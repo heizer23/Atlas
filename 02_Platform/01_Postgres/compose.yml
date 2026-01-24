@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: atlas-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${ATLAS_PG_DB}
+      POSTGRES_USER: ${ATLAS_PG_USER}
+      POSTGRES_PASSWORD: ${ATLAS_PG_PASSWORD}
+
+    # No LAN exposure: only the Pi itself can connect via 127.0.0.1
+    ports:
+      - "127.0.0.1:${ATLAS_PG_PORT}:5432"
+
+    volumes:
+      - atlas_pg_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ATLAS_PG_USER} -d ${ATLAS_PG_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  atlas_pg_data:

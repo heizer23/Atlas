@@ -1,0 +1,9 @@
+# Secrets (explicit + generic)
+01_System/secrets.env
+*.env
+!.env.example
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
