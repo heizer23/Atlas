@@ -7,3 +7,15 @@
 .vscode/
 .idea/
 .DS_Store
+
+# Platform data (never versioned)
+00_data/
+data/
+mnt/
+postgres/
+weaviate/
+files/
+
+# Docker volumes / runtime
+**/pgdata/
+**/pg_wal/

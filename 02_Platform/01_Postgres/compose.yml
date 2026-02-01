@@ -14,13 +14,10 @@ services:
       - "127.0.0.1:${ATLAS_PG_PORT}:5432"
 
     volumes:
-      - atlas_pg_data:/var/lib/postgresql/data
+      - ${DATA_ROOT}/postgres:/var/lib/postgresql/data
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${ATLAS_PG_USER} -d ${ATLAS_PG_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
       interval: 5s
       timeout: 3s
       retries: 10
-
-volumes:
-  atlas_pg_data:
