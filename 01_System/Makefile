@@ -54,4 +54,28 @@ schema:
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA)
 
 
+
+# region --- Application: WorkoutTracker
+APP_DIR=../03_Application/WorkoutTracker
+
+APP_COMPOSE=docker compose \
+	-f $(APP_DIR)/compose.yml \
+	--env-file $(SYSTEM_SECRETS)
+
+app-build:
+	$(APP_COMPOSE) build
+
+app-up:
+	$(APP_COMPOSE) up -d
+
+app-down:
+	$(APP_COMPOSE) down
+
+app-logs:
+	$(APP_COMPOSE) logs -f
+
+app-reboot:
+	$(APP_COMPOSE) down
+	$(APP_COMPOSE) up -d
+
 # endregion

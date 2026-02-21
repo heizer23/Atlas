@@ -1,0 +1,21 @@
+services:
+  workout-tracker:
+    container_name: atlas-workout-tracker
+    # Build context is the repo root so Dockerfile can reach platform packages
+    build:
+      context: ../..
+      dockerfile: 03_Application/WorkoutTracker/Dockerfile
+    restart: unless-stopped
+
+    # Host network: app reaches Postgres on 127.0.0.1:5432 without any changes
+    network_mode: host
+
+    environment:
+      ATLAS_PG_DB: ${ATLAS_PG_DB}
+      ATLAS_PG_USER: ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT: ${ATLAS_PG_PORT}
+
+    # Logs written inside container — mount out for persistence
+    volumes:
+      - ${DATA_ROOT}/workout-tracker/logs:/app/logs
