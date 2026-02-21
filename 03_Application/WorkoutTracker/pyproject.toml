@@ -1,0 +1,17 @@
+[project]
+name = "workout-tracker"
+version = "0.1.0"
+description = "Minimal Workout Tracker MVP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "psycopg[binary]",
+    "jinja2",
+    "python-multipart",
+    "pydantic",
+]
+
+[tool.setuptools]
+packages = ["app"]

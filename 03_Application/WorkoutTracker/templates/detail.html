@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block content %}
+<a href="/workouts">← Back to List</a>
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+    <div>
+        <form action="/workouts/{{ meta.workout_id }}/update_meta" method="post"
+            style="display: flex; flex-direction: column; gap: 5px;">
+            <input type="text" name="split" value="{{ meta.split }}"
+                style="font-size: 1.5rem; font-weight: bold; border: none; background: transparent; padding: 0;">
+            <input type="date" name="workout_date" value="{{ meta.workout_date }}"
+                style="border: none; background: transparent; padding: 0; color: #666;">
+            <button type="submit" class="btn"
+                style="padding: 2px 8px; font-size: 0.8rem; background: #6c757d; width: fit-content;">Save
+                Name/Date</button>
+        </form>
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <form action="/workouts/{{ meta.workout_id }}/copy_session" method="post">
+            <button type="submit" class="btn" style="background: #28a745;">Copy Session to Today</button>
+        </form>
+        <form action="/workouts/{{ meta.workout_id }}/delete" method="post"
+            onsubmit="return confirm('Delete this entire session?')">
+            <button type="submit" class="btn btn-danger">Delete Session</button>
+        </form>
+    </div>
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Exercise</th>
+            <th>Weight (kg)</th>
+            <th>Sets (Reps)</th>
+            <th>Comment</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for log in logs %}
+        <tr>
+            {% if edit_id|string == log.workout_log_id|string %}
+            <td colspan="5">
+                <form action="/log/{{ log.workout_log_id }}/update" method="post"
+                    style="display: flex; gap: 5px; align-items: center; width: 100%;">
+                    <input type="text" name="exercise" value="{{ log.exercise }}" style="width: 150px;" required>
+                    <input type="number" step="0.5" name="weight_kg"
+                        value="{{ log.weight_kg if log.weight_kg is not none else '' }}" style="width: 80px;"
+                        placeholder="kg">
+                    <input type="number" name="set1_reps"
+                        value="{{ log.set1_reps if log.set1_reps is not none else '' }}" style="width: 50px;">
+                    <input type="number" name="set2_reps"
+                        value="{{ log.set2_reps if log.set2_reps is not none else '' }}" style="width: 50px;">
+                    <input type="number" name="set3_reps"
+                        value="{{ log.set3_reps if log.set3_reps is not none else '' }}" style="width: 50px;">
+                    <input type="number" name="set4_reps"
+                        value="{{ log.set4_reps if log.set4_reps is not none else '' }}" style="width: 50px;">
+                    <input type="number" name="set5_reps"
+                        value="{{ log.set5_reps if log.set5_reps is not none else '' }}" style="width: 50px;">
+                    <input type="text" name="comment" value="{{ log.comment or '' }}" style="flex-grow: 1;">
+                    <button type="submit" class="btn" style="padding: 5px 10px;">Save</button>
+                    <a href="?" class="btn"
+                        style="padding: 5px 10px; background: #6c757d; color: white; text-decoration: none;">Cancel</a>
+                </form>
+            </td>
+            {% else %}
+            <td>{{ log.exercise }}</td>
+            <td>{{ log.weight_kg if log.weight_kg is not none else '-' }}</td>
+            <td>
+                {% for r in [log.set1_reps, log.set2_reps, log.set3_reps, log.set4_reps, log.set5_reps] if r is not
+                none
+                %}{{ r }}{{ ' , ' if not loop.last }}{% endfor %}
+            </td>
+            <td>{{ log.comment or '' }}</td>
+            <td style="white-space: nowrap;">
+                <a href="?edit_id={{ log.workout_log_id }}" title="Edit" style="text-decoration: none;">✎</a>
+                <form action="/log/{{ log.workout_log_id }}/delete" method="post" style="display:inline;"
+                    onsubmit="return confirm('Delete this exercise?')">
+                    <button type="submit" class="delete-btn" title="Delete Exercise">🗑</button>
+                </form>
+            </td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<div class="card" id="add-form">
+    <h3>{% if prefill %}Copy Exercise: {{ prefill.exercise }}{% else %}Add Exercise{% endif %}</h3>
+    <form action="/workouts/{{ meta.workout_id }}/add" method="post">
+        <div class="form-group">
+            <label>Exercise</label>
+            <input type="text" name="exercise" value="{% if prefill %}{{ prefill.exercise }}{% endif %}" required>
+        </div>
+        <div class="form-group">
+            <label>Weight (kg)</label>
+            <input type="number" step="0.5" name="weight_kg"
+                value="{% if prefill and prefill.weight_kg is not none %}{{ prefill.weight_kg }}{% endif %}">
+        </div>
+        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+            <input type="number" name="set1_reps"
+                value="{% if prefill and prefill.set1_reps is not none %}{{ prefill.set1_reps }}{% endif %}"
+                placeholder="Set 1">
+            <input type="number" name="set2_reps"
+                value="{% if prefill and prefill.set2_reps is not none %}{{ prefill.set2_reps }}{% endif %}"
+                placeholder="Set 2">
+            <input type="number" name="set3_reps"
+                value="{% if prefill and prefill.set3_reps is not none %}{{ prefill.set3_reps }}{% endif %}"
+                placeholder="Set 3">
+            <input type="number" name="set4_reps"
+                value="{% if prefill and prefill.set4_reps is not none %}{{ prefill.set4_reps }}{% endif %}"
+                placeholder="Set 4">
+            <input type="number" name="set5_reps"
+                value="{% if prefill and prefill.set5_reps is not none %}{{ prefill.set5_reps }}{% endif %}"
+                placeholder="Set 5">
+        </div>
+        <div class="form-group">
+            <input type="text" name="comment" value="{% if prefill %}{{ prefill.comment or '' }}{% endif %}"
+                placeholder="Notes...">
+        </div>
+        <button type="submit" class="btn">Add Exercise</button>
+        {% if prefill %}
+        <a href="?" class="btn" style="background: #6c757d; color: white; text-decoration: none;">Clear Prefill</a>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

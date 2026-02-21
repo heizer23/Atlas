@@ -5,6 +5,7 @@ create schema if not exists workout;
 
 create table if not exists workout.workout_log (
   workout_log_id bigserial primary key,
+  workout_id     uuid not null,        -- Shared Session ID
 
   -- Your required fields
   workout_date   date not null,
@@ -56,5 +57,8 @@ create index if not exists ix_workout_log_exercise
 
 create index if not exists ix_workout_log_split
   on workout.workout_log(split);
+
+create index if not exists ix_workout_log_workout_id
+  on workout.workout_log(workout_id);
 
 commit;

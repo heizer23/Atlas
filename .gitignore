@@ -19,3 +19,19 @@ files/
 # Docker volumes / runtime
 **/pgdata/
 **/pg_wal/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+
+# Logs
+logs/
+*.log
+
+# Node / Vite build output
+node_modules/
+dist/
+.vite/

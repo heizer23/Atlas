@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Recent Workouts</h1>
+    <a href="/workouts/new" class="btn">Log Session</a>
+</div>
+
+{% if sessions %}
+{% for s in sessions %}
+<div class="card" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h3><a href="/workouts/{{ s.workout_id }}">{{ s.workout_date }} - {{ s.split }}</a></h3>
+        <p>Exercises: {{ s.exercise_count }}</p>
+        <small>ID: {{ s.workout_id }}</small>
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <form action="/workouts/{{ s.workout_id }}/copy_session" method="post">
+            <button type="submit" class="btn" style="background: #28a745; padding: 10px 15px;">Copy Session</button>
+        </form>
+        <form action="/workouts/{{ s.workout_id }}/delete" method="post"
+            onsubmit="return confirm('Delete this entire session?')">
+            <button type="submit" class="btn btn-danger" style="padding: 10px 15px;">Delete</button>
+        </form>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<p>No workouts logged yet.</p>
+{% endif %}
+{% endblock %}
