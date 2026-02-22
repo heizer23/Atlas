@@ -47,11 +47,17 @@ pg-data-check:
 
 # --- Platform: Postgres - Schemas
 PG_SCHEMA=../02_Platform/01_Postgres/ObjectSchemas/workout_schema.sql
+PG_SCHEMA_FOOD=../02_Platform/01_Postgres/ObjectSchemas/foodtracker_schema.sql
 
 schema:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing (check secrets.env + include)" && exit 1)
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing (check secrets.env + include)" && exit 1)
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA)
+
+schema-food:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing (check secrets.env + include)" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing (check secrets.env + include)" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_FOOD)
 
 
 

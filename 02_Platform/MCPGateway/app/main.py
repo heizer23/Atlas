@@ -3,10 +3,8 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.providers.google import GoogleProvider
 
 # ---------------------------------------------------------------------------
-# Auth: FastMCP proxies the OAuth dance to Google.
-# ChatGPT redirects the user to Google sign-in, gets a token back, and sends
-# it on every MCP request. FastMCP validates it against Google's tokeninfo API.
-# No auth code beyond this configuration is needed.
+# Auth: FastMCP proxies OAuth to Google.
+# ChatGPT authenticates once; token validated on every request.
 # ---------------------------------------------------------------------------
 auth = GoogleProvider(
     client_id=os.environ["GOOGLE_CLIENT_ID"],
@@ -14,35 +12,17 @@ auth = GoogleProvider(
     base_url=os.environ["MCP_BASE_URL"],  # https://mcp.linspad.net
 )
 
-mcp = FastMCP("Atlas Food MCP", auth=auth)
+mcp = FastMCP("Atlas MCP Gateway", auth=auth)
 
 # ---------------------------------------------------------------------------
-# Data: hardcoded fruit→color mapping (MVP).
-# Replace with a Postgres lookup when building the real FoodTracker.
+# Register domain tools from applications.
+# Each application exposes plain functions; the gateway owns the MCP protocol.
+# Add new application tool modules here as Atlas grows.
 # ---------------------------------------------------------------------------
-FRUIT_COLORS: dict[str, str] = {
-    "apple": "red",
-    "banana": "yellow",
-    "mango": "orange",
-}
+from foodtracker.tools import log_meal, get_nutrition_summary  # noqa: E402
 
-
-@mcp.tool
-def get_fruit_color(fruit: str) -> str:
-    """
-    Return the typical color for a given fruit.
-
-    Supported fruits: apple, banana, mango.
-    Returns the color string (e.g. 'red'), or an error message if the
-    fruit is not in the database.
-    """
-    key = fruit.strip().lower()
-    color = FRUIT_COLORS.get(key)
-    if color is None:
-        known = ", ".join(sorted(FRUIT_COLORS.keys()))
-        return f"Unknown fruit '{fruit}'. Known fruits: {known}."
-    return color
-
+mcp.tool(log_meal)
+mcp.tool(get_nutrition_summary)
 
 if __name__ == "__main__":
     mcp.run(transport="http", host="0.0.0.0", port=8002)

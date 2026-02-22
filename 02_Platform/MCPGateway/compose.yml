@@ -2,12 +2,21 @@ services:
   mcp-server:
     container_name: atlas-mcp-server
     build:
-      context: .
-      dockerfile: Dockerfile
+      # Repo root — needed to COPY from both 02_Platform and 03_Application
+      context: ../..
+      dockerfile: 02_Platform/MCPGateway/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8002:8002"
+
+    # Host network: reaches Postgres on 127.0.0.1:5432 without extra config
+    network_mode: host
+
     environment:
+      # Auth
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       MCP_BASE_URL: ${MCP_BASE_URL}
+      # Postgres (shared Atlas platform DB)
+      ATLAS_PG_DB: ${ATLAS_PG_DB}
+      ATLAS_PG_USER: ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT: ${ATLAS_PG_PORT}
