@@ -79,3 +79,29 @@ app-reboot:
 	$(APP_COMPOSE) up -d
 
 # endregion
+
+
+# region --- Platform: MCPGateway
+MCP_DIR=../02_Platform/MCPGateway
+
+MCP_COMPOSE=docker compose \
+	-f $(MCP_DIR)/compose.yml \
+	--env-file $(SYSTEM_SECRETS)
+
+mcp-build:
+	$(MCP_COMPOSE) build
+
+mcp-up:
+	$(MCP_COMPOSE) up -d
+
+mcp-down:
+	$(MCP_COMPOSE) down
+
+mcp-logs:
+	$(MCP_COMPOSE) logs -f
+
+mcp-reboot:
+	$(MCP_COMPOSE) down
+	$(MCP_COMPOSE) up -d
+
+# endregion
