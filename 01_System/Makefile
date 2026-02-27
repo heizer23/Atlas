@@ -9,6 +9,22 @@ bootstrap-pi:
 	./bootstrap_pi.sh
 
 
+# --- System: Tailscale (host, not docker)
+tailscale-status:
+	@sudo tailscale status || true
+	@echo ""
+	@echo "Tailscale IPs:"
+	@tailscale ip -4 2>/dev/null || true
+	@tailscale ip -6 2>/dev/null || true
+
+tailscale-up:
+	@sudo systemctl enable --now tailscaled
+	@sudo tailscale up
+
+tailscale-down:
+	@sudo tailscale down
+
+
 # region --- Platform 
 # --- Platform: Postgres
 PG_DIR=../02_Platform/01_Postgres
@@ -39,7 +55,7 @@ pg-shell:
 
 pg-data-check:
 	@echo "Host path (/mnt/data/postgres):"
-	@ls -la /mnt/data/postgres | head -n 20
+	@sudo ls -la /mnt/data/postgres | head -n 20
 	@echo ""
 	@echo "Container path (/var/lib/postgresql/data):"
 	@$(PG_COMPOSE) exec -T postgres ls -la /var/lib/postgresql/data | head -n 20
