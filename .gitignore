@@ -2,6 +2,7 @@
 01_System/secrets.env
 *.env
 !.env.example
+!01_System/config.env
 
 # Editor / OS noise
 .vscode/
