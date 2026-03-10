@@ -15,6 +15,7 @@ import logging
 
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
+from platform_errorhandling.performance import install_request_timing
 
 # App and Templates
 app = FastAPI(title="WorkoutTracker")
@@ -26,6 +27,7 @@ setup_logging(
 
 log = logging.getLogger("workouttracker")
 install_exception_handlers(app)
+install_request_timing(app)
 
 # Enable CORS for local development
 app.add_middleware(
