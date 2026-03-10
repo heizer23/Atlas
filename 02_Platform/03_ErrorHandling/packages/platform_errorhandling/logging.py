@@ -8,23 +8,31 @@ def setup_logging(app_name: str, log_dir: Path) -> None:
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
 
-    if logger.handlers:
-        return
-
+    log_file = log_dir / f"{app_name}.log"
     fmt = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     )
 
-    file_handler = RotatingFileHandler(
-        log_dir / f"{app_name}.log",
-        maxBytes=2_000_000,
-        backupCount=5,
-        encoding="utf-8",
+    # Only add file handler if one for this app isn't already registered
+    already_has_file = any(
+        isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(log_file)
+        for h in logger.handlers
     )
-    file_handler.setFormatter(fmt)
+    if not already_has_file:
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=2_000_000,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(fmt)
+        logger.addHandler(file_handler)
 
-    console = logging.StreamHandler()
-    console.setFormatter(fmt)
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console)
+    # Only add console handler if one isn't already registered
+    already_has_console = any(
+        type(h) is logging.StreamHandler for h in logger.handlers
+    )
+    if not already_has_console:
+        console = logging.StreamHandler()
+        console.setFormatter(fmt)
+        logger.addHandler(console)
