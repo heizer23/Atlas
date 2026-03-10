@@ -1,0 +1,21 @@
+services:
+  tasktracker:
+    build:
+      context: ../..
+      dockerfile: 03_Application/TaskTracker/Dockerfile
+    container_name: atlas-tasktracker
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8010:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${DATA_ROOT}/tasktracker/logs:/app/logs
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

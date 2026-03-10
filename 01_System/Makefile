@@ -54,8 +54,8 @@ pg-shell:
 	$(PG_COMPOSE) exec -it postgres psql -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB)
 
 pg-data-check:
-	@echo "Host path (/mnt/data/postgres):"
-	@sudo ls -la /mnt/data/postgres | head -n 20
+	@echo "Host path ($(DATA_ROOT)/postgres):"
+	@sudo ls -la $(DATA_ROOT)/postgres | head -n 20
 	@echo ""
 	@echo "Container path (/var/lib/postgresql/data):"
 	@$(PG_COMPOSE) exec -T postgres ls -la /var/lib/postgresql/data | head -n 20
@@ -75,6 +75,32 @@ schema-food:
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing (check secrets.env + include)" && exit 1)
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_FOOD)
 
+
+
+# region --- Application: TaskTracker
+TASK_DIR=../03_Application/TaskTracker
+
+TASK_COMPOSE=docker compose \
+	-f $(TASK_DIR)/compose.yml \
+	--env-file $(SYSTEM_SECRETS)
+
+task-build:
+	$(TASK_COMPOSE) build
+
+task-up:
+	$(TASK_COMPOSE) up -d
+
+task-down:
+	$(TASK_COMPOSE) down
+
+task-logs:
+	$(TASK_COMPOSE) logs -f
+
+task-reboot:
+	$(TASK_COMPOSE) down
+	$(TASK_COMPOSE) up -d
+
+# endregion
 
 
 # region --- Application: WorkoutTracker

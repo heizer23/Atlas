@@ -52,6 +52,11 @@ docker compose version >/dev/null 2>&1 || true
 # Add current user to docker group (safe to run repeatedly; takes effect after re-login)
 echo "==> Ensuring user '$USER' is in docker group"
 sudo usermod -aG docker "$USER"
+
+# ---- Docker networks ----
+echo "==> Ensuring atlas-net Docker bridge network exists"
+docker network create atlas-net --driver bridge 2>/dev/null || echo "atlas-net already exists."
+# -------------------------
 # --------------
 
 # ---- External data disk mount (Atlas platform storage) ----
@@ -101,14 +106,23 @@ else
 
   # Create platform folders
   echo "==> Preparing platform folders on ${MOUNT_POINT}"
-  sudo mkdir -p "${MOUNT_POINT}/postgres" "${MOUNT_POINT}/weaviate" "${MOUNT_POINT}/files"
+  sudo mkdir -p \
+    "${MOUNT_POINT}/postgres" \
+    "${MOUNT_POINT}/weaviate" \
+    "${MOUNT_POINT}/files" \
+    "${MOUNT_POINT}/workout-tracker/logs" \
+    "${MOUNT_POINT}/tasktracker/logs"
 
   # Postgres container runs as uid/gid 999 by default
   sudo chown -R 999:999 "${MOUNT_POINT}/postgres"
   sudo chmod 700 "${MOUNT_POINT}/postgres"
 
   # Keep other folders owned by root (or change to your user if you want)
-  sudo chown -R root:root "${MOUNT_POINT}/weaviate" "${MOUNT_POINT}/files"
+  sudo chown -R root:root \
+    "${MOUNT_POINT}/weaviate" \
+    "${MOUNT_POINT}/files" \
+    "${MOUNT_POINT}/workout-tracker" \
+    "${MOUNT_POINT}/tasktracker"
 
   echo "External disk mounted at ${MOUNT_POINT} and folders prepared."
 fi
