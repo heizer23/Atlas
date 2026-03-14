@@ -222,6 +222,7 @@ net-connect:
 	@docker network connect atlas-net atlas-tasktracker    2>/dev/null || true
 	@docker network connect atlas-net atlas-workout-tracker 2>/dev/null || true
 	@docker network connect atlas-net atlas-ui             2>/dev/null || true
+	@docker network connect atlas-net atlas-cloudflared    2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \

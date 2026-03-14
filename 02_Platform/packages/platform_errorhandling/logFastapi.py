@@ -23,9 +23,12 @@ def install_exception_handlers(app):
             return JSONResponse(
                 status_code=500,
                 content={
-                    "error": "internal_error",
-                    "request_id": rid,
-                    "message": "Unexpected error. Search logs for this request_id.",
+                    "error": {
+                        "code":       "INTERNAL_ERROR",
+                        "message":    "Unexpected error. Search logs for this request_id.",
+                        "request_id": rid,
+                        "detail":     None,
+                    },
                 },
             )
 
