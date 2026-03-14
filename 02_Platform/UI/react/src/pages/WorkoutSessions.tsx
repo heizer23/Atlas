@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { apiFetch, isApiError } from "../api/client";
 import { useDataset } from "../hooks/useDataset";
@@ -114,11 +114,23 @@ function HistoryChart({
               String(name).replace("_reps", "").replace("set", "Set "),
             ]}
           />
-          <Bar dataKey="set1_reps" stackId="a" fill={SET_COLORS[0]} />
-          <Bar dataKey="set2_reps" stackId="a" fill={SET_COLORS[1]} />
-          <Bar dataKey="set3_reps" stackId="a" fill={SET_COLORS[2]} />
-          <Bar dataKey="set4_reps" stackId="a" fill={SET_COLORS[3]} />
-          <Bar dataKey="set5_reps" stackId="a" fill={SET_COLORS[4]} radius={[4, 4, 0, 0]} />
+          {SET_COLORS.map((color, si) => (
+            <Bar
+              key={si}
+              dataKey={`set${si + 1}_reps`}
+              stackId="a"
+              fill={color}
+              radius={si === 4 ? [4, 4, 0, 0] : undefined}
+            >
+              {data.map((entry, di) => (
+                <Cell
+                  key={di}
+                  fill={color}
+                  fillOpacity={(entry as Record<string, unknown>)._active ? 1 : 0.38}
+                />
+              ))}
+            </Bar>
+          ))}
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -294,38 +306,33 @@ function ExerciseList({ dataset, historyByExercise, onRowClick, onEdit, onDelete
 // ── ExerciseView ──────────────────────────────────────────────────────────────
 
 interface ExerciseViewProps {
-  row:         Row;
-  history:     HistoryData | undefined;
-  sessionDate: string;          // "YYYY-MM-DD" — used to determine initial completed state
-  onBack:      () => void;
-  onSave:      (data: Record<string, unknown>) => Promise<ApiError | null>;
+  row:     Row;
+  history: HistoryData | undefined;
+  onBack:  () => void;
+  onSave:  (data: Record<string, unknown>) => Promise<ApiError | null>;
 }
 
-function ExerciseView({ row, history, sessionDate, onBack, onSave }: ExerciseViewProps) {
+function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
   const [name,    setName]    = useState(row.exercise as string);
   const [weight,  setWeight]  = useState(row.weight_kg != null ? String(row.weight_kg) : "");
   const initReps = [1, 2, 3, 4, 5].map(i => String((row as Record<string, unknown>)[`set${i}_reps`] ?? ""));
-  const [reps,    setReps]    = useState(initReps);
+  const [reps,      setReps]      = useState(initReps);
   const [comment,   setComment]   = useState(String(row.comment ?? ""));
-
-  // Past sessions: sets with reps already start as completed (checkmark shown).
-  // Today's session: start uncompleted — user marks sets as they do them.
-  const today = new Date().toISOString().split("T")[0];
-  const isPast = sessionDate < today;
+  // Any set that already has saved reps starts as completed
   const [completed, setCompleted] = useState(
-    [0, 1, 2, 3, 4].map(i => isPast && parseInt(initReps[i]) > 0)
+    [0, 1, 2, 3, 4].map(i => parseInt(initReps[i]) > 0)
   );
+  const [busy,  setBusy]  = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
 
-  // Exclude this exercise's own row from history to avoid a duplicate bar
-  // (the current row is represented via liveRow instead)
+  // Exclude this exercise's own row from history — it is represented via liveRow
   const filteredHistory: HistoryData | undefined = history
     ? { rows: history.rows.filter(r => r.id !== row.id) }
     : undefined;
-  const [busy,      setBusy]      = useState(false);
-  const [error,     setError]     = useState<ApiError | null>(null);
 
   const liveRow: Record<string, unknown> = {
     workout_date: "Today",
+    _active: true,
     set1_reps: completed[0] ? (parseInt(reps[0]) || 0) : 0,
     set2_reps: completed[1] ? (parseInt(reps[1]) || 0) : 0,
     set3_reps: completed[2] ? (parseInt(reps[2]) || 0) : 0,
@@ -913,12 +920,10 @@ export default function WorkoutSessions() {
   }
 
   if (view === "exercise-view" && selectedExercise) {
-    const sessionDate = (selectedSession?.workout_date as string) ?? new Date().toISOString().split("T")[0];
     return (
       <ExerciseView
         row={selectedExercise}
         history={historyByExercise[selectedExercise.exercise as string]}
-        sessionDate={sessionDate}
         onBack={backToExercises}
         onSave={handleExerciseSave}
       />
