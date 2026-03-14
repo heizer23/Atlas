@@ -13,9 +13,7 @@ services:
       ATLAS_PG_USER:     ${ATLAS_PG_USER}
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
-      ATLAS_PG_HOST:     host.docker.internal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      ATLAS_PG_HOST:     atlas-postgres
     volumes:
       - ${DATA_ROOT}/workout-tracker/logs:/app/logs
     networks:
