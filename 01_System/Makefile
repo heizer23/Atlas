@@ -1,9 +1,11 @@
 SYSTEM_CONFIG=config.env
 SYSTEM_SECRETS=secrets.env
 
-# Load both files into Make variables
-include $(SYSTEM_CONFIG)
-include $(SYSTEM_SECRETS)
+# Load both files into Make variables.
+# -include means Make won't error if secrets.env is absent (it will fail later
+# at the Docker Compose step with a clearer message about missing variables).
+include  $(SYSTEM_CONFIG)
+-include $(SYSTEM_SECRETS)
 export
 
 # Shared --env-file flags for all docker compose calls
@@ -68,8 +70,8 @@ pg-data-check:
 
 
 # --- Platform: Postgres - Schemas
-PG_SCHEMA=../02_Platform/01_Postgres/ObjectSchemas/workout_schema.sql
-PG_SCHEMA_FOOD=../02_Platform/01_Postgres/ObjectSchemas/foodtracker_schema.sql
+PG_SCHEMA=../03_Application/WorkoutTracker/schema.sql
+PG_SCHEMA_FOOD=../03_Application/FoodTracker/schema.sql
 
 schema:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
@@ -80,6 +82,16 @@ schema-food:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_FOOD)
+
+pg-wait:
+	@echo "==> Waiting for Postgres to be ready..."
+	@for i in $$(seq 1 30); do \
+		$(PG_COMPOSE) exec -T postgres pg_isready -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) \
+		  >/dev/null 2>&1 && echo "Postgres is ready." && exit 0; \
+		echo "  ...not ready yet ($$i/30), retrying in 2s..."; \
+		sleep 2; \
+	done; \
+	echo "ERROR: Postgres did not become ready after 60s." && exit 1
 
 # endregion
 
@@ -136,6 +148,32 @@ app-reboot:
 # endregion
 
 
+# region --- Platform: UI
+UI_DIR=../02_Platform/UI
+
+UI_COMPOSE=docker compose \
+	-f $(UI_DIR)/compose.yml \
+	$(ENV_FILES)
+
+ui-build:
+	$(UI_COMPOSE) build
+
+ui-up:
+	$(UI_COMPOSE) up -d
+
+ui-down:
+	$(UI_COMPOSE) down
+
+ui-logs:
+	$(UI_COMPOSE) logs -f
+
+ui-reboot:
+	$(UI_COMPOSE) down
+	$(UI_COMPOSE) up -d
+
+# endregion
+
+
 # region --- Platform: MCPGateway
 MCP_DIR=../02_Platform/MCPGateway
 
@@ -158,5 +196,41 @@ mcp-logs:
 mcp-reboot:
 	$(MCP_COMPOSE) down
 	$(MCP_COMPOSE) up -d
+
+# endregion
+
+
+# region --- Aggregate: full stack
+# Usage:
+#   make up    — build images and start the full stack (idempotent)
+#   make down  — stop all services
+#
+# Prerequisites: secrets.env must exist alongside this Makefile.
+# Minimum contents:
+#   ATLAS_PG_PASSWORD=<your-db-password>
+#   DATA_ROOT=/mnt/data
+
+up:
+	@test -f $(SYSTEM_SECRETS) || \
+	  (echo "ERROR: $(SYSTEM_SECRETS) not found." && \
+	   echo "Create it with at minimum:" && \
+	   echo "  ATLAS_PG_PASSWORD=<password>" && \
+	   echo "  DATA_ROOT=/mnt/data" && \
+	   exit 1)
+	$(MAKE) pg-up
+	$(MAKE) pg-wait
+	$(MAKE) schema
+	$(MAKE) task-build task-up
+	$(MAKE) app-build  app-up
+	$(MAKE) ui-build   ui-up
+	@echo ""
+	@echo "Atlas stack is up. UI available on port 80."
+
+down:
+	-$(MAKE) ui-down
+	-$(MAKE) app-down
+	-$(MAKE) task-down
+	-$(MAKE) pg-down
+	@echo "Atlas stack is down."
 
 # endregion
