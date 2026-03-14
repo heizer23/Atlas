@@ -294,20 +294,33 @@ function ExerciseList({ dataset, historyByExercise, onRowClick, onEdit, onDelete
 // ── ExerciseView ──────────────────────────────────────────────────────────────
 
 interface ExerciseViewProps {
-  row:     Row;
-  history: HistoryData | undefined;
-  onBack:  () => void;
-  onSave:  (data: Record<string, unknown>) => Promise<ApiError | null>;
+  row:         Row;
+  history:     HistoryData | undefined;
+  sessionDate: string;          // "YYYY-MM-DD" — used to determine initial completed state
+  onBack:      () => void;
+  onSave:      (data: Record<string, unknown>) => Promise<ApiError | null>;
 }
 
-function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
+function ExerciseView({ row, history, sessionDate, onBack, onSave }: ExerciseViewProps) {
   const [name,    setName]    = useState(row.exercise as string);
   const [weight,  setWeight]  = useState(row.weight_kg != null ? String(row.weight_kg) : "");
-  const [reps,    setReps]    = useState(
-    [1, 2, 3, 4, 5].map(i => String((row as Record<string, unknown>)[`set${i}_reps`] ?? ""))
-  );
+  const initReps = [1, 2, 3, 4, 5].map(i => String((row as Record<string, unknown>)[`set${i}_reps`] ?? ""));
+  const [reps,    setReps]    = useState(initReps);
   const [comment,   setComment]   = useState(String(row.comment ?? ""));
-  const [completed, setCompleted] = useState([false, false, false, false, false]);
+
+  // Past sessions: sets with reps already start as completed (checkmark shown).
+  // Today's session: start uncompleted — user marks sets as they do them.
+  const today = new Date().toISOString().split("T")[0];
+  const isPast = sessionDate < today;
+  const [completed, setCompleted] = useState(
+    [0, 1, 2, 3, 4].map(i => isPast && parseInt(initReps[i]) > 0)
+  );
+
+  // Exclude this exercise's own row from history to avoid a duplicate bar
+  // (the current row is represented via liveRow instead)
+  const filteredHistory: HistoryData | undefined = history
+    ? { rows: history.rows.filter(r => r.id !== row.id) }
+    : undefined;
   const [busy,      setBusy]      = useState(false);
   const [error,     setError]     = useState<ApiError | null>(null);
 
@@ -474,7 +487,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
       {/* History chart */}
       <div style={{ padding: "0 16px 16px" }}>
         <HistoryChart
-          history={history}
+          history={filteredHistory}
           size="full"
           liveRow={completed.some(c => c) ? liveRow : undefined}
         />
@@ -743,16 +756,16 @@ export default function WorkoutSessions() {
     );
     if (isApiError(res)) return res;
     setExerciseDataset(res);
-    // Refresh history for the (possibly renamed) exercise
-    const exerciseName = (data.exercise as string) || (selectedExercise.exercise as string);
-    const histRes = await apiFetch<HistoryData>(
-      `/workout/exercises/history?name=${encodeURIComponent(exerciseName)}`
-    );
-    if (!isApiError(histRes)) {
-      setHistoryByExercise(prev => ({ ...prev, [exerciseName]: histRes }));
-    }
     setSelectedExercise(null);
     setView("exercises");
+    // Refresh history in background — doesn't block navigation
+    const exerciseName = (data.exercise as string) || (selectedExercise.exercise as string);
+    apiFetch<HistoryData>(`/workout/exercises/history?name=${encodeURIComponent(exerciseName)}`)
+      .then(histRes => {
+        if (!isApiError(histRes)) {
+          setHistoryByExercise(prev => ({ ...prev, [exerciseName]: histRes }));
+        }
+      });
     return null;
   }
 
@@ -900,10 +913,12 @@ export default function WorkoutSessions() {
   }
 
   if (view === "exercise-view" && selectedExercise) {
+    const sessionDate = (selectedSession?.workout_date as string) ?? new Date().toISOString().split("T")[0];
     return (
       <ExerciseView
         row={selectedExercise}
         history={historyByExercise[selectedExercise.exercise as string]}
+        sessionDate={sessionDate}
         onBack={backToExercises}
         onSave={handleExerciseSave}
       />
