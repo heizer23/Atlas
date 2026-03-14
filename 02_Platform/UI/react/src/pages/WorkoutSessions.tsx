@@ -182,7 +182,7 @@ function ExerciseRow({ row, history, menuOpen, onToggleMenu, onClick, onEdit, on
         </div>
         {row.weight_kg != null && (
           <div style={{ fontSize: 14, fontWeight: 400, lineHeight: "20px", color: "#49454F", letterSpacing: ".25px" }}>
-            {row.weight_kg} kg
+            {String(row.weight_kg)} kg
           </div>
         )}
       </div>
@@ -617,7 +617,7 @@ function SessionList({ dataset, onRowClick, onDelete, onCopy }: SessionListProps
             flexShrink: 0, background: "#E7E0EC", borderRadius: 12,
             padding: "2px 10px", fontSize: 12, color: "#49454F",
           }}>
-            {row.exercise_count} ex
+            {String(row.exercise_count)} ex
           </div>
 
           {/* ⋮ menu */}

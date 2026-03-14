@@ -99,7 +99,7 @@ export default function Tasks() {
   const params: Record<string, string> = { page: String(page) };
   if (statusFilter) params.status = statusFilter;
 
-  const { dataset, error, loading, refresh } = useDataset("/tasks", params);
+  const { dataset, error, loading: _loading, refresh } = useDataset("/tasks", params);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
