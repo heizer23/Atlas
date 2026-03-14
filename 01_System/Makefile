@@ -71,12 +71,18 @@ pg-data-check:
 
 # --- Platform: Postgres - Schemas
 PG_SCHEMA=../03_Application/WorkoutTracker/schema.sql
+PG_SCHEMA_TASK=../03_Application/TaskTracker/schema.sql
 PG_SCHEMA_FOOD=../03_Application/FoodTracker/schema.sql
 
 schema:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA)
+
+schema-task:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_TASK)
 
 schema-food:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
@@ -219,7 +225,7 @@ up:
 	   exit 1)
 	$(MAKE) pg-up
 	$(MAKE) pg-wait
-	$(MAKE) schema
+	$(MAKE) schema schema-task
 	$(MAKE) task-build task-up
 	$(MAKE) app-build  app-up
 	$(MAKE) ui-build   ui-up
