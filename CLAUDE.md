@@ -7,8 +7,8 @@ The underlying SYS documents remain authoritative.
 
 ## Authoritative references
 Read and follow these documents when relevant:
-- `01_System/00.01_Architecture_Manifest_LLM.md`
-- `01_System/01.Development_Standards.md`
+- `00_Blueprint/Architecture Manifest.md`
+- `00_Blueprint/01.Development_Standards.md`
 
 If this file conflicts with those documents, surface the conflict explicitly.
 
@@ -48,10 +48,11 @@ Do not place components outside this structure unless explicitly requested.
 
 ## Consistency enforcement
 - If a request conflicts with the architecture or standards, flag it explicitly before continuing.
-- Controlled deviations are allowed only when marked clearly as deviations.
-- When a deviation is proposed, ask whether to:
-  1. accept the deviation for pragmatic reasons
-  2. update the governing documentation
+- Controlled deviations are allowed when marked clearly.
+- Deviation handling is proportional to impact:
+  - **Small** (operational convenience, no layer boundary crossed): note inline, proceed.
+  - **Medium** (a layer boundary is bent, but Blueprint is not affected): note in the app or component CLAUDE.md, proceed.
+  - **Large** (a Blueprint contract or architectural rule is violated): flag explicitly and ask whether to accept or update the governing documentation before proceeding.
 
 ## Implementation guidance
 - Favor durable, minimal, reproducible solutions.

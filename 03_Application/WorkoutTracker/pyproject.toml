@@ -1,17 +1,15 @@
 [project]
 name = "workout-tracker"
-version = "0.1.0"
-description = "Minimal Workout Tracker MVP"
+version = "0.2.0"
+description = "WorkoutTracker backend — Dataset API, psycopg2 pool"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
     "uvicorn",
-    "psycopg[binary]",
-    "jinja2",
-    "python-multipart",
+    "psycopg2-binary",
     "pydantic",
 ]
 
 [tool.setuptools]
-packages = ["app"]
+packages = ["backend"]

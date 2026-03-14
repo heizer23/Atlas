@@ -56,12 +56,13 @@ export interface FormFieldOption {
 }
 
 export interface FormField {
-  key:          string;
-  label:        string;
-  type:         ColumnType;          // "string" | "number" | "date" | "boolean" | "enum"
-  required?:    boolean;             // default: false
-  options?:     FormFieldOption[];   // required when type is "enum"
-  placeholder?: string;
+  key:           string;
+  label:         string;
+  type:          ColumnType;          // "string" | "number" | "date" | "boolean" | "enum"
+  required?:     boolean;             // default: false
+  options?:      FormFieldOption[];   // required when type is "enum"
+  placeholder?:  string;
+  initialValue?: string;              // pre-fills the field; used for edit forms
 }
 
 // ── Chart mapping types ───────────────────────────────────────────────────────

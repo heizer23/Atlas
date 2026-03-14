@@ -314,12 +314,13 @@ interface FormFieldOption {
 }
 
 interface FormField {
-  key:          string;
-  label:        string;
-  type:         ColumnType;          // same vocabulary as ColumnSchema.type
-  required?:    boolean;             // default: false
-  options?:     FormFieldOption[];   // required when type is "enum"
-  placeholder?: string;
+  key:           string;
+  label:         string;
+  type:          ColumnType;          // same vocabulary as ColumnSchema.type
+  required?:     boolean;             // default: false
+  options?:      FormFieldOption[];   // required when type is "enum"
+  placeholder?:  string;
+  initialValue?: string;              // pre-fills the field; used for edit forms
 }
 ```
 
@@ -331,13 +332,15 @@ The backend does not need to emit `FormField` definitions — form fields are de
 
 ## 9. Versioning
 
-This contract is versioned. The current version is **v0.2**.
+This contract is versioned. The current version is **v0.3**.
+
+Changes from v0.2:
+- Added `initialValue?: string` to `FormField` (non-breaking additive change).
+  Used by edit forms to pre-fill fields from existing row data.
 
 Changes from v0.1:
 - Added `FormField` and `FormFieldOption` types (`CreateForm` primitive, §8).
 - Added `FormFieldOption` to `src/api/types.ts`.
-
-The current version is **v0.2**.
 
 Changes to this contract require:
 1. An explicit decision — not a side effect of feature work.

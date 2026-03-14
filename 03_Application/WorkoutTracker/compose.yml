@@ -6,16 +6,21 @@ services:
       context: ../..
       dockerfile: 03_Application/WorkoutTracker/Dockerfile
     restart: unless-stopped
-
-    # Host network: app reaches Postgres on 127.0.0.1:5432 without any changes
-    network_mode: host
-
+    ports:
+      - "127.0.0.1:8011:8000"
     environment:
-      ATLAS_PG_DB: ${ATLAS_PG_DB}
-      ATLAS_PG_USER: ${ATLAS_PG_USER}
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
-      ATLAS_PG_PORT: ${ATLAS_PG_PORT}
-
-    # Logs written inside container — mount out for persistence
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${DATA_ROOT}/workout-tracker/logs:/app/logs
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

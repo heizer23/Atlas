@@ -22,7 +22,7 @@ export default function CreateForm({
   submitLabel = "Create",
 }: Props) {
   const [values, setValues] = useState<Record<string, string>>(
-    Object.fromEntries(fields.map(f => [f.key, ""]))
+    Object.fromEntries(fields.map(f => [f.key, f.initialValue ?? ""]))
   );
   const [error, setError] = useState<ApiError | null>(null);
   const [busy,  setBusy]  = useState(false);

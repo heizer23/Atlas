@@ -6,8 +6,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.database import get_db
-from backend.platform.errors import api_error
-from backend.platform.models import ColumnSchema, Dataset, DatasetMeta
+from platform_errorhandling import api_error
+from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 

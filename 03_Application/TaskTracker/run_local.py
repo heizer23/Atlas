@@ -9,7 +9,7 @@ from pathlib import Path
 
 REPO_ROOT         = Path(__file__).parent.parent.parent
 SECRETS_ENV       = REPO_ROOT / "01_System" / "secrets.env"
-PLATFORM_PACKAGES = REPO_ROOT / "02_Platform" / "03_ErrorHandling" / "packages"
+PLATFORM_PACKAGES = REPO_ROOT / "02_Platform" / "packages"
 
 # Make platform packages importable in subprocesses (mirrors Docker PYTHONPATH)
 existing = os.environ.get("PYTHONPATH", "")
@@ -32,12 +32,15 @@ if __name__ == "__main__":
     else:
         print(f"Warning: {SECRETS_ENV} not found — relying on existing env vars")
 
+    # Local runs always connect to localhost — override any Docker-targeted host
+    os.environ["ATLAS_PG_HOST"] = "127.0.0.1"
+
     subprocess.run(
         [
             sys.executable, "-m", "uvicorn",
             "backend.main:app",
             "--reload",
-            "--port", "8001",
+            "--port", "8010",
         ],
         cwd=Path(__file__).parent,
     )

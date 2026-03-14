@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Copy platform packages (path relative to repo root build context)
-COPY 02_Platform/03_ErrorHandling/packages /platform_packages
+COPY 02_Platform/packages /platform_packages
 ENV PYTHONPATH="/platform_packages"
 
 COPY 03_Application/TaskTracker/pyproject.toml .

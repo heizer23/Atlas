@@ -4,19 +4,12 @@ This file contains app-local guidance only.
 Global architecture and development rules are defined in the repository root CLAUDE.md.
 
 ## App
-TaskTracker is a lightweight single-user task tracking application.
+TaskTracker is a lightweight single-user task management application.
 
 ## Scope
-Build the smallest useful daily task tracker first.
+Build the smallest useful daily task tracker first. Keep the MVP small.
 
-## Must-follow references
-- Root `CLAUDE.md`
-- `00_AppDefinition.md`
-- `00_Blueprint/UI/`
-- `02_Platform/03_ErrorHandling/`
-
-## Rules
-- Do not invent UI patterns outside the Blueprint UI definitions.
-- Do not invent app-specific error handling outside platform conventions.
-- Keep the MVP small.
-- Prefer one simple vertical slice over broad partial scaffolding.
+## Contract references
+- UI contract: `00_Blueprint/UI/01_UI_Contract`
+- Platform error handling: `02_Platform/03_ErrorHandling/`
+- App definition: `00_AppDefinition.md`
