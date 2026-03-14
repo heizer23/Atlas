@@ -4,7 +4,6 @@ import {
 } from "recharts";
 import { apiFetch, isApiError } from "../api/client";
 import { useDataset } from "../hooks/useDataset";
-import TableView from "../components/TableView";
 import CreateForm from "../components/CreateForm";
 import ErrorCard from "../components/ErrorCard";
 import type { Row, FormField, Dataset, ApiError } from "../api/types";
@@ -518,6 +517,146 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
   );
 }
 
+// ── Session list ──────────────────────────────────────────────────────────────
+
+interface SessionListProps {
+  dataset:    Dataset | null;
+  onRowClick: (row: Row) => void;
+  onDelete:   (id: string) => void;
+  onCopy:     (row: Row) => void;
+}
+
+function SessionList({ dataset, onRowClick, onDelete, onCopy }: SessionListProps) {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (listRef.current && !listRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  if (!dataset) return <p className="type-body" style={{ padding: 16 }}>Loading…</p>;
+  if (dataset.rows.length === 0) return <p className="type-body" style={{ padding: 16 }}>No sessions yet.</p>;
+
+  function fmtDate(val: unknown) {
+    const d = new Date(String(val));
+    return isNaN(d.getTime()) ? String(val) : d.toLocaleDateString(undefined, { dateStyle: "medium" });
+  }
+
+  return (
+    <div
+      ref={listRef}
+      style={{
+        background: "#FFFBFE",
+        borderRadius: 12,
+        boxShadow: "0px 1px 2px rgba(0,0,0,.3), 0px 1px 3px 1px rgba(0,0,0,.15)",
+        overflow: "hidden",
+        marginTop: 16,
+      }}
+    >
+      {dataset.rows.map(row => (
+        <div
+          key={row.id}
+          onClick={() => { setOpenMenuId(null); onRowClick(row); }}
+          style={{
+            display: "flex", alignItems: "center",
+            padding: "14px 16px", borderBottom: "1px solid #CAC4D0",
+            gap: 12, cursor: "pointer", position: "relative",
+            transition: "background 200ms", background: "transparent",
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = "rgba(103,80,164,.08)")}
+          onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+        >
+          {/* Leading icon */}
+          <div style={{
+            width: 40, height: 40, flexShrink: 0, background: "#E7E0EC",
+            borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <span className="material-symbols-rounded" style={{ fontSize: 20, color: "#49454F" }}>
+              calendar_today
+            </span>
+          </div>
+
+          {/* Text */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 500, color: "#1C1B1F", letterSpacing: ".15px" }}>
+              {String(row.split ?? "")}
+            </div>
+            <div style={{ fontSize: 14, color: "#49454F", letterSpacing: ".25px" }}>
+              {fmtDate(row.workout_date)}
+            </div>
+          </div>
+
+          {/* Exercise count chip */}
+          <div style={{
+            flexShrink: 0, background: "#E7E0EC", borderRadius: 12,
+            padding: "2px 10px", fontSize: 12, color: "#49454F",
+          }}>
+            {row.exercise_count} ex
+          </div>
+
+          {/* ⋮ menu */}
+          <div style={{ flexShrink: 0, position: "relative" }} onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setOpenMenuId(openMenuId === row.id ? null : row.id)}
+              style={{
+                width: 40, height: 40, border: "none", borderRadius: "50%",
+                background: "transparent", color: "#49454F", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+              aria-label="More options"
+            >
+              <span className="material-symbols-rounded" style={{ fontSize: 24 }}>more_vert</span>
+            </button>
+
+            {openMenuId === row.id && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 4px)", right: 0,
+                minWidth: 160, background: "#ECE6F0", borderRadius: 4,
+                boxShadow: "0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)",
+                padding: "8px 0", zIndex: 100,
+              }}>
+                <div
+                  onClick={() => { setOpenMenuId(null); onCopy(row); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "0 12px", height: 48, fontSize: 14,
+                    fontWeight: 400, letterSpacing: ".25px", color: "#1C1B1F", cursor: "pointer",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(28,27,31,.08)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span className="material-symbols-rounded" style={{ fontSize: 18, color: "#49454F" }}>content_copy</span>
+                  Copy
+                </div>
+                <div style={{ height: 1, background: "#CAC4D0", margin: "4px 0" }} />
+                <div
+                  onClick={() => { setOpenMenuId(null); onDelete(row.id); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "0 12px", height: 48, fontSize: 14,
+                    fontWeight: 400, letterSpacing: ".25px", color: "#B3261E", cursor: "pointer",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(28,27,31,.08)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span className="material-symbols-rounded" style={{ fontSize: 18, color: "#B3261E" }}>delete</span>
+                  Delete
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── View state ────────────────────────────────────────────────────────────────
 
 type View = "sessions" | "exercises" | "exercise-view" | "session-create" | "exercise-add";
@@ -622,6 +761,76 @@ export default function WorkoutSessions() {
     const res = await apiFetch<unknown>(`/workout/sessions/${id}`, { method: "DELETE" });
     if (isApiError(res)) { setMutateError(res); return; }
     refreshSessions();
+  }
+
+  async function handleSessionCopy(row: Row) {
+    setMutateError(null);
+    // Fetch all exercises from the source session
+    const exRes = await apiFetch<Dataset>(`/workout/sessions/${row.id}/exercises`);
+    if (isApiError(exRes) || exRes.rows.length === 0) return;
+
+    const exercises = exRes.rows;
+    const today = new Date().toISOString().split("T")[0];
+    const first = exercises[0];
+
+    // Create new session with today's date and the first exercise
+    const createRes = await apiFetch<Dataset>("/workout/sessions", {
+      method: "POST",
+      body: JSON.stringify({
+        workout_date: today,
+        split:        row.split,
+        exercise:     first.exercise,
+        weight_kg:    first.weight_kg ?? null,
+        set1_reps:    first.set1_reps ?? null,
+        set2_reps:    first.set2_reps ?? null,
+        set3_reps:    first.set3_reps ?? null,
+        set4_reps:    first.set4_reps ?? null,
+        set5_reps:    first.set5_reps ?? null,
+        comment:      first.comment   ?? null,
+      }),
+    });
+    if (isApiError(createRes)) { setMutateError(createRes); return; }
+
+    // Get the new session id (first row after creation — sorted by date DESC)
+    const sessionsRes = await apiFetch<Dataset>("/workout/sessions");
+    if (isApiError(sessionsRes) || sessionsRes.rows.length === 0) return;
+    const newSession = sessionsRes.rows[0];
+
+    // Add remaining exercises sequentially
+    let lastDataset: Dataset = createRes;
+    for (const ex of exercises.slice(1)) {
+      const addRes = await apiFetch<Dataset>(
+        `/workout/sessions/${newSession.id}/exercises`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            exercise:  ex.exercise,
+            weight_kg: ex.weight_kg ?? null,
+            set1_reps: ex.set1_reps ?? null,
+            set2_reps: ex.set2_reps ?? null,
+            set3_reps: ex.set3_reps ?? null,
+            set4_reps: ex.set4_reps ?? null,
+            set5_reps: ex.set5_reps ?? null,
+            comment:   ex.comment   ?? null,
+          }),
+        },
+      );
+      if (!isApiError(addRes)) lastDataset = addRes;
+    }
+
+    refreshSessions();
+    setSelectedSession(newSession);
+    setExerciseDataset(lastDataset);
+    setHistoryByExercise({});
+    setView("exercises");
+    // Load history for the copied exercises in the background
+    const names = [...new Set(exercises.map(e => e.exercise as string))];
+    const results = await Promise.all(
+      names.map(n => apiFetch<HistoryData>(`/workout/exercises/history?name=${encodeURIComponent(n)}`))
+    );
+    const map: Record<string, HistoryData> = {};
+    names.forEach((n, i) => { if (!isApiError(results[i])) map[n] = results[i] as HistoryData; });
+    setHistoryByExercise(map);
   }
 
   async function handleExerciseDelete(id: string) {
@@ -745,10 +954,11 @@ export default function WorkoutSessions() {
 
       {mutateError && <ErrorCard error={mutateError} />}
 
-      <TableView
+      <SessionList
         dataset={sessionDataset}
         onRowClick={openSession}
         onDelete={handleSessionDelete}
+        onCopy={handleSessionCopy}
       />
     </div>
   );
