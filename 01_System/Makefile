@@ -216,6 +216,13 @@ mcp-reboot:
 #   ATLAS_PG_PASSWORD=<your-db-password>
 #   DATA_ROOT=/mnt/data
 
+# Ensure all backend services are attached to atlas-net.
+# Uses || true so re-running when already connected is silent and safe.
+net-connect:
+	@docker network connect atlas-net atlas-tasktracker    2>/dev/null || true
+	@docker network connect atlas-net atlas-workout-tracker 2>/dev/null || true
+	@docker network connect atlas-net atlas-ui             2>/dev/null || true
+
 up:
 	@test -f $(SYSTEM_SECRETS) || \
 	  (echo "ERROR: $(SYSTEM_SECRETS) not found." && \
@@ -228,6 +235,7 @@ up:
 	$(MAKE) schema schema-task
 	$(MAKE) task-build task-up
 	$(MAKE) app-build  app-up
+	$(MAKE) net-connect
 	$(MAKE) ui-build   ui-up
 	@echo ""
 	@echo "Atlas stack is up. UI available on port 80."
