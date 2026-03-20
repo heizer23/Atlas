@@ -6,7 +6,7 @@ services:
       dockerfile: 02_Platform/02_Atlas_Shell/Dockerfile
     restart: unless-stopped
     ports:
-      - "0.0.0.0:5173:80"
+      - "0.0.0.0:80:80"
     networks:
       - atlas-net
 
