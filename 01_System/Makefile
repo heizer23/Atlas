@@ -154,7 +154,33 @@ app-reboot:
 # endregion
 
 
-# region --- Platform: UI
+# region --- Platform: Atlas Shell
+SHELL_DIR=../02_Platform/02_Atlas_Shell
+
+SHELL_COMPOSE=docker compose \
+	-f $(SHELL_DIR)/compose.yml \
+	$(ENV_FILES)
+
+shell-build:
+	$(SHELL_COMPOSE) build
+
+shell-up:
+	$(SHELL_COMPOSE) up -d
+
+shell-down:
+	$(SHELL_COMPOSE) down
+
+shell-logs:
+	$(SHELL_COMPOSE) logs -f
+
+shell-reboot:
+	$(SHELL_COMPOSE) down
+	$(SHELL_COMPOSE) up -d
+
+# endregion
+
+
+# region --- Platform: UI (legacy — use shell targets for the SPA)
 UI_DIR=../02_Platform/UI
 
 UI_COMPOSE=docker compose \
@@ -219,6 +245,7 @@ mcp-reboot:
 # Ensure all backend services are attached to atlas-net.
 # Uses || true so re-running when already connected is silent and safe.
 net-connect:
+	@docker network connect atlas-net atlas-postgres        2>/dev/null || true
 	@docker network connect atlas-net atlas-tasktracker    2>/dev/null || true
 	@docker network connect atlas-net atlas-workout-tracker 2>/dev/null || true
 	@docker network connect atlas-net atlas-ui             2>/dev/null || true
@@ -237,12 +264,12 @@ up:
 	$(MAKE) task-build task-up
 	$(MAKE) app-build  app-up
 	$(MAKE) net-connect
-	$(MAKE) ui-build   ui-up
+	$(MAKE) shell-build shell-up
 	@echo ""
-	@echo "Atlas stack is up. UI available on port 80."
+	@echo "Atlas stack is up. Shell available on port 80."
 
 down:
-	-$(MAKE) ui-down
+	-$(MAKE) shell-down
 	-$(MAKE) app-down
 	-$(MAKE) task-down
 	-$(MAKE) pg-down

@@ -1,0 +1,439 @@
+/*
+ * File: 02_Platform/02_Atlas_Shell/src/shell/shell.css
+ * Component: atlas_shell
+ *
+ * Role: Shell-level layout styles. Uses exclusively Blueprint CSS custom
+ * properties from @platform-ui/index.css. No hardcoded hex values.
+ *
+ * Breakpoints:
+ *   Desktop  : ≥1024px — persistent sidebar
+ *   Tablet   : 768–1023px — collapsible sidebar with hamburger toggle
+ *   Mobile   : <768px — bottom navigation bar
+ *
+ * Elevation references (Blueprint DesignLanguage §5):
+ *   --elevation-1  sidebar panel, bottom nav bar
+ *   --elevation-2  MoreMenu overlay
+ *
+ * Motion references (Blueprint DesignLanguage §9):
+ *   --motion-state   150ms state transitions (hover/active/selected)
+ *   --motion-enter   250ms component enter (sidebar open)
+ *   --motion-overlay 200ms overlay appear (MoreMenu)
+ */
+
+@import '@platform-ui/index.css';
+
+/* ─── Shell layout grid ──────────────────────────────────────────────────────── */
+
+.shell-root {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--md-sys-color-background);
+}
+
+.shell-content {
+  flex: 1 1 0;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────────────────────── */
+
+.shell-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-sys-color-surface);
+  box-shadow: var(--elevation-1);
+  overflow-y: auto;
+  transition: transform var(--motion-enter), width var(--motion-enter);
+  z-index: 100;
+}
+
+/* Tablet: sidebar starts hidden, slides in when open */
+@media (max-width: 1023px) and (min-width: 768px) {
+  .shell-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    transform: translateX(-100%);
+  }
+
+  .shell-sidebar.shell-sidebar--open {
+    transform: translateX(0);
+  }
+
+  /* Push content area to avoid overlap when sidebar is open is not required
+     on tablet; overlay model is used instead */
+}
+
+/* Mobile: sidebar is hidden entirely; BottomNav takes over */
+@media (max-width: 767px) {
+  .shell-sidebar {
+    display: none;
+  }
+}
+
+/* Sidebar header containing the hamburger toggle (tablet only) */
+.shell-sidebar__header {
+  display: none;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+@media (max-width: 1023px) and (min-width: 768px) {
+  .shell-sidebar__header {
+    display: flex;
+  }
+}
+
+/* Hamburger toggle button — tablet only */
+.shell-hamburger {
+  display: none;
+  position: fixed;
+  top: var(--space-sm);
+  left: var(--space-sm);
+  z-index: 110;
+  background: var(--md-sys-color-surface);
+  border: none;
+  border-radius: var(--radius-button);
+  padding: var(--space-sm);
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface);
+  transition: background var(--motion-state);
+  box-shadow: var(--elevation-1);
+}
+
+.shell-hamburger:hover {
+  background: var(--md-sys-color-surface-variant);
+}
+
+@media (max-width: 1023px) and (min-width: 768px) {
+  .shell-hamburger {
+    display: flex;
+  }
+}
+
+/* Sidebar overlay backdrop — tablet only, shown when sidebar is open */
+.shell-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 1023px) and (min-width: 768px) {
+  .shell-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: var(--md-sys-color-on-surface);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-overlay);
+  }
+
+  .shell-sidebar-backdrop.shell-sidebar-backdrop--visible {
+    opacity: 0.32;
+    pointer-events: auto;
+  }
+}
+
+/* ─── Sidebar nav items ──────────────────────────────────────────────────────── */
+
+.shell-sidebar__launcher-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-md);
+  color: var(--md-sys-color-on-surface);
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  background: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  transition: background var(--motion-state);
+}
+
+.shell-sidebar__launcher-btn:hover {
+  background: var(--md-sys-color-surface-variant);
+}
+
+.shell-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-sm) 0;
+  flex: 1;
+}
+
+.shell-sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-button);
+  margin: 2px var(--space-sm);
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--motion-state), color var(--motion-state);
+}
+
+.shell-sidebar-nav-item:hover {
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface);
+}
+
+/* Selected state — Blueprint DesignLanguage §8 */
+.shell-sidebar-nav-item--active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.shell-sidebar-nav-item--active:hover {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+/* ─── Bottom nav (mobile) ─────────────────────────────────────────────────────── */
+
+.shell-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .shell-root {
+    flex-direction: column;
+  }
+
+  .shell-bottom-nav {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    height: 80px;
+    flex-shrink: 0;
+    background: var(--md-sys-color-surface);
+    box-shadow: var(--elevation-1);
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+    order: 2;
+  }
+
+  .shell-content {
+    order: 1;
+  }
+}
+
+.shell-bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 4px;
+  padding: var(--space-xs) var(--space-xs);
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--motion-state);
+  min-width: 0;
+}
+
+.shell-bottom-nav-item__indicator {
+  width: 64px;
+  height: 32px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--motion-state);
+}
+
+/* Selected state — Blueprint DesignLanguage §10 Navigation Bar (indicator pill) */
+.shell-bottom-nav-item--active .shell-bottom-nav-item__indicator {
+  background: var(--md-sys-color-primary-container);
+}
+
+.shell-bottom-nav-item--active {
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.shell-bottom-nav-item:hover .shell-bottom-nav-item__indicator {
+  background: var(--md-sys-color-surface-variant);
+}
+
+/* ─── MoreMenu overlay ───────────────────────────────────────────────────────── */
+
+.shell-more-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--md-sys-color-on-surface);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-overlay);
+}
+
+.shell-more-menu-backdrop--visible {
+  opacity: 0.32;
+  pointer-events: auto;
+}
+
+.shell-more-menu {
+  position: fixed;
+  bottom: 80px; /* above bottom nav */
+  left: var(--space-md);
+  right: var(--space-md);
+  z-index: 201;
+  background: var(--md-sys-color-surface);
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--elevation-2);
+  padding: var(--space-sm) 0;
+  transform: translateY(16px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--motion-overlay), opacity var(--motion-overlay);
+}
+
+.shell-more-menu--open {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.shell-more-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-md);
+  color: var(--md-sys-color-on-surface);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: background var(--motion-state);
+}
+
+.shell-more-menu__item:hover {
+  background: var(--md-sys-color-surface-variant);
+}
+
+/* ─── AppLauncher ────────────────────────────────────────────────────────────── */
+
+.shell-launcher {
+  padding: var(--space-xl) var(--space-lg);
+}
+
+.shell-launcher__heading {
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: var(--space-lg);
+}
+
+.shell-launcher__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-md);
+}
+
+.shell-launcher__empty {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  padding: var(--space-xl) 0;
+}
+
+.shell-app-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--space-lg);
+  background: var(--md-sys-color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--elevation-1);
+  cursor: pointer;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background var(--motion-state), box-shadow var(--motion-state);
+  color: var(--md-sys-color-on-surface);
+}
+
+.shell-app-entry:hover {
+  background: var(--md-sys-color-surface-variant);
+  box-shadow: var(--elevation-2);
+}
+
+.shell-app-entry__label {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+}
+
+.shell-app-entry__path {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin-top: var(--space-xs);
+}
+
+/* ─── ShellNotFound ──────────────────────────────────────────────────────────── */
+
+.shell-not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-xl);
+  color: var(--md-sys-color-on-surface);
+  text-align: center;
+}
+
+.shell-not-found__code {
+  font-size: 28px;
+  font-weight: 400;
+  margin-bottom: var(--space-sm);
+}
+
+.shell-not-found__message {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin-bottom: var(--space-lg);
+}
+
+.shell-not-found__link {
+  color: var(--md-sys-color-primary);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--motion-state);
+}
+
+.shell-not-found__link:hover {
+  color: var(--md-sys-color-on-primary-container);
+}
+
+/* ─── Loading fallback (Suspense) ────────────────────────────────────────────── */
+
+.shell-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+}

@@ -453,4 +453,5 @@ Do not build these. Raise them as platform gaps via `WarningPlaceholder` if enco
 | Raw `fetch` calls | `apiFetch` from `client.ts` |
 | Hardcoded hex colors in components | CSS custom properties from §9 |
 | Font sizes not in §10 | Use closest defined level |
-| FAB, Bottom Nav, Snackbar | Not in Atlas component set — see `UI_DesignLanguage §10` |
+| FAB, Snackbar | Not in Atlas component set — see `UI_DesignLanguage §10` |
+| Bottom Nav | Shell-owned component — do not build in application code; declared via `AppConfig.mobilePrimaryNav` |

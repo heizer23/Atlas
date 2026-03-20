@@ -16,11 +16,11 @@ Atlas uses **Material Design 3 (M3)** as its design language foundation.
 - Sufficiently documented that any LLM can reason about it without this document alone.
 
 **What M3 is not used for:**
-- Mobile navigation patterns (Bottom Navigation, Navigation Drawer, FAB clusters).
+- Navigation Drawer or FAB clusters.
 - Touch-optimized interaction models (long-press, swipe-to-dismiss).
 - Consumer app aesthetics (large hero images, rounded display type).
 
-Atlas uses M3 as a **token and component discipline**, not as a mobile UI kit.
+Atlas uses M3 as a **token and component discipline**. Bottom Navigation is permitted for mobile viewports (see §2 and §10).
 
 ---
 
@@ -33,7 +33,7 @@ Atlas uses M3 as a **token and component discipline**, not as a mobile UI kit.
 | Type scale | Includes Display, Headline, Title, Body, Label with many sub-levels | Atlas uses exactly 5 named levels (see §4) | Reduces LLM decision surface |
 | Motion | Emphasizes expressive spring animations | Subtle, fast transitions only (150–250ms ease) | Data tool; animation should not distract |
 | Elevation | 5 tonal elevation levels with surface tint | 3 levels only (see §5) | Keeps visual hierarchy legible at data density |
-| Navigation | Navigation Bar / Drawer as primary patterns | Top App Bar + left sidebar only | Desktop-first; never mobile nav patterns |
+| Navigation | Navigation Bar / Drawer as primary patterns | Left sidebar (desktop/tablet) + M3 Bottom Navigation Bar (mobile, max 5 items) | Desktop-first sidebar; Bottom Navigation permitted on mobile viewports |
 | FAB | Prominent action surface | Not used in Atlas | Actions live in Top Bar or inline in tables |
 | Color surface tint | M3 tints surfaces with primary color at each elevation | Atlas uses neutral surface tints only | Avoids color bleed on data-dense pages |
 
@@ -193,7 +193,8 @@ Maps Atlas UI primitives to their M3 component counterparts. Use these mappings 
 | `ErrorCard` | Filled Card + Error color | Icon + message + collapsible detail |
 | `WarningPlaceholder` | Outlined Card + Tertiary color | Always visible; never dismissible |
 | Top App Bar | Top App Bar (Medium) | No subtitle line; title uses `headline` scale |
-| Page navigation | Navigation Rail | Left-aligned; icons + labels; no FAB slot |
+| Page navigation (desktop/tablet) | Navigation Rail | Left-aligned; icons + labels; no FAB slot |
+| Page navigation (mobile) | Navigation Bar (Bottom Navigation) | Fixed bottom; max 5 items; icons + labels; active item uses `primary-container` indicator pill |
 | Buttons (primary) | Filled Button | Standard M3; `primary` color |
 | Buttons (secondary) | Outlined Button | Standard M3; `outline` border |
 | Buttons (destructive) | Filled Button | `error` color; always requires confirmation dialog |
@@ -202,21 +203,6 @@ Maps Atlas UI primitives to their M3 component counterparts. Use these mappings 
 | Dialogs | Basic Dialog | `28px` radius; destructive confirm only |
 | Tooltips | Plain Tooltip | `10px` radius; `on-surface` background |
 | Skeleton / loading | No M3 equivalent | Animated gradient sweep on `surface-variant` |
-
-### Do Not Use
-
-These M3 components are **not part of Atlas**. If one is needed, raise it as a platform decision before implementing.
-
-- Bottom Navigation Bar
-- Navigation Drawer
-- Floating Action Button (FAB)
-- Bottom Sheet
-- Snackbar / Toast
-- Carousel
-- Search (full-screen)
-- Date Picker
-
----
 
 ## 11. Versioning
 

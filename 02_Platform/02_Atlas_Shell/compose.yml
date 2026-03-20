@@ -1,0 +1,15 @@
+services:
+  atlas-shell:
+    container_name: atlas-shell
+    build:
+      context: ../..
+      dockerfile: 02_Platform/02_Atlas_Shell/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:5173:80"
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true
