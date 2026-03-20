@@ -79,7 +79,7 @@ def log_meal(
     with _pg() as con, con.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO food_logs (
+            INSERT INTO foodtracker.food_logs (
                 id, logged_at, meal_type, dish_name,
                 kcal, protein_g, carbs_g, fiber_g, fat_g, good_fat_g,
                 meat_g, red_meat_g, sodium_mg, confidence, notes
@@ -133,7 +133,7 @@ def get_nutrition_summary(from_date: str, to_date: str) -> dict:
                 COALESCE(SUM(meat_g),      0)    AS total_meat_g,
                 COALESCE(SUM(red_meat_g),  0)    AS total_red_meat_g,
                 COALESCE(SUM(sodium_mg),   0)    AS total_sodium_mg
-            FROM food_logs
+            FROM foodtracker.food_logs
             WHERE {interval}
             """,
             (from_date, to_date),
@@ -159,7 +159,7 @@ def get_nutrition_summary(from_date: str, to_date: str) -> dict:
             f"""
             SELECT id::text, logged_at::text, meal_type, dish_name,
                    kcal, protein_g, carbs_g, fat_g, confidence
-            FROM food_logs
+            FROM foodtracker.food_logs
             WHERE {interval}
             ORDER BY logged_at
             """,
