@@ -260,7 +260,7 @@ up:
 	   exit 1)
 	$(MAKE) pg-up
 	$(MAKE) pg-wait
-	$(MAKE) schema schema-task
+	$(MAKE) schema schema-task schema-food
 	$(MAKE) task-build task-up
 	$(MAKE) app-build  app-up
 	$(MAKE) net-connect

@@ -1,4 +1,6 @@
-CREATE TABLE food_logs (
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS food_logs (
   id UUID PRIMARY KEY,
 
   logged_at TIMESTAMP NOT NULL,
@@ -50,5 +52,7 @@ CREATE TABLE food_logs (
   CHECK (confidence BETWEEN 1 AND 5)
 );
 
-CREATE INDEX idx_food_logs_logged_at ON food_logs (logged_at);
-CREATE INDEX idx_food_logs_meal_type ON food_logs (meal_type);
+CREATE INDEX IF NOT EXISTS idx_food_logs_logged_at ON food_logs (logged_at);
+CREATE INDEX IF NOT EXISTS idx_food_logs_meal_type ON food_logs (meal_type);
+
+COMMIT;
