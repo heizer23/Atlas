@@ -89,6 +89,9 @@ schema-food:
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_FOOD)
 
+migrate:
+	@python3 ../02_Platform/01_Postgres/migrate.py
+
 pg-wait:
 	@echo "==> Waiting for Postgres to be ready..."
 	@for i in $$(seq 1 30); do \
@@ -260,7 +263,7 @@ up:
 	   exit 1)
 	$(MAKE) pg-up
 	$(MAKE) pg-wait
-	$(MAKE) schema schema-task schema-food
+	$(MAKE) migrate
 	$(MAKE) task-build task-up
 	$(MAKE) app-build  app-up
 	$(MAKE) net-connect

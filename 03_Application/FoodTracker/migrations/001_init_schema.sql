@@ -10,20 +10,20 @@ CREATE TABLE IF NOT EXISTS foodtracker.food_logs (
   dish_name TEXT NOT NULL,
 
   -- Environmental tracking
-  meat_g NUMERIC(7,1) NOT NULL DEFAULT 0,
+  meat_g     NUMERIC(7,1) NOT NULL DEFAULT 0,
   red_meat_g NUMERIC(7,1) NOT NULL DEFAULT 0,
 
   -- Energy
   kcal NUMERIC(7,0) NOT NULL DEFAULT 0,
 
   -- Macros
-  protein_g NUMERIC(7,1) NOT NULL DEFAULT 0,
-  carbs_g   NUMERIC(7,1) NOT NULL DEFAULT 0,
-  fiber_g   NUMERIC(7,1) NOT NULL DEFAULT 0,
-  fat_g     NUMERIC(7,1) NOT NULL DEFAULT 0,
+  protein_g  NUMERIC(7,1) NOT NULL DEFAULT 0,
+  carbs_g    NUMERIC(7,1) NOT NULL DEFAULT 0,
+  fiber_g    NUMERIC(7,1) NOT NULL DEFAULT 0,
+  fat_g      NUMERIC(7,1) NOT NULL DEFAULT 0,
   good_fat_g NUMERIC(7,1) NOT NULL DEFAULT 0,
 
-  -- Micro (minimal)
+  -- Micro
   sodium_mg NUMERIC(7,0) NOT NULL DEFAULT 0,
 
   -- Quality indicator
@@ -35,22 +35,17 @@ CREATE TABLE IF NOT EXISTS foodtracker.food_logs (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-  -- Constraints
   CHECK (meat_g >= 0),
   CHECK (red_meat_g >= 0),
   CHECK (red_meat_g <= meat_g),
-
   CHECK (kcal >= 0),
-
   CHECK (protein_g >= 0),
   CHECK (carbs_g >= 0),
   CHECK (fiber_g >= 0),
   CHECK (fat_g >= 0),
   CHECK (good_fat_g >= 0),
   CHECK (good_fat_g <= fat_g),
-
   CHECK (sodium_mg >= 0),
-
   CHECK (confidence BETWEEN 1 AND 5)
 );
 
