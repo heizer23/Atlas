@@ -14,7 +14,7 @@ or query the data.
 
 ## Data Contract (Authoritative)
 
-Schema: `02_Platform/01_Postgres/ObjectSchemas/foodtracker_schema.sql`
+Schema: `03_Application/FoodTracker/migrations/001_init_schema.sql`
 
 **Stability rule:** Code is disposable; data contracts are not.
 
@@ -58,9 +58,14 @@ Returns:
 ## File Layout
 ```
 03_Application/FoodTracker/
-  tools.py          ← log_meal + get_nutrition_summary (plain functions)
+  00_Requirements/
+    00_Definition.md       ← this file
+  migrations/
+    001_init_schema.sql    ← authoritative schema (idempotent baseline)
+    002_move_public_food_logs.sql  ← one-time migration from public schema
+  tools.py                 ← log_meal + get_nutrition_summary (plain functions)
   __init__.py
-  07_FoodTracker.md ← this file
+  schema.sql               ← legacy reference copy (superseded by migrations/)
 ```
 
 Tools are registered into `02_Platform/MCPGateway/app/main.py` at startup.
