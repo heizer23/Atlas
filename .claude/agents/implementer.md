@@ -1,5 +1,5 @@
 ---
-name: application-implementer
+name: implementer
 description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`definition.md`, `component_architecture.json`, `component_scaffold.json`) are present inside a `03_Application` component directory."
 model: sonnet
 color: green

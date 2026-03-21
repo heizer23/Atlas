@@ -1,0 +1,351 @@
+{
+  "generated_at": "2026-03-20T09:43:45.943692+00:00",
+  "source_root": "C:\\Users\\premm\\Programming\\Atlas\\Atlas",
+  "component_count": 12,
+  "components": [
+    {
+      "name": "SharedViews",
+      "layer": "00_Blueprint",
+      "path": "00_Blueprint/SharedViews",
+      "atlas_dependencies": [],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": []
+    },
+    {
+      "name": "UI",
+      "layer": "00_Blueprint",
+      "path": "00_Blueprint/UI",
+      "atlas_dependencies": [],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": []
+    },
+    {
+      "name": "01_Access",
+      "layer": "01_System",
+      "path": "01_System/01_Access",
+      "atlas_dependencies": [],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "01_System/01_Access/Tailscale/readme.md",
+        "01_System/01_Access/cloudflared/compose.yml"
+      ]
+    },
+    {
+      "name": "01_Postgres",
+      "layer": "02_Platform",
+      "path": "02_Platform/01_Postgres",
+      "atlas_dependencies": [],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/01_Postgres/compose.yml"
+      ]
+    },
+    {
+      "name": "02_Atlas_Shell",
+      "layer": "02_Platform",
+      "path": "02_Platform/02_Atlas_Shell",
+      "atlas_dependencies": [
+        "00_Blueprint/UI",
+        "01_System/01_Access",
+        "02_Platform/UI",
+        "03_Application/TaskTracker",
+        "03_Application/WorkoutTracker"
+      ],
+      "external_libraries": [
+        "@platform-ui/index.css",
+        "@testing-library/jest-dom",
+        "@testing-library/react",
+        "@testing-library/user-event",
+        "@types/react",
+        "@types/react-dom",
+        "@vitejs/plugin-react",
+        "React",
+        "React from",
+        "ReactDOM from",
+        "jsdom",
+        "path from",
+        "react",
+        "react from",
+        "react-dom",
+        "react-router-dom",
+        "recharts",
+        "type",
+        "type React from",
+        "typescript",
+        "vite",
+        "vitest"
+      ],
+      "internal_aliases": [
+        "@atlas/shell"
+      ],
+      "detected_entry_files": [
+        "02_Platform/02_Atlas_Shell/compose.yml",
+        "02_Platform/02_Atlas_Shell/package.json",
+        "02_Platform/02_Atlas_Shell/src/index.ts",
+        "02_Platform/02_Atlas_Shell/src/shell/Router.tsx"
+      ]
+    },
+    {
+      "name": "03_ErrorHandling",
+      "layer": "02_Platform",
+      "path": "02_Platform/03_ErrorHandling",
+      "atlas_dependencies": [],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": []
+    },
+    {
+      "name": "MCPGateway",
+      "layer": "02_Platform",
+      "path": "02_Platform/MCPGateway",
+      "atlas_dependencies": [
+        "03_Application/FoodTracker"
+      ],
+      "external_libraries": [
+        "fastmcp",
+        "foodtracker",
+        "httpx",
+        "json\n\nBASE",
+        "os\nfrom fastmcp import FastMCP\nfrom fastmcp.server.auth.providers.google import GoogleProvider",
+        "sys\nimport os"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/MCPGateway/app/main.py",
+        "02_Platform/MCPGateway/compose.yml"
+      ]
+    },
+    {
+      "name": "UI",
+      "layer": "02_Platform",
+      "path": "02_Platform/UI",
+      "atlas_dependencies": [
+        "00_Blueprint/UI"
+      ],
+      "external_libraries": [
+        "@types/react",
+        "@types/react-dom",
+        "@vitejs/plugin-react",
+        "ErrorCard from",
+        "Skeleton from",
+        "WarningPlaceholder from",
+        "eslint-plugin-react-dom",
+        "eslint-plugin-react-x",
+        "react",
+        "react from",
+        "react-dom",
+        "reactDom from",
+        "reactX from",
+        "recharts",
+        "type",
+        "typescript",
+        "vite"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/UI/README.md",
+        "02_Platform/UI/compose.yml",
+        "02_Platform/UI/react/package.json"
+      ]
+    },
+    {
+      "name": "packages",
+      "layer": "02_Platform",
+      "path": "02_Platform/packages",
+      "atlas_dependencies": [
+        "00_Blueprint/UI"
+      ],
+      "external_libraries": [
+        "HTMLResponse\n\nlog",
+        "fastapi",
+        "logging\nfrom logging.handlers import RotatingFileHandler\nfrom pathlib import Path\n\ndef setup_logging",
+        "logging\nimport time\nfrom contextlib import contextmanager\n\nfrom fastapi import Request\n\nlog",
+        "logging\nimport uuid\nfrom fastapi import Request\nfrom fastapi.responses import JSONResponse",
+        "platform_errorhandling",
+        "pydantic",
+        "uuid\nfrom fastapi.responses import JSONResponse\n\n\ndef api_error"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/packages/platform_contracts/CLAUDE.md",
+        "02_Platform/packages/platform_errorhandling/CLAUDE.md",
+        "02_Platform/packages/platform_errorhandling/README.md"
+      ]
+    },
+    {
+      "name": "FoodTracker",
+      "layer": "03_Application",
+      "path": "03_Application/FoodTracker",
+      "atlas_dependencies": [
+        "02_Platform/01_Postgres",
+        "02_Platform/MCPGateway"
+      ],
+      "external_libraries": [
+        "os\nimport uuid\nfrom datetime import datetime\nfrom typing import Optional\n\nimport psycopg\nfrom psycopg.rows import dict_row"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": []
+    },
+    {
+      "name": "TaskTracker",
+      "layer": "03_Application",
+      "path": "03_Application/TaskTracker",
+      "atlas_dependencies": [
+        "00_Blueprint/UI",
+        "02_Platform/02_Atlas_Shell",
+        "02_Platform/03_ErrorHandling",
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        "0.1.0",
+        "@platform-ui/api",
+        "@platform-ui/components",
+        "@platform-ui/hooks",
+        "CreateForm from",
+        "Dataset",
+        "DatasetMeta\n\nrouter",
+        "DetailView from",
+        "ErrorCard from",
+        "React from",
+        "TableView from",
+        "fastapi",
+        "init_schema\nfrom backend.routers import tasks\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nsetup_logging",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom backend.database import init_pool",
+        "os\nfrom contextlib import contextmanager\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\ndef _build_url",
+        "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT",
+        "psycopg2-binary",
+        "pydantic",
+        "react",
+        "react-router-dom",
+        "tasktracker",
+        "type",
+        "uuid\nfrom typing import Any\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import JSONResponse\nfrom pydantic import BaseModel\n\nfrom backend.database import get_db\nfrom platform_errorhandling import api_error\nfrom platform_contracts import ColumnSchema"
+      ],
+      "internal_aliases": [
+        "@atlas/shell"
+      ],
+      "detected_entry_files": [
+        "03_Application/TaskTracker/CLAUDE.md",
+        "03_Application/TaskTracker/backend/main.py",
+        "03_Application/TaskTracker/compose.yml",
+        "03_Application/TaskTracker/pyproject.toml"
+      ]
+    },
+    {
+      "name": "WorkoutTracker",
+      "layer": "03_Application",
+      "path": "03_Application/WorkoutTracker",
+      "atlas_dependencies": [
+        "02_Platform/01_Postgres",
+        "02_Platform/02_Atlas_Shell",
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        "0.2.0",
+        "@emotion/react",
+        "@emotion/styled",
+        "@mui/icons-material",
+        "@mui/material",
+        "@platform-ui/api",
+        "@platform-ui/components",
+        "@platform-ui/hooks",
+        "@popperjs/core",
+        "@radix-ui/react-accordion",
+        "@radix-ui/react-alert-dialog",
+        "@radix-ui/react-aspect-ratio",
+        "@radix-ui/react-avatar",
+        "@radix-ui/react-checkbox",
+        "@radix-ui/react-collapsible",
+        "@radix-ui/react-context-menu",
+        "@radix-ui/react-dialog",
+        "@radix-ui/react-dropdown-menu",
+        "@radix-ui/react-hover-card",
+        "@radix-ui/react-label",
+        "@radix-ui/react-menubar",
+        "@radix-ui/react-navigation-menu",
+        "@radix-ui/react-popover",
+        "@radix-ui/react-progress",
+        "@radix-ui/react-radio-group",
+        "@radix-ui/react-scroll-area",
+        "@radix-ui/react-select",
+        "@radix-ui/react-separator",
+        "@radix-ui/react-slider",
+        "@radix-ui/react-slot",
+        "@radix-ui/react-switch",
+        "@radix-ui/react-tabs",
+        "@radix-ui/react-toggle",
+        "@radix-ui/react-toggle-group",
+        "@radix-ui/react-tooltip",
+        "@tailwindcss/vite",
+        "@vitejs/plugin-react",
+        "CreateForm from",
+        "Dataset",
+        "DatasetMeta\n\nrouter",
+        "ErrorCard from",
+        "README.md",
+        "React",
+        "React from",
+        "backend",
+        "canvas-confetti",
+        "class-variance-authority",
+        "clsx",
+        "cmdk",
+        "date-fns",
+        "embla-carousel-react",
+        "fastapi",
+        "input-otp",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom backend.database import init_pool\nfrom backend.routers import workout\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nsetup_logging",
+        "lucide-react",
+        "motion",
+        "next-themes",
+        "os\nfrom contextlib import contextmanager\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\n\ndef _build_url",
+        "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT",
+        "path from",
+        "postcss-nested",
+        "psycopg2-binary",
+        "pydantic",
+        "react",
+        "react from",
+        "react-day-picker",
+        "react-dnd",
+        "react-dnd-html5-backend",
+        "react-dom",
+        "react-hook-form",
+        "react-popper",
+        "react-resizable-panels",
+        "react-responsive-masonry",
+        "react-router",
+        "react-router-dom",
+        "react-slick",
+        "recharts",
+        "sonner",
+        "tailwind-merge",
+        "tailwindcss",
+        "tailwindcss from",
+        "tw-animate-css",
+        "type",
+        "useEmblaCarousel",
+        "uuid\nfrom typing import Any\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import JSONResponse\nfrom pydantic import BaseModel\n\nfrom backend.database import get_db\nfrom platform_errorhandling import api_error\nfrom platform_contracts import ColumnSchema",
+        "uvicorn",
+        "vaul",
+        "vite",
+        "workout-tracker"
+      ],
+      "internal_aliases": [
+        "@atlas/shell"
+      ],
+      "detected_entry_files": [
+        "03_Application/WorkoutTracker/00_requirements/ui-reference/README.md",
+        "03_Application/WorkoutTracker/00_requirements/ui-reference/package.json",
+        "03_Application/WorkoutTracker/README.md",
+        "03_Application/WorkoutTracker/backend/main.py",
+        "03_Application/WorkoutTracker/compose.yml",
+        "03_Application/WorkoutTracker/pyproject.toml"
+      ]
+    }
+  ]
+}

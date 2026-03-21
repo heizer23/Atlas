@@ -1,5 +1,5 @@
 """
-Run the TaskTracker backend locally.
+Run the FoodTracker backend locally.
 Loads secrets from 01_System/secrets.env, then starts uvicorn.
 """
 import os
@@ -32,15 +32,15 @@ if __name__ == "__main__":
     else:
         print(f"Warning: {SECRETS_ENV} not found — relying on existing env vars")
 
-    # Local runs always connect to localhost — override any Docker-targeted host
+    # Local runs always connect to localhost — override any Docker-targeted values
     os.environ["ATLAS_PG_HOST"] = "127.0.0.1"
-    os.environ.pop("DATABASE_URL", None)   # DATABASE_URL takes priority in database.py; remove it for local runs
+    os.environ.pop("DATABASE_URL", None)   # DATABASE_URL (set for TaskTracker Docker) takes priority; remove it
 
     subprocess.run(
         [
             sys.executable, "-m", "uvicorn",
             "backend.main:app",
-            "--port", "8010",
+            "--port", "8012",
         ],
         cwd=Path(__file__).parent,
     )

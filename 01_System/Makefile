@@ -131,6 +131,32 @@ task-reboot:
 # endregion
 
 
+# region --- Application: FoodTracker
+FOOD_DIR=../03_Application/FoodTracker
+
+FOOD_COMPOSE=docker compose \
+	-f $(FOOD_DIR)/compose.yml \
+	$(ENV_FILES)
+
+food-build:
+	$(FOOD_COMPOSE) build
+
+food-up:
+	$(FOOD_COMPOSE) up -d
+
+food-down:
+	$(FOOD_COMPOSE) down
+
+food-logs:
+	$(FOOD_COMPOSE) logs -f
+
+food-reboot:
+	$(FOOD_COMPOSE) down
+	$(FOOD_COMPOSE) up -d
+
+# endregion
+
+
 # region --- Application: WorkoutTracker
 APP_DIR=../03_Application/WorkoutTracker
 
@@ -251,6 +277,7 @@ net-connect:
 	@docker network connect atlas-net atlas-postgres        2>/dev/null || true
 	@docker network connect atlas-net atlas-tasktracker    2>/dev/null || true
 	@docker network connect atlas-net atlas-workout-tracker 2>/dev/null || true
+	@docker network connect atlas-net atlas-food-tracker   2>/dev/null || true
 	@docker network connect atlas-net atlas-ui             2>/dev/null || true
 	@docker network connect atlas-net atlas-cloudflared    2>/dev/null || true
 
@@ -264,8 +291,9 @@ up:
 	$(MAKE) pg-up
 	$(MAKE) pg-wait
 	$(MAKE) migrate
-	$(MAKE) task-build task-up
-	$(MAKE) app-build  app-up
+	$(MAKE) task-build  task-up
+	$(MAKE) app-build   app-up
+	$(MAKE) food-build  food-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
 	@echo ""
@@ -273,6 +301,7 @@ up:
 
 down:
 	-$(MAKE) shell-down
+	-$(MAKE) food-down
 	-$(MAKE) app-down
 	-$(MAKE) task-down
 	-$(MAKE) pg-down

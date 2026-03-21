@@ -1,0 +1,250 @@
+{
+  "component_name": "food_tracker",
+  "layer": "03_Application",
+  "source_definition": "00_Requirements/FoodTracker01 — Manual JSON Intake.md",
+  "summary": "Provides a user-mediated JSON intake flow for logging a single meal — validate, preview, and commit — against the existing foodtracker.food_logs table.",
+  "classification": {
+    "why_application": "FoodTracker encodes domain-specific meaning: meal types, nutritional field semantics, confidence scale, dish_name derivation rules, and the precise mapping from the user's JSON template to the foodtracker schema. None of this meaning belongs to a shared platform capability.",
+    "non_goals": [
+      "Viewing or listing historical meal entries (deferred to Sprint 02)",
+      "Editing or deleting existing entries",
+      "Batch / multi-meal JSON imports",
+      "Authentication redesign",
+      "Analytics, aggregation, or charting features",
+      "MCP-based meal input"
+    ],
+    "not_platform": "The intake flow, template shape, validation rules, normalisation logic, and nutritional field set are all specific to the FoodTracker domain. Promoting them to a platform capability would inject domain meaning into a shared layer, violating the dependency-direction rule."
+  },
+  "contracts": {
+    "consumes": [
+      "02_Platform/01_Postgres — Postgres instance on atlas-net reachable via ATLAS_PG_HOST:ATLAS_PG_PORT",
+      "02_Platform/packages/platform_errorhandling — install_exception_handlers, install_request_timing, setup_logging",
+      "02_Platform/packages/platform_contracts — ColumnSchema, DatasetMeta, Dataset",
+      "02_Platform/02_Atlas_Shell — AppRegistry.register for shell navigation integration",
+      "02_Platform/UI — apiFetch, isApiError, ErrorCard, Skeleton platform UI primitives"
+    ],
+    "provides": [
+      "GET /api/food/template → text/plain canonical JSON template string",
+      "POST /api/food/validate → preview model (HTTP 200) or ApiError (HTTP 422)",
+      "POST /api/food/meals → Dataset (HTTP 200, one row) or ApiError (HTTP 400 / 422 / 500)",
+      "Shell route /food registered under appId 'food' with nav label 'Log'"
+    ],
+    "invariants": [
+      "No row is written to foodtracker.food_logs unless the user has explicitly clicked Accept (POST /api/food/meals)",
+      "No draft or intermediate state is persisted to the database at any point",
+      "The commit endpoint re-validates the payload independently — it never relies on prior validate call results",
+      "The preview reflects the normalised data that will be written; it is not a rendering of the raw JSON",
+      "dish_name is always derived server-side by joining items[].name with ', '",
+      "kcal is always cast to integer (rounded) before insert and preview",
+      "confidence defaults to 3 when absent; all optional numeric nutrition fields default to 0 when absent"
+    ],
+    "failure_modes": [
+      "PARSE_ERROR — request body is not syntactically valid JSON; HTTP 422",
+      "MISSING_FIELD — a required top-level or nutrition field is absent; HTTP 422",
+      "INVALID_FIELD — a field is present but fails type or constraint checks; HTTP 422",
+      "VALIDATION_ERROR — wrapper code returned for all validate / commit validation failures; HTTP 422",
+      "DB_CONSTRAINT — a database CHECK constraint is violated at insert time (e.g. good_fat_g > fat_g slipping through rounding); HTTP 400",
+      "INTERNAL_ERROR — unexpected exception caught by install_exception_handlers; HTTP 500"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool via database.get_db()",
+      "platform_errorhandling.api_error() for error envelope construction",
+      "platform_contracts.ColumnSchema, DatasetMeta, Dataset for commit response",
+      "AppRegistry from @atlas/shell for frontend registration",
+      "apiFetch, isApiError, ErrorCard, Skeleton from @platform-ui/*"
+    ],
+    "provides": [
+      "HTTP API on port 8012 (container port 8000, host-bound to 127.0.0.1:8012)",
+      "Shell route /food consumed by 02_Platform/02_Atlas_Shell router"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/template",
+        "purpose": "Returns the hardcoded canonical meal JSON template as a text/plain string so the frontend can display it in a selectable read-only area for the user to copy into ChatGPT.",
+        "ui_contract": "text/plain"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/validate",
+        "purpose": "Accepts a raw JSON payload, runs all validation checks in order (parse, timestamp, meal_type, items, nutrition presence, required numeric fields, optional numeric constraints, confidence range), normalises the data (defaults, dish_name derivation, kcal rounding, timestamp re-serialisation), and returns the preview model on success or ApiError on any failure.",
+        "ui_contract": "preview_model | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/meals",
+        "purpose": "Accepts the same raw JSON payload as validate, re-runs full validation and normalisation, inserts one row into foodtracker.food_logs, and returns the inserted row as a Dataset with MEAL_SCHEMA. Returns ApiError for validation failures (422), DB constraint violations (400), or unexpected errors (500).",
+        "ui_contract": "Dataset | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "receive_raw_body",
+      "description": "FastAPI receives the request body as raw bytes and attempts JSON decode. If decode fails, raises PARSE_ERROR immediately.",
+      "inputs": ["HTTP request body (bytes)"],
+      "outputs": ["parsed dict or PARSE_ERROR ApiError"]
+    },
+    {
+      "step": 2,
+      "name": "validate_fields",
+      "description": "Sequential field validation: timestamp parseable as ISO-8601, meal_type in allowed enum, items non-empty array with non-empty name strings, nutrition object present, required numeric fields present and >= 0, optional numeric fields satisfy their individual >= 0 checks if present, cross-field constraints (good_fat_g <= fat_g, red_meat_g <= meat_g) checked only after both operand fields have individually passed their >= 0 presence and type checks — if either operand field fails first, the cross-field check is skipped and the first failure is returned, confidence is integer 1–5 if present. Returns first encountered failure. Failure is signaled by return value (not by raising an exception): _validate_and_normalise returns (None, error_dict) on failure; the route handler constructs and returns the JSONResponse (HTTP 422).",
+      "inputs": ["parsed dict"],
+      "outputs": ["(normalised_dict, None) on success or (None, error_dict) where error_dict is ApiError-shaped — route handler constructs JSONResponse from error_dict"]
+    },
+    {
+      "step": 3,
+      "name": "normalise",
+      "description": "Apply defaults (fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg → 0; confidence → 3), derive dish_name by joining items[].name with ', ', cast kcal to int, re-serialise timestamp as 'YYYY-MM-DDTHH:MM:SS', strip unknown top-level and nutrition fields.",
+      "inputs": ["validated dict"],
+      "outputs": ["normalised preview dict matching preview model shape"]
+    },
+    {
+      "step": 4,
+      "name": "return_preview_or_insert",
+      "description": "For POST /api/food/validate: return the normalised preview dict (HTTP 200). For POST /api/food/meals: proceed to DB insert using the normalised values.",
+      "inputs": ["normalised preview dict"],
+      "outputs": ["preview model response (validate) or proceeds to step 5 (meals)"]
+    },
+    {
+      "step": 5,
+      "name": "db_insert",
+      "description": "Generate uuid4 for id. Execute INSERT INTO foodtracker.food_logs with all normalised field values. RETURNING * to retrieve the inserted row. Catch psycopg2.IntegrityError or CheckViolation and raise DB_CONSTRAINT ApiError (HTTP 400). Commit on success.",
+      "inputs": ["normalised preview dict", "database connection from get_db()"],
+      "outputs": ["inserted row dict or DB_CONSTRAINT ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "build_dataset_response",
+      "description": "Wrap the inserted row in a Dataset using MEAL_SCHEMA and DatasetMeta(object_type='food_meal', label='Food Log', total=1, page=1, page_size=1, row_actions=[]). Serialise id and logged_at as strings; all numeric fields as float.",
+      "inputs": ["inserted row dict"],
+      "outputs": ["Dataset response (HTTP 200)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "02_Platform/01_Postgres",
+        "role": "Persistent storage for foodtracker.food_logs; schema pre-provisioned via 03_Application/FoodTracker/migrations/001_init_schema.sql"
+      },
+      {
+        "component": "02_Platform/packages/platform_errorhandling",
+        "role": "install_exception_handlers (INTERNAL_ERROR envelope), install_request_timing, setup_logging, api_error() constructor"
+      },
+      {
+        "component": "02_Platform/packages/platform_contracts",
+        "role": "ColumnSchema, DatasetMeta, Dataset — required to produce the commit response in the standard UI data contract shape"
+      },
+      {
+        "component": "02_Platform/02_Atlas_Shell",
+        "role": "AppRegistry.register — registers the /food route and nav entries so the shell renders the app"
+      },
+      {
+        "component": "02_Platform/UI",
+        "role": "apiFetch, isApiError, ErrorCard, Skeleton — platform UI primitives consumed by ShellEntry.tsx"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "fastapi",
+        "role": "HTTP framework; APIRouter, FastAPI, Request, Response",
+        "reuse_existing": true
+      },
+      {
+        "name": "uvicorn",
+        "role": "ASGI server",
+        "reuse_existing": true
+      },
+      {
+        "name": "psycopg2-binary",
+        "role": "Postgres driver with RealDictCursor and connection pooling; matches WorkoutTracker pattern",
+        "reuse_existing": true
+      },
+      {
+        "name": "pydantic",
+        "role": "Request/response model validation and serialisation",
+        "reuse_existing": true
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "03_Application/FoodTracker/tools.py — hardcodes host='127.0.0.1', incompatible with Docker atlas-net; backend must not import it",
+      "psycopg (psycopg3) — tools.py uses psycopg3 but the backend pattern uses psycopg2-binary; do not mix drivers",
+      "Any platform component that is a peer or downstream of 03_Application — dependency must only flow upward to 02_Platform and 00_Blueprint"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "03_Application/FoodTracker/migrations/001_init_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement backend/database.py by copying WorkoutTracker database.py verbatim (psycopg2-binary, ATLAS_PG_* env vars, init_pool, get_db)",
+      "Implement backend/main.py following WorkoutTracker main.py verbatim: FastAPI title 'FoodTracker' version '0.1.0', CORS allow_methods GET POST (DELETE must not be included — Sprint 01 has no DELETE endpoint; add DELETE only when a DELETE endpoint is defined in a future sprint), install_exception_handlers, install_request_timing, setup_logging app_name='foodtracker', startup calls init_pool only (no init_schema — schema is pre-provisioned by migration)",
+      "Implement backend/routers/food.py: define MEAL_SCHEMA constant, implement _validate_and_normalise() private function containing all validation steps and normalisation logic, implement GET /api/food/template returning hardcoded template as PlainTextResponse, implement POST /api/food/validate calling _validate_and_normalise and returning preview dict, implement POST /api/food/meals calling _validate_and_normalise then DB insert then Dataset response",
+      "Write pyproject.toml with dependencies [fastapi, uvicorn, psycopg2-binary, pydantic]",
+      "Write Dockerfile following WorkoutTracker Dockerfile; copy only backend/ not tools.py",
+      "Write compose.yml as specified in sprint definition §7.3 with port 127.0.0.1:8012:8000 and atlas-net external network",
+      "Handle psycopg2.IntegrityError (or psycopg2.errors.CheckViolation) in the meals endpoint and return DB_CONSTRAINT ApiError (HTTP 400)",
+      "Generate uuid4 server-side for each inserted row id",
+      "Serialise inserted row fields: id and logged_at as str, all numeric fields as float, for Dataset rows"
+    ],
+    "ui_implementer": [
+      "Implement src/shellConfig.ts registering appId='food', label='Food', basePath='/food' with the nav structure from sprint definition §7.6",
+      "Implement src/ShellEntry.tsx with FoodIntake component managing idle / preview / success UI states as specified in sprint definition §7.7",
+      "Idle state: fetch template on mount via GET /api/food/template with Skeleton while loading; 'Copy Template' button; controlled textarea for paste; 'Log Meal' button disabled while in-flight; ErrorCard on ApiError",
+      "Preview state: read-only field list of all normalised values (logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes); 'Back' returns to idle preserving pasted JSON; 'Accept' posts original pasted JSON to /api/food/meals; ErrorCard on ApiError",
+      "Success state: confirmation panel showing logged_at, meal_type, dish_name, kcal; 'Log Another' resets to idle and clears textarea",
+      "Preview panel must be a bespoke read-only field list (plain dl or table styled with Atlas tokens) — not DetailView, not TableView",
+      "Do not use CreateForm — the two-step paste + preview + accept flow is not supported by it",
+      "Use apiFetch for all three API calls; use isApiError to check responses; render errors via ErrorCard",
+      "The form must never reset on error — pasted JSON and paste area must remain visible"
+    ],
+    "test_writer": [
+      "Validate endpoint: valid payload returns 200 with preview model containing correct dish_name derivation (single item, multiple items joined with ', '), kcal rounded to integer, defaults applied for absent optional fields",
+      "Validate endpoint: PARSE_ERROR on malformed JSON body",
+      "Validate endpoint: MISSING_FIELD on absent nutrition object",
+      "Validate endpoint: INVALID_FIELD on bad timestamp format, disallowed meal_type, empty items array, items entry with empty name, required numeric field < 0, optional numeric constraint violation (good_fat_g > fat_g, red_meat_g > meat_g), confidence out of range",
+      "Validate endpoint: unknown top-level and nutrition fields are stripped silently",
+      "Meals endpoint: valid payload inserts exactly one row in foodtracker.food_logs and returns Dataset with object_type='food_meal', MEAL_SCHEMA columns, and row matching inserted values",
+      "Meals endpoint: same validation errors as validate endpoint (re-validation confirmed)",
+      "Meals endpoint: DB_CONSTRAINT error returned as ApiError HTTP 400 (not 500)",
+      "GET template: returns text/plain with the canonical template JSON string"
+    ],
+    "reviewer": [
+      "Confirm tools.py is not imported anywhere in the backend package",
+      "Confirm no intermediate state is written to the database between validate and commit calls",
+      "Confirm commit endpoint re-validates independently (no shared state with validate)",
+      "Confirm MEAL_SCHEMA key order matches sprint definition §7.4 exactly (display order is schema order per UI contract)",
+      "Confirm all six failure mode codes (PARSE_ERROR, MISSING_FIELD, INVALID_FIELD, VALIDATION_ERROR, DB_CONSTRAINT, INTERNAL_ERROR) are reachable",
+      "Confirm kcal rounding is applied before both preview and insert",
+      "Confirm good_fat_g <= fat_g and red_meat_g <= meat_g are validated at application layer (not only relied on DB CHECK)"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "kcal rounding discrepancy between preview and insert",
+      "impact": "If the application layer rounds differently from the DB NUMERIC(7,0) truncation, the preview value shown to the user may differ from what is stored. Mitigation: always apply Python int(round(kcal)) before preview and before insert."
+    },
+    {
+      "risk": "good_fat_g > fat_g or red_meat_g > meat_g after rounding",
+      "impact": "Floating-point rounding could cause a value pair that passes application-layer validation to trigger a DB CHECK constraint, producing an unexpected DB_CONSTRAINT error. Mitigation: enforce the constraint in the application validator before insert, not only at DB level."
+    },
+    {
+      "risk": "tools.py psycopg3 import present in same package __init__.py",
+      "impact": "If 03_Application/FoodTracker/__init__.py imports tools.py (or tools.py imports psycopg at module level), the backend Docker image build may fail if psycopg3 is not installed, or the wrong host resolution may be exercised. Mitigation: backend package is self-contained under backend/; tools.py must not be imported."
+    }
+  ],
+  "open_questions": []
+}

@@ -36,6 +36,7 @@ export default defineConfig({
       // Add a new entry here when a new application backend is integrated.
       '/api/workout': { target: 'http://localhost:8011', changeOrigin: true },
       '/api/tasks':   { target: 'http://localhost:8010', changeOrigin: true },
+      '/api/food':    { target: 'http://localhost:8012', changeOrigin: true },
     },
   },
   test: {

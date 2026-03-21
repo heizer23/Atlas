@@ -1,0 +1,472 @@
+{
+  "component_name": "food_tracker",
+  "target_root": "03_Application/FoodTracker",
+  "directories": [
+    "03_Application/FoodTracker/backend",
+    "03_Application/FoodTracker/backend/routers",
+    "03_Application/FoodTracker/src",
+    "03_Application/FoodTracker/logs"
+  ],
+  "files": [
+    {
+      "path": "03_Application/FoodTracker/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker for the backend module; no runtime logic.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application factory: configures CORS (GET POST only), attaches platform middleware, registers food and report routers, initialises the DB connection pool on startup.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "fastapi_app_instance",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "on_startup",
+          "pattern": "startup_handler",
+          "methods": [
+            {
+              "name": "on_startup",
+              "visibility": "public",
+              "args": [],
+              "returns": "None",
+              "purpose": "Calls init_pool(); logs ready or logs error and continues. No init_schema call — schema is pre-provisioned."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Postgres connection pool using psycopg2-binary. Reads ATLAS_PG_* env vars (DATABASE_URL fallback). Exposes init_pool() and get_db() context manager.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "pattern": "initialiser",
+          "methods": [
+            {
+              "name": "init_pool",
+              "visibility": "public",
+              "args": [],
+              "returns": "None",
+              "purpose": "Creates a SimpleConnectionPool(minconn=1, maxconn=5) using the DSN built from ATLAS_PG_* env vars; stores it in module-level _pool."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "pattern": "context_manager",
+          "methods": [
+            {
+              "name": "get_db",
+              "visibility": "public",
+              "args": [],
+              "returns": "Generator[psycopg2.extensions.connection, None, None]",
+              "purpose": "Context manager: checks out a connection from _pool, yields it, rolls back on exception, and returns it to the pool in the finally block."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_build_url",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_build_url",
+              "visibility": "private",
+              "args": [],
+              "returns": "str",
+              "purpose": "Returns DATABASE_URL env var if set, otherwise constructs a postgresql:// DSN from ATLAS_PG_USER, ATLAS_PG_PASSWORD, ATLAS_PG_HOST, ATLAS_PG_PORT, ATLAS_PG_DB."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker for the routers sub-package; no runtime logic.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/food.py",
+      "stub_kind": "python_module",
+      "role": "Sprint 01 intake endpoints: GET /api/food/template, POST /api/food/validate, POST /api/food/meals. Unchanged in Sprint 02.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "MEAL_SCHEMA",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "get_template",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "get_template",
+              "visibility": "public",
+              "args": [],
+              "returns": "PlainTextResponse",
+              "purpose": "GET /api/food/template — returns the hardcoded canonical meal JSON template string as text/plain."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "validate_meal",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "validate_meal",
+              "visibility": "public",
+              "args": ["request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "POST /api/food/validate — reads raw request body, calls _validate_and_normalise(), returns HTTP 200 with {preview: <normalised_dict>} on success or ApiError (HTTP 422) on any validation failure."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "commit_meal",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "commit_meal",
+              "visibility": "public",
+              "args": ["request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "POST /api/food/meals — reads raw request body, calls _validate_and_normalise(), inserts one row into foodtracker.food_logs via get_db(), wraps the inserted row in a Dataset using MEAL_SCHEMA and returns HTTP 200. Returns ApiError HTTP 422 on validation failure, ApiError HTTP 400 on DB_CONSTRAINT, ApiError HTTP 500 via install_exception_handlers on unexpected errors."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "TEMPLATE_JSON",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "ALLOWED_MEAL_TYPES",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_validate_and_normalise",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_and_normalise",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "Decodes raw bytes as JSON, runs all field validation checks in order, applies defaults and normalisation. Returns (normalised_dict, None) on success or (None, error_dict) on failure. No HTTP coupling."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/report.py",
+      "stub_kind": "python_module",
+      "role": "Sprint 02 reporting endpoint: GET /api/food/report. Contains REPORT_SCHEMA constant, the ReportQuery dataclass, and private helpers for param validation, bucket computation, DB query, and zero-fill. No shared state with food.py.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "REPORT_SCHEMA",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "get_report",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "get_report",
+              "visibility": "public",
+              "args": [
+                "scope: str = Query(...)",
+                "period_key: str | None = Query(None)",
+                "mode: str = Query(...)"
+              ],
+              "returns": "JSONResponse",
+              "purpose": "GET /api/food/report — validates query params via _parse_report_params(), then orchestrates steps in order: for scope=all_time+aggregated, calls _query_logs() first, then passes db_rows into _compute_buckets(); for all other scope+mode combinations, calls _compute_buckets() first then _query_logs(). Calls _zero_fill() to merge results, then returns Dataset. Returns ApiError HTTP 422 for invalid params, ApiError HTTP 500 via install_exception_handlers on unexpected errors."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "class",
+          "name": "ReportQuery",
+          "pattern": "data_model",
+          "methods": [
+            {
+              "name": "__init__",
+              "visibility": "public",
+              "args": ["scope: str", "period_key: str | None", "mode: str"],
+              "returns": "None",
+              "purpose": "Value object holding validated scope, period_key, and mode. Constructed only by _parse_report_params() after all validation passes."
+            }
+          ]
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_SCOPES",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_MODES",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_parse_report_params",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_parse_report_params",
+              "visibility": "private",
+              "args": ["scope: str", "period_key: str | None", "mode: str"],
+              "returns": "tuple[ReportQuery, None] | tuple[None, dict]",
+              "purpose": "Validates scope against VALID_SCOPES, validates mode against VALID_MODES, rejects mode=aggregated when scope=week (INVALID_PARAM), validates period_key format matches scope using regex (INVALID_PERIOD_KEY if mismatch, INVALID_PARAM if required but absent). Returns (ReportQuery, None) on success or (None, error_dict) on failure."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_compute_buckets",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_compute_buckets",
+              "visibility": "private",
+              "args": ["query: ReportQuery", "db_rows: dict[str, dict] | None = None"],
+              "returns": "tuple[list[str], dict[str, str]]",
+              "purpose": "Returns (ordered_bucket_ids, bucket_label_map) for the given ReportQuery. Enumerates every expected bucket in the period: daily mode→one per calendar day (for all_time+daily returns empty list and empty dict — passthrough handled by _zero_fill), aggregated mode→sub-period labels per bucket rules. For scope=all_time+aggregated, db_rows is required (must not be None): bucket_ids are the distinct year keys present in db_rows, sorted ascending. For all other scope+mode combinations, db_rows is unused. bucket_label_map maps bucket_id to its display string."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_build_where_clause",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_build_where_clause",
+              "visibility": "private",
+              "args": ["query: ReportQuery"],
+              "returns": "tuple[str, list]",
+              "purpose": "Returns (sql_fragment, params) for the WHERE clause that restricts foodtracker.food_logs to the selected period. all_time returns empty fragment. Other scopes compute inclusive start and exclusive end timestamps from period_key."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_build_group_key_expr",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_build_group_key_expr",
+              "visibility": "private",
+              "args": ["query: ReportQuery"],
+              "returns": "str",
+              "purpose": "Returns the SQL expression for the GROUP BY key column, matching the bucket_id format for the given scope+mode (e.g., \"to_char(logged_at,'YYYY-MM-DD')\" for daily, \"to_char(logged_at,'YYYY-MM')\" for year+aggregated, \"to_char(logged_at,'IYYY-\\\"W\\\"IW')\" for month+aggregated ISO week key). The month+aggregated expression must use IYYY (ISO year) and IW (ISO week number 01-53), NOT WW (which is non-ISO and will produce bucket ids that do not match the YYYY-WNN format enumerated in _compute_buckets)."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_query_logs",
+          "pattern": "repository",
+          "methods": [
+            {
+              "name": "_query_logs",
+              "visibility": "private",
+              "args": ["query: ReportQuery", "conn: psycopg2.extensions.connection"],
+              "returns": "dict[str, dict]",
+              "purpose": "Executes SELECT with GROUP BY SUM(kcal), SUM(protein_g), SUM(carbs_g), SUM(fat_g), SUM(fiber_g) against foodtracker.food_logs for the given ReportQuery. Returns a dict mapping bucket_id string → {kcal, protein_g, carbs_g, fat_g, fiber_g}."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_zero_fill",
+          "pattern": "mapper",
+          "methods": [
+            {
+              "name": "_zero_fill",
+              "visibility": "private",
+              "args": [
+                "bucket_ids: list[str]",
+                "label_map: dict[str, str]",
+                "db_rows: dict[str, dict]"
+              ],
+              "returns": "list[dict]",
+              "purpose": "Merges the ordered bucket_ids list with db_rows. Normal path (bucket_ids non-empty): for each bucket_id, if present in db_rows use those metric values; otherwise emit a row with all metrics = 0. Attaches bucket_label from label_map. Passthrough path (bucket_ids empty — the all_time+daily case only): emit one row per entry in db_rows, sorted ascending by bucket_id. For each passthrough row, derive bucket_label as the day-of-month integer string from the YYYY-MM-DD bucket_id (e.g., '2025-03-07' → '7'); label_map is empty in this case and must not be consulted. Returns ordered list of Dataset row dicts with keys: id, bucket_label, kcal, protein_g, carbs_g, fat_g, fiber_g."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_build_report_label",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_build_report_label",
+              "visibility": "private",
+              "args": ["query: ReportQuery"],
+              "returns": "str",
+              "purpose": "Returns the human-readable DatasetMeta.label string for the given ReportQuery, e.g. 'March 2025 — Daily', 'All Time — Aggregated', '2025 — Daily'."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/FoodTracker/src/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "Side-effect-only registration module. Calls AppRegistry.register({...}) at module scope. Sprint 02 adds the Report nav item (order 2) to mobilePrimaryNav and desktopNav. Has no exports of any kind.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Top-level React entry for the FoodTracker shell slot. Sets up two routes: /food → FoodIntake (Sprint 01, unchanged), /food/report → ReportPage (Sprint 02). The route for /food must use path='/food' (not path='/*').",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "default",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "default",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Default export consumed by the shell lazy import in shellConfig.ts. Renders a React Router <Routes> with <Route path='/food' element={<FoodIntake />} /> and <Route path='/food/report' element={<ReportPage />} />."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "FoodIntake",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "FoodIntake",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Sprint 01 three-state meal intake flow (idle | preview | success). Unchanged in Sprint 02."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/ReportPage.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Sprint 02 report screen. Owns page-level scope/period/mode/navStack state, fetches GET /api/food/report, and renders two independently configured chart panels.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "ReportPage",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "ReportPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Top-level report page component. Manages scope (string), period_key (string | null), mode ('aggregated' | 'daily'), navStack ({scope, period_key, mode}[]), isLoading (boolean), error (ApiError | null), currentDataset (Dataset | null). Fetches on mount and on scope/period_key/mode change. Renders scope selector, mode selector (hidden for week scope), back button (enabled when navStack non-empty), and two ChartPanel instances."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "ChartPanel",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "ChartPanel",
+              "visibility": "public",
+              "args": [
+                "dataset: Dataset",
+                "defaultMetric: string",
+                "onDrillDown: (bucketId: string) => void",
+                "isDrillable: boolean"
+              ],
+              "returns": "JSX.Element",
+              "purpose": "Renders one chart panel with an independent metric selector and a BarChart over the provided Dataset rows. Local state: selectedMetric (string, initialised from defaultMetric). BarChartMapping: {x: 'bucket_label', y: selectedMetric, aggregation: 'sum'}. Calls onDrillDown(bucketId) when a bar is clicked and isDrillable is true. isDrillable is true when the parent ReportPage is in aggregated mode."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "METRICS",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "DRILL_TARGET",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_currentPeriodKey",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_currentPeriodKey",
+              "visibility": "private",
+              "args": ["scope: string"],
+              "returns": "string | null",
+              "purpose": "Returns the period_key string for the system-current period of the given scope (e.g., scope='month' → current 'YYYY-MM', scope='year' → current 'YYYY', scope='week' → current 'YYYY-WNN', scope='all_time' → null)."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
