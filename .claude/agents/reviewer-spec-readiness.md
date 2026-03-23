@@ -110,6 +110,8 @@ READY / NOT READY
 - Confidence levels on ambiguity resolutions must be honest — use Low when you are genuinely uncertain what the product intent is.
 - If the spec is a fragment or stub, say so explicitly and return NOT READY with a single Must-Fix: "Spec is incomplete — insufficient content to evaluate."
 
+**Spec location:** Sprint definition files are located at `<ComponentDir>/Sprint<N>_<Title>/00_input/draft.md`.
+
 **Update your agent memory** as you review specs in this project. Build up institutional knowledge about Atlas-specific patterns, common spec mistakes, recurring Atlas violations, and product decisions that tend to be under-specified.
 
 Examples of what to record:

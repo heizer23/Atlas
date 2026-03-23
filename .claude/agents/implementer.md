@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`definition.md`, `component_architecture.json`, `component_scaffold.json`) are present inside a `03_Application` component directory."
+description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`00_input/draft.md`, `20_design/architecture.json`, `20_design/scaffolding.json`) are present inside the sprint folder."
 model: sonnet
 color: green
 ---
@@ -50,12 +50,12 @@ If reusable infrastructure emerges, it belongs in `02_Platform`, not here.
 
 Before implementing, confirm the existence of:
 
-1. A sprint definition file in `00_Requirements/` — the authoritative intent for this sprint.
-   Naming convention: `<AppName><N> — <Title>.md`.
-2. `10_Design/component_architecture.json`
-3. `10_Design/component_scaffold.json`
+1. A sprint definition file at `00_input/draft.md` within the sprint folder — the authoritative intent for this sprint.
+   Sprint folder naming convention: `Sprint<N>_<Title>/`.
+2. `20_design/architecture.json`
+3. `20_design/scaffolding.json`
 
-Also confirm that the scaffold generator has created the files defined in `component_scaffold.json`.
+Also confirm that the scaffold generator has created the files defined in `20_design/scaffolding.json`.
 
 Consult rules in:
 
@@ -134,8 +134,8 @@ A dedicated UI agent may later refine layout, interaction design, and appearance
 Read:
 
 
-10_Design/component_architecture.json
-10_Design/component_scaffold.json
+20_design/architecture.json
+20_design/scaffolding.json
 
 
 Extract:
@@ -155,7 +155,7 @@ Treat the architecture artifacts as authoritative.
 
 Inspect the repository and confirm the scaffold generator created all expected files.
 
-If files are missing or inconsistent with `component_scaffold.json`, report:
+If files are missing or inconsistent with `20_design/scaffolding.json`, report:
 
 - which files are missing
 - whether implementation can proceed partially

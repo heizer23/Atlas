@@ -1,0 +1,398 @@
+{
+  "component_name": "food_tracker",
+  "target_root": "03_Application/FoodTracker",
+  "directories": [
+    "03_Application/FoodTracker/backend",
+    "03_Application/FoodTracker/backend/routers",
+    "03_Application/FoodTracker/src",
+    "03_Application/FoodTracker/logs"
+  ],
+  "files": [
+    {
+      "path": "03_Application/FoodTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application factory. Sprint 03 changes: (1) register entries.router under prefix '/api', (2) expand CORS allow_methods to ['GET', 'POST', 'PUT', 'DELETE']. All other behaviour unchanged.",
+      "sprint03_changes": [
+        "Import entries router: from backend.routers import food, report, entries",
+        "Register: app.include_router(entries.router, prefix='/api')",
+        "Expand CORS: allow_methods=['GET', 'POST', 'PUT', 'DELETE']"
+      ],
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "fastapi_app_instance",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "on_startup",
+          "pattern": "startup_handler",
+          "methods": [
+            {
+              "name": "on_startup",
+              "visibility": "public",
+              "args": [],
+              "returns": "None",
+              "purpose": "Unchanged from Sprint 02. Calls init_pool(); logs ready or logs error and continues."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/entries.py",
+      "stub_kind": "python_module",
+      "role": "Sprint 03 entry management endpoints: GET /api/food/entries, GET /api/food/entries/{id}, PUT /api/food/entries/{id}, DELETE /api/food/entries/{id}, POST /api/food/entries/{id}/copy. Contains ENTRIES_OVERVIEW_SCHEMA constant and private helpers _serialise_entry_detail() and _validate_entry_edit_request(). Does NOT import from food.py — edit and intake are separate flows (Option A).",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "ENTRIES_OVERVIEW_SCHEMA",
+          "pattern": "data_model",
+          "methods": [],
+          "note": "Column order: id (string, sortable=False, detail_visible=False), logged_at (date, sortable=True), meal_type (string, sortable=True, filterable=True), dish_name (string, sortable=True), kcal (number, format='kcal', sortable=True). Row_actions declared in DatasetMeta, not schema."
+        },
+        {
+          "kind": "function",
+          "name": "list_entries",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "list_entries",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSONResponse",
+              "purpose": "GET /api/food/entries — queries foodtracker.food_logs ORDER BY logged_at DESC, wraps all rows in a Dataset with ENTRIES_OVERVIEW_SCHEMA and DatasetMeta(object_type='food_entry', label='Meal Entries', total=N, page=1, page_size=N, row_actions=['delete','copy','detail']). Returns HTTP 200. Returns ApiError HTTP 500 via install_exception_handlers on unexpected errors."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "get_entry",
+              "visibility": "public",
+              "args": ["entry_id: str (path parameter)"],
+              "returns": "JSONResponse",
+              "purpose": "GET /api/food/entries/{id} — queries foodtracker.food_logs WHERE id = %s. Returns ApiError HTTP 404 (NOT_FOUND) if no row found. Returns the EntryDetail dict (see architecture.json contracts.named_contracts.EntryDetail) as JSON HTTP 200, serialised by _serialise_entry_detail."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "update_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "update_entry",
+              "visibility": "public",
+              "args": ["entry_id: str (path parameter)", "request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "PUT /api/food/entries/{id} — parses JSON body as EntryEditRequest (see architecture.json contracts.named_contracts.EntryEditRequest). Calls _validate_entry_edit_request(body) (HTTP 422 on failure). Checks id existence (HTTP 404 if not found). Executes UPDATE foodtracker.food_logs SET logged_at=%s, meal_type=%s, dish_name=%s, <all nutrition fields>, updated_at=CURRENT_TIMESTAMP WHERE id=%s RETURNING *. Wraps updated row in single-row Dataset using ENTRIES_OVERVIEW_SCHEMA. Returns HTTP 200. Returns ApiError HTTP 400 on DB_CONSTRAINT. Does NOT call validate_and_normalise — Option A."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "delete_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "delete_entry",
+              "visibility": "public",
+              "args": ["entry_id: str (path parameter)"],
+              "returns": "Response",
+              "purpose": "DELETE /api/food/entries/{id} — executes DELETE FROM foodtracker.food_logs WHERE id = %s, checks cursor.rowcount; if rowcount == 0 the row did not exist, rollback and return ApiError HTTP 404. Otherwise commit. Returns HTTP 204 No Content (no body). Single-statement approach — no prior SELECT."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "copy_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "copy_entry",
+              "visibility": "public",
+              "args": ["entry_id: str (path parameter)"],
+              "returns": "JSONResponse",
+              "purpose": "POST /api/food/entries/{id}/copy — selects source row by id (HTTP 404 if not found), assigns new_id = str(uuid.uuid4()), sets logged_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), inserts new row copying all meal content columns (meal_type, dish_name, kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes) from the source row, RETURNING *. Returns the newly inserted row serialised as an entry_detail dict (HTTP 201)."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_serialise_entry_detail",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_serialise_entry_detail",
+              "visibility": "private",
+              "args": ["row: dict"],
+              "returns": "dict",
+              "purpose": "Converts a psycopg2 RealDictRow (from SELECT *) into an EntryDetail dict (see architecture.json contracts.named_contracts.EntryDetail): id as str, logged_at/created_at/updated_at as 'YYYY-MM-DDTHH:MM:SS' strings (handle datetime objects from psycopg2), kcal as int, confidence as int, all other numerics as float, notes as str or None."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_validate_entry_edit_request",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_entry_edit_request",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "Parses and validates the PUT /api/food/entries/{id} request body against the EntryEditRequest contract (see architecture.json contracts.named_contracts.EntryEditRequest). Returns (validated_dict, None) on success or (None, error_dict) on failure. Checks: required fields present, numeric fields non-negative, meal_type is a valid enum value, logged_at is a parseable datetime string, kcal and confidence are integers, dish_name is a non-empty string. Does not call or reference validate_and_normalise."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/food.py",
+      "stub_kind": "python_module",
+      "role": "Sprint 01 intake endpoints: GET /api/food/template, POST /api/food/validate, POST /api/food/meals. Unchanged in Sprint 03. Not imported by entries.py.",
+      "sprint03_changes": [],
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "MEAL_SCHEMA",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "get_template",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "get_template",
+              "visibility": "public",
+              "args": [],
+              "returns": "PlainTextResponse",
+              "purpose": "Unchanged from Sprint 01."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "validate_meal",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "validate_meal",
+              "visibility": "public",
+              "args": ["request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "Unchanged from Sprint 01."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "commit_meal",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "commit_meal",
+              "visibility": "public",
+              "args": ["request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "Unchanged from Sprint 01."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_validate_and_normalise",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_and_normalise",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "Unchanged from Sprint 01. Private to food.py — not exported, not imported by entries.py. Sprint 03 edit path uses its own _validate_entry_edit_request in entries.py (Option A)."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/report.py",
+      "stub_kind": "python_module",
+      "role": "Sprint 02 reporting endpoint: GET /api/food/report. Unchanged in Sprint 03.",
+      "sprint03_changes": [],
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "Side-effect-only registration module. Sprint 03 adds the Entries nav item (order 3) to mobilePrimaryNav and desktopNav. Has no exports of any kind.",
+      "sprint03_changes": [
+        "Add { id: 'entries', label: 'Entries', path: '/food/entries', order: 3 } to mobilePrimaryNav",
+        "Add { id: 'entries', label: 'Entries', path: '/food/entries', order: 3 } to desktopNav"
+      ],
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Top-level React entry for the FoodTracker shell slot. Sprint 03 adds two new routes: /food/entries and /food/entries/:id. Existing routes for /food and /food/report are unchanged.",
+      "sprint03_changes": [
+        "Add import for EntriesPage and EntryDetailPage",
+        "Add <Route path='/food/entries' element={<EntriesPage />} />",
+        "Add <Route path='/food/entries/:id' element={<EntryDetailPage />} />"
+      ],
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "default",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "default",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Default export consumed by the shell lazy import in shellConfig.ts. Renders a React Router <Routes> with routes for /food (FoodIntake), /food/report (ReportPage), /food/entries (EntriesPage), and /food/entries/:id (EntryDetailPage)."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "FoodIntake",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "FoodIntake",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Sprint 01 three-state meal intake flow. Unchanged in Sprint 03."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntriesPage.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Sprint 03 entries overview screen. Fetches GET /api/food/entries on mount. Renders a list of meal entry rows with delete, copy, and open-detail row actions. Handles empty state and error state.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntriesPage",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "EntriesPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Top-level entries overview component. State: entries (Row[] | null), isLoading (boolean), error (ApiError | null), deleteConfirmId (string | null — id of the entry pending delete confirmation). Fetches GET /api/food/entries on mount. Renders: Skeleton while loading, ErrorCard on error, empty state message when entries is an empty array, entry list when entries is non-empty. Each entry row shows: logged_at, meal_type, dish_name, kcal, and three action triggers (delete, copy, open detail). Delete trigger sets deleteConfirmId to the entry's id, showing a confirmation dialog. Confirming dialog issues DELETE /api/food/entries/{id}; on success removes the entry from the displayed list and clears deleteConfirmId. Copy trigger issues POST /api/food/entries/{id}/copy; on success navigates to /food/entries/{copiedId} using React Router navigate. Open detail trigger navigates to /food/entries/{id}."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "DeleteConfirmDialog",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "DeleteConfirmDialog",
+              "visibility": "private",
+              "args": ["open: boolean", "onConfirm: () => void", "onCancel: () => void"],
+              "returns": "JSX.Element",
+              "purpose": "Material 3 dialog presented when the user triggers delete. Shows a confirmation message. Confirm button triggers onConfirm; Cancel/dismiss triggers onCancel."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntryDetailPage.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Sprint 03 entry detail/edit screen. Loads one existing meal entry by id from the route param. Renders an editable form for all supported meal fields except system-managed metadata. Saves via PUT /api/food/entries/{id}.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntryDetailPage",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "EntryDetailPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Entry detail and edit component. Reads the entry id from the React Router useParams() hook. State: entry (EntryDetail | null), formState (editable field values), isLoading (boolean), isSaving (boolean), loadError (ApiError | null), saveError (ApiError | null), saveSuccess (boolean). Fetches GET /api/food/entries/{id} on mount. Populates formState from the loaded entry. Renders: Skeleton while loading, ErrorCard on loadError, edit form when entry is loaded. Edit form fields per EntryEditRequest contract: logged_at (datetime input), meal_type (select: breakfast/lunch/dinner/snack/other), dish_name (user-editable text field — editable in this simplified flow), nutrition fields (kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg), confidence (integer select 1-5), notes (optional textarea). Non-editable display: id, created_at, updated_at (shown as read-only context). Save button: disabled while isSaving, issues PUT /api/food/entries/{id} with EntryEditRequest JSON body constructed by _buildPutBody(formState) — no items field, no timestamp field. On save success, updates displayed values from the response Dataset row. On save error, displays saveError ApiError message. Back link navigates to /food/entries."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_buildPutBody",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "_buildPutBody",
+              "visibility": "private",
+              "args": ["formState: EntryFormState"],
+              "returns": "string (JSON string)",
+              "purpose": "Constructs the JSON body string for the PUT /api/food/entries/{id} request from the current form state. Conforms to EntryEditRequest contract (see architecture.json contracts.named_contracts.EntryEditRequest): {logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes?}. No items field. No timestamp field. dish_name is taken directly from formState and is user-editable. This is the simplified edit contract (Option A)."
+            }
+          ]
+        },
+        {
+          "kind": "type",
+          "name": "EntryDetail",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "TypeScript type for the EntryDetail response from GET /api/food/entries/{id} and POST /api/food/entries/{id}/copy. Conforms to architecture.json contracts.named_contracts.EntryDetail. Fields: id (string), logged_at (string), meal_type (string), dish_name (string), kcal (number), protein_g (number), carbs_g (number), fat_g (number), fiber_g (number), good_fat_g (number), meat_g (number), red_meat_g (number), sodium_mg (number), confidence (number), notes (string | null), created_at (string), updated_at (string)."
+        },
+        {
+          "kind": "type",
+          "name": "EntryFormState",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "TypeScript type for the local form editing state. Contains all user-editable fields per EntryEditRequest contract: logged_at (string), meal_type (string), dish_name (string — user-editable in the edit flow, sent directly in PUT body), kcal (number), protein_g (number), carbs_g (number), fat_g (number), fiber_g (number), good_fat_g (number), meat_g (number), red_meat_g (number), sodium_mg (number), confidence (number), notes (string)."
+        }
+      ]
+    }
+  ]
+}

@@ -6,14 +6,18 @@
  * All platform imports use the @platform-ui alias.
  *
  * Routes covered:
- *   /food         → FoodIntake (idle → preview → success state machine)
- *   /food/report  → ReportPage (Sprint 02 — reporting slice)
+ *   /food              → FoodIntake (idle → preview → success state machine)
+ *   /food/report       → ReportPage (Sprint 02 — reporting slice)
+ *   /food/entries      → EntriesPage (Sprint 03 — entry overview with row actions)
+ *   /food/entries/:id  → EntryDetailPage (Sprint 03 — entry detail and edit)
  */
 
 import { useState, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ReportPage from './ReportPage';
+import EntriesPage from './EntriesPage';
+import EntryDetailPage from './EntryDetailPage';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
@@ -366,8 +370,10 @@ export function FoodIntake() {
 export default function ShellEntry() {
   return (
     <Routes>
-      <Route path="/"       element={<FoodIntake />} />
-      <Route path="/report" element={<ReportPage />} />
+      <Route path="/"            element={<FoodIntake />} />
+      <Route path="/report"      element={<ReportPage />} />
+      <Route path="/entries"     element={<EntriesPage />} />
+      <Route path="/entries/:id" element={<EntryDetailPage />} />
     </Routes>
   );
 }

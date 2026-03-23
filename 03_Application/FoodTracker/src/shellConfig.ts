@@ -15,13 +15,15 @@ AppRegistry.register({
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [
-    { id: 'log',    label: 'Log',    path: '/food',        order: 1 },
-    { id: 'report', label: 'Report', path: '/food/report', order: 2 },
+    { id: 'log',     label: 'Log',     path: '/food',          order: 1 },
+    { id: 'report',  label: 'Report',  path: '/food/report',   order: 2 },
+    { id: 'entries', label: 'Entries', path: '/food/entries',  order: 3 },
   ],
 
   desktopNav: [
-    { id: 'log',    label: 'Log',    path: '/food',        order: 1 },
-    { id: 'report', label: 'Report', path: '/food/report', order: 2 },
+    { id: 'log',     label: 'Log',     path: '/food',          order: 1 },
+    { id: 'report',  label: 'Report',  path: '/food/report',   order: 2 },
+    { id: 'entries', label: 'Entries', path: '/food/entries',  order: 3 },
   ],
 
   secondaryMenu: [],

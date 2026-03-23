@@ -1,0 +1,390 @@
+{
+  "component_name": "food_tracker",
+  "layer": "03_Application",
+  "source_definition": "03_Application/FoodTracker/Sprint03_Meal Entry Overview with Row Actions/00_input/draft.md",
+  "prior_source_definition": "03_Application/FoodTracker/Sprint02_First_Reporting_Slice/00_input/draft.md",
+  "summary": "Adds a third user-facing domain to FoodTracker: entry management. Provides an Entries screen that lists all stored meal rows from foodtracker.food_logs, with row-level delete (with confirmation), copy (create new row, navigate to its detail), and open-detail actions. Adds a detail view that loads one existing row by id for editing. Edit saves update the existing row. Copy creates a new row with the same meal content, a new identity, and logged_at set to current time, then navigates to the copied row's detail view. This slice introduces the first meal-level read interface, the first update mutation, the first delete mutation, and a third shell navigation item.",
+  "classification": {
+    "why_application": "Entry management encodes FoodTracker-specific domain semantics: the distinction between creating a meal and editing an existing one, copy-and-navigate behavior specific to this UX, hard-delete confirmation semantics, and the reuse of the existing meal validation contract for edits. None of this generalises to a shared platform capability.",
+    "non_goals": [
+      "Bulk delete or bulk copy",
+      "Search, filtering, sorting controls, or pagination",
+      "Inline editing in the list",
+      "Undo, soft delete, or audit history",
+      "Report drilldown into entries",
+      "New nutrition fields or schema changes",
+      "Autosave, drafts, or conflict resolution",
+      "Authentication or authorization changes",
+      "Batch multi-meal imports",
+      "User-local timezone handling",
+      "Export or sharing",
+      "Duplicate detection"
+    ],
+    "not_platform": "The entry management flow (delete confirmation, copy-and-navigate, edit with existing validation reuse) is specific to the FoodTracker intake domain. No general-purpose CRUD pattern should be extracted to platform from this slice."
+  },
+  "contracts": {
+    "consumes": [
+      "02_Platform/01_Postgres — Postgres instance on atlas-net reachable via ATLAS_PG_HOST:ATLAS_PG_PORT",
+      "02_Platform/packages/platform_errorhandling — install_exception_handlers, install_request_timing, setup_logging, api_error()",
+      "02_Platform/packages/platform_contracts — ColumnSchema, DatasetMeta, Dataset",
+      "02_Platform/02_Atlas_Shell — AppRegistry.register for shell navigation integration",
+      "02_Platform/UI — apiFetch, isApiError, ErrorCard, Skeleton platform UI primitives"
+    ],
+    "provides": [
+      "GET /api/food/template → text/plain canonical JSON template string (Sprint 01, unchanged)",
+      "POST /api/food/validate → preview model (HTTP 200) or ApiError (HTTP 422) (Sprint 01, unchanged)",
+      "POST /api/food/meals → Dataset (HTTP 200, one row) or ApiError (HTTP 400 / 422 / 500) (Sprint 01, unchanged)",
+      "GET /api/food/report → Dataset (HTTP 200, N bucket rows) or ApiError (HTTP 400 / 422 / 500) (Sprint 02, unchanged)",
+      "GET /api/food/entries → Dataset (HTTP 200, all entry rows) or ApiError (HTTP 500) (Sprint 03, new)",
+      "GET /api/food/entries/{id} → EntryDetail (HTTP 200) or ApiError (HTTP 404 / 500) (Sprint 03, new)",
+      "PUT /api/food/entries/{id} → updated entry Dataset row (HTTP 200) or ApiError (HTTP 404 / 422 / 400 / 500) (Sprint 03, new)",
+      "DELETE /api/food/entries/{id} → HTTP 204 No Content or ApiError (HTTP 404 / 500) (Sprint 03, new)",
+      "POST /api/food/entries/{id}/copy → EntryDetail (HTTP 201) or ApiError (HTTP 404 / 500) (Sprint 03, new)",
+      "Shell route /food/entries registered with nav item 'Entries' (order 3) in both mobilePrimaryNav and desktopNav (Sprint 03, new)"
+    ],
+    "named_contracts": {
+      "EntryDetail": {
+        "description": "Stable response contract for GET /api/food/entries/{id} and POST /api/food/entries/{id}/copy. Used by the frontend to populate the edit form. Not a Dataset — returned as a plain JSON dict.",
+        "fields": {
+          "id": "string — UUID of the meal entry row",
+          "logged_at": "string — ISO 8601 datetime without timezone: 'YYYY-MM-DDTHH:MM:SS'",
+          "meal_type": "string — one of: breakfast, lunch, dinner, snack, other",
+          "dish_name": "string — server-derived from items[].name at intake time; read-only for edit",
+          "kcal": "number (int) — total kilocalories",
+          "protein_g": "number (float) — protein in grams",
+          "carbs_g": "number (float) — carbohydrates in grams",
+          "fat_g": "number (float) — fat in grams",
+          "fiber_g": "number (float) — dietary fibre in grams",
+          "good_fat_g": "number (float) — unsaturated fat in grams",
+          "meat_g": "number (float) — meat content in grams",
+          "red_meat_g": "number (float) — red meat content in grams",
+          "sodium_mg": "number (float) — sodium in milligrams",
+          "confidence": "number (int) — user confidence score 1–5",
+          "notes": "string | null — optional free-text notes",
+          "created_at": "string — ISO 8601 datetime without timezone: 'YYYY-MM-DDTHH:MM:SS'",
+          "updated_at": "string — ISO 8601 datetime without timezone: 'YYYY-MM-DDTHH:MM:SS'"
+        },
+        "serialisation_rules": [
+          "id serialised as str (UUID hex with hyphens)",
+          "logged_at, created_at, updated_at serialised as 'YYYY-MM-DDTHH:MM:SS' (naive, no timezone suffix) — consistent with existing logged_at serialisation pattern",
+          "kcal and confidence serialised as int",
+          "All other numeric fields serialised as float",
+          "notes is null when no notes value is stored"
+        ],
+        "version": "v1.0 (Sprint 03)"
+      },
+      "EntryEditRequest": {
+        "description": "Stable request contract for PUT /api/food/entries/{id}. Accepts simplified edit payload — dish_name and nutrition fields directly. Does not use the intake items[] flow. Does not require validate_and_normalise reuse. Product decision (Option A) recorded 2026-03-21.",
+        "fields": {
+          "logged_at": "string — ISO 8601 datetime string: 'YYYY-MM-DDTHH:MM:SS'",
+          "meal_type": "string — one of: breakfast, lunch, dinner, snack, other",
+          "dish_name": "string — user-editable display name for the meal",
+          "kcal": "number (int) — total kilocalories",
+          "protein_g": "number (float) — protein in grams",
+          "carbs_g": "number (float) — carbohydrates in grams",
+          "fat_g": "number (float) — fat in grams",
+          "fiber_g": "number (float) — dietary fibre in grams",
+          "good_fat_g": "number (float) — unsaturated fat in grams",
+          "meat_g": "number (float) — meat content in grams",
+          "red_meat_g": "number (float) — red meat content in grams",
+          "sodium_mg": "number (float) — sodium in milligrams",
+          "confidence": "number (int) — user confidence score 1–5",
+          "notes": "string | null — optional free-text notes"
+        },
+        "excluded_fields": [
+          "id — system-managed, must not be submitted",
+          "created_at — system-managed, must not be submitted",
+          "updated_at — system-managed, must not be submitted",
+          "items — not part of this simplified edit contract; intake and edit are separate flows"
+        ],
+        "validation_rules": [
+          "All numeric fields must be non-negative",
+          "meal_type must be one of the allowed enum values",
+          "logged_at must be a parseable datetime string",
+          "kcal and confidence must be integers",
+          "dish_name must be a non-empty string"
+        ],
+        "version": "v1.0 (Sprint 03)"
+      }
+    },
+    "invariants": [
+      "No row is written to foodtracker.food_logs unless the user has explicitly confirmed an action (Accept for intake, Save for edit, Confirm for delete, Copy action for copy)",
+      "PUT /api/food/entries/{id} uses the EntryEditRequest contract — a simplified edit path separate from the intake flow; it does not invoke validate_and_normalise",
+      "PUT /api/food/entries/{id} updates the existing row in-place; it never creates a second row",
+      "POST /api/food/entries/{id}/copy always assigns a new uuid4() id to the copied row",
+      "POST /api/food/entries/{id}/copy always sets logged_at to server datetime.now() (same time source as used elsewhere in the app)",
+      "DELETE /api/food/entries/{id} is a hard delete — the row is permanently removed from foodtracker.food_logs",
+      "updated_at is NOT auto-maintained by a database trigger; the PUT endpoint must explicitly set updated_at = CURRENT_TIMESTAMP in the UPDATE SQL",
+      "id, created_at, and updated_at are system-managed fields and must not be accepted as editable input in PUT or copy payloads",
+      "CORS must be expanded to allow DELETE and PUT methods for this slice (current: GET POST only)",
+      "dish_name in the edit flow is accepted directly from the user in the PUT body (EntryEditRequest contract); this differs from the intake flow where dish_name is derived server-side from items[].name",
+      "The GET /api/food/entries endpoint returns all rows in descending logged_at order (most recent first)",
+      "The report endpoint (GET /api/food/report) is strictly read-only — unchanged from Sprint 02",
+      "The intake endpoints (POST /api/food/validate, POST /api/food/meals) are unchanged from Sprint 01"
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — PUT body fails EntryEditRequest validation (missing required field, wrong type, invalid enum value); HTTP 422",
+      "NOT_FOUND — the requested entry id does not exist in foodtracker.food_logs; HTTP 404 (GET /entries/{id}, PUT, DELETE, copy)",
+      "DB_CONSTRAINT — a database CHECK constraint is violated at update or insert time; HTTP 400",
+      "INTERNAL_ERROR — unexpected exception caught by install_exception_handlers; HTTP 500",
+      "PARSE_ERROR — PUT request body is not syntactically valid JSON; HTTP 422",
+      "MISSING_FIELD — a required field is absent in PUT body; HTTP 422",
+      "INVALID_FIELD — a field is present but fails type or constraint checks in PUT body; HTTP 422"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool via database.get_db()",
+      "platform_errorhandling.api_error() for error envelope construction",
+      "platform_contracts.ColumnSchema, DatasetMeta, Dataset for list and commit responses",
+      "AppRegistry from @atlas/shell for frontend registration",
+      "apiFetch, isApiError, ErrorCard, Skeleton from @platform-ui/*"
+    ],
+    "provides": [
+      "HTTP API on port 8012 (container port 8000, host-bound to 127.0.0.1:8012)",
+      "Shell routes /food, /food/report, /food/entries consumed by 02_Platform/02_Atlas_Shell router"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries",
+        "purpose": "Returns all rows from foodtracker.food_logs as a Dataset conforming to the UI data contract. Rows are ordered by logged_at descending. No filters, no pagination in this slice.",
+        "ui_contract": "Dataset | ApiError",
+        "row_actions": ["delete", "copy", "detail"],
+        "dataset_meta": {
+          "object_type": "food_entry",
+          "label": "Meal Entries",
+          "row_actions": ["delete", "copy", "detail"]
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries/{id}",
+        "purpose": "Returns the full editable field set for a single stored meal entry. Used by the frontend to load an existing row into the edit form. Returns ApiError HTTP 404 if id not found.",
+        "ui_contract": "EntryDetail (see contracts.named_contracts.EntryDetail) | ApiError",
+        "response_contract_ref": "contracts.named_contracts.EntryDetail"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/food/entries/{id}",
+        "purpose": "Accepts an EntryEditRequest body (simplified edit contract — dish_name and nutrition directly, no items field). Validates and updates the existing row in-place. Returns the updated row as a single-row Dataset. Returns ApiError HTTP 404 if id not found, HTTP 422 on validation failure, HTTP 400 on DB_CONSTRAINT. Does not invoke validate_and_normalise — edit and intake are separate flows (Option A product decision, 2026-03-21).",
+        "ui_contract": "Dataset (single updated row) | ApiError",
+        "request_contract_ref": "contracts.named_contracts.EntryEditRequest"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/food/entries/{id}",
+        "purpose": "Hard-deletes one row from foodtracker.food_logs by id. Returns HTTP 204 No Content on success. Returns ApiError HTTP 404 if id not found.",
+        "ui_contract": "HTTP 204 No Content | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/entries/{id}/copy",
+        "purpose": "Reads the existing row identified by id, creates a new row with the same meal content fields (all except id, created_at, updated_at), assigns a new uuid4() id, sets logged_at to server datetime.now(). Returns the newly created row as an EntryDetail. Returns ApiError HTTP 404 if source id not found.",
+        "ui_contract": "EntryDetail HTTP 201 (see contracts.named_contracts.EntryDetail) | ApiError",
+        "response_contract_ref": "contracts.named_contracts.EntryDetail"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "list_entries",
+      "description": "GET /api/food/entries: SELECT all columns from foodtracker.food_logs ORDER BY logged_at DESC. Serialise each row to a Dataset row dict. Return Dataset with ENTRIES_OVERVIEW_SCHEMA, DatasetMeta(object_type='food_entry', label='Meal Entries', total=row_count, row_actions=['delete','copy','detail']).",
+      "inputs": ["database connection from get_db()"],
+      "outputs": ["Dataset response (HTTP 200)"]
+    },
+    {
+      "step": 2,
+      "name": "get_entry_detail",
+      "description": "GET /api/food/entries/{id}: SELECT all columns from foodtracker.food_logs WHERE id = %s. If no row found, return ApiError HTTP 404 (NOT_FOUND). Serialise all columns including created_at and updated_at. Return the entry_detail dict directly (not wrapped in Dataset) as JSON HTTP 200.",
+      "inputs": ["id: str (path parameter)", "database connection from get_db()"],
+      "outputs": ["entry_detail dict (HTTP 200) or NOT_FOUND ApiError (HTTP 404)"]
+    },
+    {
+      "step": 3,
+      "name": "update_entry",
+      "description": "PUT /api/food/entries/{id}: Parse JSON body as EntryEditRequest (see contracts.named_contracts.EntryEditRequest). Validate required fields and types; on failure return ApiError HTTP 422. Check that id exists in foodtracker.food_logs; if not, return ApiError HTTP 404. Execute UPDATE foodtracker.food_logs SET logged_at=%s, meal_type=%s, dish_name=%s, kcal=%s, protein_g=%s, carbs_g=%s, fat_g=%s, fiber_g=%s, good_fat_g=%s, meat_g=%s, red_meat_g=%s, sodium_mg=%s, confidence=%s, notes=%s, updated_at=CURRENT_TIMESTAMP WHERE id=%s RETURNING *. Catch CheckViolation/IntegrityError and return ApiError HTTP 400 DB_CONSTRAINT. Commit. Wrap the returned row in a single-row Dataset with ENTRIES_OVERVIEW_SCHEMA. Return HTTP 200. Note: does NOT call validate_and_normalise — edit and intake are separate flows (Option A).",
+      "inputs": ["id: str (path parameter)", "HTTP request body (JSON)", "database connection from get_db()"],
+      "outputs": ["Dataset (single updated row, HTTP 200) or ApiError (HTTP 404 / 422 / 400)"]
+    },
+    {
+      "step": 4,
+      "name": "delete_entry",
+      "description": "DELETE /api/food/entries/{id}: Execute DELETE FROM foodtracker.food_logs WHERE id = %s. Check cursor.rowcount; if rowcount == 0, the row did not exist — rollback and return ApiError HTTP 404. Commit. Return HTTP 204 No Content. Single-statement approach — no prior SELECT.",
+      "inputs": ["id: str (path parameter)", "database connection from get_db()"],
+      "outputs": ["HTTP 204 No Content or NOT_FOUND ApiError (HTTP 404)"]
+    },
+    {
+      "step": 5,
+      "name": "copy_entry",
+      "description": "POST /api/food/entries/{id}/copy: SELECT all columns from foodtracker.food_logs WHERE id = %s. If not found, return ApiError HTTP 404. Assign new_id = uuid4(). Set new_logged_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S'). INSERT into foodtracker.food_logs with all meal content fields (meal_type, dish_name, kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes) copied from the source row, new_id as id, new_logged_at as logged_at. RETURNING *. Commit. Return the inserted row as entry_detail dict (HTTP 201).",
+      "inputs": ["id: str (path parameter)", "database connection from get_db()"],
+      "outputs": ["entry_detail dict (HTTP 201) or NOT_FOUND ApiError (HTTP 404)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "02_Platform/01_Postgres",
+        "role": "Persistent storage for foodtracker.food_logs; schema pre-provisioned via migrations/001_init_schema.sql. Sprint 03 reads individual rows, updates rows, deletes rows, and inserts copy rows."
+      },
+      {
+        "component": "02_Platform/packages/platform_errorhandling",
+        "role": "install_exception_handlers, install_request_timing, setup_logging, api_error() constructor"
+      },
+      {
+        "component": "02_Platform/packages/platform_contracts",
+        "role": "ColumnSchema, DatasetMeta, Dataset — required to produce list and update responses in the standard UI data contract shape"
+      },
+      {
+        "component": "02_Platform/02_Atlas_Shell",
+        "role": "AppRegistry.register — registers /food, /food/report, and /food/entries routes and nav entries"
+      },
+      {
+        "component": "02_Platform/UI",
+        "role": "apiFetch, isApiError, ErrorCard, Skeleton — platform UI primitives consumed by frontend components"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "fastapi",
+        "role": "HTTP framework; APIRouter, FastAPI, Request",
+        "reuse_existing": true
+      },
+      {
+        "name": "uvicorn",
+        "role": "ASGI server",
+        "reuse_existing": true
+      },
+      {
+        "name": "psycopg2-binary",
+        "role": "Postgres driver with RealDictCursor and connection pooling",
+        "reuse_existing": true
+      },
+      {
+        "name": "pydantic",
+        "role": "Request/response model validation and serialisation",
+        "reuse_existing": true
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "03_Application/FoodTracker/tools.py — hardcodes host='127.0.0.1', incompatible with Docker atlas-net; backend must not import it",
+      "psycopg (psycopg3) — tools.py uses psycopg3; the backend pattern uses psycopg2-binary; do not mix drivers",
+      "Any platform component that is a peer or downstream of 03_Application — dependency must only flow upward to 02_Platform and 00_Blueprint",
+      "New migrations or schema changes — the existing foodtracker.food_logs table has all required fields; no schema changes are permitted in Sprint 03",
+      "Soft delete, audit log, or history tables — explicitly out of scope",
+      "Client-side aggregation from raw meal rows — unchanged from Sprint 02"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "03_Application/FoodTracker/migrations/001_init_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state",
+    "sprint03_note": "No schema changes in Sprint 03. All required columns (id, logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes, created_at, updated_at) are present in the existing schema. updated_at has no auto-update trigger and must be set explicitly by the PUT endpoint SQL."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Create backend/routers/entries.py: define ENTRIES_OVERVIEW_SCHEMA constant (columns: id, logged_at, meal_type, dish_name, kcal — minimum required by draft; add protein_g, fat_g as detail_visible columns for richer display). Implement GET /api/food/entries, GET /api/food/entries/{id}, PUT /api/food/entries/{id}, DELETE /api/food/entries/{id}, POST /api/food/entries/{id}/copy per internal_flow steps 1-5.",
+      "Register entries.router in backend/main.py under prefix '/api' alongside food.router and report.router.",
+      "Expand CORS in backend/main.py to allow_methods=['GET', 'POST', 'PUT', 'DELETE']. This is a deliberate scope expansion required by the mutation contracts introduced in Sprint 03.",
+      "ENTRIES_OVERVIEW_SCHEMA must declare columns in this order: id (string, sortable=False, detail_visible=False), logged_at (date, sortable=True), meal_type (string, sortable=True, filterable=True), dish_name (string, sortable=True), kcal (number, format='kcal', sortable=True). Additional detail_visible columns are optional but must not alter the declared order of the first five.",
+      "GET /api/food/entries/{id} returns a plain JSON dict conforming to contracts.named_contracts.EntryDetail. Not a Dataset. Serialise id as str, logged_at/created_at/updated_at as 'YYYY-MM-DDTHH:MM:SS' (no timezone suffix), kcal and confidence as int, all other numerics as float.",
+      "POST /api/food/entries/{id}/copy returns an EntryDetail dict (contracts.named_contracts.EntryDetail) with HTTP 201.",
+      "PUT /api/food/entries/{id} accepts an EntryEditRequest body (contracts.named_contracts.EntryEditRequest). Parse JSON directly — do NOT call validate_and_normalise. Edit and intake are separate flows (Option A). Validate EntryEditRequest fields inline. Check id existence (HTTP 404 if not found). Execute UPDATE with all EntryEditRequest fields plus updated_at=CURRENT_TIMESTAMP. Do not rely on a trigger for updated_at.",
+      "DELETE /api/food/entries/{id}: execute DELETE and check cursor.rowcount — return HTTP 404 if rowcount == 0. Return HTTP 204 with no response body.",
+      "entries.py must not import anything from food.py or report.py. The routers share no module-level state.",
+      "food.py and report.py must not be modified. food.py's validate_and_normalise function is not used by entries.py.",
+      "Sprint 01 and Sprint 02 backend behavior is unchanged.",
+      "Do not add tests — that is deferred to test_writer."
+    ],
+    "ui_implementer": [
+      "Update src/shellConfig.ts: add { id: 'entries', label: 'Entries', path: '/food/entries', order: 3 } to both mobilePrimaryNav and desktopNav. Do not change the existing Log (order 1) or Report (order 2) nav items.",
+      "Update src/ShellEntry.tsx: add a third route <Route path='/food/entries' ... /> and <Route path='/food/entries/:id' ... /> for the detail view alongside the existing /food and /food/report routes.",
+      "Implement src/EntriesPage.tsx as the top-level component for /food/entries. EntriesPage fetches GET /api/food/entries on mount. Renders a list of rows. Each row shows: logged_at, meal_type, dish_name, kcal. Each row exposes three actions: delete, copy, open detail. Renders Skeleton while loading. Renders ErrorCard on error. Renders an empty state message when rows array is empty.",
+      "Delete action: show a confirmation dialog before calling DELETE /api/food/entries/{id}. On confirm, issue the DELETE request. On success, remove the row from the displayed list (re-fetch or local state removal — implementer choice). On cancel, dismiss without any action.",
+      "Copy action: issue POST /api/food/entries/{id}/copy. On success, navigate directly to /food/entries/{newId} (the id from the returned EntryDetail) to open that copied entry's detail view.",
+      "Open detail action: navigate to /food/entries/{id}.",
+      "Implement src/EntryDetailPage.tsx as the component for /food/entries/:id. EntryDetailPage fetches GET /api/food/entries/{id} on mount (using the id from the route param). Renders a form with editable fields per EntryEditRequest contract (contracts.named_contracts.EntryEditRequest): logged_at, meal_type, dish_name (user-editable in this flow), and all nutrition fields (kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg), confidence, notes. Renders Skeleton while loading. Renders ErrorCard if load fails.",
+      "EntryDetailPage Save action: issue PUT /api/food/entries/{id} with EntryEditRequest JSON body (logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes?). No items field. No timestamp field. On success, refresh the displayed values from the response Dataset row. On error, display the ApiError message.",
+      "Non-editable fields (id, created_at, updated_at) must be displayed as read-only context but must not be submitted as part of the PUT body.",
+      "EntryDetailPage should provide a Back navigation to /food/entries.",
+      "Material 3 page structure and controls apply. The delete confirmation dialog should use Material 3 dialog conventions."
+    ],
+    "test_writer": [
+      "Sprint 01 and Sprint 02 test matrices remain outstanding.",
+      "GET /api/food/entries: returns Dataset with object_type='food_entry', ENTRIES_OVERVIEW_SCHEMA in correct column order, row_actions=['delete','copy','detail'], rows in descending logged_at order.",
+      "GET /api/food/entries: returns empty rows array (not an error) when foodtracker.food_logs is empty.",
+      "GET /api/food/entries/{id}: returns entry_detail dict with all expected fields for an existing row.",
+      "GET /api/food/entries/{id}: returns NOT_FOUND ApiError (HTTP 404) for a non-existent id.",
+      "PUT /api/food/entries/{id}: updates the row and returns the updated row as a Dataset.",
+      "PUT /api/food/entries/{id}: returns HTTP 404 for a non-existent id.",
+      "PUT /api/food/entries/{id}: returns HTTP 422 for an invalid payload (reuse intake validation test cases).",
+      "PUT /api/food/entries/{id}: updated_at is updated in the stored row after a successful PUT.",
+      "DELETE /api/food/entries/{id}: removes the row and returns HTTP 204.",
+      "DELETE /api/food/entries/{id}: returns HTTP 404 for a non-existent id.",
+      "POST /api/food/entries/{id}/copy: creates a new row with a new id, logged_at = approximately now, same meal content.",
+      "POST /api/food/entries/{id}/copy: returns HTTP 404 for a non-existent source id.",
+      "POST /api/food/entries/{id}/copy: returns HTTP 201.",
+      "entries.py imports nothing from food.py or report.py — the routers share no module-level state."
+    ],
+    "reviewer": [
+      "Confirm CORS in main.py has been expanded to allow DELETE and PUT in addition to GET and POST.",
+      "Confirm entries.py imports nothing from food.py or report.py. The routers share no module-level state.",
+      "Confirm PUT endpoint parses EntryEditRequest body directly — does NOT call validate_and_normalise.",
+      "Confirm PUT endpoint sets updated_at explicitly in the SQL UPDATE statement (not relying on a trigger).",
+      "Confirm DELETE uses single-statement approach: execute DELETE, check cursor.rowcount == 0 for 404.",
+      "Confirm DELETE returns HTTP 204 with no response body.",
+      "Confirm POST /entries/{id}/copy assigns a new uuid4() id and sets logged_at to datetime.now().",
+      "Confirm GET /entries/{id} returns HTTP 404 (not HTTP 500) when the row does not exist.",
+      "Confirm Sprint 01 and Sprint 02 endpoints are unchanged (food.py and report.py unmodified).",
+      "Confirm shellConfig.ts nav order: Log=order 1, Report=order 2, Entries=order 3 in both mobilePrimaryNav and desktopNav.",
+      "Confirm EntriesPage renders an empty state (not an error) when the entries list is empty.",
+      "Confirm delete action shows a confirmation dialog before calling the DELETE endpoint.",
+      "Confirm copy action navigates to the copied entry's detail view after success.",
+      "Confirm EntryDetailPage PUT body contains: logged_at, meal_type, dish_name, nutrition fields, confidence, notes — no items field, no id, no created_at, no updated_at.",
+      "Confirm dish_name is user-editable in the edit form (not read-only) and sent directly in the PUT body."
+    ]
+  },
+  "deferred_decisions": [
+    "Whether the frontend reconstructs the items array for the PUT body from stored dish_name text or maintains it in component state — implementer decides; the server contract only requires a valid items array in the PUT body",
+    "How the frontend achieves list refresh after a successful delete — re-fetch from server or local state removal — both are acceptable; implementer decides"
+  ],
+  "risks": [
+    {
+      "risk": "CORS expansion from GET POST to GET POST PUT DELETE",
+      "impact": "The draft explicitly notes that current CORS allows GET POST only and that the slice must either work within that constraint or deliberately expand. This design deliberately expands CORS. The implementer must update allow_methods in main.py. Failure to do so will cause the browser to block PUT and DELETE requests from the frontend with a CORS preflight failure."
+    },
+    {
+      "risk": "updated_at has no auto-update trigger",
+      "impact": "If the PUT endpoint omits the explicit SET updated_at = CURRENT_TIMESTAMP in the SQL, the field will remain equal to created_at after updates. The implementer must include it explicitly. This is documented as a known gap from Sprint 02."
+    },
+    {
+      "risk": "Copy uses datetime.now() for logged_at (server local time)",
+      "impact": "Consistent with the existing server time baseline used elsewhere. No additional risk introduced. Documented for traceability."
+    },
+    {
+      "risk": "PUT body uses simplified EntryEditRequest contract (Option A decision, 2026-03-21)",
+      "impact": "The PUT body is NOT the intake JSON shape. It accepts dish_name and nutrition fields directly. No items field. No validate_and_normalise call. The frontend form sends the stored dish_name as an editable field. Backend validates EntryEditRequest inline. This is intentional — edit and intake are separate flows. Implementer must not attempt to reuse intake validation logic here."
+    },
+    {
+      "risk": "Race condition between DELETE and concurrent GET /entries",
+      "impact": "Low risk in a single-user local app. No concurrency handling is required for this slice. Documented for awareness."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should the PUT /api/food/entries/{id} body use the intake items[] flow (with validate_and_normalise) or a simplified edit contract?",
+      "status": "RESOLVED",
+      "resolution": "Option A selected by human (2026-03-21): PUT body accepts dish_name and nutrition fields directly (EntryEditRequest contract). Does NOT require validate_and_normalise reuse for the edit path. Simpler edit form; edit and intake are separate flows.",
+      "owner": "Human — product decision"
+    }
+  ]
+}

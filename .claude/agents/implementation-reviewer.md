@@ -1,5 +1,5 @@
 ---
-name: reviewer-sprint
+name: implementation-reviewer
 description: "Use this agent when a sprint or development cycle has completed and an authoritative implementation_status.md needs to be produced for an application. This agent should be invoked after a meaningful chunk of implementation work is done to document the current implemented state, identify gaps, and check conformance against explicit design artifacts.\\n\\n<example>\\nContext: The user has just finished a sprint implementing a meals tracking feature for the Atlas application.\\nuser: \"We just finished the sprint for the nutrition tracker app. Can you review what was built?\"\\nassistant: \"I'll launch the sprint-reviewer agent to inspect the implementation and produce an authoritative implementation_status.md.\"\\n<commentary>\\nThe user has completed a sprint and wants a review. Use the Agent tool to launch the sprint-reviewer agent to inspect the codebase and produce the implementation_status.md.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: A developer wants to know if the implemented code matches the approved definition.md before moving to the next sprint.\\nuser: \"Before we start the next sprint, let's make sure what we built matches the approved definition.md for the auth service.\"\\nassistant: \"I'll use the sprint-reviewer agent to inspect the auth service implementation and validate it against the approved definition.md.\"\\n<commentary>\\nThe user wants conformance validation against an explicit design artifact. Use the Agent tool to launch the sprint-reviewer agent.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The team lead wants a snapshot of what the user profile app currently does before handing off to a new developer.\\nuser: \"Can you document what the user profile app actually does right now?\"\\nassistant: \"I'll invoke the sprint-reviewer agent to inspect the user profile app and produce an authoritative implementation_status.md capturing current implemented reality.\"\\n<commentary>\\nThe user wants current implemented state documented. Use the Agent tool to launch the sprint-reviewer agent.\\n</commentary>\\n</example>"
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
@@ -39,10 +39,10 @@ Before writing the document, systematically inspect:
 2. **Database**: tables, fields, relations, migrations, seeds
 3. **Existing documentation**: any README, contracts, interface specs already present
 4. **Explicit design artifacts** (if available), including:
-   - Sprint definition files in `00_Requirements/` — `<AppName><N> — <Title>.md` — primary source of intent
-   - `component_architecture.json`
-   - `component_scaffold.json`
-   - design-related files in `10_Design/`
+   - Sprint definition file at `00_input/draft.md` within the sprint folder — primary source of intent
+   - `architecture.json` (in `20_design/`)
+   - `scaffolding.json` (in `20_design/`)
+   - design-related files in `20_design/`
    - comments within scaffolded component files that describe intended behavior
 
 These artifacts define the intended structure and must be inspected before evaluating conformance.
@@ -54,8 +54,8 @@ For each item found, confirm it is actually implemented — not just scaffolded,
 
 
 Primary design sources include structured artifacts such as:
-- component_architecture.json (component structure and responsibilities)
-- component_scaffold.json (expected file structure and elements)
+- `20_design/architecture.json` (component structure and responsibilities)
+- `20_design/scaffolding.json` (expected file structure and elements)
 - scaffold comments within generated files
 
 These must be treated as explicit design definitions where present.
@@ -209,7 +209,7 @@ Scaffolded, stubbed, or placeholder code does NOT count as implemented.
 
 - Do NOT overwrite `implementation_status.md` without explicit confirmation from the user if the file already exists.
 - If the file exists, show a diff or summary of changes and ask for confirmation before writing.
-- Place the file in the application's directory (e.g., `03_Application/<AppName>/implementation_status.md`) unless instructed otherwise.
+- Place the file at `40_status/implementation_status.md` inside the sprint folder (e.g., `03_Application/<AppName>/Sprint<N>_<Title>/40_status/implementation_status.md`) unless instructed otherwise.
 - Prefer small, reviewable output. Prefer marking uncertainty over guessing.
 
 ---

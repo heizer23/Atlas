@@ -73,6 +73,7 @@ pg-data-check:
 PG_SCHEMA=../03_Application/WorkoutTracker/schema.sql
 PG_SCHEMA_TASK=../03_Application/TaskTracker/schema.sql
 PG_SCHEMA_FOOD=../03_Application/FoodTracker/schema.sql
+PG_SCHEMA_CHRONICLE=../00_Blueprint/SharedViews/chronicle.sql
 
 schema:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
@@ -88,6 +89,11 @@ schema-food:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_FOOD)
+
+schema-chronicle:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_CHRONICLE)
 
 migrate:
 	@python3 ../02_Platform/01_Postgres/migrate.py
@@ -153,6 +159,32 @@ food-logs:
 food-reboot:
 	$(FOOD_COMPOSE) down
 	$(FOOD_COMPOSE) up -d
+
+# endregion
+
+
+# region --- Application: Chronicle
+CHRONICLE_DIR=../03_Application/Chronicle
+
+CHRONICLE_COMPOSE=docker compose \
+	-f $(CHRONICLE_DIR)/compose.yml \
+	$(ENV_FILES)
+
+chronicle-build:
+	$(CHRONICLE_COMPOSE) build
+
+chronicle-up:
+	$(CHRONICLE_COMPOSE) up -d
+
+chronicle-down:
+	$(CHRONICLE_COMPOSE) down
+
+chronicle-logs:
+	$(CHRONICLE_COMPOSE) logs -f
+
+chronicle-reboot:
+	$(CHRONICLE_COMPOSE) down
+	$(CHRONICLE_COMPOSE) up -d
 
 # endregion
 
