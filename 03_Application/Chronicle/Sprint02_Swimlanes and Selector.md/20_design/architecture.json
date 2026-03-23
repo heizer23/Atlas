@@ -1,0 +1,239 @@
+{
+  "component_name": "chronicle",
+  "layer": "03_Application",
+  "source_definition": "00_input/draft.md",
+  "summary": "Extends Chronicle to display sources as collapsible application groups in the chooser, and renders up to four simultaneously selected sources (from any application) as side-by-side swimlanes in a single transposed calendar view.",
+
+  "classification": {
+    "why_application": "This sprint modifies domain-specific presentation behavior owned by Chronicle: group identity derived from the `application` field, multi-source swimlane layout, and per-source event fetching. All behavior is meaningful only within Chronicle.",
+    "non_goals": [
+      "Group-level selection (checking an entire application group at once)",
+
+      "More than four simultaneous checked sources",
+      "Arbitrary user-defined swimlane ordering",
+      "App-side aggregation or normalization",
+      "Year navigation",
+      "Platform extraction of the swimlane or heatmap renderer",
+      "Source-label immutability enforcement",
+      "Generic dashboard or comparison mode",
+      "Per-user preferences"
+    ],
+    "not_platform": "The swimlane renderer is specific to Chronicle's calendar data model and group semantics. It has no generalization path that would serve other applications without importing Chronicle domain assumptions. Platform extraction is explicitly deferred by the definition."
+  },
+
+  "contracts": {
+    "consumes": [
+      "shared_views.calendar_event_view (Blueprint) — read-only; fields: date, application, source_label, label, value, selected, detail, deep_link",
+      "shared_views.calendar_source_selection (Blueprint) — read/write; primary key (application, source_label)",
+      "GET /api/chronicle/calendar/sources — returns list[SourceListRow] in SQL-defined stable order",
+      "GET /api/chronicle/calendar/events?application=X&source_label=Y — returns list[CalendarEventRow] for current year",
+      "PATCH /api/chronicle/calendar/sources — upserts selection state; request: SelectionToggleRequest; response: SelectionToggleResponse | ApiError"
+    ],
+    "provides": [
+      "SourceChooser renders sources grouped by application in collapsible sections, collapsed by default, with max-four selection enforcement",
+      "SwimlaneRenderer renders 1..4 selected sources (from any application) as swimlane sub-rows within a shared transposed year grid",
+      "CalendarPage coordinates multi-source selection state and routes selected sources to SwimlaneRenderer",
+      "DayDetailView receives the exact CalendarEventRow for the clicked (source, date) pair — no behavior change"
+    ],
+    "invariants": [
+      "No transformation, aggregation, or normalization logic exists in the application layer. All value preparation is in the Blueprint SQL view.",
+      "Source ordering in the chooser and swimlanes follows the order returned by GET /calendar/sources (SQL-defined). The frontend does not re-sort.",
+      "The `application` field is the sole source of group identity. No derived or inferred grouping is permitted.",
+      "At most four sources may be selected simultaneously. The chooser enforces this by disabling unchecked rows when selectedCount >= maxSelected.",
+      "Selection is global (single-user). No per-user preferences.",
+      "Swimlanes within a group are ordered by the SQL-defined source order, not by user action.",
+      "SwimlaneRenderer is inline; it has no dependency on any Platform component beyond ErrorCard and Skeleton.",
+      "HeatmapRenderer no longer exists after this sprint. CalendarPage must not reference it."
+    ],
+    "failure_modes": [
+      "GET /calendar/sources fails: CalendarPage surfaces ErrorCard; no sources are displayed",
+      "GET /calendar/events fails for one source: SwimlaneRenderer surfaces ErrorCard for that source's swimlane; other swimlanes continue rendering",
+      "GET /calendar/events fails for all sources: SwimlaneRenderer surfaces ErrorCard for each source",
+      "PATCH /calendar/sources fails: CalendarPage surfaces an error state; the selection state is not changed (confirm-then-apply — no rollback needed)",
+      "Empty selection (no sources selected): CalendarPage shows the chooser with a prompt text and no swimlane area"
+    ]
+  },
+
+  "shared_views": {
+    "consumes": [
+      "shared_views.calendar_event_view — Blueprint-owned, read-only",
+      "shared_views.calendar_source_selection — Blueprint-owned, read/write"
+    ],
+    "provides": []
+  },
+
+  "interfaces": {
+    "consumes": [
+      "GET /api/chronicle/calendar/sources (Chronicle backend)",
+      "GET /api/chronicle/calendar/events (Chronicle backend)",
+      "PATCH /api/chronicle/calendar/sources (Chronicle backend)",
+      "@platform-ui/api/client: apiFetch, isApiError",
+      "@platform-ui/components: ErrorCard, Skeleton"
+    ],
+    "provides": [
+      "CalendarPage — top-level React component rendered at route '/' within Chronicle shell entry",
+      "SourceChooser — receives sources: SourceListRow[], onToggle, selectedCount, maxSelected; renders grouped, collapsible source list",
+      "SwimlaneRenderer — receives sources: SourceListRow[] (1..4), onDayClick; fetches and renders multi-source transposed year grid",
+      "DayDetailView — receives row: CalendarEventRow | null; no change from Sprint01"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "python_api",
+        "name": "GET /api/chronicle/calendar/sources",
+        "purpose": "Returns distinct (application, source_label, selected) rows from calendar_event_view in SQL-defined stable order. No field changes from Sprint01; confirm ORDER BY is in place.",
+        "ui_contract": "list[SourceListRow] — explicit stable named contract; Dataset not applicable (no pagination, no row_actions)"
+      },
+      {
+        "type": "python_api",
+        "name": "GET /api/chronicle/calendar/events",
+        "purpose": "Returns all CalendarEventRow entries for a given (application, source_label) for the current calendar year. Called once per selected source in parallel by SwimlaneRenderer.",
+        "ui_contract": "list[CalendarEventRow] — explicit stable named contract; Dataset not applicable (sparse date rows, no pagination semantics)"
+      },
+      {
+        "type": "python_api",
+        "name": "PATCH /api/chronicle/calendar/sources",
+        "purpose": "Upserts selection state for a (application, source_label) pair in calendar_source_selection.",
+        "ui_contract": "SelectionToggleResponse | ApiError"
+      }
+    ]
+  },
+
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "load_sources",
+      "description": "CalendarPage mounts and fetches GET /calendar/sources. On success, sources state is populated. selectedSources is derived as sources.filter(s => s.selected). If selectedSources is empty, chooser is shown with prompt text.",
+      "inputs": ["mount event"],
+      "outputs": ["sources: SourceListRow[]", "selectedSources: SourceListRow[]"]
+    },
+    {
+      "step": 2,
+      "name": "render_chooser",
+      "description": "SourceChooser receives the flat sources list and groups them by the `application` field, preserving SQL-defined order. Each group renders as a collapsible section collapsed by default. Sources within an expanded group show a checkbox-style selected indicator. If selectedCount >= maxSelected, unchecked sources are visually disabled and non-interactive.",
+      "inputs": ["sources: SourceListRow[]", "selectedCount: number", "maxSelected: number (4)"],
+      "outputs": ["onToggle(application, source_label, selected) calls on user interaction"]
+    },
+    {
+      "step": 3,
+      "name": "handle_toggle",
+      "description": "CalendarPage.handleToggle calls PATCH /calendar/sources with the new selected state. The UI waits for the response before updating. On success, sources state is updated and selectedSources is re-derived. On failure, sources state is unchanged and an error is surfaced. No snapshot or rollback is needed (confirm-then-apply).",
+      "inputs": ["application: string", "source_label: string", "selected: boolean"],
+      "outputs": ["updated sources: SourceListRow[]", "updated selectedSources: SourceListRow[]"]
+    },
+    {
+      "step": 4,
+      "name": "fetch_events_per_source",
+      "description": "SwimlaneRenderer receives selectedSources (1..4). It calls GET /calendar/events once per source in parallel, using application and source_label as query params. Each successful response is stored as a date-keyed eventMap per source. Failures are stored as per-source error state. When selectedSources changes (including year changes), a new set of fetches is issued. No AbortController — prior responses that arrive late are discarded by React state reconciliation.",
+      "inputs": ["selectedSources: SourceListRow[]", "current calendar year (client Date)"],
+      "outputs": ["eventMaps: Map<string, CalendarEventRow>[] indexed by source position", "perSourceError: boolean[]"]
+    },
+    {
+      "step": 5,
+      "name": "render_swimlane_grid",
+      "description": "SwimlaneRenderer builds a transposed year grid: rows are weeks (~52), columns are days of week (Mon=0..Sun=6). For each week row, it renders N swimlane sub-rows (one per source). Each cell maps to a (source, date) pair. Intensity class is determined by the value in the source's eventMap for that date: no row = heat-0, 1-25 = heat-1, 26-50 = heat-2, 51-75 = heat-3, 76-100 = heat-4. Month labels appear at the left margin on the first row of each month. Source labels appear at the left margin of the first sub-row in each week block, or as a header row above the first week. While any source fetch is pending, Skeleton is shown. If a per-source fetch failed, ErrorCard is shown for that source's swimlane sub-row area.",
+      "inputs": ["eventMaps per source", "selectedSources: SourceListRow[]", "current calendar year"],
+      "outputs": ["rendered transposed swimlane grid"]
+    },
+    {
+      "step": 6,
+      "name": "handle_day_click",
+      "description": "When a populated cell (value > 0) is clicked in any swimlane, SwimlaneRenderer calls onDayClick with the CalendarEventRow for that exact (source, date) pair. CalendarPage sets selectedDay state, causing DayDetailView to render. Cells with value=0 or missing dates are non-interactive.",
+      "inputs": ["clicked cell: (source index, date string)"],
+      "outputs": ["onDayClick(row: CalendarEventRow)"]
+    },
+    {
+      "step": 7,
+      "name": "render_day_detail",
+      "description": "CalendarPage renders DayDetailView with the selectedDay CalendarEventRow. DayDetailView is unchanged from Sprint01.",
+      "inputs": ["selectedDay: CalendarEventRow | null"],
+      "outputs": ["rendered DayDetailView or null"]
+    }
+  ],
+
+  "dependencies": {
+    "internal_required": [
+      {"component": "00_Blueprint/SharedViews/chronicle.sql", "role": "Defines calendar_event_view and calendar_source_selection — the sole data source"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "Backend logging, exception handlers, request timing"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Backend ApiError shape (used for PATCH error responses)"},
+      {"component": "02_Platform/02_Atlas_Shell", "role": "Provides routing, layout, and app hosting for Chronicle frontend"},
+      {"component": "02_Platform/UI", "role": "Provides ErrorCard and Skeleton components; apiFetch and isApiError"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "Backend HTTP framework", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "PostgreSQL driver for backend queries", "reuse_existing": true},
+      {"name": "react", "role": "Frontend component rendering", "reuse_existing": true},
+      {"name": "react-router-dom", "role": "Frontend routing within shell", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "App-side aggregation or normalization of calendar values",
+      "Platform component creation for the swimlane renderer in this sprint",
+      "Re-sorting of sources client-side (order must follow SQL-defined order from GET /calendar/sources)",
+      "Any reference to HeatmapRenderer.tsx after deletion"
+    ]
+  },
+
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": "none",
+    "persistence_type": "none",
+    "ownership": "none — all durable state owned by Blueprint (shared_views.calendar_event_view, shared_views.calendar_source_selection). No new tables or columns in this sprint."
+  },
+
+  "deferrals": {
+    "application_implementer": [
+      "Verify GET /calendar/sources query has ORDER BY application, source_label (or equivalent stable order) — no new fields needed, confirm existing query",
+      "Implement SourceChooser.tsx: group by `application` preserving SQL order, collapsible sections collapsed by default, max-four enforcement (disable unchecked rows when selectedCount >= maxSelected), onToggle on source row click, no group-level checkbox",
+      "Implement SwimlaneRenderer.tsx: parallel fetch per source, transposed grid (rows=weeks, columns=Mon-Sun), N swimlane sub-rows per week block, source labels at left margin, month labels at left margin on first row of each month, heat-0..heat-4 intensity, Skeleton while any fetch is pending, per-source ErrorCard on fetch failure, onDayClick only for cells with value > 0",
+      "Update CalendarPage.tsx: remove activeSrc state, derive selectedSources from sources.filter(s => s.selected), pass selectedCount and maxSelected (4) to SourceChooser, render SwimlaneRenderer when selectedSources.length > 0, retain DayDetailView, retain loading/error/empty-state behaviors, show prompt text when selectedSources is empty",
+      "Delete HeatmapRenderer.tsx — remove file and all references from CalendarPage",
+      "Confirm no import of HeatmapRenderer remains anywhere in Chronicle src"
+    ],
+    "ui_implementer": [
+      "Determine exact pixel dimensions for swimlane sub-row height and source label column width (deferred from definition)",
+      "Determine whether color differentiation between swimlanes is applied or whether each lane uses the same heat scale independently"
+    ],
+    "test_writer": [
+      "SourceChooser: groups render collapsed by default",
+      "SourceChooser: expanding a group reveals individual source rows",
+      "SourceChooser: clicking a source row calls onToggle with !selected",
+      "SourceChooser: unchecked source row is disabled when selectedCount >= maxSelected",
+      "SourceChooser: checked source row remains interactive when selectedCount >= maxSelected",
+      "SourceChooser: no group-level checkbox is rendered",
+      "SwimlaneRenderer: renders one swimlane sub-row per source in selectedSources",
+      "SwimlaneRenderer: cells with value > 0 call onDayClick with the correct CalendarEventRow",
+      "SwimlaneRenderer: cells with value = 0 or missing date are non-interactive",
+      "SwimlaneRenderer: shows Skeleton until all source fetches complete",
+      "SwimlaneRenderer: shows per-source ErrorCard when a source fetch fails; other swimlanes render normally",
+      "SwimlaneRenderer: transposed grid has weekday columns (Mon..Sun) and week rows",
+      "SwimlaneRenderer: month labels appear at the left margin on the first row of each month",
+      "CalendarPage: selectedSources is empty -> chooser is shown, no SwimlaneRenderer",
+      "CalendarPage: PATCH failure surfaces an error and leaves selection state unchanged (confirm-then-apply)"
+    ],
+    "reviewer": [
+      "Confirm ORDER BY is present in the GET /calendar/sources SQL query before implementation closes",
+      "Confirm SwimlaneRenderer contains no aggregation or normalization logic — values consumed as-is from CalendarEventRow",
+      "Confirm HeatmapRenderer.tsx is deleted and no reference remains",
+      "Confirm SwimlaneRenderer correctly labels each swimlane with its source_label (especially when sources span multiple applications)"
+    ]
+  },
+
+  "deferred_decisions": [
+    "Exact pixel dimensions for swimlane sub-row height and source label column width (deferred to UI_Implementer)",
+    "Whether swimlanes use color differentiation between lanes or an identical heat scale per lane (definition states same scale is acceptable as first cut)"
+  ],
+
+  "risks": [
+    {
+      "risk": "Source label staleness across sessions",
+      "impact": "Carried from Sprint01: source_label immutability is not enforced. A stale selection against a changed label will silently orphan. No new risk introduced; no mitigation added in this sprint."
+    },
+    {
+      "risk": "Parallel fetch timing in SwimlaneRenderer",
+      "impact": "If fetches complete at different times, a partial render could flash before all data is ready. Skeleton must be shown until all fetches for the current selectedSources resolve (success or failure)."
+    }
+  ],
+
+  "open_questions": []
+}

@@ -17,95 +17,34 @@ Applications are coupled to this contract. They are not coupled to React compone
 
 ## 1. Core Types
 
-### 1.1 TypeScript (frontend)
+Authoritative type definitions live in two implementation files. Import from them — never redefine locally.
 
-```typescript
-// src/api/types.ts — single source of truth for frontend types
-// Do not extend or override locally. Change this file when the contract changes.
+| File | Language |
+|---|---|
+| `02_Platform/UI/react/src/api/types.ts` | TypeScript |
+| `02_Platform/packages/platform_contracts/contracts.py` | Python |
 
-type ColumnType  = "string" | "number" | "date" | "boolean" | "enum";
-type Aggregation = "sum" | "avg" | "count" | "max" | "min";
-type BarMode     = "grouped" | "stacked" | "stacked_percent";
-type SeriesType  = "bar" | "line";
-type YAxis       = "left" | "right";
-type RowAction   = "delete" | "edit" | "copy";
+### 1.1 Scalar types
 
-interface ColumnSchema {
-  key:             string;   // matches row field key exactly — case-sensitive
-  label:           string;   // human-readable column header
-  type:            ColumnType;
-  sortable?:       boolean;  // default: true
-  filterable?:     boolean;  // default: false
-  detail_visible?: boolean;  // shown in DetailView, default: true
-  format?:         string;   // display hint: "€#,##0" | "kg" | "YYYY-MM-DD" | "%"
-}
+| Type | Valid values | Open/Closed | Notes |
+|---|---|---|---|
+| `ColumnType` | `"string"`, `"number"`, `"date"`, `"boolean"`, `"enum"` | Closed | Field display type |
+| `RowAction` | any string | **Open** | Backend declares which actions apply. Frontend renders only what is declared. Conventional values: `"delete"`, `"edit"`, `"copy"` |
+| `Aggregation` | `"sum"`, `"avg"`, `"count"`, `"max"`, `"min"` | Closed | Chart aggregation function (TypeScript / chart use only) |
+| `BarMode` | `"grouped"`, `"stacked"`, `"stacked_percent"` | Closed | Bar chart stacking mode |
+| `SeriesType` | `"bar"`, `"line"` | Closed | Combo chart series type |
+| `YAxis` | `"left"`, `"right"` | Closed | Dual-axis binding |
 
-interface DatasetMeta {
-  object_type: string;       // e.g. "workout_session" — snake_case, stable identifier
-  label:       string;       // e.g. "Workout Sessions" — human-readable, used in UI headings
-  total:       number;       // total rows across all pages
-  page:        number;       // current page, 1-indexed
-  page_size:   number;       // rows per page
-  row_actions: RowAction[];  // backend declares which actions are valid for this object
-}
+### 1.2 Structures
 
-type Row = { id: string } & Record<string, unknown>;
-
-interface Dataset {
-  meta:   DatasetMeta;
-  schema: ColumnSchema[];    // ordered — column display order matches array order
-  rows:   Row[];
-}
-
-// Every API response is Dataset | ApiError. Nothing else.
-interface ApiError {
-  error: {
-    code:       string;      // machine-readable: "INVALID_FILTER" | "NOT_FOUND" | "NETWORK_ERROR" etc.
-    message:    string;      // human-readable — shown directly in ErrorCard
-    detail?:    unknown;     // developer context — shown in DebugPanel, not in main UI
-    request_id: string;      // correlates with backend log entry
-  };
-}
-```
-
-### 1.2 Python (backend)
-
-```python
-# backend/platform/models.py
-# Import from here in every router. Never redefine these locally.
-
-from typing import Any, Literal
-from pydantic import BaseModel, Field
-
-ColumnType = Literal["string", "number", "date", "boolean", "enum"]
-Aggregation = Literal["sum", "avg", "count", "max", "min"]
-RowAction   = Literal["delete", "edit", "copy"]
-
-class ColumnSchema(BaseModel):
-    key:            str
-    label:          str
-    type:           ColumnType
-    sortable:       bool = True
-    filterable:     bool = False
-    detail_visible: bool = True
-    format:         str | None = None
-
-class DatasetMeta(BaseModel):
-    object_type: str
-    label:       str
-    total:       int
-    page:        int = 1
-    page_size:   int = 25
-    row_actions: list[RowAction] = []
-
-class Dataset(BaseModel):
-    meta:    DatasetMeta
-    schema_: list[ColumnSchema] = Field(alias="schema")
-    rows:    list[dict[str, Any]]
-
-    class Config:
-        populate_by_name = True
-```
+| Structure | Key fields |
+|---|---|
+| `ColumnSchema` | `key`, `label`, `type`, `sortable?`, `filterable?`, `detail_visible?`, `format?` |
+| `DatasetMeta` | `object_type`, `label`, `total`, `page`, `page_size`, `row_actions` |
+| `Dataset` | `meta`, `schema`, `rows` |
+| `Row` | `id: string` + additional fields matching schema keys |
+| `ApiError` | `error.{code, message, detail?, request_id}` |
+| `FormField` | `key`, `label`, `type`, `required?`, `options?`, `placeholder?`, `initialValue?` |
 
 ---
 

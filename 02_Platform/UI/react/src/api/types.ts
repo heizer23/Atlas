@@ -7,7 +7,7 @@ export type Aggregation = "sum" | "avg" | "count" | "max" | "min";
 export type BarMode     = "grouped" | "stacked" | "stacked_percent";
 export type SeriesType  = "bar" | "line";
 export type YAxis       = "left" | "right";
-export type RowAction   = "delete" | "edit" | "copy";
+export type RowAction   = string;  // open — backend declares any action string; frontend renders what is declared
 
 export interface ColumnSchema {
   key:             string;   // matches row field key exactly — case-sensitive

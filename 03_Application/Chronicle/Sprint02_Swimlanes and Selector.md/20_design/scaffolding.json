@@ -1,0 +1,196 @@
+{
+  "component_name": "chronicle",
+  "target_root": "03_Application/Chronicle",
+  "sprint": "Sprint02_Swimlanes and Selector",
+
+  "directories": [],
+
+  "files": [
+    {
+      "path": "03_Application/Chronicle/src/SourceChooser.tsx",
+      "stub_kind": "tsx_module",
+      "action": "replace",
+      "role": "Grouped, collapsible source chooser. Full replacement of Sprint01 flat-list implementation.",
+      "public_objects": [
+        {
+          "kind": "interface",
+          "name": "SourceChooserProps",
+          "pattern": "props",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "SourceChooser",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "SourceChooser",
+              "visibility": "public",
+              "args": [
+                "props: SourceChooserProps"
+              ],
+              "returns": "JSX.Element",
+              "purpose": "Groups sources by application field (preserving SQL-defined order), renders one collapsible section per group collapsed by default, renders checkbox-style source rows within each expanded group, disables unchecked rows when selectedCount >= maxSelected, calls onToggle on source row click."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "interface",
+          "name": "SourceGroup",
+          "pattern": "data_model",
+          "purpose": "Internal grouping type: { application: string; sources: SourceListRow[] }. Used only within this file to organize the flat sources list before rendering."
+        }
+      ],
+      "props_contract": {
+        "sources": "SourceListRow[]",
+        "onToggle": "(application: string, source_label: string, selected: boolean) => void",
+        "selectedCount": "number",
+        "maxSelected": "number"
+      }
+    },
+
+    {
+      "path": "03_Application/Chronicle/src/SwimlaneRenderer.tsx",
+      "stub_kind": "tsx_module",
+      "action": "create",
+      "role": "New component. Fetches events for 1..4 selected sources in parallel and renders a transposed year grid with per-source swimlane sub-rows.",
+      "public_objects": [
+        {
+          "kind": "interface",
+          "name": "SwimlaneRendererProps",
+          "pattern": "props",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "SwimlaneRenderer",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "SwimlaneRenderer",
+              "visibility": "public",
+              "args": [
+                "props: SwimlaneRendererProps"
+              ],
+              "returns": "JSX.Element",
+              "purpose": "Fetches events for each source in parallel on mount and when sources changes. Renders a transposed grid: rows=weeks (~52), columns=days-of-week (Mon..Sun). For each week row, renders one swimlane sub-row per source. Month labels at left margin on first row of each month. Source labels at left margin. Intensity classes heat-0..heat-4. Shows Skeleton until all fetches resolve. Shows per-source ErrorCard on fetch failure. Calls onDayClick only for cells with value > 0."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "buildEventMap",
+          "pattern": "mapper",
+          "purpose": "Converts CalendarEventRow[] into a Map<string, CalendarEventRow> keyed by date string ('YYYY-MM-DD'). Used only within SwimlaneRenderer."
+        },
+        {
+          "kind": "function",
+          "name": "getIntensityClass",
+          "purpose": "Maps a numeric value (0..100) to a CSS class string: 0 -> 'heat-0', 1-25 -> 'heat-1', 26-50 -> 'heat-2', 51-75 -> 'heat-3', 76-100 -> 'heat-4'. Used only within SwimlaneRenderer."
+        },
+        {
+          "kind": "function",
+          "name": "buildWeekGrid",
+          "purpose": "Builds the ordered list of week start dates and month boundary markers for the current calendar year. Returns a structure that SwimlaneRenderer uses to render week rows with correct month labels. Used only within SwimlaneRenderer."
+        }
+      ],
+      "props_contract": {
+        "sources": "SourceListRow[]",
+        "onDayClick": "(row: CalendarEventRow) => void"
+      }
+    },
+
+    {
+      "path": "03_Application/Chronicle/src/CalendarPage.tsx",
+      "stub_kind": "tsx_module",
+      "action": "modify",
+      "role": "Top-level calendar page. Significant changes: remove activeSrc, introduce selectedSources derived from sources, route to SwimlaneRenderer, remove HeatmapRenderer reference.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "CalendarPage",
+          "pattern": "react_component",
+          "methods": [
+            {
+              "name": "CalendarPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Fetches sources on mount. Maintains sources: SourceListRow[] state. Derives selectedSources = sources.filter(s => s.selected). Passes selectedCount=selectedSources.length and maxSelected=4 to SourceChooser. Renders SwimlaneRenderer when selectedSources.length > 0, passing selectedSources and handleDayClick. Renders DayDetailView with selectedDay. Shows prompt text when selectedSources is empty. Retains loading, error, and empty-state behaviors."
+            },
+            {
+              "name": "handleToggle",
+              "visibility": "private",
+              "args": [
+                "application: string",
+                "source_label: string",
+                "selected: boolean"
+              ],
+              "returns": "void",
+              "purpose": "Calls PATCH /api/chronicle/calendar/sources. On success updates sources state. On failure rolls back optimistic update and surfaces error."
+            },
+            {
+              "name": "handleDayClick",
+              "visibility": "private",
+              "args": [
+                "row: CalendarEventRow"
+              ],
+              "returns": "void",
+              "purpose": "Sets selectedDay state, causing DayDetailView to render with the clicked row."
+            }
+          ]
+        }
+      ],
+      "private_objects": [],
+      "removal_notes": [
+        "Remove activeSrc state",
+        "Remove all imports and references to HeatmapRenderer",
+        "Replace HeatmapRenderer usage with SwimlaneRenderer"
+      ]
+    },
+
+    {
+      "path": "03_Application/Chronicle/src/HeatmapRenderer.tsx",
+      "stub_kind": "tsx_module",
+      "action": "delete",
+      "role": "RETIRED. Replaced entirely by SwimlaneRenderer. File must be deleted. No references to this file may remain in the Chronicle src directory after deletion.",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "03_Application/Chronicle/src/DayDetailView.tsx",
+      "stub_kind": "tsx_module",
+      "action": "no_change",
+      "role": "Unchanged from Sprint01. Receives CalendarEventRow | null and renders detail. No modifications required.",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "03_Application/Chronicle/src/types.ts",
+      "stub_kind": "ts_module",
+      "action": "no_change",
+      "role": "Unchanged from Sprint01. SourceListRow and CalendarEventRow shapes are sufficient for Sprint02. No new types required.",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "03_Application/Chronicle/backend/routers/calendar.py",
+      "stub_kind": "python_module",
+      "action": "verify",
+      "role": "Existing Sprint01 backend router. Verify only: confirm GET /calendar/sources query has ORDER BY application, source_label (or equivalent stable order). No new endpoints, no field changes.",
+      "public_objects": [],
+      "private_objects": [],
+      "verification_notes": [
+        "Confirm ORDER BY clause is present in the sources query",
+        "No new fields, endpoints, or query changes required for Sprint02"
+      ]
+    }
+  ]
+}

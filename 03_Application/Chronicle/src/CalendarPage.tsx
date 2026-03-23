@@ -3,10 +3,13 @@
  *
  * Responsibilities:
  * - Fetch sources list on mount (GET /api/chronicle/calendar/sources)
- * - Maintain sources[] and activeSrc state
- * - Auto-open first selected source on initial load (if any selected)
- * - Render SourceChooser + HeatmapRenderer (when a source is active) + DayDetailView
+ * - Maintain sources[] state; derive selectedSources = sources.filter(s => s.selected)
+ * - Pass selectedCount and maxSelected (4) to SourceChooser
+ * - Render SwimlaneRenderer when selectedSources.length > 0
+ * - Show a prompt text when no sources are selected
  * - Handle source selection toggle (PATCH /api/chronicle/calendar/sources)
+ *   confirm-then-apply: wait for server response before updating state; no rollback
+ * - Render DayDetailView for the selected day
  */
 
 import { useState, useEffect } from 'react';
@@ -16,21 +19,20 @@ import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
 import type { SourceListRow, CalendarEventRow } from './types';
 import SourceChooser from './SourceChooser';
-import HeatmapRenderer from './HeatmapRenderer';
+import SwimlaneRenderer from './SwimlaneRenderer';
 import DayDetailView from './DayDetailView';
 
-interface ActiveSource {
-  application:  string;
-  source_label: string;
-}
+const MAX_SELECTED = 4;
 
 export default function CalendarPage() {
-  const [sources,    setSources]    = useState<SourceListRow[]>([]);
-  const [activeSrc,  setActiveSrc]  = useState<ActiveSource | null>(null);
+  const [sources,     setSources]     = useState<SourceListRow[]>([]);
   const [selectedDay, setSelectedDay] = useState<CalendarEventRow | null>(null);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState<ApiError | null>(null);
-  const [toggling,   setToggling]   = useState(false);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState<ApiError | null>(null);
+  const [toggling,    setToggling]    = useState(false);
+
+  // Derived: sources that are currently selected (in SQL-defined order)
+  const selectedSources = sources.filter((s) => s.selected);
 
   // ── Load sources on mount ────────────────────────────────────────────────────
 
@@ -40,25 +42,15 @@ export default function CalendarPage() {
 
     apiFetch<SourceListRow[]>('/chronicle/calendar/sources').then((res) => {
       if (isApiError(res)) {
-        setError(res);
+        setError(res as ApiError);
       } else {
-        const list = res as SourceListRow[];
-        setSources(list);
-
-        // Auto-open first selected source
-        const firstSelected = list.find((s) => s.selected);
-        if (firstSelected) {
-          setActiveSrc({
-            application:  firstSelected.application,
-            source_label: firstSelected.source_label,
-          });
-        }
+        setSources(res as SourceListRow[]);
       }
       setLoading(false);
     });
   }, []);
 
-  // ── Toggle handler ───────────────────────────────────────────────────────────
+  // ── Toggle handler (confirm-then-apply) ──────────────────────────────────────
 
   async function handleToggle(application: string, source_label: string, selected: boolean) {
     if (toggling) return;
@@ -68,21 +60,21 @@ export default function CalendarPage() {
       '/chronicle/calendar/sources',
       {
         method: 'PATCH',
-        body: JSON.stringify({ application, source_label, selected }),
+        body:   JSON.stringify({ application, source_label, selected }),
       },
     );
 
     setToggling(false);
 
     if (isApiError(res)) {
-      // Surface error but don't block — leave current state
+      // Server rejected — surface error, leave selection state unchanged
       setError(res as ApiError);
       return;
     }
 
     const updated = res as { application: string; source_label: string; selected: boolean };
 
-    // Update sources list optimistically (confirmed by server response)
+    // Update sources list only after server confirms the change
     setSources((prev) =>
       prev.map((s) =>
         s.application === updated.application && s.source_label === updated.source_label
@@ -91,20 +83,14 @@ export default function CalendarPage() {
       ),
     );
 
-    // If we just selected a new source and none is active, auto-open it
-    if (updated.selected && activeSrc === null) {
-      setActiveSrc({ application: updated.application, source_label: updated.source_label });
-    }
-
-    // Clear selected day when toggling changes the active source context
+    // Clear selected day when selection changes (stale detail from a removed source)
     setSelectedDay(null);
   }
 
-  // ── Source click (activate) ──────────────────────────────────────────────────
+  // ── Day click ────────────────────────────────────────────────────────────────
 
-  function handleActivate(application: string, source_label: string) {
-    setActiveSrc({ application, source_label });
-    setSelectedDay(null);
+  function handleDayClick(row: CalendarEventRow) {
+    setSelectedDay(row);
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -137,20 +123,16 @@ export default function CalendarPage() {
         <h1 className="type-display">Calendar</h1>
       </div>
 
+      {/* Non-fatal error banner (e.g. PATCH failure) */}
       {error && (
         <div style={{ marginBottom: 'var(--space-sm)' }}>
           <ErrorCard error={error} />
         </div>
       )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '200px 1fr',
-          gap: 'var(--space-md)',
-          alignItems: 'start',
-        }}
-      >
+      {/* Chooser always above chart — column layout on all screen sizes */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+
         {/* Source chooser panel */}
         <aside>
           <h2 className="type-title" style={{ marginBottom: 'var(--space-sm)' }}>
@@ -158,41 +140,27 @@ export default function CalendarPage() {
           </h2>
           <SourceChooser
             sources={sources}
-            onToggle={(application, source_label, selected) => {
-              // Toggle selection in DB
-              handleToggle(application, source_label, selected);
-              // Also activate the clicked source for viewing
-              handleActivate(application, source_label);
-            }}
+            onToggle={handleToggle}
+            selectedCount={selectedSources.length}
+            maxSelected={MAX_SELECTED}
           />
         </aside>
 
-        {/* Heatmap area */}
+        {/* Swimlane / empty state area */}
         <main>
-          {activeSrc ? (
+          {selectedSources.length > 0 ? (
             <>
-              <h2 className="type-title" style={{ marginBottom: 'var(--space-sm)' }}>
-                {activeSrc.source_label}
-                <span
-                  style={{
-                    marginLeft: 'var(--space-xs)',
-                    fontSize: '0.8em',
-                    fontWeight: 400,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  ({activeSrc.application})
-                </span>
-              </h2>
-              <HeatmapRenderer
-                application={activeSrc.application}
-                source_label={activeSrc.source_label}
-                onDayClick={setSelectedDay}
+              <SwimlaneRenderer
+                sources={selectedSources}
+                onDayClick={handleDayClick}
               />
               <DayDetailView row={selectedDay} />
             </>
           ) : (
-            <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+            <p
+              className="type-body"
+              style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
+            >
               Select a source to view its calendar.
             </p>
           )}

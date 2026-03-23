@@ -93,7 +93,6 @@ Assume this target structure unless the sprint is at an earlier stage:
 
 40_status/
   implementation_status.md
-  deployment_report.md
 
 90_meta/
   sprint_state.json
@@ -177,7 +176,6 @@ AWAITING_HUMAN_REVIEW
 
 IMPLEMENTATION_REVIEWED
   -> if reviewer verdict is COMPLETE, then SPRINT_COMPLETE
-    -> human writes 40_status/deployment_report.md (bugs found, root causes, agent improvement notes)
   -> if reviewer verdict is CHANGES_REQUIRED, then BLOCKED unless a follow-up correction loop is explicitly defined in sprint rules
 
 Any missing required input, contradictory verdict, or illegal transition
@@ -226,11 +224,6 @@ Required:
 - implementation code
 - 30_implementation/implementation_review.md
 - 40_status/implementation_status.md
-
-## SPRINT_COMPLETE
-Required:
-- all IMPLEMENTATION_REVIEWED artifacts
-- 40_status/deployment_report.md — written after human review gate closes; captures bugs found during human testing, root cause by process layer, and agent improvement recommendations
 
 ---
 

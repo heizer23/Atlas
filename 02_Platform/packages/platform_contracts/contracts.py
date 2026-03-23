@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 ColumnType = Literal["string", "number", "date", "boolean", "enum"]
-RowAction  = Literal["delete", "edit", "copy"]
+RowAction  = str  # open — backend declares any action string; frontend renders what is declared
 
 
 class ColumnSchema(BaseModel):
