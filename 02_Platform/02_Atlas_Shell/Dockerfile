@@ -27,6 +27,7 @@ COPY 02_Platform/02_Atlas_Shell/ 02_Platform/02_Atlas_Shell/
 COPY 03_Application/WorkoutTracker/src/ 03_Application/WorkoutTracker/src/
 COPY 03_Application/TaskTracker/src/    03_Application/TaskTracker/src/
 COPY 03_Application/FoodTracker/src/    03_Application/FoodTracker/src/
+COPY 03_Application/Chronicle/src/      03_Application/Chronicle/src/
 
 WORKDIR /repo/02_Platform/02_Atlas_Shell
 RUN npm run build
