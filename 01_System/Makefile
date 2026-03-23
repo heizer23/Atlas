@@ -323,9 +323,11 @@ up:
 	$(MAKE) pg-up
 	$(MAKE) pg-wait
 	$(MAKE) migrate
-	$(MAKE) task-build  task-up
-	$(MAKE) app-build   app-up
-	$(MAKE) food-build  food-up
+	$(MAKE) schema-chronicle
+	$(MAKE) task-build       task-up
+	$(MAKE) app-build        app-up
+	$(MAKE) food-build       food-up
+	$(MAKE) chronicle-build  chronicle-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
 	@echo ""
@@ -333,6 +335,7 @@ up:
 
 down:
 	-$(MAKE) shell-down
+	-$(MAKE) chronicle-down
 	-$(MAKE) food-down
 	-$(MAKE) app-down
 	-$(MAKE) task-down
