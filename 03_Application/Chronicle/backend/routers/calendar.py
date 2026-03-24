@@ -23,15 +23,14 @@ exception to the Atlas UI Data Contract (heatmap does not fit paginated Dataset
 semantics).
 """
 
-import uuid
 from datetime import date
-from typing import Any
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.database import get_db
+from platform_errorhandling import api_error
 
 router = APIRouter(prefix="/chronicle", tags=["calendar"])
 
@@ -42,19 +41,6 @@ class SelectionToggleRequest(BaseModel):
     application:  str
     source_label: str
     selected:     bool
-
-
-# ── Error helper ──────────────────────────────────────────────────────────────
-
-def _api_error(code: str, message: str, detail: Any = None) -> dict:
-    return {
-        "error": {
-            "code":       code,
-            "message":    message,
-            "detail":     detail,
-            "request_id": uuid.uuid4().hex[:8],
-        }
-    }
 
 
 # ── GET /calendar/sources ─────────────────────────────────────────────────────
@@ -84,10 +70,7 @@ def get_sources() -> JSONResponse:
                 cur.execute(sql)
                 rows = cur.fetchall()
     except Exception as exc:
-        return JSONResponse(
-            status_code=500,
-            content=_api_error("DB_ERROR", "Failed to fetch sources.", str(exc)),
-        )
+        return api_error("DB_ERROR", "Failed to fetch sources.", detail=str(exc), status=500)
 
     result = [
         {
@@ -120,13 +103,11 @@ def get_events(
         year = date.today().year
 
     if year < 2000 or year > 2100:
-        return JSONResponse(
-            status_code=422,
-            content=_api_error(
-                "INVALID_PARAM",
-                f"year must be between 2000 and 2100, got {year}",
-                {"field": "year", "received": year},
-            ),
+        return api_error(
+            "INVALID_PARAM",
+            f"year must be between 2000 and 2100, got {year}",
+            detail={"field": "year", "received": year},
+            status=422,
         )
 
     sql = """
@@ -155,10 +136,7 @@ def get_events(
                 cur.execute(sql, (application, source_label, year_start, year_end))
                 rows = cur.fetchall()
     except Exception as exc:
-        return JSONResponse(
-            status_code=500,
-            content=_api_error("DB_ERROR", "Failed to fetch events.", str(exc)),
-        )
+        return api_error("DB_ERROR", "Failed to fetch events.", detail=str(exc), status=500)
 
     result = [
         {
@@ -201,10 +179,7 @@ def patch_source(body: SelectionToggleRequest) -> JSONResponse:
                 row = cur.fetchone()
             conn.commit()
     except Exception as exc:
-        return JSONResponse(
-            status_code=500,
-            content=_api_error("DB_ERROR", "Failed to update selection.", str(exc)),
-        )
+        return api_error("DB_ERROR", "Failed to update selection.", detail=str(exc), status=500)
 
     return JSONResponse(content={
         "application":  row["application"],

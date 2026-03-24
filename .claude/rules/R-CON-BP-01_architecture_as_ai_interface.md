@@ -1,4 +1,12 @@
-# Rule: Architecture as AI Interface
+---
+RULE_ID: R-CON-BP-01
+TITLE: Architecture as AI Interface
+TYPE: CONSTITUTIONAL
+SCOPE: BLUEPRINT
+STATUS: ACTIVE
+CANONICAL_SOURCE: .claude/rules/R-CON-BP-01_architecture_as_ai_interface.md
+RELATES_TO: 00_Blueprint/Atlas_Manifest.md
+---
 
 Design for machine legibility as well as human understanding.
 

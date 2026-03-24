@@ -1,4 +1,13 @@
-01.UI_Data_Contract
+---
+RULE_ID: R-CON-BP-04
+TITLE: UI Data Contract
+TYPE: CONSTITUTIONAL
+SCOPE: BLUEPRINT
+STATUS: ACTIVE
+VERSION: v1.0
+CANONICAL_SOURCE: .claude/rules/R-CON-BP-04_ui_data_contract.md
+RELATES_TO: R-CON-BP-02
+---
 
 Status: Stable — changes deliberately, with explicit versioning.
 Audience: LLMs writing backend endpoints, LLMs designing frontend-facing interfaces, LLMs implementing frontend data consumption, humans reviewing backend/UI contracts.

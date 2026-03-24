@@ -26,12 +26,11 @@ Do not place components outside this structure unless explicitly requested.
 - Surface architectural conflicts before proceeding.
 
 ## Security
-- Default to least privilege and minimal exposure.
-- Warn when a proposal introduces unnecessary exposure.
-- Do not suggest opening ports unless clearly required and secured.
+
+See R-OPS-BP-02 (`.claude/rules/R-OPS-BP-02_security.md`).
 
 ## Repository references
-- UI governance: `00_Blueprint/UI/`
+- Rule registry: `00_Blueprint/RULE_REGISTRY.md`
 - Error handling: `02_Platform/03_ErrorHandling/`
 
 ## Agent delegation

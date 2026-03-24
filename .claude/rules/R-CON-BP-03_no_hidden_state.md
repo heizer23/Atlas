@@ -1,4 +1,12 @@
-# Rule: Durable State Must Be Explicit
+---
+RULE_ID: R-CON-BP-03
+TITLE: Durable State Must Be Explicit
+TYPE: CONSTITUTIONAL
+SCOPE: BLUEPRINT
+STATUS: ACTIVE
+CANONICAL_SOURCE: .claude/rules/R-CON-BP-03_no_hidden_state.md
+RELATES_TO: R-CON-BP-02
+---
 
 State that affects system behavior or correctness must be explicit and owned.
 

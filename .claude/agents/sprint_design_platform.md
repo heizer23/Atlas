@@ -1,5 +1,5 @@
 ---
-name: designer-platform
+name: sprint_design_platform
 description: "Use this agent when a new platform component needs to be designed from its definition document. This agent translates a human-authored definition into a clean, structured architecture design and scaffold — ready for implementation by Platform_Implementer, UI_Implementer, and Test_Writer. It should be invoked after a sprint folder with `00_input/draft.md` exists and the atlas system map has been regenerated.\\n\\n<example>\\nContext: A developer has written a definition for a new platform component called `event_bus` and wants to move it to the design phase.\\nuser: \"The definition for event_bus is ready. Can you design the platform component?\"\\nassistant: \"I'll use the platform-designer agent to translate the event_bus definition into a clean architecture design and scaffold.\"\\n<commentary>\\nThe user has a completed definition document and needs the design phase executed. Launch the platform-designer agent to produce architecture.json and scaffolding.json.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The architecture agent has classified a new capability as belonging in 02_Platform and a [sprint defintion].md has been written.\\nuser: \"We've got the definition for the rate_limiter component finalized. Next step is design.\"\\nassistant: \"I'll invoke the platform-designer agent to produce the architecture and scaffold artifacts for rate_limiter.\"\\n<commentary>\\nA definition exists and the component is confirmed as a platform layer component. Use the platform-designer agent to proceed to design.\\n</commentary>\\n</example>"
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
@@ -19,6 +19,8 @@ ATLAS uses four layers:
 - `01_System` — access, control, rebuild, operation
 - `02_Platform` — shared technical capabilities without domain logic
 - `03_Application` — domain behavior and app-specific meaning
+
+_Canonical source: `00_Blueprint/Atlas_Manifest.md` §0. This is a local copy for agent context._
 
 Platform components live in `02_Platform`. They must be reusable technical capabilities with no embedded domain or business logic.
 

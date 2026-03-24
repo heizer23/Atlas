@@ -1,12 +1,12 @@
-# platform_errorhandling/contracts.py
+# platform_contracts/contracts.py
 # Python implementation of the UI Dataset contract.
 # Source of truth: 00_Blueprint/UI/01_UI_Contract
 # Import from here in every router. Never redefine these types locally.
 
-from typing import Any, Literal
+from typing import Any
 from pydantic import BaseModel, Field
 
-ColumnType = Literal["string", "number", "date", "boolean", "enum"]
+ColumnType = str  # open — backend declares any column type string; frontend renders what is declared
 RowAction  = str  # open — backend declares any action string; frontend renders what is declared
 
 

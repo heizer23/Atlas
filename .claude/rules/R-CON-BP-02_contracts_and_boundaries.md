@@ -1,4 +1,12 @@
-# Rule: Contracts and Boundaries
+---
+RULE_ID: R-CON-BP-02
+TITLE: Contracts and Boundaries
+TYPE: CONSTITUTIONAL
+SCOPE: BLUEPRINT
+STATUS: ACTIVE
+CANONICAL_SOURCE: .claude/rules/R-CON-BP-02_contracts_and_boundaries.md
+RELATES_TO: R-CON-BP-01
+---
 
 Contracts are more durable than implementation.
 

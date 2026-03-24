@@ -1,4 +1,12 @@
-# Rule: Dependency Direction
+---
+RULE_ID: R-CON-PL-02
+TITLE: Dependency Direction
+TYPE: CONSTITUTIONAL
+SCOPE: PLATFORM_LAYER
+STATUS: ACTIVE
+CANONICAL_SOURCE: .claude/rules/R-CON-PL-02_dependency_direction.md
+RELATES_TO: R-CON-PL-01
+---
 
 Respect Atlas layer boundaries.
 

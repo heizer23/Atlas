@@ -1,4 +1,12 @@
-# Rule: Platform Boundary
+---
+RULE_ID: R-CON-PL-01
+TITLE: Platform Boundary
+TYPE: CONSTITUTIONAL
+SCOPE: PLATFORM_LAYER
+STATUS: ACTIVE
+CANONICAL_SOURCE: .claude/rules/R-CON-PL-01_platform_boundary.md
+RELATES_TO: R-CON-BP-01
+---
 
 A Platform component provides reusable technical capability.
 

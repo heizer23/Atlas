@@ -1,5 +1,5 @@
 ---
-name: designer-application
+name: sprint_design_application
 description: "Use this agent when a new application component needs to be designed from its definition document. This agent translates a human-authored definition into a clean, structured application design and scaffold — ready for implementation by Application_Implementer, UI_Implementer, and Test_Writer. It should be invoked after a sprint folder with `00_input/draft.md` exists and the atlas system map has been regenerated.\n\n<example>\nContext: A developer has written a definition for a new application called `food_tracker` and wants to move it to the design phase.\nuser: \"The definition for food_tracker is ready. Can you design the application?\"\nassistant: \"I'll use the application-designer agent to translate the food_tracker definition into a clean application architecture and scaffold.\"\n<commentary>\nThe user has a completed definition document and needs the design phase executed. Launch the application-designer agent to produce architecture.json, scaffolding.json, and schema.sql if required.\n</commentary>\n</example>\n\n<example>\nContext: The architecture agent has classified a new capability as belonging in 03_Application and a definition.md has been written.\nuser: \"We've got the definition for the workout_tracker app finalized. Next step is design.\"\nassistant: \"I'll invoke the application-designer agent to produce the architecture and scaffold artifacts for workout_tracker.\"\n<commentary>\nA definition exists and the component is confirmed as an application-layer component. Use the application-designer agent to proceed to design.\n</commentary>\n</example>"
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
@@ -21,6 +21,8 @@ ATLAS uses four layers:
 - `01_System` — access, control, rebuild, operation
 - `02_Platform` — shared technical capabilities without domain logic
 - `03_Application` — domain behavior and app-specific meaning
+
+_Canonical source: `00_Blueprint/Atlas_Manifest.md` §0. This is a local copy for agent context._
 
 Application components live in `03_Application`. They implement meaningful behavior for a specific domain or purpose. They may consume Blueprint contracts, System control surfaces, and Platform capabilities, but they do not provide reusable platform services.
 

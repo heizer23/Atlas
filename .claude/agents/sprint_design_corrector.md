@@ -1,5 +1,5 @@
 ---
-name: atlas-design-corrector
+name: sprint_design_corrector
 description: "Use this agent when design artifacts in an ATLAS application need to be updated based on an approved design review, specifically to apply review-approved corrections to `20_design/architecture.json`, `20_design/scaffolding.json`, and optionally `20_Data/schema.sql`. This agent should be invoked after a design review has been completed and a `20_design/design_review.md` artifact exists with a verdict, confirmed problems, and a minimal change set.\\n\\n<example>\\nContext: A design review has been completed for a new ATLAS application component and the review artifact is ready.\\nuser: \"The design review for the NotificationService is done. Can you apply the approved corrections to the design artifacts?\"\\nassistant: \"I'll use the atlas-design-corrector agent to apply the review-approved corrections to the design artifacts.\"\\n<commentary>\\nThe user has a completed design review and wants the corrections applied to existing design artifacts. Use the atlas-design-corrector agent to apply only the approved changes from the review artifact.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: A sprint review flagged critical problems in the component architecture that must be resolved before implementation.\\nuser: \"The design_review.md for the PaymentProcessor has Critical and Major issues listed. Please fix the design artifacts before we start coding.\"\\nassistant: \"I'll launch the atlas-design-corrector agent to apply the minimal required corrections from the design review.\"\\n<commentary>\\nCritical and Major review findings must be resolved before implementation. The atlas-design-corrector agent applies only those corrections with the smallest possible change set.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The design review for a component returned a conditional approval requiring specific changes before implementation can begin.\\nuser: \"design_review.md says 'Approved with Required Changes' — the Minimal Change Set has 3 items. Apply them.\"\\nassistant: \"I'll invoke the atlas-design-corrector agent to apply exactly the 3 items in the Minimal Change Set and produce a design corrections summary.\"\\n<commentary>\\nA conditional approval with explicit required changes is the primary trigger for this agent. It applies exactly what the review specifies, nothing more.\\n</commentary>\\n</example>"
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
@@ -24,6 +24,8 @@ ATLAS uses four layers:
 - `01_System` — access, control, rebuild, operation
 - `02_Platform` — shared technical capabilities without domain logic
 - `03_Application` — domain behavior and app-specific meaning
+
+_Canonical source: `00_Blueprint/Atlas_Manifest.md` §0. This is a local copy for agent context._
 
 Design artifacts live inside an application folder under `03_Application/<AppName>/`. Do not place or move files outside this structure unless the review explicitly requires it.
 

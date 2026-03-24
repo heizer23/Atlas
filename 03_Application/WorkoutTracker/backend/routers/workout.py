@@ -334,6 +334,18 @@ def update_exercise(exercise_id: str, body: ExerciseUpdate) -> JSONResponse:
     return dataset_response(_exercises_dataset(rows, str(updated["workout_id"])))
 
 
+HISTORY_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="id",          label="ID",          type="string", sortable=False, detail_visible=False),
+    ColumnSchema(key="workout_date", label="Date",        type="date",   sortable=True),
+    ColumnSchema(key="set1_reps",   label="Set 1 (reps)", type="number", sortable=False),
+    ColumnSchema(key="set2_reps",   label="Set 2 (reps)", type="number", sortable=False),
+    ColumnSchema(key="set3_reps",   label="Set 3 (reps)", type="number", sortable=False),
+    ColumnSchema(key="set4_reps",   label="Set 4 (reps)", type="number", sortable=False),
+    ColumnSchema(key="set5_reps",   label="Set 5 (reps)", type="number", sortable=False),
+    ColumnSchema(key="weight_kg",   label="Weight (kg)",  type="number", sortable=True,  format="kg"),
+]
+
+
 @router.get("/exercises/history", response_model=None)
 def exercise_history(name: str) -> JSONResponse:
     with get_db() as conn:
@@ -357,7 +369,17 @@ def exercise_history(name: str) -> JSONResponse:
         if r.get("weight_kg") is not None:
             r["weight_kg"] = float(r["weight_kg"])
 
-    return JSONResponse(content={"rows": rows})
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="exercise_history",
+            label=f"History — {name}",
+            total=len(rows),
+            page=1,
+            page_size=len(rows) or 1,
+        ),
+        schema_=HISTORY_SCHEMA,
+        rows=rows,
+    ))
 
 
 @router.delete("/exercises/{exercise_id}", response_model=None)

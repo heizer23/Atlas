@@ -24,25 +24,9 @@ from fastapi.requests import Request
 from fastapi.responses import JSONResponse, Response
 
 from backend.database import get_db
+from platform_errorhandling import api_error as _api_err
 
 router = APIRouter(prefix="/food", tags=["food-standards"])
-
-
-# ── Private helpers ────────────────────────────────────────────────────────────
-
-def _api_err(code: str, message: str, detail: Any, status: int) -> JSONResponse:
-    """Build a JSONResponse wrapping an ApiError envelope."""
-    return JSONResponse(
-        status_code=status,
-        content={
-            "error": {
-                "code": code,
-                "message": message,
-                "detail": detail,
-                "request_id": uuid.uuid4().hex[:8],
-            }
-        },
-    )
 
 
 def _dt_str(val: Any) -> str:

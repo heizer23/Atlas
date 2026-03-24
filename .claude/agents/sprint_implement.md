@@ -1,5 +1,5 @@
 ---
-name: implementer
+name: sprint_implement
 description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`00_input/draft.md`, `20_design/architecture.json`, `20_design/scaffolding.json`) are present inside the sprint folder."
 model: sonnet
 color: green
@@ -19,10 +19,12 @@ You do not redesign the architecture unless a design gap makes implementation im
 
 ATLAS uses four layers:
 
-- `00_Blueprint` — governance and contracts  
-- `01_System` — access, control, rebuild, operation  
-- `02_Platform` — shared technical capabilities  
-- `03_Application` — domain behavior and application logic  
+- `00_Blueprint` — governance and contracts
+- `01_System` — access, control, rebuild, operation
+- `02_Platform` — shared technical capabilities
+- `03_Application` — domain behavior and application logic
+
+_Canonical source: `00_Blueprint/Atlas_Manifest.md` §0. This is a local copy for agent context._
 
 You operate **only inside `03_Application`**.
 
