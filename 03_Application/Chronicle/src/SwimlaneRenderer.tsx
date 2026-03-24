@@ -125,10 +125,12 @@ interface DayCellProps {
 function DayCell({ dateStr, sources, sourceStates, onDayClick }: DayCellProps) {
   const n = sources.length;
 
-  // Grid layout inside each cell based on source count
-  const innerGrid: React.CSSProperties = n === 4
-    ? { gridTemplateColumns: 'repeat(2, 1fr)', gridTemplateRows: 'repeat(2, 1fr)' }
-    : { gridTemplateColumns: `repeat(${n}, 1fr)`, gridTemplateRows: '1fr' };
+  // Always N vertical stripes — one column per source, single row.
+  // Never 2×2: that produces a checkerboard pattern across adjacent days.
+  const innerGrid: React.CSSProperties = {
+    gridTemplateColumns: `repeat(${n}, 1fr)`,
+    gridTemplateRows:    '1fr',
+  };
 
   return (
     <div

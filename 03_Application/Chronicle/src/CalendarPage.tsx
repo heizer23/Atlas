@@ -12,7 +12,7 @@
  * - Render DayDetailView for the selected day
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
@@ -31,8 +31,9 @@ export default function CalendarPage() {
   const [error,       setError]       = useState<ApiError | null>(null);
   const [toggling,    setToggling]    = useState(false);
 
-  // Derived: sources that are currently selected (in SQL-defined order)
-  const selectedSources = sources.filter((s) => s.selected);
+  // Memoised — stable reference prevents SwimlaneRenderer's useEffect from
+  // re-firing (and re-fetching) on unrelated CalendarPage re-renders (e.g. setSelectedDay).
+  const selectedSources = useMemo(() => sources.filter((s) => s.selected), [sources]);
 
   // ── Load sources on mount ────────────────────────────────────────────────────
 
@@ -146,16 +147,16 @@ export default function CalendarPage() {
           />
         </aside>
 
+        {/* Day detail — above the grid so it is visible without scrolling */}
+        <DayDetailView row={selectedDay} />
+
         {/* Swimlane / empty state area */}
         <main>
           {selectedSources.length > 0 ? (
-            <>
-              <SwimlaneRenderer
-                sources={selectedSources}
-                onDayClick={handleDayClick}
-              />
-              <DayDetailView row={selectedDay} />
-            </>
+            <SwimlaneRenderer
+              sources={selectedSources}
+              onDayClick={handleDayClick}
+            />
           ) : (
             <p
               className="type-body"
