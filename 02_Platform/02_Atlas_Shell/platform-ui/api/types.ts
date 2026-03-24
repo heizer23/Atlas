@@ -1,6 +1,6 @@
-// src/api/types.ts — single source of truth for frontend types
-// Mirrors 00_Blueprint/UI/01_UI_Contract. Do not extend or override locally.
-// Change this file only when the contract changes, then version-bump the contract.
+// platform-ui/api/types.ts — single source of truth for frontend types
+// Implements R-CON-BP-04 (UI Data Contract). Do not extend or override locally.
+// Change this file only when the contract changes, then version-bump R-CON-BP-04.
 
 export type ColumnType  = "string" | "number" | "date" | "boolean" | "enum";
 export type Aggregation = "sum" | "avg" | "count" | "max" | "min";

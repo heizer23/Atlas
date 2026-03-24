@@ -10,7 +10,7 @@ Platform. Contains no domain logic. Shared by all application routers that surfa
 
 ## Source of truth
 
-`00_Blueprint/UI/01_UI_Contract` defines the contract in language-neutral terms.
+`R-CON-BP-04` (`.claude/rules/R-CON-BP-04_ui_data_contract.md`) defines the contract in language-neutral terms.
 This package is its Python expression. When the contract changes, update both.
 
 ## Responsibilities

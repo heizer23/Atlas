@@ -6,7 +6,7 @@
  * Role: Vite configuration for the standalone shell application.
  * Defines two module aliases:
  *   @atlas/shell   → ./src/index.ts                   (self-reference)
- *   @platform-ui   → ../../02_Platform/UI/react/src/  (Blueprint UI primitives)
+ *   @platform-ui   → ./platform-ui/                    (platform UI primitives, owned by shell)
  */
 
 import { defineConfig } from 'vite';
@@ -18,7 +18,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@atlas/shell':    path.resolve(__dirname, './src/index.ts'),
-      '@platform-ui':   path.resolve(__dirname, '../../02_Platform/UI/react/src'),
+      '@platform-ui':   path.resolve(__dirname, './platform-ui'),
       // App source files live outside the shell root so Vite can't find their
       // dependencies via normal node_modules traversal. Pin shared packages to
       // the shell's own node_modules to guarantee a single copy and correct resolution.
@@ -46,7 +46,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     alias: {
       '@atlas/shell': path.resolve(__dirname, './src/index.ts'),
-      '@platform-ui': path.resolve(__dirname, '../../02_Platform/UI/react/src'),
+      '@platform-ui': path.resolve(__dirname, './platform-ui'),
     },
   },
 });

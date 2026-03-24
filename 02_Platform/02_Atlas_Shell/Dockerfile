@@ -1,24 +1,18 @@
 # Stage 1: build the Atlas Shell Vite application
 #
-# Build context must be the repo root so the @platform-ui alias
-# (vite.config.ts: '../../02_Platform/UI/react/src/') resolves correctly.
-# The shell vite.config.ts uses path.resolve(__dirname, ...) relative to the
-# shell package root — at build time __dirname is /app, so we reproduce
-# the same relative structure inside the image.
+# Build context is the repo root so application source paths resolve correctly.
+# platform-ui lives inside the shell at 02_Platform/02_Atlas_Shell/platform-ui/
+# and is covered by the shell COPY below — no separate copy needed.
 #
 FROM node:20-alpine AS builder
 
-# Recreate the relevant repo subtree under /repo so relative paths match.
 WORKDIR /repo
 
 # Install shell dependencies
 COPY 02_Platform/02_Atlas_Shell/package*.json 02_Platform/02_Atlas_Shell/
 RUN cd 02_Platform/02_Atlas_Shell && npm ci
 
-# Copy Platform UI source (alias target: /repo/02_Platform/UI/react/src/)
-COPY 02_Platform/UI/react/src/ 02_Platform/UI/react/src/
-
-# Copy shell source
+# Copy shell source (includes platform-ui/)
 COPY 02_Platform/02_Atlas_Shell/ 02_Platform/02_Atlas_Shell/
 
 # Copy application shell registration files.

@@ -4,276 +4,167 @@ TITLE: UI Data Contract
 TYPE: CONSTITUTIONAL
 SCOPE: BLUEPRINT
 STATUS: ACTIVE
-VERSION: v1.0
 CANONICAL_SOURCE: .claude/rules/R-CON-BP-04_ui_data_contract.md
-RELATES_TO: R-CON-BP-02
+VERSION: v0.3
 ---
 
-Status: Stable — changes deliberately, with explicit versioning.
-Audience: LLMs writing backend endpoints, LLMs designing frontend-facing interfaces, LLMs implementing frontend data consumption, humans reviewing backend/UI contracts.
-Relationship: Defines the stable data contract between Atlas producers and Atlas UI consumers. Application and platform code couple to this contract, not to concrete frontend implementation details.
+# UI Data Contract
 
-Purpose
+> **Status:** Stable — changes deliberately, with explicit versioning. Application code couples to this document, not to implementation details.
+> **Audience:** LLMs writing backend endpoints, LLMs writing frontend components, humans reviewing API design.
+> **Relationship:** Defines the data shapes that the platform UI primitives render and that Application routers must produce.
 
-Any Atlas endpoint or interface intended to supply data for UI rendering must return a payload that conforms to a stable UI data contract.
+---
 
-Applications and platform components are coupled to this contract. They are not coupled to React components, hooks, local view logic, or styling choices.
+## Purpose
 
-This contract exists so that:
+Any Application that surfaces data in the Atlas UI must return a `Dataset` from its endpoints.
+The UI renders nothing that is not a `Dataset`.
+This contract is **stable**. The UI implementation is not.
 
-backend producers know exactly what shape to return
+Applications are coupled to this contract. They are not coupled to React components, hooks, or styling decisions.
 
-frontend consumers know exactly what shape to expect
+---
 
-design agents can define interfaces without coupling to implementation details
+## 1. Core Types
 
-UI implementation can evolve without breaking producers
+Authoritative type definitions live in two implementation files. Import from them — never redefine locally.
 
-This document defines data shape and payload semantics only.
+| File | Language |
+|---|---|
+| `02_Platform/02_Atlas_Shell/platform-ui/api/types.ts` | TypeScript |
+| `02_Platform/packages/platform_contracts/contracts.py` | Python |
 
-It does not define:
+### 1.1 Scalar types
 
-rendering behavior
+| Type | Valid values | Open/Closed | Notes |
+|---|---|---|---|
+| `ColumnType` | `"string"`, `"number"`, `"date"`, `"boolean"`, `"enum"` | Closed | Field display type |
+| `RowAction` | any string | **Open** | Backend declares which actions apply. Frontend renders only what is declared. Conventional values: `"delete"`, `"edit"`, `"copy"` |
+| `Aggregation` | `"sum"`, `"avg"`, `"count"`, `"max"`, `"min"` | Closed | Chart aggregation function |
+| `BarMode` | `"grouped"`, `"stacked"`, `"stacked_percent"` | Closed | Bar chart stacking mode |
+| `SeriesType` | `"bar"`, `"line"` | Closed | Combo chart series type |
+| `YAxis` | `"left"`, `"right"` | Closed | Dual-axis binding |
 
-placeholder behavior
+### 1.2 Structures
 
-visual fallback behavior
+| Structure | Key fields |
+|---|---|
+| `ColumnSchema` | `key`, `label`, `type`, `sortable?`, `filterable?`, `detail_visible?`, `format?` |
+| `DatasetMeta` | `object_type`, `label`, `total`, `page`, `page_size`, `row_actions` |
+| `Dataset` | `meta`, `schema`, `rows` |
+| `Row` | `id: string` + additional fields matching schema keys |
+| `ApiError` | `error.{code, message, detail?, request_id}` |
+| `FormField` | `key`, `label`, `type`, `required?`, `options?`, `placeholder?`, `initialValue?` |
 
-Scope
+---
 
-This contract applies to:
+## 2. Dataset Rules
 
-application endpoints that provide UI-rendered data
+These rules are enforced by the frontend. Violations produce `WarningPlaceholder` or silent ignores as specified.
 
-platform components that expose frontend-facing data interfaces
+| Rule | Enforcement |
+|---|---|
+| Every `row` must have an `id` field (string) | `WarningPlaceholder` if missing |
+| `schema` key order defines column display order | Enforced by render order |
+| `row` fields not declared in `schema` are ignored | Silent — no warning, no crash |
+| `row_actions` is declared by backend, not hardcoded in frontend | Frontend renders only what backend declares |
+| `schema[].key` must match `row` field keys exactly (case-sensitive) | Mismatched keys render empty cells |
+| `total` reflects full unpaginated count, not current page count | Used for pagination controls |
 
-frontend components that consume Atlas data payloads
+---
 
-This contract does not apply to:
+## 3. Chart Mapping Types
 
-internal implementation details of frontend components
+Charts are **views over a Dataset** — they never fetch their own data. A chart is a `dataset` prop plus a `mapping` that declares how to interpret it.
 
-styling or visual design rules
+### 3.1 BarChartMapping
 
-runtime rendering fallback behavior
-
-endpoints governed by another explicit stable contract
-
-Core Rule
-
-Any Atlas endpoint or interface intended to supply data for UI rendering must return a payload defined by an explicit stable UI contract.
-
-The default contract for collection-style UI data is:
-
-Dataset
-
-or ApiError
-
-Other UI payload shapes are allowed only when Dataset is not a natural fit and the alternate shape is defined as an explicit stable contract.
-
-Default-First Rule
-
-Use Dataset by default for:
-
-tables
-
-list views
-
-filterable collections
-
-chart source data
-
-pageable result sets
-
-Do not invent an alternate contract when Dataset fits reasonably well.
-
-Define another explicit UI contract when the payload is primarily:
-
-a command result
-
-a form definition or submission result
-
-a detail object with nested structure
-
-a tree or graph
-
-a composed dashboard payload
-
-live or streaming state
-
-1. Core Types
-1.1 TypeScript (frontend)
-// src/api/types.ts
-// Single source of truth for frontend contract types.
-// Do not redefine locally.
-
-export type ColumnType =
-  | "string"
-  | "number"
-  | "date"
-  | "boolean"
-  | "enum"
-  | string; // extensible
-
-export type Aggregation =
-  | "sum"
-  | "avg"
-  | "count"
-  | "max"
-  | "min";
-
-export type BarMode =
-  | "grouped"
-  | "stacked"
-  | "stacked_percent";
-
-export type SeriesType =
-  | "bar"
-  | "line";
-
-export type YAxis =
-  | "left"
-  | "right";
-
-export type RowAction = string; // e.g. "edit", "delete", "archive"
-
-export interface ColumnSchema {
-  key: string;
-  label: string;
-  type: ColumnType;
-
-  sortable?: boolean;
-  filterable?: boolean;
-  detail_visible?: boolean;
-
-  format?: string;
-}
-
-export interface DatasetMeta {
-  object_type: string;
-  label: string;
-
-  total: number;
-
-  page: number;
-  page_size: number;
-
-  row_actions: RowAction[];
-}
-
-export type Row =
-  { id: string } &
-  Record<string, unknown>;
-
-export interface Dataset {
-  meta: DatasetMeta;
-  schema: ColumnSchema[];
-  rows: Row[];
-}
-
-export interface ApiError {
-  error: {
-    code: string;
-    message: string;
-    detail?: unknown;
-    request_id: string;
-  };
-}
-1.2 Python (backend)
-# backend/platform/models.py
-# Import from here in routers and platform services. Never redefine locally.
-
-from typing import Any, Literal
-from pydantic import BaseModel, Field
-
-
-ColumnType = str
-Aggregation = Literal["sum", "avg", "count", "max", "min"]
-RowAction = str
-
-
-class ColumnSchema(BaseModel):
-    key: str
-    label: str
-    type: ColumnType
-
-    sortable: bool = True
-    filterable: bool = False
-    detail_visible: bool = True
-
-    format: str | None = None
-
-
-class DatasetMeta(BaseModel):
-    object_type: str
-    label: str
-
-    total: int
-
-    page: int = 1
-    page_size: int = 25
-
-    row_actions: list[RowAction] = Field(default_factory=list)
-
-
-class Dataset(BaseModel):
-    meta: DatasetMeta
-    schema: list[ColumnSchema]
-    rows: list[dict[str, Any]]
-2. Dataset Semantics
-
-The following rules are part of the contract.
-
-Rule	Meaning
-Every row must contain id: string	Stable row identity for UI actions and detail rendering
-schema order defines column display order	Producers control display ordering
-schema[].key must match row field keys exactly	Field matching is case-sensitive
-Row fields not present in schema are non-contract data	Consumers may ignore them
-row_actions is declared by the producer	The frontend must not invent object actions
-total represents the total number of rows matching the query before pagination is applied	Pagination metadata refers to the full result set
-3. Chart Mapping Types
-
-Charts are views over a Dataset.
-They do not define their own independent data shape.
-
-3.1 BarChartMapping
+```typescript
 interface BarChartMapping {
-  x: string;
-  y: string;
-
+  x:           string;      // schema key — category axis
+  y:           string;      // schema key — must be type: "number"
   aggregation: Aggregation;
-
-  group_by?: string;
-  bar_mode?: BarMode;
+  group_by?:   string;      // schema key — creates one series per unique value
+  bar_mode?:   BarMode;     // default: "grouped" when group_by is present
 }
-3.2 LineChartMapping
+```
+
+| `bar_mode` | Behaviour |
+|---|---|
+| `"grouped"` | Bars side-by-side per category. Default when `group_by` is set. |
+| `"stacked"` | Bars stacked — shows absolute totals per category. |
+| `"stacked_percent"` | Bars stacked and normalized to 100% — shows composition/share. |
+
+### 3.2 LineChartMapping
+
+```typescript
 interface LineChartMapping {
-  x: string;
-  y: string;
-
+  x:           string;      // schema key — time axis preferred (type: "date")
+  y:           string;      // schema key — must be type: "number"
   aggregation: Aggregation;
 }
-3.3 ComboChartMapping
+```
+
+### 3.3 ComboChartMapping
+
+```typescript
 interface SeriesMapping {
-  y: string;
-
-  type: SeriesType;
-
-  label?: string;
-
+  y:           string;      // schema key — must be type: "number"
+  type:        SeriesType;  // "bar" | "line"
+  label?:      string;      // legend label — defaults to schema[y].label
   aggregation: Aggregation;
-
-  y_axis?: YAxis;
+  y_axis?:     YAxis;       // "left" | "right" — default: "left"
 }
 
 interface ComboChartMapping {
-  x: string;
-  series: SeriesMapping[];
+  x:      string;           // schema key — shared category/time axis
+  series: SeriesMapping[];  // min 2 — must include ≥1 "bar" and ≥1 "line"
 }
-4. Error Envelope
+```
 
-All UI-facing errors must use this shape:
+### 3.4 Chart Decision Tree
 
+```
+One category, one metric          →  BarChart
+One category, multiple metrics    →  BarChart  +  group_by  +  bar_mode: "grouped"
+Composition / share               →  BarChart  +  group_by  +  bar_mode: "stacked_percent"
+Absolute stacked totals           →  BarChart  +  group_by  +  bar_mode: "stacked"
+Time trend, one metric            →  LineChart
+Time trend + categorical metric   →  ComboChart  (bar + line, shared axis)
+Two metrics, different scales     →  ComboChart  +  y_axis: "left" / "right"
+```
+
+---
+
+## 4. Validation Rules
+
+If a primitive receives an invalid configuration it must render `WarningPlaceholder` and log to DebugPanel. It must never crash, render blank, or silently degrade.
+
+| Violation | Response |
+|---|---|
+| `mapping.x` key not in `schema` | `WarningPlaceholder` — "key '{x}' not found in schema" |
+| `mapping.y` key not in `schema` | `WarningPlaceholder` — "key '{y}' not found in schema" |
+| `mapping.y` field not `type: "number"` | `WarningPlaceholder` — "y-axis field must be type: number" |
+| `bar_mode` set without `group_by` | `WarningPlaceholder` — "`bar_mode` requires `group_by`" |
+| `ComboChart` with fewer than 2 series | `WarningPlaceholder` — suggest `BarChart` or `LineChart` |
+| `ComboChart` missing a `"bar"` series | `WarningPlaceholder` — "ComboChart requires ≥1 bar series" |
+| `ComboChart` missing a `"line"` series | `WarningPlaceholder` — "ComboChart requires ≥1 line series" |
+| `y_axis: "right"` with no `"left"` series | `WarningPlaceholder` — "dual axis requires ≥1 series on left" |
+| `row` missing `id` field | `WarningPlaceholder` — "rows must have an id field" |
+| Unsupported view type requested | `WarningPlaceholder` — "unsupported view: {type}; use BarChart, LineChart, ComboChart, TableView, or DetailView" |
+
+---
+
+## 5. Error Envelope
+
+All API errors must use this shape. The frontend checks for the `error` key first on every response.
+
+```typescript
+// Successful response
+{ meta: {...}, schema: [...], rows: [...] }
+
+// Error response — always this shape, never a different error format
 {
   "error": {
     "code": "INVALID_FILTER",
@@ -282,37 +173,40 @@ All UI-facing errors must use this shape:
     "request_id": "req_8f2a1c"
   }
 }
+```
 
-Rules:
+**Backend FastAPI error helper:**
 
-code is machine-readable
+```python
+# backend/platform/errors.py
+from fastapi.responses import JSONResponse
+import uuid
 
-message is human-readable
+def api_error(code: str, message: str, detail=None, status: int = 400):
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "detail": detail,
+                "request_id": uuid.uuid4().hex[:8],
+            }
+        }
+    )
+```
 
-detail is optional developer/debug context
+---
 
-request_id is required for traceability
+## 6. Canonical Endpoint Example
 
-5. Canonical Producer Rule
-
-A backend endpoint or platform interface that provides UI-rendered data must:
-
-declare a stable Dataset.meta.object_type
-
-declare a complete schema
-
-return rows whose keys conform to that schema
-
-return ApiError when contract-valid data cannot be produced
-
-6. Canonical Endpoint Example
+```python
+# backend/routers/workout.py
 from platform.models import Dataset, DatasetMeta, ColumnSchema
 
 @router.get("/workout/sessions")
 def list_sessions(page: int = 1, page_size: int = 25) -> Dataset:
-
     rows, total = db.get_sessions(page=page, page_size=page_size)
-
     return Dataset(
         meta=DatasetMeta(
             object_type="workout_session",
@@ -322,85 +216,94 @@ def list_sessions(page: int = 1, page_size: int = 25) -> Dataset:
             page_size=page_size,
             row_actions=["edit", "delete"],
         ),
-        schema=[
-            ColumnSchema(key="date", label="Date", type="date"),
-            ColumnSchema(key="exercise", label="Exercise", type="string", filterable=True),
+        schema_=[
+            ColumnSchema(key="date",      label="Date",        type="date",   sortable=True),
+            ColumnSchema(key="exercise",  label="Exercise",    type="string", filterable=True),
             ColumnSchema(key="volume_kg", label="Volume (kg)", type="number", format="kg"),
-            ColumnSchema(key="notes", label="Notes", type="string", sortable=False),
+            ColumnSchema(key="notes",     label="Notes",       type="string", sortable=False),
         ],
         rows=rows,
     )
-7. Contract Boundaries
-Producers must not
+```
 
-couple payload shape to specific React components
+---
 
-require frontend knowledge of backend-local model names
+## 7. CreateForm Types
 
-invent app-local response shapes when Dataset fits
+`CreateForm` is a platform primitive for creating new entities. Its field definitions reuse `ColumnType` so the backend schema vocabulary and the form vocabulary stay aligned.
 
-return ad hoc error formats
+```typescript
+// Defined in platform-ui/api/types.ts — alongside the Dataset types
 
-Consumers must not
+interface FormFieldOption {
+  value: string;
+  label: string;
+}
 
-assume undeclared row fields are stable
+interface FormField {
+  key:           string;
+  label:         string;
+  type:          ColumnType;          // same vocabulary as ColumnSchema.type
+  required?:     boolean;             // default: false
+  options?:      FormFieldOption[];   // required when type is "enum"
+  placeholder?:  string;
+  initialValue?: string;              // pre-fills the field; used for edit forms
+}
+```
 
-hardcode actions that are not declared in row_actions
+The backend does not emit `FormField` definitions — form fields are declared by the application frontend. The backend only validates the resulting POST/PATCH body and returns `Dataset | ApiError`.
 
-reinterpret schema keys or change their meaning locally
+---
 
-8. Out of Scope
+## 8. Out of Scope
 
-This document does not define:
+The frontend renders none of the following. If an Application requests them, `WarningPlaceholder` is rendered and the event is logged as a platform gap.
 
-placeholder rendering
+| ❌ Not supported | ✅ Use instead |
+|---|---|
+| Pie charts | `BarChart` + `bar_mode: "stacked_percent"` |
+| Scatter / bubble charts | Not available — raise as platform gap |
+| App-specific chart types | Not available — raise as platform gap |
+| Charts that fetch their own data | Charts always receive `dataset` prop |
+| Custom table layouts per app | Configure `TableView` via `schema` |
+| Raw `fetch` in components | `apiFetch` from `platform-ui/api/client.ts` only |
 
-validation warning rendering
+---
 
-chart fallback behavior
+## 9. Contract Boundaries
 
-visual design
+Producers must not:
+- couple payload shape to specific React components
+- require frontend knowledge of backend-local model names
+- invent app-local response shapes when Dataset fits
+- return ad hoc error formats
 
-layout rules
+Consumers must not:
+- assume undeclared row fields are stable
+- hardcode actions that are not declared in `row_actions`
+- reinterpret schema keys or change their meaning locally
 
-component composition details
+---
 
-form runtime behavior
+## 10. Versioning
 
-Those belong in separate UI implementation or primitive behavior rules.
+This contract is versioned. The current version is **v0.3**.
 
-9. Guidance for Designers
+Changes from v0.2:
+- Added `initialValue?: string` to `FormField` (non-breaking additive change).
 
-When a designer agent defines a frontend-facing platform or application interface:
+Changes from v0.1:
+- Added `FormField` and `FormFieldOption` types (`CreateForm` primitive).
 
-use this contract as the default payload contract for UI-rendered data
+Changes from original R-CON-BP-04:
+- Added chart mapping types (`BarChartMapping`, `LineChartMapping`, `ComboChartMapping`) and decision tree.
+- Added full validation rules table.
+- Updated implementation file path to `02_Platform/02_Atlas_Shell/platform-ui/`.
 
-reference this contract instead of restating field definitions
+Changes to this contract require:
+1. An explicit decision — not a side effect of feature work.
+2. Update to this document with rationale.
+3. Corresponding update to affected producers and consumers.
+4. Version bump in this header.
 
-surface any required deviation explicitly as an open question or controlled exception
-
-Do not silently invent alternate UI payload contracts.
-
-10. Versioning
-
-This contract is versioned.
-The current version is v1.0.
-
-Changes require:
-
-explicit decision
-
-update to this document
-
-corresponding updates to affected producers and consumers
-
-version bump in this header
-
-Compatibility rules:
-
-Change	Breaking
-Add optional field	No
-Add optional schema metadata	No
-Remove field	Yes
-Rename field	Yes
-Change semantics	Yes
+Additive changes (new optional fields) are non-breaking. Removals or renames are breaking and require migration notes.

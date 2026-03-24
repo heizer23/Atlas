@@ -370,12 +370,11 @@ These decisions have been made and must not be re-opened during design or implem
 
 ## Deployment model
 The shell is a **standalone Vite application** — its own build, its own `package.json`, its own compose entry.
-It is not a package embedded inside `02_Platform/UI`, and it is not a publishable npm package.
+It is not a publishable npm package.
 
-## Relationship to 02_Platform/UI
-The shell supersedes `02_Platform/UI` as the frontend host.
-The platform UI primitives (`components/`, `api/`, `hooks/`, `index.css`) inside `02_Platform/UI/react/src/` are retained and consumed by the shell via an alias (`@platform-ui`).
-The outer `02_Platform/UI` Vite host files are removed.
+## Platform UI primitives
+The platform UI primitives (`components/`, `api/`, `hooks/`, `index.css`) live at `02_Platform/02_Atlas_Shell/platform-ui/` and are consumed via the `@platform-ui` Vite alias.
+The shell is the sole owner and consumer. `02_Platform/UI` no longer exists.
 
 ## Application hosting model
 The shell is the UI host for all Atlas applications.
@@ -394,7 +393,7 @@ The shell has no dependency to declare on this — it is an ops concern, not a s
 
 ## Mobile navigation
 Bottom Navigation is permitted for mobile viewports.
-`00_Blueprint/UI/02_UI_DesignLanguage` has been updated to reflect this.
+`02_Platform/02_Atlas_Shell/UI_DesignLanguage.md` defines this as a permitted deviation from stock M3.
 Maximum 5 items in mobile bottom navigation — this is a hard constraint, not a guideline.
 
 ---

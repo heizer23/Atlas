@@ -1,5 +1,5 @@
-// src/api/client.ts — do not modify during feature work
-// Copied verbatim from 00_Blueprint/UI/03_UI_Implementation §3
+// platform-ui/api/client.ts — do not modify during feature work
+// See: 02_Platform/02_Atlas_Shell/UI_Implementation.md §3
 
 import type { ApiError } from "./types";
 

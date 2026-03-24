@@ -221,7 +221,7 @@ Before finalizing output, verify each of the following:
 ## Behavioral Constraints
 
 - Do not invent components or dependencies not implied by the definition or system map.
-- Do not make visual design decisions unless already fixed by `00_Blueprint/UI/` governance.
+- Do not make visual design decisions unless already fixed by `02_Platform/02_Atlas_Shell/UI_DesignLanguage.md` governance.
 - Do not write implementation code beyond stubs and structural scaffolding.
 - Do not design a full test suite — name the test scenarios and defer writing them to Test_Writer.
 - Prefer the simplest structure consistent with the definition.
