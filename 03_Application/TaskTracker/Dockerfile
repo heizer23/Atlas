@@ -6,7 +6,7 @@ COPY 02_Platform/packages /platform_packages
 ENV PYTHONPATH="/platform_packages"
 
 COPY 03_Application/TaskTracker/pyproject.toml .
-RUN pip install --no-cache-dir -e .
+RUN --mount=type=cache,target=/root/.cache/pip pip install -e .
 
 COPY 03_Application/TaskTracker/backend/ ./backend/
 

@@ -8,7 +8,7 @@ COPY 02_Platform/MCPGateway/app/ ./app/
 # Application: FoodTracker tools (domain layer)
 COPY 03_Application/FoodTracker/ ./foodtracker/
 
-RUN pip install --no-cache-dir fastmcp "psycopg[binary]"
+RUN --mount=type=cache,target=/root/.cache/pip pip install fastmcp "psycopg[binary]"
 
 EXPOSE 8002
 

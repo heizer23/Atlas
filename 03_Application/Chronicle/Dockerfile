@@ -10,7 +10,7 @@ ENV PYTHONPATH="/platform_packages"
 COPY 03_Application/Chronicle/pyproject.toml .
 COPY 03_Application/Chronicle/backend/ ./backend/
 
-RUN pip install --no-cache-dir .
+RUN --mount=type=cache,target=/root/.cache/pip pip install .
 
 EXPOSE 8000
 
