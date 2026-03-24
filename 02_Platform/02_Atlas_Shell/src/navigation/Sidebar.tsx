@@ -85,6 +85,18 @@ export function Sidebar(): JSX.Element {
     ? [...activeApp.desktopNav].sort((a, b) => a.order - b.order)
     : [];
 
+  // Find the most-specific matching nav item to avoid false positives when a
+  // short path (e.g. '/food') is a prefix of more specific paths ('/food/report').
+  const activeItemId = navItems.reduce<string | null>((bestId, item) => {
+    const matches =
+      location.pathname === item.path ||
+      location.pathname.startsWith(item.path + '/');
+    if (!matches) return bestId;
+    const bestItem = bestId ? navItems.find((i) => i.id === bestId) : null;
+    if (!bestItem) return item.id;
+    return item.path.length > bestItem.path.length ? item.id : bestId;
+  }, null);
+
   function handleLauncherClick() {
     navigate('/');
     if (isTablet) setIsOpen(false);
@@ -133,7 +145,7 @@ export function Sidebar(): JSX.Element {
             <SidebarNavItem
               key={item.id}
               item={item}
-              isActive={location.pathname === item.path || location.pathname.startsWith(item.path + '/')}
+              isActive={item.id === activeItemId}
               onClick={isTablet ? () => setIsOpen(false) : undefined}
             />
           ))}

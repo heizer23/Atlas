@@ -13,12 +13,29 @@
  */
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ShellContext } from './ShellContext';
 import { AppRegistry } from '../registry/AppRegistry';
 import { Sidebar } from '../navigation/Sidebar';
 import { BottomNav } from '../navigation/BottomNav';
 import './shell.css';
+
+function MobileHeader({ label }: { label: string }): JSX.Element {
+  const navigate = useNavigate();
+  return (
+    <div className="shell-mobile-header">
+      <button
+        type="button"
+        className="shell-mobile-header__back-btn"
+        onClick={() => navigate('/')}
+        aria-label="Back to launcher"
+      >
+        ← Atlas
+      </button>
+      <span className="shell-mobile-header__title">{label}</span>
+    </div>
+  );
+}
 
 /** Returns true when the viewport is mobile (<768px). */
 function useIsMobile(): boolean {
@@ -59,6 +76,7 @@ export function ShellLayout({ children }: ShellLayoutProps): JSX.Element {
     <ShellContext.Provider value={contextValue}>
       <div className="shell-root">
         {!isMobile && <Sidebar />}
+        {isMobile && activeApp && <MobileHeader label={activeApp.label} />}
         <main className="shell-content">
           {children}
         </main>

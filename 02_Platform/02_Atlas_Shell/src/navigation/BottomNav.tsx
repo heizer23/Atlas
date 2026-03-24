@@ -63,6 +63,18 @@ export function BottomNav(): JSX.Element {
     primaryItems = primaryItems.slice(0, MAX_BOTTOM_NAV_ITEMS);
   }
 
+  // Find the most-specific matching nav item to avoid false positives when a
+  // short path (e.g. '/food') is a prefix of more specific paths ('/food/report').
+  const activeItemId = primaryItems.reduce<string | null>((bestId, item) => {
+    const matches =
+      location.pathname === item.path ||
+      location.pathname.startsWith(item.path + '/');
+    if (!matches) return bestId;
+    const bestItem = bestId ? primaryItems.find((i) => i.id === bestId) : null;
+    if (!bestItem) return item.id;
+    return item.path.length > bestItem.path.length ? item.id : bestId;
+  }, null);
+
   return (
     <>
       <nav className="shell-bottom-nav" aria-label="Mobile navigation">
@@ -70,10 +82,7 @@ export function BottomNav(): JSX.Element {
           <BottomNavItem
             key={item.id}
             item={item}
-            isActive={
-              location.pathname === item.path ||
-              location.pathname.startsWith(item.path + '/')
-            }
+            isActive={item.id === activeItemId}
           />
         ))}
 
