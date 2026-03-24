@@ -18,6 +18,7 @@ import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ReportPage from './ReportPage';
 import EntriesPage from './EntriesPage';
 import EntryDetailPage from './EntryDetailPage';
+import StandardsPage from './StandardsPage';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
@@ -374,6 +375,7 @@ export default function ShellEntry() {
       <Route path="/report"      element={<ReportPage />} />
       <Route path="/entries"     element={<EntriesPage />} />
       <Route path="/entries/:id" element={<EntryDetailPage />} />
+      <Route path="/day"         element={<StandardsPage />} />
     </Routes>
   );
 }

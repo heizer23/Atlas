@@ -1,17 +1,20 @@
 /**
- * EntriesPage — Sprint 03
+ * EntriesPage — Sprint 04
  *
  * Top-level entries overview screen for /food/entries.
- * Fetches GET /api/food/entries on mount. Renders all stored meal entries
- * with row-level delete, copy, and open-detail actions.
+ * Fetches GET /api/food/entries on mount. Each row now exposes a three-dots
+ * menu with Standard / Remove Standard / Delete actions.
  *
- * Behaviours:
- * - Delete: confirmation dialog → DELETE /api/food/entries/{id} → remove from list
- * - Copy:   POST /api/food/entries/{id}/copy → navigate to /food/entries/{newId}
- * - Detail: navigate to /food/entries/{id}
+ * Sprint 04 changes from Sprint 03:
+ * - EntryRow now includes `standard: boolean`
+ * - Flat action buttons replaced with ThreeDotsMenu per row
+ * - Standard / Remove Standard calls PATCH /api/food/entries/{id}/standard
+ *   and updates local state on success (no full re-fetch needed)
+ * - Delete flow unchanged from Sprint 03
+ * - row_actions from backend is now ['delete'] only; Copy button removed
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
@@ -28,11 +31,7 @@ interface EntryRow extends Row {
   kcal:       number;
   protein_g?: number;
   fat_g?:     number;
-}
-
-interface EntryDetail {
-  id: string;
-  [key: string]: unknown;
+  standard:   boolean;  // Sprint 04
 }
 
 // ── DeleteConfirmDialog ───────────────────────────────────────────────────────
@@ -106,6 +105,140 @@ function DeleteConfirmDialog({
   );
 }
 
+// ── ThreeDotsMenu ─────────────────────────────────────────────────────────────
+
+function ThreeDotsMenu({
+  entryId,
+  isStandard,
+  onToggleStandard,
+  onCopy,
+  onDeleteTrigger,
+}: {
+  entryId: string;
+  isStandard: boolean;
+  onToggleStandard: (id: string, desiredState: boolean) => void;
+  onCopy: (id: string) => void;
+  onDeleteTrigger: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        aria-label="Row actions"
+        aria-haspopup="true"
+        aria-expanded={open}
+        className="btn-outlined"
+        style={{ fontSize: '1rem', padding: '4px 10px', minWidth: '36px' }}
+        onClick={() => setOpen((v) => !v)}
+        title="Row actions"
+      >
+        &#8942;
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: '100%',
+            marginTop: '4px',
+            background: 'var(--md-sys-color-surface)',
+            border: '1px solid var(--md-sys-color-outline-variant)',
+            borderRadius: '8px',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
+            minWidth: '160px',
+            zIndex: 200,
+            overflow: 'hidden',
+          }}
+        >
+          {/* Standard / Remove Standard */}
+          <button
+            role="menuitem"
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              padding: 'var(--space-sm) var(--space-md)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              color: 'var(--md-sys-color-on-surface)',
+            }}
+            onClick={() => {
+              setOpen(false);
+              onToggleStandard(entryId, !isStandard);
+            }}
+          >
+            {isStandard ? 'Remove Standard' : 'Standard'}
+          </button>
+
+          {/* Copy */}
+          <button
+            role="menuitem"
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              padding: 'var(--space-sm) var(--space-md)',
+              background: 'none',
+              border: 'none',
+              borderTop: '1px solid var(--md-sys-color-outline-variant)',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              color: 'var(--md-sys-color-on-surface)',
+            }}
+            onClick={() => {
+              setOpen(false);
+              onCopy(entryId);
+            }}
+          >
+            Copy
+          </button>
+
+          {/* Delete */}
+          <button
+            role="menuitem"
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              padding: 'var(--space-sm) var(--space-md)',
+              background: 'none',
+              border: 'none',
+              borderTop: '1px solid var(--md-sys-color-outline-variant)',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              color: 'var(--md-sys-color-error)',
+            }}
+            onClick={() => {
+              setOpen(false);
+              onDeleteTrigger(entryId);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── EntriesPage ───────────────────────────────────────────────────────────────
 
 export default function EntriesPage() {
@@ -116,25 +249,55 @@ export default function EntriesPage() {
   const [error,           setError]           = useState<ApiError | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting,      setIsDeleting]      = useState(false);
-  const [deleteError,     setDeleteError]     = useState<ApiError | null>(null);
-  const [isCopying,       setIsCopying]       = useState<string | null>(null); // id being copied
+  const [actionError,     setActionError]     = useState<ApiError | null>(null);
+
+  const fetchEntries = useCallback(async () => {
+    const res = await apiFetch<{ meta: object; schema: object[]; rows: EntryRow[] }>('/food/entries');
+    setIsLoading(false);
+    if (isApiError(res)) {
+      setError(res);
+    } else {
+      const dataset = res as { meta: object; schema: object[]; rows: EntryRow[] };
+      setEntries(dataset.rows ?? []);
+    }
+  }, []);
 
   useEffect(() => {
-    apiFetch<{ meta: object; schema: object[]; rows: EntryRow[] }>('/food/entries').then((res) => {
-      setIsLoading(false);
-      if (isApiError(res)) {
-        setError(res);
-      } else {
-        const dataset = res as { meta: object; schema: object[]; rows: EntryRow[] };
-        setEntries(dataset.rows ?? []);
-      }
-    });
-  }, []);
+    fetchEntries();
+  }, [fetchEntries]);
+
+  // ── Toggle standard handler ─────────────────────────────────────────────────
+
+  async function handleToggleStandard(id: string, desiredState: boolean) {
+    setActionError(null);
+    const res = await apiFetch<{ id: string; standard: boolean }>(
+      `/food/entries/${id}/standard`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ desired_standard: desiredState }),
+      },
+    );
+    if (isApiError(res)) {
+      setActionError(res);
+    } else {
+      await fetchEntries();
+    }
+  }
+
+  async function handleCopy(id: string) {
+    setActionError(null);
+    const res = await apiFetch<unknown>(`/food/entries/${id}/copy`, { method: 'POST' });
+    if (isApiError(res)) {
+      setActionError(res);
+    } else {
+      await fetchEntries();
+    }
+  }
 
   // ── Delete handlers ────────────────────────────────────────────────────────
 
   function handleDeleteTrigger(id: string) {
-    setDeleteError(null);
+    setActionError(null);
     setDeleteConfirmId(id);
   }
 
@@ -150,34 +313,14 @@ export default function EntriesPage() {
         method: 'DELETE',
       });
       if (isApiError(res)) {
-        setDeleteError(res);
+        setActionError(res);
         setDeleteConfirmId(null);
       } else {
-        // Remove from local list
         setEntries((prev) => prev ? prev.filter((e) => e.id !== deleteConfirmId) : prev);
         setDeleteConfirmId(null);
       }
     } finally {
       setIsDeleting(false);
-    }
-  }
-
-  // ── Copy handler ───────────────────────────────────────────────────────────
-
-  async function handleCopy(id: string) {
-    setIsCopying(id);
-    try {
-      const res = await apiFetch<EntryDetail>(`/food/entries/${id}/copy`, {
-        method: 'POST',
-      });
-      if (isApiError(res)) {
-        setDeleteError(res); // reuse error display for copy errors
-      } else {
-        const copied = res as EntryDetail;
-        navigate(`/food/entries/${copied.id}`);
-      }
-    } finally {
-      setIsCopying(null);
     }
   }
 
@@ -217,9 +360,9 @@ export default function EntriesPage() {
         <h1 className="type-display">Entries</h1>
       </div>
 
-      {deleteError && (
+      {actionError && (
         <div style={{ marginBottom: 'var(--space-sm)' }}>
-          <ErrorCard error={deleteError} />
+          <ErrorCard error={actionError} />
         </div>
       )}
 
@@ -252,9 +395,25 @@ export default function EntriesPage() {
                   flexWrap: 'wrap',
                 }}
               >
-                <div>
+                <div
+                  style={{ cursor: 'pointer', flex: 1 }}
+                  onClick={() => navigate(`/food/entries/${entry.id}`)}
+                  title="Open detail"
+                >
                   <p className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
                     {entry.logged_at} &middot; {entry.meal_type}
+                    {entry.standard && (
+                      <span
+                        style={{
+                          marginLeft: 'var(--space-xs)',
+                          fontSize: '0.75rem',
+                          color: 'var(--md-sys-color-primary)',
+                          fontWeight: 600,
+                        }}
+                      >
+                        STANDARD
+                      </span>
+                    )}
                   </p>
                   <p className="type-body" style={{ margin: 0, fontWeight: 500 }}>
                     {entry.dish_name}
@@ -264,39 +423,14 @@ export default function EntriesPage() {
                   </p>
                 </div>
 
-                {/* Row actions */}
-                <div style={{ display: 'flex', gap: 'var(--space-xs)', flexShrink: 0 }}>
-                  <button
-                    className="btn-outlined"
-                    style={{ fontSize: '0.8rem', padding: '4px 10px' }}
-                    onClick={() => navigate(`/food/entries/${entry.id}`)}
-                    title="Open detail"
-                  >
-                    Detail
-                  </button>
-                  <button
-                    className="btn-outlined"
-                    style={{ fontSize: '0.8rem', padding: '4px 10px' }}
-                    onClick={() => handleCopy(entry.id)}
-                    disabled={isCopying === entry.id}
-                    title="Copy entry"
-                  >
-                    {isCopying === entry.id ? 'Copying…' : 'Copy'}
-                  </button>
-                  <button
-                    className="btn-outlined"
-                    style={{
-                      fontSize: '0.8rem',
-                      padding: '4px 10px',
-                      color: 'var(--md-sys-color-error)',
-                      borderColor: 'var(--md-sys-color-error)',
-                    }}
-                    onClick={() => handleDeleteTrigger(entry.id)}
-                    title="Delete entry"
-                  >
-                    Delete
-                  </button>
-                </div>
+                {/* Three-dots row menu */}
+                <ThreeDotsMenu
+                  entryId={entry.id}
+                  isStandard={entry.standard}
+                  onToggleStandard={handleToggleStandard}
+                  onCopy={handleCopy}
+                  onDeleteTrigger={handleDeleteTrigger}
+                />
               </div>
             </div>
           ))}

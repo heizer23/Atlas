@@ -34,6 +34,8 @@ ENTRIES_OVERVIEW_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="kcal",       label="kcal",         type="number", sortable=True,  format="kcal"),
     ColumnSchema(key="protein_g",  label="Protein (g)",  type="number", sortable=True,  format="g",  detail_visible=True),
     ColumnSchema(key="fat_g",      label="Fat (g)",      type="number", sortable=True,  format="g",  detail_visible=True),
+    # Sprint 04: standard flag — used by frontend to render correct three-dots menu label
+    ColumnSchema(key="standard",   label="Standard",     type="boolean", sortable=False, detail_visible=False),
 ]
 
 # ── Private helpers ────────────────────────────────────────────────────────────
@@ -84,10 +86,13 @@ def _serialise_entry_detail(row: dict) -> dict:
         "meat_g":     float(row["meat_g"]),
         "red_meat_g": float(row["red_meat_g"]),
         "sodium_mg":  float(row["sodium_mg"]),
-        "confidence": int(row["confidence"]),
-        "notes":      row["notes"],
-        "created_at": _dt_str(row["created_at"]),
-        "updated_at": _dt_str(row["updated_at"]),
+        "confidence":         int(row["confidence"]),
+        "notes":              row["notes"],
+        "created_at":         _dt_str(row["created_at"]),
+        "updated_at":         _dt_str(row["updated_at"]),
+        # Sprint 04 v1.1 extension
+        "standard":           bool(row["standard"]),
+        "source_standard_id": str(row["source_standard_id"]) if row["source_standard_id"] else None,
     }
 
 
@@ -312,6 +317,8 @@ def _serialise_overview_row(row: dict) -> dict[str, Any]:
         "kcal":      int(row["kcal"]),
         "protein_g": float(row["protein_g"]),
         "fat_g":     float(row["fat_g"]),
+        # Sprint 04: standard flag for three-dots menu label selection
+        "standard":  bool(row["standard"]),
     }
 
 
@@ -328,7 +335,9 @@ def list_entries() -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, logged_at, meal_type, dish_name, kcal, protein_g, fat_g "
+                # Sprint 04: include standard column so the frontend can render
+                # the correct three-dots menu label per row.
+                "SELECT id, logged_at, meal_type, dish_name, kcal, protein_g, fat_g, standard "
                 "FROM foodtracker.food_logs ORDER BY logged_at DESC"
             )
             rows = [dict(r) for r in cur.fetchall()]
@@ -342,7 +351,7 @@ def list_entries() -> JSONResponse:
             total=len(serialised_rows),
             page=1,
             page_size=len(serialised_rows),
-            row_actions=["delete", "copy", "edit"],
+            row_actions=["delete", "copy"],
         ),
         **{"schema": ENTRIES_OVERVIEW_SCHEMA},
         rows=serialised_rows,
@@ -495,7 +504,7 @@ async def update_entry(entry_id: str, request: Request) -> JSONResponse:
             total=1,
             page=1,
             page_size=1,
-            row_actions=["delete", "copy", "edit"],
+            row_actions=["delete", "copy"],
         ),
         **{"schema": ENTRIES_OVERVIEW_SCHEMA},
         rows=[row_dict],
@@ -580,11 +589,13 @@ def copy_entry(entry_id: str) -> JSONResponse:
                 INSERT INTO foodtracker.food_logs (
                     id, logged_at, meal_type, dish_name,
                     kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g,
-                    meat_g, red_meat_g, sodium_mg, confidence, notes
+                    meat_g, red_meat_g, sodium_mg, confidence, notes,
+                    standard, source_standard_id
                 ) VALUES (
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s,
+                    FALSE, NULL
                 ) RETURNING *
                 """,
                 (
