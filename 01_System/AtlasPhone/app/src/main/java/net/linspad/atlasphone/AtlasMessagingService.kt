@@ -9,7 +9,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-
 private const val TAG = "AtlasMessaging"
 private const val CHANNEL_ID = "atlas_platform"
 private const val CHANNEL_NAME = "Atlas Notifications"
@@ -25,10 +24,10 @@ class AtlasMessagingService : FirebaseMessagingService() {
     }
 
     // Called when FCM issues or rotates the registration token.
-    // The token must reach the Atlas backend so it can address FCM messages to this device.
-    // TODO: POST token to Atlas /devices endpoint once that endpoint is available.
+    // Token is persisted locally and logged. When it rotates, update FCM_TOKEN
+    // in secrets.env on the server and restart the Notifications service.
     override fun onNewToken(token: String) {
-        Log.i(TAG, "FCM token updated: $token")
+        Log.i(TAG, "FCM token updated — update FCM_TOKEN in secrets.env if this is a new token: $token")
         getSharedPreferences("atlas_prefs", MODE_PRIVATE)
             .edit().putString("fcm_token", token).apply()
     }

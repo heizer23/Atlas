@@ -1,0 +1,16 @@
+[project]
+name = "notifications"
+version = "1.0.0"
+description = "Notifications platform service — generic one-time notification pipeline via FCM"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "psycopg2-binary",
+    "pydantic",
+    "APScheduler>=3.0,<4.0",
+    "firebase-admin",
+]
+
+[tool.setuptools]
+packages = ["backend", "backend.routers"]

@@ -34,10 +34,12 @@ export default defineConfig({
     proxy: {
       // Each backend runs on its own port locally (matches compose.yml port mappings).
       // Add a new entry here when a new application backend is integrated.
-      '/api/workout':    { target: 'http://localhost:8011', changeOrigin: true },
-      '/api/tasks':      { target: 'http://localhost:8010', changeOrigin: true },
-      '/api/food':       { target: 'http://localhost:8012', changeOrigin: true },
-      '/api/chronicle':  { target: 'http://localhost:8013', changeOrigin: true },
+      '/api/workout':        { target: 'http://localhost:8011', changeOrigin: true },
+      '/api/tasks':          { target: 'http://localhost:8010', changeOrigin: true },
+      '/api/food':           { target: 'http://localhost:8012', changeOrigin: true },
+      '/api/chronicle':      { target: 'http://localhost:8013', changeOrigin: true },
+      '/api/notifications':  { target: 'http://localhost:8020', changeOrigin: true },
+      '/api/devices':        { target: 'http://localhost:8020', changeOrigin: true },
     },
   },
   test: {

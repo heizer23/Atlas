@@ -215,6 +215,37 @@ app-reboot:
 # endregion
 
 
+# region --- Platform: Notifications
+NOTIF_DIR=../02_Platform/Notifications
+
+NOTIF_COMPOSE=docker compose \
+	-f $(NOTIF_DIR)/compose.yml \
+	$(ENV_FILES)
+
+notif-build:
+	$(NOTIF_COMPOSE) build
+
+notif-up:
+	$(NOTIF_COMPOSE) up -d
+
+notif-down:
+	$(NOTIF_COMPOSE) down
+
+notif-logs:
+	$(NOTIF_COMPOSE) logs -f
+
+notif-reboot:
+	$(NOTIF_COMPOSE) down
+	$(NOTIF_COMPOSE) up -d
+
+notif-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(NOTIF_DIR)/20_Data/schema.sql
+
+# endregion
+
+
 # region --- Platform: Atlas Shell
 SHELL_DIR=../02_Platform/02_Atlas_Shell
 
@@ -312,6 +343,7 @@ net-connect:
 	@docker network connect atlas-net atlas-food-tracker   2>/dev/null || true
 	@docker network connect atlas-net atlas-ui             2>/dev/null || true
 	@docker network connect atlas-net atlas-cloudflared    2>/dev/null || true
+	@docker network connect atlas-net atlas-notifications  2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -324,10 +356,12 @@ up:
 	$(MAKE) pg-wait
 	$(MAKE) migrate
 	$(MAKE) schema-chronicle
+	$(MAKE) notif-schema
 	$(MAKE) task-build       task-up
 	$(MAKE) app-build        app-up
 	$(MAKE) food-build       food-up
 	$(MAKE) chronicle-build  chronicle-up
+	$(MAKE) notif-build      notif-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
 	@echo ""
@@ -335,6 +369,7 @@ up:
 
 down:
 	-$(MAKE) shell-down
+	-$(MAKE) notif-down
 	-$(MAKE) chronicle-down
 	-$(MAKE) food-down
 	-$(MAKE) app-down

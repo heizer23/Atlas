@@ -1,6 +1,8 @@
 # Secrets (explicit + generic)
 01_System/secrets.env
 *.env
+**/firebase_service_account.json
+**/*service_account*.json
 !.env.example
 !01_System/config.env
 

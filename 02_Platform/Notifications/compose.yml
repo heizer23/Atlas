@@ -1,0 +1,32 @@
+services:
+  notifications:
+    container_name: atlas-notifications
+    # Build context is the repo root so Dockerfile can reach platform packages
+    build:
+      context: ../..
+      dockerfile: 02_Platform/Notifications/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8020:8000"  # Accessible on network for Android device via Tailscale
+    environment:
+      # Postgres — required. Either set DATABASE_URL or the individual ATLAS_PG_* vars.
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+      # FCM credential — FIREBASE_SERVICE_ACCOUNT is a host file path.
+      # Mounted read-only into the container at /run/secrets/firebase.json.
+      FCM_SERVICE_ACCOUNT_JSON_PATH: /run/secrets/firebase.json
+      # Default device FCM token — pre-seeds the device table on startup.
+      # Update in secrets.env when the token rotates.
+      FCM_DEFAULT_DEVICE_TOKEN: ${FCM_TOKEN}
+    volumes:
+      - ${DATA_ROOT}/notifications/logs:/app/logs
+      - ${FIREBASE_SERVICE_ACCOUNT}:/run/secrets/firebase.json:ro
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true
