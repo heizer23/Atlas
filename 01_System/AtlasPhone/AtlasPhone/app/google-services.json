@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "270682658267",
+    "firebase_url": "https://newagent-dc8ef.firebaseio.com",
+    "project_id": "newagent-dc8ef",
+    "storage_bucket": "newagent-dc8ef.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:270682658267:android:e39eec773e3570a11403fe",
+        "android_client_info": {
+          "package_name": "net.linspad.atlasphone"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD13qTJFKMlW25c87u3b7ptZr4RRniIusg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
