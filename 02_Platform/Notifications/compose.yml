@@ -23,7 +23,7 @@ services:
       FCM_DEFAULT_DEVICE_TOKEN: ${FCM_TOKEN}
     volumes:
       - ${DATA_ROOT}/notifications/logs:/app/logs
-      - ${FIREBASE_SERVICE_ACCOUNT}:/run/secrets/firebase.json:ro
+      - ./20_Data/firebase_service_account.json:/run/secrets/firebase.json:ro
     networks:
       - atlas-net
 
