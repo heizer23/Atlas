@@ -112,7 +112,9 @@ else
     "${MOUNT_POINT}/files" \
     "${MOUNT_POINT}/workout-tracker/logs" \
     "${MOUNT_POINT}/tasktracker/logs" \
-    "${MOUNT_POINT}/openclawed/workspace"
+    "${MOUNT_POINT}/openclawed/workspace" \
+    "${MOUNT_POINT}/openclawed/agents" \
+    "${MOUNT_POINT}/openclawed/config"
 
   # Postgres container runs as uid/gid 999 by default
   sudo chown -R 999:999 "${MOUNT_POINT}/postgres"
