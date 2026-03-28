@@ -33,6 +33,36 @@ tailscale-down:
 	@sudo tailscale down
 
 
+
+
+# region --- System: OpenClawed
+OPENCLAW_DIR=../01_System/OpenClawed
+
+OPENCLAW_COMPOSE=docker compose \
+	-f $(OPENCLAW_DIR)/compose.yml \
+	$(ENV_FILES)
+
+openclaw-up:
+	$(OPENCLAW_COMPOSE) up -d
+
+openclaw-down:
+	$(OPENCLAW_COMPOSE) down
+
+openclaw-logs:
+	$(OPENCLAW_COMPOSE) logs -f
+
+openclaw-reboot:
+	$(OPENCLAW_COMPOSE) down
+	$(OPENCLAW_COMPOSE) up -d
+
+openclaw-ps:
+	$(OPENCLAW_COMPOSE) ps
+
+# endregion
+
+
+
+
 # region --- Platform
 # --- Platform: Postgres
 PG_DIR=../02_Platform/01_Postgres
@@ -322,6 +352,7 @@ mcp-reboot:
 	$(MCP_COMPOSE) up -d
 
 # endregion
+
 
 
 # region --- Aggregate: full stack

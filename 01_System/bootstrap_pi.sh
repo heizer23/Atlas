@@ -104,29 +104,35 @@ else
     exit 1
   fi
 
-  # Create platform folders
-  echo "==> Preparing platform folders on ${MOUNT_POINT}"
+  # Create folders
+  echo "==> Preparing Atlas data folders on ${MOUNT_POINT}"
   sudo mkdir -p \
     "${MOUNT_POINT}/postgres" \
     "${MOUNT_POINT}/weaviate" \
     "${MOUNT_POINT}/files" \
     "${MOUNT_POINT}/workout-tracker/logs" \
-    "${MOUNT_POINT}/tasktracker/logs"
+    "${MOUNT_POINT}/tasktracker/logs" \
+    "${MOUNT_POINT}/openclawed/workspace"
 
   # Postgres container runs as uid/gid 999 by default
   sudo chown -R 999:999 "${MOUNT_POINT}/postgres"
   sudo chmod 700 "${MOUNT_POINT}/postgres"
 
-  # Keep other folders owned by root (or change to your user if you want)
+  # Keep other folders owned by root
   sudo chown -R root:root \
     "${MOUNT_POINT}/weaviate" \
     "${MOUNT_POINT}/files" \
     "${MOUNT_POINT}/workout-tracker" \
     "${MOUNT_POINT}/tasktracker"
 
+  # OpenClawed state is user-owned for bind-mount usability
+  sudo chown -R "$USER:$USER" "${MOUNT_POINT}/openclawed"
+
   echo "External disk mounted at ${MOUNT_POINT} and folders prepared."
 fi
 # ----------------------------------------------------------
+
+
 
 echo ""
 echo "Bootstrap complete."

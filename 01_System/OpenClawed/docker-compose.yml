@@ -1,0 +1,12 @@
+services:
+  openclawed:
+    image: ${OPENCLAW_IMAGE}
+    container_name: openclawed
+    restart: unless-stopped
+    ports:
+      - "${OPENCLAW_BIND}:${OPENCLAW_PORT}:18789"
+    environment:
+      OPENCLAW_ALLOWED_ORIGINS: ${OPENCLAW_ALLOWED_ORIGINS}
+    volumes:
+      - "${OPENCLAW_STATE_DIR}:/home/node/.openclaw"
+      - "${OPENCLAW_WORKSPACE_DIR}:/workspace"
