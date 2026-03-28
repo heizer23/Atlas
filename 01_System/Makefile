@@ -27,12 +27,32 @@ tailscale-status:
 
 tailscale-up:
 	@sudo systemctl enable --now tailscaled
-	@sudo tailscale up
+	@sudo tailscale status >/dev/null 2>&1 || sudo tailscale up --accept-dns=false
 
 tailscale-down:
 	@sudo tailscale down
 
+# --- System: SystemMonitoring (Netdata)
+MONITOR_DIR=../01_System/SystemMonitoring
 
+monitor-install:
+	chmod +x $(MONITOR_DIR)/install.sh
+	$(MONITOR_DIR)/install.sh
+
+monitor-status:
+	@sudo systemctl status netdata --no-pager || true
+
+monitor-start:
+	@sudo systemctl start netdata
+
+monitor-stop:
+	@sudo systemctl stop netdata
+
+monitor-restart:
+	@sudo systemctl restart netdata
+
+monitor-logs:
+	@sudo journalctl -u netdata -f
 
 
 # region --- System: OpenClawed
