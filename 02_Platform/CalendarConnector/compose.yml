@@ -6,18 +6,17 @@ services:
     container_name: atlas-calendar-connector
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${CALENDAR_CONNECTOR_PORT:-8021}:8000"
+      - "${CALENDAR_CONNECTOR_PORT:-8021}:8000"
     environment:
       ATLAS_PG_DB:       ${ATLAS_PG_DB}
       ATLAS_PG_USER:     ${ATLAS_PG_USER}
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
-      GOOGLE_CLIENT_ID:     ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GoogleAuth_ClientID: ${GoogleAuth_ClientID}
+      GoogleAuth_Secret: ${GoogleAuth_Secret}
       CALENDAR_CONNECTOR_PORT: ${CALENDAR_CONNECTOR_PORT:-8021}
-      # Optional: override the OAuth callback URI for non-local deployments
-      # CALENDAR_CALLBACK_URI: https://your-domain.com/api/calendar/google/connect/callback
+      CALENDAR_CALLBACK_URI: "https://workout.linspad.net/api/calendar/google/connect/callback"
     volumes:
       - ${DATA_ROOT}/calendar_connector/logs:/app/logs
     networks:
