@@ -137,7 +137,16 @@
       "Bash(cmd.exe /c \"wmic process where ProcessId=48328 get Name,ProcessId,CommandLine 2>nul\")",
       "Bash(npm run:*)",
       "Bash(make chronicle-reboot:*)",
-      "Bash(make notif-schema:*)"
+      "Bash(make notif-schema:*)",
+      "Bash(python3:*)",
+      "Bash(python3.12 --version)",
+      "Bash(python3.11 --version)",
+      "Bash(py -3 --version)",
+      "Bash(py:*)",
+      "Bash(reg query:*)",
+      "Bash(findstr \":8021\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(CALENDAR_CONNECTOR_PORT=8022 python run_local.py)"
     ]
   }
 }

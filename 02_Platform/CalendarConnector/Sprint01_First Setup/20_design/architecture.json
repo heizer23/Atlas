@@ -1,0 +1,259 @@
+{
+  "component_name": "calendar_connector",
+  "layer": "02_Platform",
+  "source_definition": "00_input/draft.md",
+  "summary": "Provides Google Calendar OAuth connection management, token persistence, and read-only event retrieval as a reusable platform capability for Atlas applications.",
+  "classification": {
+    "why_platform": "OAuth token lifecycle, calendar credential storage, and Google Calendar API access are generic technical capabilities with no embedded domain meaning. Any Atlas application (Chronos or future consumers) may use this component without owning the connection state.",
+    "non_goals": [
+      "Writing events to Google Calendar",
+      "Creating or managing Atlas-specific target calendars",
+      "Background sync workers or recurring sync jobs",
+      "Webhook push notification subscriptions",
+      "Multi-provider calendar abstraction beyond minimal internal structure",
+      "Chronos-specific business logic or task-to-event mapping",
+      "UI implementation beyond the minimal status endpoint",
+      "At-rest token encryption (known gap — deferred)"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from 01_System/config.env and 01_System/secrets.env",
+      "CALENDAR_CONNECTOR_PORT from 01_System/config.env",
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema from 02_Platform/packages/platform_contracts/contracts.py",
+      "api_error() from 02_Platform/packages/platform_errorhandling/api_response.py",
+      "install_exception_handlers(), install_request_timing(), setup_logging() from 02_Platform/packages/platform_errorhandling",
+      "Atlas Postgres database (shared, managed by 02_Platform/01_Postgres)",
+      "Google OAuth 2.0 authorization endpoint and token endpoint (external)"
+    ],
+    "provides": [
+      "GET /api/calendar/google/connect/start — initiates Google Calendar OAuth consent flow",
+      "GET /api/calendar/google/connect/callback — receives auth code, exchanges tokens, persists connection state",
+      "GET /api/calendar/events?from=<ISO8601>&to=<ISO8601> — returns Dataset of normalized calendar events for the time window",
+      "GET /api/calendar/status — returns Dataset describing current connection health (no secrets exposed)"
+    ],
+    "invariants": [
+      "Calendar connection state is independent of Atlas login state. A Google login session does not imply a calendar connection.",
+      "Token fields (access_token, refresh_token) are never included in any API response body.",
+      "All API error responses use the api_error() envelope from platform_errorhandling.",
+      "GET /api/calendar/events always returns a Dataset — never an ad hoc list or raw Google API response.",
+      "GET /api/calendar/status always returns a Dataset — never a raw connection record.",
+      "The component uses the existing GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — it does not create or register a separate Google OAuth client.",
+      "The OAuth scope requested is exclusively https://www.googleapis.com/auth/calendar.readonly for this slice.",
+      "Atlas is system-scoped: no user_id FK exists on calendar_connection or calendar_token tables."
+    ],
+    "failure_modes": [
+      "NO_CONNECTION: No calendar_connection record exists — events endpoint returns api_error(code='NO_CALENDAR_CONNECTION', status=404)",
+      "CONNECTION_EXPIRED: Token is expired and refresh fails or no refresh_token stored — events endpoint returns api_error(code='CALENDAR_TOKEN_EXPIRED', status=503)",
+      "CONNECTION_REVOKED: Google revoked access — refresh attempt returns 401/403 from Google — connection status updated to 'revoked', events endpoint returns api_error(code='CALENDAR_ACCESS_REVOKED', status=503)",
+      "OAUTH_STATE_MISMATCH: Incoming callback state parameter does not match stored nonce — returns api_error(code='OAUTH_STATE_MISMATCH', status=400) and aborts token exchange",
+      "GOOGLE_API_ERROR: Google Calendar API returns non-2xx during event fetch — returns api_error(code='GOOGLE_API_ERROR', status=502) with detail",
+      "REDIRECT_URI_MISMATCH: Google rejects token exchange because callback URI is not registered — surfaces as GOOGLE_API_ERROR with detail; requires manual Google Cloud Console registration as a deployment pre-condition",
+      "DB_UNAVAILABLE: Database unreachable at startup or request time — startup logs error; requests fail with 500 via install_exception_handlers"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": [
+      "CalendarEventRow: id (string, equals Google event id), title (string), description (string|null), start_at (ISO8601 string), end_at (ISO8601 string), all_day (boolean rendered as string), location (string|null), status (string), source_calendar_id (string), source_calendar_label (string|null) — row shape within Dataset rows for object_type 'calendar_event'",
+      "CalendarConnectionStatusRow: id (string, fixed value 'system'), provider (string), account_email (string|null), status (string), granted_scopes (string), last_success_at (string|null), last_error (string|null), created_at (string), updated_at (string) — row shape within Dataset rows for object_type 'calendar_connection'"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "Google OAuth 2.0: GET https://accounts.google.com/o/oauth2/v2/auth (authorization redirect)",
+      "Google OAuth 2.0: POST https://oauth2.googleapis.com/token (token exchange and refresh)",
+      "Google Calendar API v3: GET https://www.googleapis.com/calendar/v3/calendars/primary/events (event list)",
+      "Postgres: psycopg2 connection pool — SELECT/INSERT/UPDATE on calendar_connection and calendar_oauth_state tables",
+      "platform_errorhandling.api_error(code, message, detail, status)",
+      "platform_errorhandling.install_exception_handlers(app)",
+      "platform_errorhandling.install_request_timing(app)",
+      "platform_errorhandling.setup_logging(app_name, log_dir)",
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema"
+    ],
+    "provides": [
+      "GET /api/calendar/google/connect/start -> RedirectResponse to Google consent URL",
+      "GET /api/calendar/google/connect/callback?code=<str>&state=<str> -> JSONResponse (success) | JSONResponse api_error",
+      "GET /api/calendar/events?from=<ISO8601>&to=<ISO8601> -> Dataset (object_type: calendar_event) | JSONResponse api_error",
+      "GET /api/calendar/status -> Dataset (object_type: calendar_connection) | JSONResponse api_error"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/calendar/google/connect/start",
+        "purpose": "Generates Google OAuth authorization URL with calendar.readonly scope and CSRF state nonce, stores nonce, redirects browser to Google consent screen"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/calendar/google/connect/callback",
+        "purpose": "Validates CSRF state nonce, exchanges auth code for tokens, persists connection and token state, returns success or api_error"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/calendar/events",
+        "purpose": "Retrieves events from Google Calendar for the given time window, refreshes token if expired, returns Dataset with object_type calendar_event"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/calendar/status",
+        "purpose": "Returns Dataset with object_type calendar_connection describing connection health — no token values exposed"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "connect_start",
+      "description": "Generate a cryptographically random state nonce, persist it in calendar_oauth_state with a short TTL, construct the Google OAuth authorization URL with scope=calendar.readonly and redirect_uri=/api/calendar/google/connect/callback, return RedirectResponse.",
+      "inputs": ["HTTP GET /api/calendar/google/connect/start"],
+      "outputs": ["RedirectResponse to Google consent URL", "calendar_oauth_state row inserted"]
+    },
+    {
+      "step": 2,
+      "name": "connect_callback",
+      "description": "Receive code and state from Google. Look up state in calendar_oauth_state; if not found or expired, return OAUTH_STATE_MISMATCH error and do not proceed. Delete the nonce (one-time use). POST to Google token endpoint with code and redirect_uri. On success, upsert calendar_connection (status=connected, granted_scopes, account_email from id_token if present) and upsert calendar_token (access_token, refresh_token, token_expiry, token_type, scope). Return 200 JSON success.",
+      "inputs": ["HTTP GET /api/calendar/google/connect/callback?code&state", "calendar_oauth_state lookup", "Google token endpoint response"],
+      "outputs": ["calendar_connection row upserted", "calendar_token row upserted", "calendar_oauth_state nonce deleted", "JSON success response or api_error"]
+    },
+    {
+      "step": 3,
+      "name": "token_refresh_check",
+      "description": "Called internally before any Google API request. Read calendar_token. If access_token is expired (token_expiry <= now), POST to Google token endpoint with refresh_token. On success, update calendar_token (new access_token, token_expiry, updated_at). On failure (no refresh_token, or Google returns 4xx), update calendar_connection status to 'expired' or 'revoked' and raise the appropriate failure mode.",
+      "inputs": ["calendar_token record", "Google token refresh endpoint response"],
+      "outputs": ["Updated calendar_token record", "Or failure mode raised: CONNECTION_EXPIRED or CONNECTION_REVOKED"]
+    },
+    {
+      "step": 4,
+      "name": "fetch_events",
+      "description": "Call token_refresh_check. If connection is healthy, call Google Calendar API v3 events.list for primary calendar with timeMin=from and timeMax=to. Normalize each Google event item into a CalendarEventRow. Wrap in Dataset with object_type=calendar_event, schema matching CalendarEventRow fields, and meta.total=len(rows). Return Dataset.",
+      "inputs": ["HTTP GET /api/calendar/events?from&to", "calendar_token (post-refresh if needed)", "Google Calendar API response"],
+      "outputs": ["Dataset with object_type=calendar_event", "Or api_error on any failure mode"]
+    },
+    {
+      "step": 5,
+      "name": "status_read",
+      "description": "Read calendar_connection record. If no record exists, return a Dataset with a single row where status='not_connected'. If record exists, map fields to CalendarConnectionStatusRow (omitting token fields). Return Dataset with object_type=calendar_connection.",
+      "inputs": ["HTTP GET /api/calendar/status", "calendar_connection record (or absence)"],
+      "outputs": ["Dataset with object_type=calendar_connection (always returns Dataset, never an error when record is absent)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "Error envelope (api_error), exception handlers, request timing, logging setup"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema types for all data-returning endpoints"},
+      {"component": "02_Platform/01_Postgres", "role": "Shared Postgres database for calendar_connection, calendar_token, calendar_oauth_state tables"},
+      {"component": "02_Platform/02_Atlas_Shell/nginx.conf", "role": "Nginx proxy block for /api/calendar is a required deployment artifact. Required block shape (matching existing Atlas services): location /api/calendar { set $upstream_calendar atlas-calendar-connector:8000; proxy_pass http://$upstream_calendar; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_read_timeout 30s; }"},
+      {"component": "01_System/config.env", "role": "CALENDAR_CONNECTOR_PORT=8021 must be registered in the service port roster. The compose service and nginx upstream must use this env var, not a hardcoded port."}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP service framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres connection pool", "reuse_existing": true},
+      {"name": "httpx", "role": "HTTP client for Google OAuth token exchange and Calendar API calls", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request/response model validation", "reuse_existing": true}
+    ],
+    "external_optional": [
+      {"name": "python-jose or PyJWT", "role": "Decode Google id_token to extract account_email. Implementer may alternatively call Google userinfo endpoint — no library required for that path.", "reuse_existing": false}
+    ],
+    "forbidden": [
+      "Any import from 03_Application/* — platform must not depend on application code",
+      "Modification of existing Google login flow or MCPGateway auth configuration",
+      "user_id foreign key on any table in this component",
+      "Separate Google OAuth client credentials — must reuse GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET",
+      "Ad hoc error response shapes — all errors must use api_error()"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "20_Data/schema.sql",
+    "persistence_type": "postgres"
+  },
+  "deferrals": {
+    "platform_implementer": [
+      "Implement FastAPI app in app/main.py following the TaskTracker pattern: CORSMiddleware with allow_origin_regex, install_exception_handlers, install_request_timing, router prefix /api",
+      "Implement database.py: psycopg2 connection pool, init_pool(), get_db(), init_schema() that runs schema.sql on startup",
+      "Implement router/calendar.py: all four endpoints per internal_flow steps 1-5",
+      "Implement services/google_oauth.py: build_authorization_url(), exchange_code_for_tokens(), refresh_access_token() using httpx",
+      "Implement services/calendar_api.py: fetch_events(access_token, from_dt, to_dt) -> list[CalendarEventRow] using httpx against Google Calendar API v3",
+      "Implement services/token_store.py: get_connection(), upsert_connection(), get_token(), upsert_token(), update_connection_status()",
+      "Implement models.py: CalendarEventRow and CalendarConnectionStatusRow as Pydantic models",
+      "Choose CSRF state implementation: recommend short-lived nonce row in calendar_oauth_state with expires_at column; delete nonce on use",
+      "Add compose.yml for atlas-calendar-connector service on port 8021 (use CALENDAR_CONNECTOR_PORT env var, not raw port number)",
+      "Register http://localhost:8021/api/calendar/google/connect/callback as authorized redirect URI in Google Cloud Console for the existing OAuth client (GOOGLE_CLIENT_ID) before end-to-end testing",
+      "Flag token plaintext storage as a known security gap in implementation notes"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "connect_start: verify redirect URL contains correct scope (calendar.readonly), correct redirect_uri, and a state parameter; verify nonce row created in DB",
+      "connect_callback: valid state and code -> connection and token rows persisted, nonce deleted, 200 returned",
+      "connect_callback: missing or mismatched state -> OAUTH_STATE_MISMATCH error returned, no token exchange attempted",
+      "connect_callback: expired nonce -> OAUTH_STATE_MISMATCH error returned",
+      "connect_callback: Google token endpoint returns error -> api_error returned, no partial state persisted",
+      "fetch_events: no connection record -> NO_CALENDAR_CONNECTION api_error",
+      "fetch_events: valid connection, token not expired -> Dataset returned with correct schema keys and row id fields",
+      "fetch_events: token expired, refresh succeeds -> token updated in DB, Dataset returned",
+      "fetch_events: token expired, refresh fails (no refresh_token) -> CALENDAR_TOKEN_EXPIRED api_error",
+      "fetch_events: Google revokes access (refresh returns 401) -> connection status set to revoked, CALENDAR_ACCESS_REVOKED api_error",
+      "fetch_events: response rows each contain an id field matching Google event id",
+      "status: no connection record -> Dataset with single row status=not_connected returned",
+      "status: connected record -> Dataset with status field, no access_token or refresh_token in response body",
+      "all endpoints: verify no token values appear in any response body"
+    ],
+    "reviewer": [
+      "Verify no user_id FK on any table",
+      "Verify token fields (access_token, refresh_token) are absent from all API response shapes",
+      "Verify /api/calendar/events returns Dataset with object_type=calendar_event and row id field present",
+      "Verify /api/calendar/status returns Dataset with object_type=calendar_connection and row id field present",
+      "Verify CSRF nonce is deleted after single use in callback",
+      "Verify database.py init_schema() runs migrations/001_init.sql on startup (authoritative schema deployment path per design_decisions)",
+      "Verify nginx location block for /api/calendar is present in 02_Atlas_Shell/nginx.conf with upstream atlas-calendar-connector:8000 (required per dependencies.internal_required)",
+      "Verify CALENDAR_CONNECTOR_PORT=8021 is present in 01_System/config.env and referenced by env var in compose.yml (required per dependencies.internal_required)",
+      "Verify Google Cloud Console callback URI registration is documented as a deployment pre-condition"
+    ]
+  },
+  "deferred_decisions": [
+    "Account email extraction method: decode id_token from Google (requires JWT library) vs. call Google userinfo endpoint (no extra library). Either is acceptable — implementer decides.",
+    "Token refresh trigger: on every events request that finds token_expiry <= now (lazy, simpler) vs. proactive background check (out of scope for this slice). Lazy is recommended for this slice.",
+    "Two-table vs one-table schema: spec permits collapsing calendar_connection and calendar_token. This design keeps two tables for explicit state separation, but implementer may collapse if Atlas DB conventions clearly prefer it — must preserve all required fields either way."
+  ],
+  "risks": [
+    {
+      "risk": "Google Cloud Console callback URI not registered",
+      "impact": "OAuth flow fails at Google's authorization endpoint with redirect_uri_mismatch for every test run. This is a deployment pre-condition that blocks end-to-end testing. Must register http://localhost:8021/api/calendar/google/connect/callback before testing."
+    },
+    {
+      "risk": "Token plaintext storage",
+      "impact": "access_token and refresh_token stored as plaintext in Postgres. Anyone with DB read access can extract live Google Calendar credentials. Known gap for this slice — must be flagged in implementation notes and addressed before production use."
+    },
+    {
+      "risk": "MCPGateway shared credentials",
+      "impact": "MCPGateway uses the same GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET for MCP protocol auth via FastMCP GoogleProvider. CalendarConnector uses these same credentials for a separate web OAuth flow. The token state is independent (separate tables, separate consent flows, separate scopes). No functional collision exists, but a revocation or credential rotation affecting one will affect both."
+    },
+    {
+      "risk": "Login isolation drift",
+      "impact": "Naming or routing changes that place calendar endpoints under /auth/ would create naming proximity to the login flow and risk confusing future agents. All calendar routes must remain under /api/calendar/."
+    }
+  ],
+  "design_decisions": [
+    {
+      "decision": "Migration runner path: database.py init_schema() is the authoritative schema deployment path for this component.",
+      "rationale": "migrate.py currently scans 03_Application/*/migrations/ only. Extending it to scan Platform paths is a shared-infrastructure change outside this sprint's scope. Instead, database.py's init_schema() runs migrations/001_init.sql idempotently on service startup. This is sufficient for this slice. Extending migrate.py to cover Platform paths is deferred to a future infrastructure sprint and must be tracked there, not here.",
+      "owner": "architecture"
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should the calendar_oauth_state nonce be stored in a DB table (as this design specifies) or implemented as a signed JWT in the OAuth state parameter? DB nonce is simpler and consistent with Atlas's existing patterns. Signed JWT has no DB round-trip but requires a signing key in config.",
+      "owner": "implementer"
+    },
+    {
+      "question": "Is httpx already present in the Atlas Python environment, or does it need to be added to pyproject.toml? System map shows it in MCPGateway but not confirmed available to this component.",
+      "owner": "implementer"
+    }
+  ]
+}
