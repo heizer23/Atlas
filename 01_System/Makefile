@@ -56,7 +56,7 @@ monitor-logs:
 
 
 # region --- System: OpenClawed
-OPENCLAW_DIR=../01_System/OpenClawed
+OPENCLAW_DIR=../02_Platform/OpenClawed
 
 OPENCLAW_COMPOSE=docker compose \
 	-f $(OPENCLAW_DIR)/compose.yml \
