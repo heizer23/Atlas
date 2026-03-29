@@ -10,3 +10,9 @@ services:
     volumes:
       - "${OPENCLAW_STATE_DIR}:/home/node/.openclaw"
       - "${OPENCLAW_WORKSPACE_DIR}:/workspace"
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true
