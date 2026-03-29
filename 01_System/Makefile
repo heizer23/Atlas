@@ -296,6 +296,37 @@ notif-schema:
 # endregion
 
 
+# region --- Platform: CalendarConnector
+CALENDAR_DIR=../02_Platform/CalendarConnector
+
+CALENDAR_COMPOSE=docker compose \
+	-f $(CALENDAR_DIR)/compose.yml \
+	$(ENV_FILES)
+
+calendar-build:
+	$(CALENDAR_COMPOSE) build
+
+calendar-up:
+	$(CALENDAR_COMPOSE) up -d
+
+calendar-down:
+	$(CALENDAR_COMPOSE) down
+
+calendar-logs:
+	$(CALENDAR_COMPOSE) logs -f
+
+calendar-reboot:
+	$(CALENDAR_COMPOSE) down
+	$(CALENDAR_COMPOSE) up -d
+
+calendar-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(CALENDAR_DIR)/migrations/001_init.sql
+
+# endregion
+
+
 # region --- Platform: Atlas Shell
 SHELL_DIR=../02_Platform/02_Atlas_Shell
 
@@ -395,6 +426,7 @@ net-connect:
 	@docker network connect atlas-net atlas-ui             2>/dev/null || true
 	@docker network connect atlas-net atlas-cloudflared    2>/dev/null || true
 	@docker network connect atlas-net atlas-notifications  2>/dev/null || true
+	@docker network connect atlas-net atlas-calendar-connector 2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -413,6 +445,7 @@ up:
 	$(MAKE) food-build       food-up
 	$(MAKE) chronicle-build  chronicle-up
 	$(MAKE) notif-build      notif-up
+	$(MAKE) calendar-build   calendar-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
 	@echo ""
@@ -420,6 +453,7 @@ up:
 
 down:
 	-$(MAKE) shell-down
+	-$(MAKE) calendar-down
 	-$(MAKE) notif-down
 	-$(MAKE) chronicle-down
 	-$(MAKE) food-down
