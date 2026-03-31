@@ -54,10 +54,10 @@ echo "==> Ensuring user '$USER' is in docker group"
 sudo usermod -aG docker "$USER"
 
 # ---- Docker networks ----
+# Run via sudo so it works even before the user re-logs in to pick up the docker group
 echo "==> Ensuring atlas-net Docker bridge network exists"
-docker network create atlas-net --driver bridge 2>/dev/null || echo "atlas-net already exists."
+sudo docker network create atlas-net --driver bridge 2>/dev/null || echo "atlas-net already exists."
 # -------------------------
-# --------------
 
 # ---- External data disk mount (Atlas platform storage) ----
 # This script assumes the external partition is labeled "data"
@@ -114,7 +114,8 @@ else
     "${MOUNT_POINT}/tasktracker/logs" \
     "${MOUNT_POINT}/openclawed/workspace" \
     "${MOUNT_POINT}/openclawed/agents" \
-    "${MOUNT_POINT}/openclawed/config"
+    "${MOUNT_POINT}/openclawed/config" \
+    "${MOUNT_POINT}/calendar_connector/logs"
 
   # Postgres container runs as uid/gid 999 by default
   sudo chown -R 999:999 "${MOUNT_POINT}/postgres"

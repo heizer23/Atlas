@@ -34,6 +34,12 @@ setup_logging(
 )
 log = logging.getLogger("notifications")
 
+# Silence high-frequency loggers that would otherwise write thousands of lines/day
+# APScheduler logs "Running job..." + "Job executed successfully" on every 5s tick
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+# Uvicorn access log writes one line per HTTP request into the root logger file
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 app = FastAPI(title="Notifications", version="1.0.0")
 
 app.add_middleware(
@@ -83,7 +89,7 @@ def on_startup() -> None:
     init_fcm()
     log.info("FCM initialised.")
 
-    log.info("Starting APScheduler dispatch job (interval=5s)...")
+    log.info("Starting APScheduler dispatch job...")
     _scheduler = start_scheduler()
     log.info("Scheduler started. Notifications service ready.")
 

@@ -21,6 +21,7 @@ services:
       # Default device FCM token — pre-seeds the device table on startup.
       # Update in secrets.env when the token rotates.
       FCM_DEFAULT_DEVICE_TOKEN: ${FCM_TOKEN}
+      NOTIFICATIONS_DISPATCH_INTERVAL_SECONDS: ${NOTIFICATIONS_DISPATCH_INTERVAL_SECONDS:-30}
     volumes:
       - ${DATA_ROOT}/notifications/logs:/app/logs
       - ./20_Data/firebase_service_account.json:/run/secrets/firebase.json:ro
