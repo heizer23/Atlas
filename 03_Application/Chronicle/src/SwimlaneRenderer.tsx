@@ -44,8 +44,8 @@ const HEAT_COLORS: Record<string, string> = {
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DOW_LABELS   = ['M','T','W','T','F','S','S'];
 
-const CELL_GAP        = 2;   // px gap between cells
-const MONTH_COL_WIDTH = 28;  // px — fixed left column for month labels
+const CELL_GAP       = 2;   // px gap between cells
+const DOW_LABEL_WIDTH = 16;  // px — fixed left column for day-of-week labels
 const MAX_CELL        = 80;  // px — max cell size; prevents cells from growing too large on wide screens
 
 // ── Private helpers ────────────────────────────────────────────────────────────
@@ -69,6 +69,12 @@ interface WeekRow {
   monthLabel: string | null;
 }
 
+function localDateStr(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 function buildWeekGrid(year: number): WeekRow[] {
   const jan1 = new Date(year, 0, 1);
   const jan1DayOfWeek = (jan1.getDay() + 6) % 7;
@@ -78,7 +84,7 @@ function buildWeekGrid(year: number): WeekRow[] {
 
   const d = new Date(year, 0, 1);
   while (d.getFullYear() === year) {
-    cells.push(d.toISOString().slice(0, 10));
+    cells.push(localDateStr(d));
     d.setDate(d.getDate() + 1);
   }
   while (cells.length % 7 !== 0) cells.push(null);
@@ -222,14 +228,75 @@ export default function SwimlaneRenderer({ sources, onDayClick }: SwimlaneRender
 
   if (!allResolved) return <Skeleton />;
 
-  const weeks    = buildWeekGrid(year);
-  const gridCols = `${MONTH_COL_WIDTH}px 1fr`;
-  const dayCols  = `repeat(7, minmax(0, ${MAX_CELL}px))`;
+  const weeks      = buildWeekGrid(year);
+  const weekCount  = weeks.length;
 
   // Surface per-source errors above the grid
   const sourceErrors = sourceStates
     .map((s, i) => s.error ? { src: sources[i], error: s.error } : null)
     .filter((e): e is { src: SourceListRow; error: ApiError } => e !== null);
+
+  // Transposed layout: columns = weeks (time flows left→right), rows = days of week (Mon–Sun).
+  // Build flat cell list for CSS grid auto-placement:
+  //   Row 0 : [corner] [month label per week…]
+  //   Rows 1–7 : [dow label] [day cell per week…]
+  const gridItems: React.ReactNode[] = [];
+
+  // Month label row
+  gridItems.push(<div key="corner" />);
+  weeks.forEach((week, wi) => {
+    gridItems.push(
+      <div
+        key={`month-${wi}`}
+        style={{
+          fontSize:   '0.6rem',
+          color:      'var(--md-sys-color-on-surface-variant)',
+          userSelect: 'none',
+          overflow:   'hidden',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {week.monthLabel ?? ''}
+      </div>
+    );
+  });
+
+  // Day-of-week rows
+  DOW_LABELS.forEach((lbl, dow) => {
+    gridItems.push(
+      <div
+        key={`dow-${dow}`}
+        style={{
+          fontSize:   '0.6rem',
+          color:      'var(--md-sys-color-on-surface-variant)',
+          textAlign:  'center',
+          userSelect: 'none',
+          alignSelf:  'center',
+        }}
+      >
+        {lbl}
+      </div>
+    );
+    weeks.forEach((week, wi) => {
+      const dateStr = week.days[dow];
+      gridItems.push(
+        dateStr ? (
+          <DayCell
+            key={`${wi}-${dow}`}
+            dateStr={dateStr}
+            sources={sources}
+            sourceStates={sourceStates}
+            onDayClick={onDayClick}
+          />
+        ) : (
+          <div
+            key={`${wi}-${dow}-empty`}
+            style={{ aspectRatio: '1', background: 'transparent', borderRadius: 2 }}
+          />
+        )
+      );
+    });
+  });
 
   return (
     <div style={{ width: '100%' }}>
@@ -241,71 +308,16 @@ export default function SwimlaneRenderer({ sources, onDayClick }: SwimlaneRender
         </div>
       ))}
 
-      {/* Day-of-week header */}
-      <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: CELL_GAP, marginBottom: 4 }}>
-        <div />
-        <div style={{ display: 'grid', gridTemplateColumns: dayCols, gap: CELL_GAP }}>
-          {DOW_LABELS.map((lbl, i) => (
-            <div
-              key={i}
-              style={{
-                fontSize:   '0.6rem',
-                color:      'var(--md-sys-color-on-surface-variant)',
-                textAlign:  'center',
-                userSelect: 'none',
-              }}
-            >
-              {lbl}
-            </div>
-          ))}
-        </div>
+      {/* Transposed heatmap grid */}
+      <div
+        style={{
+          display:             'grid',
+          gridTemplateColumns: `${DOW_LABEL_WIDTH}px repeat(${weekCount}, minmax(0, ${MAX_CELL}px))`,
+          gap:                 CELL_GAP,
+        }}
+      >
+        {gridItems}
       </div>
-
-      {/* Week rows */}
-      {weeks.map((week, wi) => (
-        <div
-          key={wi}
-          style={{
-            display:             'grid',
-            gridTemplateColumns: gridCols,
-            gap:                 CELL_GAP,
-            marginBottom:        CELL_GAP,
-            alignItems:          'start',
-          }}
-        >
-          {/* Month label */}
-          <div
-            style={{
-              fontSize:   '0.65rem',
-              color:      'var(--md-sys-color-on-surface-variant)',
-              userSelect: 'none',
-              paddingTop: 1,
-            }}
-          >
-            {week.monthLabel ?? ''}
-          </div>
-
-          {/* Day cells */}
-          <div style={{ display: 'grid', gridTemplateColumns: dayCols, gap: CELL_GAP }}>
-            {week.days.map((dateStr, di) =>
-              dateStr ? (
-                <DayCell
-                  key={di}
-                  dateStr={dateStr}
-                  sources={sources}
-                  sourceStates={sourceStates}
-                  onDayClick={onDayClick}
-                />
-              ) : (
-                <div
-                  key={di}
-                  style={{ aspectRatio: '1', background: 'transparent', borderRadius: 2 }}
-                />
-              )
-            )}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
