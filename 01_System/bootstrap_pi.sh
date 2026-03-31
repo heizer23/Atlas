@@ -112,9 +112,9 @@ else
     "${MOUNT_POINT}/files" \
     "${MOUNT_POINT}/workout-tracker/logs" \
     "${MOUNT_POINT}/tasktracker/logs" \
-    "${MOUNT_POINT}/openclawed/workspace" \
-    "${MOUNT_POINT}/openclawed/agents" \
-    "${MOUNT_POINT}/openclawed/config" \
+    "${MOUNT_POINT}/chronos/workspace" \
+    "${MOUNT_POINT}/chronos/agents" \
+    "${MOUNT_POINT}/chronos/config" \
     "${MOUNT_POINT}/calendar_connector/logs"
 
   # Postgres container runs as uid/gid 999 by default
@@ -129,7 +129,7 @@ else
     "${MOUNT_POINT}/tasktracker"
 
   # OpenClawed state is user-owned for bind-mount usability
-  sudo chown -R "$USER:$USER" "${MOUNT_POINT}/openclawed"
+  sudo chown -R "$USER:$USER" "${MOUNT_POINT}/chronos"
 
   echo "External disk mounted at ${MOUNT_POINT} and folders prepared."
 fi

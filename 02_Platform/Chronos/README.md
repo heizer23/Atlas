@@ -1,4 +1,4 @@
-# OpenClawed
+# Chronos
 
 Role: System control surface for Atlas AI access.
 
@@ -6,26 +6,26 @@ Role: System control surface for Atlas AI access.
 01_System component
 
 ## Purpose
-OpenClawed is the System-level AI gateway for Atlas.
+Chronos is the System-level AI gateway for Atlas.
 It provides access and orchestration, not domain behavior.
 
 ## Ownership
 
-OpenClawed owns:
+Chronos owns:
 - its runtime and internal state (workspace, cache, logs)
-- OpenClawed-native agents and prompts
+- Chronos-native agents and prompts
 
 Atlas owns:
 - Platform capabilities (APIs, DB, tools)
 - Application logic and data
 
-OpenClawed must not:
+Chronos must not:
 - directly own or mutate application data
 - redefine platform capabilities
 
 ## Configuration
 
-- Deployment config: central Atlas env (OPENCLAW_*)
+- Deployment config: central Atlas env (CHRONOS_*)
 - Secrets: provided via Atlas secrets.env
 - Internal config: treated as implementation detail (not Atlas contract)
 
@@ -36,9 +36,9 @@ OpenClawed must not:
 
 ## Dependencies
 
-- OpenClawed may call Atlas via explicit, stable interfaces only
+- Chronos may call Atlas via explicit, stable interfaces only
 
 ## State
 
-- All OpenClawed state is stored under a single defined host path
+- All Chronos state is stored under a single defined host path
 - This state is treated as owned implementation state, not Atlas contract

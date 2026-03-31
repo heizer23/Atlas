@@ -1,0 +1,18 @@
+services:
+  chronos:
+    image: ${CHRONOS_IMAGE}
+    container_name: atlas-chronos
+    restart: unless-stopped
+    ports:
+      - "${CHRONOS_BIND}:${CHRONOS_PORT}:18789"
+    environment:
+      OPENCLAW_ALLOWED_ORIGINS: ${CHRONOS_ALLOWED_ORIGINS}
+    volumes:
+      - "${CHRONOS_STATE_DIR}:/home/node/.openclaw"
+      - "${CHRONOS_WORKSPACE_DIR}:/workspace"
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

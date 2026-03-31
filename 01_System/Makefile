@@ -55,28 +55,28 @@ monitor-logs:
 	@sudo journalctl -u netdata -f
 
 
-# region --- System: OpenClawed
-OPENCLAW_DIR=../02_Platform/OpenClawed
+# region --- System: Chronos
+CHRONOS_DIR=../02_Platform/Chronos
 
-OPENCLAW_COMPOSE=docker compose \
-	-f $(OPENCLAW_DIR)/compose.yml \
+CHRONOS_COMPOSE=docker compose \
+	-f $(CHRONOS_DIR)/compose.yml \
 	$(ENV_FILES)
 
-openclaw-up:
-	$(OPENCLAW_COMPOSE) up -d
+chronos-up:
+	$(CHRONOS_COMPOSE) up -d
 
-openclaw-down:
-	$(OPENCLAW_COMPOSE) down
+chronos-down:
+	$(CHRONOS_COMPOSE) down
 
-openclaw-logs:
-	$(OPENCLAW_COMPOSE) logs -f
+chronos-logs:
+	$(CHRONOS_COMPOSE) logs -f
 
-openclaw-reboot:
-	$(OPENCLAW_COMPOSE) down
-	$(OPENCLAW_COMPOSE) up -d
+chronos-reboot:
+	$(CHRONOS_COMPOSE) down
+	$(CHRONOS_COMPOSE) up -d
 
-openclaw-ps:
-	$(OPENCLAW_COMPOSE) ps
+chronos-ps:
+	$(CHRONOS_COMPOSE) ps
 
 # endregion
 
