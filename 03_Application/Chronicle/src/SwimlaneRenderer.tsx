@@ -44,8 +44,8 @@ const HEAT_COLORS: Record<string, string> = {
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DOW_LABELS   = ['M','T','W','T','F','S','S'];
 
-const CELL_GAP       = 2;   // px gap between cells
-const DOW_LABEL_WIDTH = 16;  // px — fixed left column for day-of-week labels
+const CELL_GAP        = 2;   // px gap between cells
+const MONTH_COL_WIDTH = 28;  // px — fixed left column for month labels
 const MAX_CELL        = 80;  // px — max cell size; prevents cells from growing too large on wide screens
 
 // ── Private helpers ────────────────────────────────────────────────────────────
@@ -131,11 +131,10 @@ interface DayCellProps {
 function DayCell({ dateStr, sources, sourceStates, onDayClick }: DayCellProps) {
   const n = sources.length;
 
-  // Always N vertical stripes — one column per source, single row.
-  // Never 2×2: that produces a checkerboard pattern across adjacent days.
+  // N horizontal stripes — one row per source, single column.
   const innerGrid: React.CSSProperties = {
-    gridTemplateColumns: `repeat(${n}, 1fr)`,
-    gridTemplateRows:    '1fr',
+    gridTemplateColumns: '1fr',
+    gridTemplateRows:    `repeat(${n}, 1fr)`,
   };
 
   return (
@@ -228,75 +227,14 @@ export default function SwimlaneRenderer({ sources, onDayClick }: SwimlaneRender
 
   if (!allResolved) return <Skeleton />;
 
-  const weeks      = buildWeekGrid(year);
-  const weekCount  = weeks.length;
+  const weeks    = buildWeekGrid(year);
+  const gridCols = `${MONTH_COL_WIDTH}px 1fr`;
+  const dayCols  = `repeat(7, minmax(0, ${MAX_CELL}px))`;
 
   // Surface per-source errors above the grid
   const sourceErrors = sourceStates
     .map((s, i) => s.error ? { src: sources[i], error: s.error } : null)
     .filter((e): e is { src: SourceListRow; error: ApiError } => e !== null);
-
-  // Transposed layout: columns = weeks (time flows left→right), rows = days of week (Mon–Sun).
-  // Build flat cell list for CSS grid auto-placement:
-  //   Row 0 : [corner] [month label per week…]
-  //   Rows 1–7 : [dow label] [day cell per week…]
-  const gridItems: React.ReactNode[] = [];
-
-  // Month label row
-  gridItems.push(<div key="corner" />);
-  weeks.forEach((week, wi) => {
-    gridItems.push(
-      <div
-        key={`month-${wi}`}
-        style={{
-          fontSize:   '0.6rem',
-          color:      'var(--md-sys-color-on-surface-variant)',
-          userSelect: 'none',
-          overflow:   'hidden',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {week.monthLabel ?? ''}
-      </div>
-    );
-  });
-
-  // Day-of-week rows
-  DOW_LABELS.forEach((lbl, dow) => {
-    gridItems.push(
-      <div
-        key={`dow-${dow}`}
-        style={{
-          fontSize:   '0.6rem',
-          color:      'var(--md-sys-color-on-surface-variant)',
-          textAlign:  'center',
-          userSelect: 'none',
-          alignSelf:  'center',
-        }}
-      >
-        {lbl}
-      </div>
-    );
-    weeks.forEach((week, wi) => {
-      const dateStr = week.days[dow];
-      gridItems.push(
-        dateStr ? (
-          <DayCell
-            key={`${wi}-${dow}`}
-            dateStr={dateStr}
-            sources={sources}
-            sourceStates={sourceStates}
-            onDayClick={onDayClick}
-          />
-        ) : (
-          <div
-            key={`${wi}-${dow}-empty`}
-            style={{ aspectRatio: '1', background: 'transparent', borderRadius: 2 }}
-          />
-        )
-      );
-    });
-  });
 
   return (
     <div style={{ width: '100%' }}>
@@ -308,16 +246,71 @@ export default function SwimlaneRenderer({ sources, onDayClick }: SwimlaneRender
         </div>
       ))}
 
-      {/* Transposed heatmap grid */}
-      <div
-        style={{
-          display:             'grid',
-          gridTemplateColumns: `${DOW_LABEL_WIDTH}px repeat(${weekCount}, minmax(0, ${MAX_CELL}px))`,
-          gap:                 CELL_GAP,
-        }}
-      >
-        {gridItems}
+      {/* Day-of-week header */}
+      <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: CELL_GAP, marginBottom: 4 }}>
+        <div />
+        <div style={{ display: 'grid', gridTemplateColumns: dayCols, gap: CELL_GAP }}>
+          {DOW_LABELS.map((lbl, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize:   '0.6rem',
+                color:      'var(--md-sys-color-on-surface-variant)',
+                textAlign:  'center',
+                userSelect: 'none',
+              }}
+            >
+              {lbl}
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* Week rows */}
+      {weeks.map((week, wi) => (
+        <div
+          key={wi}
+          style={{
+            display:             'grid',
+            gridTemplateColumns: gridCols,
+            gap:                 CELL_GAP,
+            marginBottom:        CELL_GAP,
+            alignItems:          'start',
+          }}
+        >
+          {/* Month label */}
+          <div
+            style={{
+              fontSize:   '0.65rem',
+              color:      'var(--md-sys-color-on-surface-variant)',
+              userSelect: 'none',
+              paddingTop: 1,
+            }}
+          >
+            {week.monthLabel ?? ''}
+          </div>
+
+          {/* Day cells */}
+          <div style={{ display: 'grid', gridTemplateColumns: dayCols, gap: CELL_GAP }}>
+            {week.days.map((dateStr, di) =>
+              dateStr ? (
+                <DayCell
+                  key={di}
+                  dateStr={dateStr}
+                  sources={sources}
+                  sourceStates={sourceStates}
+                  onDayClick={onDayClick}
+                />
+              ) : (
+                <div
+                  key={di}
+                  style={{ aspectRatio: '1', background: 'transparent', borderRadius: 2 }}
+                />
+              )
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
