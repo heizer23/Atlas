@@ -406,6 +406,29 @@ mcp-reboot:
 
 
 
+# region --- System: Cloudflared tunnel
+CLOUDFLARED_DIR=01_Access/cloudflared
+
+CLOUDFLARED_COMPOSE=docker compose \
+	-f $(CLOUDFLARED_DIR)/compose.yml \
+	--env-file $(SYSTEM_SECRETS)
+
+cloudflared-up:
+	$(CLOUDFLARED_COMPOSE) up -d
+
+cloudflared-down:
+	$(CLOUDFLARED_COMPOSE) down
+
+cloudflared-logs:
+	$(CLOUDFLARED_COMPOSE) logs -f
+
+cloudflared-reboot:
+	$(CLOUDFLARED_COMPOSE) down
+	$(CLOUDFLARED_COMPOSE) up -d
+
+# endregion
+
+
 # region --- Aggregate: full stack
 # Usage:
 #   make up    — build images and start the full stack (idempotent)
@@ -446,6 +469,7 @@ up:
 	$(MAKE) chronicle-build  chronicle-up
 	$(MAKE) notif-build      notif-up
 	$(MAKE) calendar-build   calendar-up
+	$(MAKE) cloudflared-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
 	@echo ""
@@ -453,6 +477,7 @@ up:
 
 down:
 	-$(MAKE) shell-down
+	-$(MAKE) cloudflared-down
 	-$(MAKE) calendar-down
 	-$(MAKE) notif-down
 	-$(MAKE) chronicle-down
