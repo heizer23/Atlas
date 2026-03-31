@@ -128,8 +128,8 @@ else
     "${MOUNT_POINT}/workout-tracker" \
     "${MOUNT_POINT}/tasktracker"
 
-  # OpenClawed state is user-owned for bind-mount usability
-  sudo chown -R "$USER:$USER" "${MOUNT_POINT}/chronos"
+  # Chronos container runs as node user (uid/gid 1000)
+  sudo chown -R 1000:1000 "${MOUNT_POINT}/chronos"
 
   echo "External disk mounted at ${MOUNT_POINT} and folders prepared."
 fi
