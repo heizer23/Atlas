@@ -376,7 +376,10 @@ def get_events(
 
     # Fetch events from Google Calendar (outside DB context — network call)
     try:
-        event_rows = calendar_api.fetch_events(access_token, from_dt=from_, to_dt=to)
+        event_rows = calendar_api.fetch_events(
+            access_token, from_dt=from_, to_dt=to,
+            extra_calendar_ids=[_target_calendar_id()],
+        )
     except ValueError as exc:
         log.error("Google Calendar API error: %s", exc)
         with get_db() as conn:

@@ -23,13 +23,13 @@ from app.models import (
 
 log = logging.getLogger("calendar_connector")
 
-_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+_EVENTS_LIST_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
 _EVENTS_INSERT_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
 _EVENTS_PATCH_URL = "https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}"
 _PRIMARY_CALENDAR_ID = "primary"
 
 
-def _normalize_event(item: dict) -> CalendarEventRow:
+def _normalize_event(item: dict, calendar_id: str) -> CalendarEventRow:
     """Normalize a single Google Calendar event item into CalendarEventRow."""
     start = item.get("start", {})
     end = item.get("end", {})
@@ -50,54 +50,74 @@ def _normalize_event(item: dict) -> CalendarEventRow:
         all_day="true" if all_day else "false",
         location=item.get("location") or None,
         status=item.get("status", "confirmed"),
-        source_calendar_id=_PRIMARY_CALENDAR_ID,
+        source_calendar_id=calendar_id,
         source_calendar_label=item.get("organizer", {}).get("displayName") or None,
     )
 
 
-def fetch_events(access_token: str, from_dt: str, to_dt: str) -> list[CalendarEventRow]:
-    """Call Google Calendar API v3 events.list for the primary calendar.
-
-    Args:
-        access_token: valid (post-refresh if needed) Google access token
-        from_dt: ISO8601 datetime string for timeMin
-        to_dt: ISO8601 datetime string for timeMax
-
-    Returns:
-        List of CalendarEventRow normalized from the Google response.
-
-    Raises:
-        ValueError: if Google returns a non-2xx response.
-    """
-    # Google requires RFC3339 with timezone — append Z if no offset present
-    def _rfc3339(dt: str) -> str:
-        return dt if (dt.endswith("Z") or "+" in dt[10:] or dt.count("-") > 2) else dt + "Z"
-
+def _fetch_events_from_calendar(
+    access_token: str, calendar_id: str, time_min: str, time_max: str
+) -> list[CalendarEventRow]:
+    """Fetch events from a single Google Calendar."""
+    url = _EVENTS_LIST_URL.format(calendar_id=calendar_id)
     params = {
-        "timeMin": _rfc3339(from_dt),
-        "timeMax": _rfc3339(to_dt),
-        "singleEvents": "true",   # expand recurring events
+        "timeMin": time_min,
+        "timeMax": time_max,
+        "singleEvents": "true",
         "orderBy": "startTime",
         "maxResults": 250,
     }
-    log.info("Fetching events: timeMin=%s timeMax=%s", params["timeMin"], params["timeMax"])
     response = httpx.get(
-        _EVENTS_URL,
+        url,
         headers={"Authorization": f"Bearer {access_token}"},
         params=params,
         timeout=20.0,
     )
-
     if response.status_code != 200:
         body = response.text[:500]
         raise ValueError(
-            f"Google Calendar API returned {response.status_code}: {body}"
+            f"Google Calendar API returned {response.status_code} for calendar {calendar_id!r}: {body}"
         )
+    items = response.json().get("items", [])
+    log.debug("Fetched %d events from calendar %s", len(items), calendar_id)
+    return [_normalize_event(item, calendar_id) for item in items]
 
-    data = response.json()
-    items = data.get("items", [])
-    log.debug("Fetched %d events from Google Calendar", len(items))
-    return [_normalize_event(item) for item in items]
+
+def fetch_events(
+    access_token: str, from_dt: str, to_dt: str, extra_calendar_ids: list[str] | None = None
+) -> list[CalendarEventRow]:
+    """Fetch events from the primary calendar and any extra calendars, merged by start time.
+
+    Args:
+        access_token: valid Google access token
+        from_dt: ISO8601 datetime string for timeMin
+        to_dt: ISO8601 datetime string for timeMax
+        extra_calendar_ids: additional calendar IDs to fetch alongside primary
+
+    Returns:
+        Merged, start-time-sorted list of CalendarEventRow (duplicates by event ID removed).
+
+    Raises:
+        ValueError: if Google returns a non-2xx response for any calendar.
+    """
+    time_min = _rfc3339(from_dt)
+    time_max = _rfc3339(to_dt)
+    log.info("Fetching events: timeMin=%s timeMax=%s", time_min, time_max)
+
+    calendar_ids = [_PRIMARY_CALENDAR_ID] + (extra_calendar_ids or [])
+    seen_ids: set[str] = set()
+    all_rows: list[CalendarEventRow] = []
+
+    for cal_id in calendar_ids:
+        rows = _fetch_events_from_calendar(access_token, cal_id, time_min, time_max)
+        for row in rows:
+            if row.id not in seen_ids:
+                seen_ids.add(row.id)
+                all_rows.append(row)
+
+    # Sort merged results by start_at
+    all_rows.sort(key=lambda r: r.start_at)
+    return all_rows
 
 
 def _rfc3339(dt: str) -> str:
