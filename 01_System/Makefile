@@ -62,6 +62,15 @@ CHRONOS_COMPOSE=docker compose \
 	-f $(CHRONOS_DIR)/compose.yml \
 	$(ENV_FILES)
 
+chronos-init:
+	@if [ -f "$(CHRONOS_STATE_DIR)/openclaw.json" ]; then \
+	  echo "$(CHRONOS_STATE_DIR)/openclaw.json already exists — skipping. Delete it first to re-init."; \
+	else \
+	  cp $(CHRONOS_DIR)/openclaw-init.json $(CHRONOS_STATE_DIR)/openclaw.json; \
+	  echo "Wrote $(CHRONOS_STATE_DIR)/openclaw.json"; \
+	  echo "Token is injected from CHRONOS_TOKEN in secrets.env — no manual edit needed."; \
+	fi
+
 chronos-up:
 	$(CHRONOS_COMPOSE) up -d
 
@@ -77,6 +86,10 @@ chronos-reboot:
 
 chronos-ps:
 	$(CHRONOS_COMPOSE) ps
+
+chronos-pair:
+	$(CHRONOS_COMPOSE) exec chronos openclaw devices approve --latest \
+	  --token $$(python3 -c "import json; print(json.load(open('$(CHRONOS_STATE_DIR)/openclaw.json'))['gateway']['auth']['token'])")
 
 # endregion
 

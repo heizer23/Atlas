@@ -18,7 +18,11 @@ log = logging.getLogger("calendar_connector")
 _GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
+# Sprint02: upgraded from calendar.readonly to calendar (read+write superset).
+# Operator must re-run GET /api/calendar/google/connect/start to re-consent with
+# the expanded scope. Existing read functionality continues to work — calendar
+# scope is a superset of calendar.readonly.
 
 
 def _client_id() -> str:

@@ -18,6 +18,7 @@ from platform_errorhandling.performance import install_request_timing
 
 from app.database import init_pool, init_schema
 from app.routers import calendar
+from app.routers.calendar import _validate_target_calendar_id
 
 setup_logging(
     app_name="calendar_connector",
@@ -48,7 +49,10 @@ def on_startup() -> None:
         init_pool()
         log.info("Running schema init...")
         init_schema()
+        log.info("Validating CALENDAR_TARGET_CALENDAR_ID...")
+        _validate_target_calendar_id()   # raises RuntimeError if env var absent
         log.info("CalendarConnector ready.")
     except Exception as exc:
-        log.error("Startup failed (database may not be reachable): %s", exc)
-        log.error("Requests will fail until the database is available.")
+        log.error("Startup failed: %s", exc)
+        log.error("Requests will fail until configuration is corrected.")
+        raise

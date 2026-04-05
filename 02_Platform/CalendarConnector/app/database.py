@@ -66,11 +66,20 @@ def get_db() -> Generator[psycopg2.extensions.connection, None, None]:
 
 
 def init_schema() -> None:
-    """Execute migrations/001_init.sql to ensure all tables exist (idempotent)."""
-    sql_path = _MIGRATIONS_DIR / "001_init.sql"
-    sql = sql_path.read_text(encoding="utf-8")
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-        conn.commit()
-    log.info("Schema initialised from %s", sql_path)
+    """Execute all .sql files in migrations/ directory sorted by filename.
+
+    Each file is executed in its own transaction (files use BEGIN/COMMIT internally).
+    Idempotent: all migration files use CREATE TABLE IF NOT EXISTS.
+
+    Sprint02 change: previously hardcoded to 001_init.sql only.
+    Now scans all .sql files sorted by name so that 002_write_capability.sql
+    and any future migrations are applied automatically on startup.
+    """
+    sql_files = sorted(_MIGRATIONS_DIR.glob("*.sql"))
+    for sql_path in sql_files:
+        sql = sql_path.read_text(encoding="utf-8")
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+            conn.commit()
+        log.info("Schema initialised from %s", sql_path)

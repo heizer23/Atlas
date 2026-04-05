@@ -7,6 +7,7 @@ services:
       - "${CHRONOS_BIND}:${CHRONOS_PORT}:18789"
     environment:
       OPENCLAW_ALLOWED_ORIGINS: ${CHRONOS_ALLOWED_ORIGINS}
+      ANTHROPIC_API_KEY: ${OPENCLAW_API}
     volumes:
       - "${CHRONOS_STATE_DIR}:/home/node/.openclaw"
       - "${CHRONOS_WORKSPACE_DIR}:/workspace"

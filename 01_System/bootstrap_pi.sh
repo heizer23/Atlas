@@ -1,24 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Atlas/System bootstrap for Raspberry Pi host
-# Installs docker + basic tools, prepares user permissions,
-# mounts external platform storage at /mnt/data,
-# and installs Tailscale as a System-layer access component.
+# Atlas/System bootstrap for Debian host
+# - installs base tools
+# - installs/configures Tailscale
+# - installs/configures Docker
+# - prepares Atlas data root on internal storage at /mnt/data
+# - creates required folders with expected ownership
+
+DATA_ROOT="/mnt/data"
 
 echo "==> Updating apt + installing base tools"
 sudo apt update
-sudo apt -y install git curl ca-certificates util-linux
+sudo apt install -y \
+  sudo \
+  git \
+  curl \
+  ca-certificates \
+  util-linux \
+  ethtool \
+  apt-transport-https \
+  gnupg \
+  lsb-release \
+  make
 
 # ---- Tailscale (System access) ----
 echo "==> Ensuring Tailscale is installed"
 if ! command -v tailscale >/dev/null 2>&1; then
   echo "Installing Tailscale via official apt repo..."
-
   sudo mkdir -p /etc/apt/keyrings
   CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
 
-  # Add Tailscale signing key (noarmor) + apt repo
   curl -fsSL "https://pkgs.tailscale.com/stable/debian/${CODENAME}.noarmor.gpg" \
     | sudo tee /etc/apt/keyrings/tailscale-archive-keyring.gpg >/dev/null
 
@@ -31,7 +43,6 @@ else
   echo "Tailscale already installed."
 fi
 
-# Ensure daemon is enabled/running (idempotent)
 echo "==> Ensuring tailscaled is enabled and running"
 sudo systemctl enable --now tailscaled
 # ----------------------------------
@@ -39,120 +50,69 @@ sudo systemctl enable --now tailscaled
 # ---- Docker ----
 echo "==> Ensuring Docker is installed"
 if ! command -v docker >/dev/null 2>&1; then
-  # Note: remote installer; kept for now because this is your current pattern.
-  # Later we can switch to the official Docker apt repo for a fully deterministic bootstrap.
+  echo "Installing Docker via official convenience script..."
   curl -fsSL https://get.docker.com | sh
 else
   echo "Docker already installed."
 fi
 
-# Ensure docker compose is available (comes with modern docker installs)
-docker compose version >/dev/null 2>&1 || true
+echo "==> Ensuring Docker daemon is enabled and running"
+sudo systemctl enable --now docker
 
-# Add current user to docker group (safe to run repeatedly; takes effect after re-login)
 echo "==> Ensuring user '$USER' is in docker group"
 sudo usermod -aG docker "$USER"
 
-# ---- Docker networks ----
-# Run via sudo so it works even before the user re-logs in to pick up the docker group
 echo "==> Ensuring atlas-net Docker bridge network exists"
-sudo docker network create atlas-net --driver bridge 2>/dev/null || echo "atlas-net already exists."
-# -------------------------
+sudo docker network inspect atlas-net >/dev/null 2>&1 || \
+  sudo docker network create atlas-net --driver bridge
+# ----------------
 
-# ---- External data disk mount (Atlas platform storage) ----
-# This script assumes the external partition is labeled "data"
-DATA_LABEL="data"
-MOUNT_POINT="/mnt/data"
+# ---- Atlas data root on internal disk ----
+echo "==> Ensuring Atlas data root exists at ${DATA_ROOT}"
+sudo mkdir -p \
+  "${DATA_ROOT}/postgres" \
+  "${DATA_ROOT}/weaviate" \
+  "${DATA_ROOT}/files" \
+  "${DATA_ROOT}/workout-tracker/logs" \
+  "${DATA_ROOT}/tasktracker/logs" \
+  "${DATA_ROOT}/chronos/workspace" \
+  "${DATA_ROOT}/chronos/agents" \
+  "${DATA_ROOT}/chronos/config" \
+  "${DATA_ROOT}/calendar_connector/logs"
 
-echo "==> Checking for external disk labeled '${DATA_LABEL}'"
-# Resolve device by filesystem label (preferred for stability)
-DATA_DEV="$(blkid -L "${DATA_LABEL}" || true)"
+echo "==> Setting ownership and permissions"
+# Postgres container runs as uid/gid 999 by default
+sudo chown -R 999:999 "${DATA_ROOT}/postgres"
+sudo chmod 700 "${DATA_ROOT}/postgres"
 
-if [[ -z "${DATA_DEV}" ]]; then
-  echo "WARN: No block device found with label '${DATA_LABEL}'. Skipping external disk mount."
-else
-  echo "External data disk: ${DATA_DEV} (label=${DATA_LABEL})"
+# Root-owned shared storage
+sudo chown -R root:root \
+  "${DATA_ROOT}/weaviate" \
+  "${DATA_ROOT}/files" \
+  "${DATA_ROOT}/workout-tracker" \
+  "${DATA_ROOT}/tasktracker" \
+  "${DATA_ROOT}/calendar_connector"
 
-  sudo mkdir -p "${MOUNT_POINT}"
+# Chronos container runs as uid/gid 1000
+sudo chown -R 1000:1000 "${DATA_ROOT}/chronos"
+# ---------------------------------------
 
-  # Get UUID + FSTYPE for fstab (UUID is more robust than /dev/sdX)
-  DATA_UUID="$(blkid -s UUID -o value "${DATA_DEV}")"
-  DATA_FSTYPE="$(blkid -s TYPE -o value "${DATA_DEV}")"
+# ---- Optional: prevent server sleep/network autosuspend surprises ----
+echo "==> Disabling suspend targets for server stability"
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target || true
 
-  if [[ -z "${DATA_UUID}" || -z "${DATA_FSTYPE}" ]]; then
-    echo "ERROR: Could not read UUID/FSTYPE for ${DATA_DEV}. Aborting."
-    exit 1
-  fi
-
-  # Add fstab entry if missing (idempotent)
-  FSTAB_LINE="UUID=${DATA_UUID}  ${MOUNT_POINT}  ${DATA_FSTYPE}  defaults,nofail  0  2"
-  if ! grep -qF "UUID=${DATA_UUID}" /etc/fstab; then
-    echo "Adding fstab entry for external data disk..."
-    sudo cp /etc/fstab "/etc/fstab.bak.$(date +%Y%m%d_%H%M%S)"
-    echo "${FSTAB_LINE}" | sudo tee -a /etc/fstab >/dev/null
-  else
-    echo "fstab already contains entry for UUID=${DATA_UUID}"
-  fi
-
-  # Mount (safe even if already mounted)
-  echo "==> Mounting all filesystems from fstab"
-  sudo mount -a
-
-  # Verify mount
-  if ! mountpoint -q "${MOUNT_POINT}"; then
-    echo "ERROR: ${MOUNT_POINT} is not mounted after mount -a. Aborting."
-    exit 1
-  fi
-
-  # Create folders
-  echo "==> Preparing Atlas data folders on ${MOUNT_POINT}"
-  sudo mkdir -p \
-    "${MOUNT_POINT}/postgres" \
-    "${MOUNT_POINT}/weaviate" \
-    "${MOUNT_POINT}/files" \
-    "${MOUNT_POINT}/workout-tracker/logs" \
-    "${MOUNT_POINT}/tasktracker/logs" \
-    "${MOUNT_POINT}/chronos/workspace" \
-    "${MOUNT_POINT}/chronos/agents" \
-    "${MOUNT_POINT}/chronos/config" \
-    "${MOUNT_POINT}/calendar_connector/logs"
-
-  # Postgres container runs as uid/gid 999 by default
-  sudo chown -R 999:999 "${MOUNT_POINT}/postgres"
-  sudo chmod 700 "${MOUNT_POINT}/postgres"
-
-  # Keep other folders owned by root
-  sudo chown -R root:root \
-    "${MOUNT_POINT}/weaviate" \
-    "${MOUNT_POINT}/files" \
-    "${MOUNT_POINT}/workout-tracker" \
-    "${MOUNT_POINT}/tasktracker"
-
-  # Chronos container runs as node user (uid/gid 1000)
-  sudo chown -R 1000:1000 "${MOUNT_POINT}/chronos"
-
-  echo "External disk mounted at ${MOUNT_POINT} and folders prepared."
+if [[ -e /sys/class/net/eno1/power/control ]]; then
+  echo "==> Setting NIC power control to 'on' for eno1"
+  echo on | sudo tee /sys/class/net/eno1/power/control >/dev/null
 fi
-# ----------------------------------------------------------
+# ---------------------------------------------------------------------
 
-
-
-echo ""
+echo
 echo "Bootstrap complete."
-echo ""
-echo "IMPORTANT: Re-login (or run: newgrp docker) so docker group membership applies."
-echo ""
-echo "Manual steps required before running 'make up':"
-echo ""
-echo "  1. Authenticate Tailscale:"
-echo "       sudo tailscale up"
-echo ""
-echo "  2. Create 01_System/secrets.env with at minimum:"
-echo "       ATLAS_PG_PASSWORD=<password>"
-echo "       DATA_ROOT=/mnt/data"
-echo "       CLOUDFLARE_TUNNEL_TOKEN=<token>"
-echo "       FCM_TOKEN=<firebase-device-token>"
-echo ""
-echo "  3. Copy the Firebase service account file (not in git):"
-echo "       scp <dev>:Atlas/02_Platform/Notifications/20_Data/firebase_service_account.json \\"
-echo "           ~/Atlas/02_Platform/Notifications/20_Data/firebase_service_account.json"
+echo
+echo "Re-login required for docker group membership to apply."
+echo
+echo "Still manual because secrets/auth are not in git:"
+echo "  1. sudo tailscale up"
+echo "  2. create 01_System/secrets.env"
+echo "  3. copy firebase_service_account.json if Notifications are used"

@@ -17,6 +17,7 @@ services:
       GoogleAuth_Secret: ${GoogleAuth_Secret}
       CALENDAR_CONNECTOR_PORT: ${CALENDAR_CONNECTOR_PORT:-8021}
       CALENDAR_CALLBACK_URI: "https://workout.linspad.net/api/calendar/google/connect/callback"
+      CALENDAR_TARGET_CALENDAR_ID: ${CALENDAR_TARGET_CALENDAR_ID}
     volumes:
       - ${DATA_ROOT}/calendar_connector/logs:/app/logs
     networks:

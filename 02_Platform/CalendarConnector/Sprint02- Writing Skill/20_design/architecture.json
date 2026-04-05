@@ -1,0 +1,296 @@
+{
+  "component_name": "calendar_connector",
+  "sprint": "Sprint02-Writing Skill",
+  "layer": "02_Platform",
+  "source_definition": "00_input/draft.md",
+  "baseline_sprint": "Sprint01_First Setup",
+  "summary": "Extends CalendarConnector from read-only to write-capable by upgrading the OAuth scope, adding a POST /api/calendar/events endpoint that creates events in a fixed operator-configured target calendar, and persisting a decision log record for every create attempt.",
+  "classification": {
+    "why_platform": "Event creation through a Google Calendar API connection is a reusable technical capability with no embedded domain meaning. The connector owns the OAuth lifecycle, credential storage, target calendar enforcement, and audit persistence. Domain decisions about what events to create remain in the calling application (Chronos skill).",
+    "non_goals": [
+      "Updating existing Google Calendar events",
+      "Deleting Google Calendar events",
+      "Writing to any calendar other than the operator-configured Chronos target calendar",
+      "Calendar discovery or selection UI",
+      "Rich Google event features beyond minimum create payload (attendees, reminders, recurrence, conferencing)",
+      "Background sync, retry workers, or async execution",
+      "Per-user ownership or per-user calendar routing",
+      "Duplicate detection or idempotency strategy",
+      "Multi-calendar routing",
+      "External-to-internal event mapping model",
+      "At-rest token encryption (known gap — deferred from Sprint01)"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from 01_System/config.env and 01_System/secrets.env",
+      "CALENDAR_CONNECTOR_PORT from 01_System/config.env",
+      "CALENDAR_TARGET_CALENDAR_ID from 01_System/config.env — required deployment input; CalendarConnector raises RuntimeError at startup if absent",
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema from 02_Platform/packages/platform_contracts/contracts.py",
+      "api_error() from 02_Platform/packages/platform_errorhandling/api_response.py",
+      "Atlas Postgres database (shared, managed by 02_Platform/01_Postgres)",
+      "Google OAuth 2.0 authorization and token endpoints (external)",
+      "Google Calendar API v3 events.insert endpoint (external)"
+    ],
+    "provides": [
+      "GET /api/calendar/google/connect/start — initiates Google Calendar OAuth consent flow (now requests calendar read+write scope)",
+      "GET /api/calendar/google/connect/callback — receives auth code, exchanges tokens, persists connection state",
+      "GET /api/calendar/events?from=<ISO8601>&to=<ISO8601> — returns Dataset of normalized calendar events (unchanged from Sprint01)",
+      "GET /api/calendar/status — returns Dataset describing current connection health (unchanged from Sprint01)",
+      "POST /api/calendar/events — creates a new event in the operator-configured Chronos target calendar; returns structured success payload; persists decision log entry"
+    ],
+    "invariants": [
+      "Calendar connection state is independent of Atlas login state.",
+      "Token fields (access_token, refresh_token) are never included in any API response body.",
+      "All API error responses use the api_error() envelope from platform_errorhandling.",
+      "GET /api/calendar/events always returns a Dataset.",
+      "GET /api/calendar/status always returns a Dataset.",
+      "POST /api/calendar/events always writes to the calendar identified by CALENDAR_TARGET_CALENDAR_ID — never to a caller-supplied calendar ID.",
+      "POST /api/calendar/events writes a decision log entry for every create attempt, regardless of outcome.",
+      "A decision log write failure must never cause the endpoint to return an error if the Google API call succeeded.",
+      "POST /api/calendar/events requires write-capable authorization (scope: calendar). If the stored connection was granted only calendar.readonly scope, the endpoint must reject the request with INSUFFICIENT_SCOPE.",
+      "The component uses the existing GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — no separate OAuth client.",
+      "Atlas is system-scoped: no user_id FK on any table.",
+      "OAuth scope for connect_start is now https://www.googleapis.com/auth/calendar (read+write superset of calendar.readonly).",
+      "Existing read endpoints (GET /api/calendar/events, GET /api/calendar/status) continue to function after scope upgrade — calendar scope is a superset of calendar.readonly."
+    ],
+    "failure_modes": [
+      "INSUFFICIENT_SCOPE: Stored granted_scopes does not include 'calendar' write scope — POST endpoint returns api_error(code='INSUFFICIENT_SCOPE', status=403) with message directing operator to re-run consent flow",
+      "CALENDAR_TARGET_NOT_CONFIGURED: CALENDAR_TARGET_CALENDAR_ID env var is absent — service raises RuntimeError at startup (fail-fast)",
+      "CALENDAR_TARGET_NOT_FOUND: Google Calendar API returns 404 for the configured calendar ID — POST endpoint returns api_error(code='CALENDAR_TARGET_NOT_FOUND', status=502)",
+      "NO_CONNECTION: No calendar_connection record exists — POST endpoint returns api_error(code='NO_CALENDAR_CONNECTION', status=404)",
+      "CONNECTION_EXPIRED: Token is expired and refresh fails — POST endpoint returns api_error(code='CALENDAR_TOKEN_EXPIRED', status=503)",
+      "CONNECTION_REVOKED: Google revoked access — POST endpoint returns api_error(code='CALENDAR_ACCESS_REVOKED', status=503)",
+      "GOOGLE_API_ERROR: Google Calendar API returns non-2xx on insert — POST endpoint returns api_error(code='GOOGLE_API_ERROR', status=502)",
+      "INVALID_INPUT: Required fields (title, start_at, end_at) missing or malformed — POST endpoint returns api_error(code='INVALID_EVENT_INPUT', status=400)",
+      "DB_UNAVAILABLE: Database unreachable — requests fail with 500 via install_exception_handlers"
+    ]
+  },
+  "shared_views": {
+    "new_in_sprint02": [
+      "CalendarCreateEventRequest: title (string, required), start_at (ISO8601 string, required), end_at (ISO8601 string, required), description (string|null, optional), location (string|null, optional), all_day (boolean, optional, default false) — Pydantic model for POST /api/calendar/events request body",
+      "CalendarCreateEventResult: status (string, 'created'), google_event_id (string), title (string), start_at (ISO8601 string), end_at (ISO8601 string), all_day (boolean), source_calendar_id (string), source_calendar_label (string|null) — Pydantic model for POST /api/calendar/events success response"
+    ],
+    "retained_from_sprint01": [
+      "CalendarEventRow — unchanged",
+      "CalendarConnectionStatusRow — unchanged"
+    ]
+  },
+  "interfaces": {
+    "new_in_sprint02": {
+      "consumes": [
+        "Google Calendar API v3: POST https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events (event insert)",
+        "CALENDAR_TARGET_CALENDAR_ID env var — resolved at startup"
+      ],
+      "provides": [
+        "POST /api/calendar/events -> JSONResponse (CalendarCreateEventResult as JSON) | JSONResponse api_error"
+      ],
+      "exposed_surfaces": [
+        {
+          "type": "http_endpoint",
+          "name": "POST /api/calendar/events",
+          "purpose": "Validates request body (title, start_at, end_at required), checks connection and scope, inserts event into CALENDAR_TARGET_CALENDAR_ID calendar via Google Calendar API v3, writes decision log entry, returns success payload or api_error"
+        }
+      ]
+    },
+    "changed_in_sprint02": {
+      "connect_start_scope": "build_authorization_url() now requests https://www.googleapis.com/auth/calendar (read+write) instead of https://www.googleapis.com/auth/calendar.readonly"
+    }
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "connect_start (updated)",
+      "description": "Unchanged from Sprint01 except: scope changes from calendar.readonly to calendar. This is the only change to the existing connect flow. Operator must re-run this flow after deployment to upgrade the granted scope.",
+      "inputs": ["HTTP GET /api/calendar/google/connect/start"],
+      "outputs": ["RedirectResponse to Google consent URL (calendar scope)", "calendar_oauth_state row inserted"]
+    },
+    {
+      "step": 2,
+      "name": "connect_callback",
+      "description": "Unchanged from Sprint01. The expanded calendar scope is stored in granted_scopes on upsert.",
+      "inputs": ["HTTP GET /api/calendar/google/connect/callback?code&state"],
+      "outputs": ["calendar_connection row upserted (granted_scopes includes 'calendar')", "calendar_token row upserted", "calendar_oauth_state nonce deleted", "JSON success response or api_error"]
+    },
+    {
+      "step": 3,
+      "name": "token_refresh_check",
+      "description": "Unchanged from Sprint01. Used internally before any Google API request.",
+      "inputs": ["calendar_token record", "Google token refresh endpoint response"],
+      "outputs": ["Updated calendar_token record", "Or failure mode raised: CONNECTION_EXPIRED or CONNECTION_REVOKED"]
+    },
+    {
+      "step": 4,
+      "name": "fetch_events",
+      "description": "Unchanged from Sprint01.",
+      "inputs": ["HTTP GET /api/calendar/events?from&to"],
+      "outputs": ["Dataset with object_type=calendar_event", "Or api_error on any failure mode"]
+    },
+    {
+      "step": 5,
+      "name": "status_read",
+      "description": "Unchanged from Sprint01.",
+      "inputs": ["HTTP GET /api/calendar/status"],
+      "outputs": ["Dataset with object_type=calendar_connection"]
+    },
+    {
+      "step": 6,
+      "name": "create_event",
+      "description": "New in Sprint02. 1) Validate request body: title, start_at, end_at required. 2) Check connection record exists. 3) Call token_refresh_check (reuse existing pattern). 4) Check granted_scopes includes write-capable scope; if not, return INSUFFICIENT_SCOPE. 5) Resolve target calendar ID from CALENDAR_TARGET_CALENDAR_ID env var. 6) Call Google Calendar API v3 events.insert on the target calendar. 7) Write decision log entry (best-effort — catch DB exceptions, log, do not propagate). 8) On success: return CalendarCreateEventResult as JSON 201. 9) On failure: write failure decision log entry (best-effort), return api_error.",
+      "inputs": [
+        "HTTP POST /api/calendar/events (CalendarCreateEventRequest body)",
+        "calendar_token (post-refresh if needed)",
+        "CALENDAR_TARGET_CALENDAR_ID from environment",
+        "Google Calendar API v3 insert response"
+      ],
+      "outputs": [
+        "Google Calendar event created in target calendar",
+        "calendar_decision_log row inserted (success or failure)",
+        "JSONResponse with CalendarCreateEventResult (status 201) on success",
+        "JSONResponse api_error on any failure mode"
+      ]
+    }
+  ],
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifacts": [
+      "migrations/001_init.sql — Sprint01 base schema (calendar_connection, calendar_token, calendar_oauth_state)",
+      "migrations/002_write_capability.sql — Sprint02 addition (calendar_decision_log)"
+    ],
+    "persistence_type": "postgres",
+    "new_table": {
+      "name": "calendar_decision_log",
+      "columns": [
+        {"name": "id", "type": "SERIAL PRIMARY KEY"},
+        {"name": "operation", "type": "TEXT NOT NULL", "note": "e.g. 'calendar_event_create'"},
+        {"name": "requested_at", "type": "TIMESTAMPTZ NOT NULL"},
+        {"name": "target_calendar_id", "type": "TEXT NOT NULL"},
+        {"name": "outcome", "type": "TEXT NOT NULL", "values": ["success", "failure"]},
+        {"name": "google_event_id", "type": "TEXT", "nullable": true, "note": "populated on success only"},
+        {"name": "error_summary", "type": "TEXT", "nullable": true, "note": "populated on failure only"},
+        {"name": "created_at", "type": "TIMESTAMPTZ NOT NULL DEFAULT NOW()"}
+      ]
+    }
+  },
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "Error envelope (api_error), exception handlers, request timing, logging setup"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema types for read endpoints"},
+      {"component": "02_Platform/01_Postgres", "role": "Shared Postgres database"},
+      {"component": "02_Platform/02_Atlas_Shell/nginx.conf", "role": "Existing /api/calendar location block covers POST /api/calendar/events — no new block required"},
+      {"component": "01_System/config.env", "role": "CALENDAR_CONNECTOR_PORT and new CALENDAR_TARGET_CALENDAR_ID must be present"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP service framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres connection pool", "reuse_existing": true},
+      {"name": "httpx", "role": "HTTP client for Google OAuth and Calendar API", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request/response model validation", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any import from 03_Application/*",
+      "Modification of existing Google login flow or MCPGateway auth configuration",
+      "user_id foreign key on any table in this component",
+      "Separate Google OAuth client credentials",
+      "Ad hoc error response shapes — all errors must use api_error()",
+      "Accepting a caller-supplied calendar_id in POST /api/calendar/events"
+    ]
+  },
+  "design_decisions": [
+    {
+      "decision": "database.py init_schema() must be updated to run all .sql files in migrations/ sorted by filename, not only 001_init.sql by hardcoded name.",
+      "rationale": "Current init_schema() hardcodes the path to 001_init.sql. Sprint02 adds 002_write_capability.sql. Without this change, the new table will not be created on startup. The fix is minimal: replace the hardcoded path with a sorted glob over the migrations/ directory.",
+      "owner": "platform_implementer"
+    },
+    {
+      "decision": "OAuth scope change from calendar.readonly to calendar requires operator re-consent.",
+      "rationale": "Google does not automatically upgrade a previously granted scope. The operator must re-run GET /api/calendar/google/connect/start after deployment to obtain a new grant with the expanded scope. This is a deployment pre-condition, not an implementation decision.",
+      "owner": "operations"
+    },
+    {
+      "decision": "INSUFFICIENT_SCOPE check: verify granted_scopes contains 'https://www.googleapis.com/auth/calendar' (not just 'calendar.readonly') before accepting POST /api/calendar/events.",
+      "rationale": "Existing connections granted before this sprint will have calendar.readonly scope only. Attempting to write with a read-only token will fail at Google with a 403. The connector must detect this condition early and return a clear error directing the operator to re-consent.",
+      "owner": "platform_implementer"
+    },
+    {
+      "decision": "Decision log write is best-effort: DB exceptions are caught, logged, and not propagated to the caller.",
+      "rationale": "The primary success criterion is that the Google event was created. A secondary audit failure must not retroactively fail a successful create operation from the caller's perspective. The operator can diagnose missing log entries from application logs.",
+      "owner": "platform_implementer"
+    },
+    {
+      "decision": "CALENDAR_TARGET_CALENDAR_ID env var validated at startup (fail-fast), not at request time.",
+      "rationale": "Consistent with how _client_id() and _client_secret() are validated in google_oauth.py. Fail-fast surfaces misconfiguration immediately at container start rather than on the first request.",
+      "owner": "platform_implementer"
+    },
+    {
+      "decision": "Migration runner path: init_schema() remains the authoritative schema deployment path (unchanged from Sprint01 design_decision).",
+      "rationale": "Same rationale as Sprint01: migrate.py scans Application paths only. Extension to Platform paths remains deferred.",
+      "owner": "architecture"
+    }
+  ],
+  "deferrals": {
+    "platform_implementer": [
+      "Update database.py init_schema() to run all .sql files in migrations/ sorted by filename (not hardcoded 001_init.sql)",
+      "Add CALENDAR_TARGET_CALENDAR_ID to 01_System/config.env — add to port roster comment block and as a new Platform: CalendarConnector config entry; validate at startup",
+      "Update google_oauth.py: change _CALENDAR_SCOPE constant to 'https://www.googleapis.com/auth/calendar'",
+      "Add services/calendar_api.py create_event(access_token, target_calendar_id, request) function: POST to Google Calendar API v3 events.insert, normalize response into CalendarCreateEventResult",
+      "Add token_store.py write_decision_log(conn, operation, requested_at, target_calendar_id, outcome, google_event_id, error_summary) function",
+      "Add models.py CalendarCreateEventRequest and CalendarCreateEventResult Pydantic models",
+      "Add POST /api/calendar/events endpoint in routers/calendar.py per internal_flow step 6",
+      "Implement INSUFFICIENT_SCOPE check: inspect granted_scopes column from calendar_connection before calling Google API",
+      "Add migrations/002_write_capability.sql with CREATE TABLE IF NOT EXISTS calendar_decision_log",
+      "Document CALENDAR_TARGET_CALENDAR_ID and re-consent requirement as deployment pre-conditions in implementation_notes.md"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "POST /api/calendar/events: valid request with write-capable scope -> event created in Google Calendar, 201 returned, decision log row written",
+      "POST /api/calendar/events: missing required field (title) -> INVALID_EVENT_INPUT api_error returned",
+      "POST /api/calendar/events: no connection record -> NO_CALENDAR_CONNECTION api_error returned",
+      "POST /api/calendar/events: connection has only calendar.readonly scope -> INSUFFICIENT_SCOPE api_error returned",
+      "POST /api/calendar/events: token expired, refresh succeeds -> token updated, event created",
+      "POST /api/calendar/events: Google Calendar API returns error -> GOOGLE_API_ERROR returned, failure decision log row written",
+      "POST /api/calendar/events: all_day=true -> event created with date-only start/end format in Google API call",
+      "POST /api/calendar/events: decision log DB write fails -> event create still returns success (best-effort log)",
+      "GET /api/calendar/events: continues to function after scope upgrade",
+      "init_schema(): runs both 001_init.sql and 002_write_capability.sql idempotently"
+    ],
+    "reviewer": [
+      "Verify init_schema() runs all .sql files in migrations/ sorted by filename",
+      "Verify POST /api/calendar/events does not accept caller-supplied calendar_id",
+      "Verify INSUFFICIENT_SCOPE check is present and returns api_error before any Google API call",
+      "Verify decision log write is best-effort (try/except, no propagation to caller)",
+      "Verify CalendarCreateEventRequest validates title, start_at, end_at as required fields",
+      "Verify CALENDAR_TARGET_CALENDAR_ID validated at startup (fail-fast)",
+      "Verify google_oauth.py scope constant updated to calendar (not calendar.readonly)",
+      "Verify 002_write_capability.sql uses CREATE TABLE IF NOT EXISTS",
+      "Verify token values absent from all API response shapes (unchanged invariant)",
+      "Verify no user_id FK on any table"
+    ]
+  },
+  "risks": [
+    {
+      "risk": "Operator does not re-run OAuth consent flow after deployment",
+      "impact": "POST /api/calendar/events returns INSUFFICIENT_SCOPE for all requests. Connector is functional but write capability is unavailable until re-consent is completed. Resolution: operator runs GET /api/calendar/google/connect/start and completes the Google consent screen."
+    },
+    {
+      "risk": "CALENDAR_TARGET_CALENDAR_ID not set in config.env before deployment",
+      "impact": "Service fails to start (RuntimeError at startup). Resolution: operator adds the calendar ID to config.env and restarts the service."
+    },
+    {
+      "risk": "Google Calendar ID for Chronos calendar unknown at design time",
+      "impact": "Deployment blocked until operator retrieves the calendar ID from Google Calendar settings and adds it to config.env. This is an operational input that cannot be determined from the codebase."
+    },
+    {
+      "risk": "Token plaintext storage (carried forward from Sprint01)",
+      "impact": "access_token and refresh_token stored as plaintext in Postgres. Known gap — must be addressed before production use."
+    }
+  ],
+  "open_questions": [],
+  "deployment_preconditions": [
+    "Operator must add CALENDAR_TARGET_CALENDAR_ID=<chronos-calendar-id> to 01_System/config.env before first deployment",
+    "Operator must re-run GET /api/calendar/google/connect/start after deployment to upgrade the OAuth scope from calendar.readonly to calendar",
+    "Google Cloud Console callback URI registration (http://localhost:8021/api/calendar/google/connect/callback) must remain valid — no change from Sprint01"
+  ]
+}

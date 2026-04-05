@@ -1,8 +1,14 @@
 """
-Pydantic models for the normalized CalendarEventRow and CalendarConnectionStatusRow shapes.
+Pydantic models for CalendarConnector request/response shapes.
 
-These are the shared_views types declared in architecture.json.
-They populate Dataset rows returned by the calendar endpoints.
+Sprint01 models:
+  CalendarEventRow          — Dataset row shape for GET /api/calendar/events
+  CalendarConnectionStatusRow — Dataset row shape for GET /api/calendar/status
+
+Sprint02 additions:
+  CalendarCreateEventRequest  — Request body for POST /api/calendar/events
+  CalendarCreateEventResult   — Success response for POST /api/calendar/events
+
 Token fields (access_token, refresh_token) are never included here.
 """
 from typing import Optional
@@ -41,3 +47,40 @@ class CalendarConnectionStatusRow(BaseModel):
     last_error: Optional[str]
     created_at: str                 # ISO8601 string
     updated_at: str                 # ISO8601 string
+
+
+# ---------------------------------------------------------------------------
+# Sprint02 additions — write capability
+# ---------------------------------------------------------------------------
+
+class CalendarCreateEventRequest(BaseModel):
+    """Request body for POST /api/calendar/events.
+
+    title, start_at, end_at are required.
+    description, location, all_day are optional.
+    calendar_id is NOT accepted — target calendar is always operator-configured.
+    """
+
+    title: str
+    start_at: str                    # ISO8601 datetime string (or YYYY-MM-DD if all_day=True)
+    end_at: str                      # ISO8601 datetime string (or YYYY-MM-DD if all_day=True)
+    description: Optional[str] = None
+    location: Optional[str] = None
+    all_day: bool = False            # if True, use date-only format in Google API call
+
+
+class CalendarCreateEventResult(BaseModel):
+    """Success response for POST /api/calendar/events.
+
+    Not a Dataset row — this is a direct JSON success payload.
+    Returned as JSONResponse with status_code=201.
+    """
+
+    status: str = "created"          # always 'created'
+    google_event_id: str             # Google Calendar event id
+    title: str
+    start_at: str                    # ISO8601 string as returned by Google
+    end_at: str                      # ISO8601 string as returned by Google
+    all_day: bool                    # native bool (not string — this is not a Dataset row)
+    source_calendar_id: str          # the target calendar ID used
+    source_calendar_label: Optional[str]  # calendar summary from Google response, if available

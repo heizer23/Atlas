@@ -1,5 +1,6 @@
 """
-Database access layer for calendar_connection, calendar_token, and calendar_oauth_state tables.
+Database access layer for calendar_connection, calendar_token, calendar_oauth_state,
+and (Sprint02) calendar_decision_log tables.
 
 All DB reads and writes for this component go through this module.
 No token values are returned in API responses — this module returns raw dicts
@@ -187,3 +188,38 @@ def consume_oauth_state(
         deleted = cur.fetchone()
     conn.commit()
     return deleted is not None
+
+
+# ---------------------------------------------------------------------------
+# Sprint02 additions — decision log
+# ---------------------------------------------------------------------------
+
+def write_decision_log(
+    conn: psycopg2.extensions.connection,
+    operation: str,
+    requested_at: str,
+    target_calendar_id: str,
+    outcome: str,
+    google_event_id: Optional[str],
+    error_summary: Optional[str],
+) -> None:
+    """Insert a row into calendar_decision_log.
+
+    operation: e.g. 'calendar_event_create'
+    outcome: 'success' or 'failure'
+    google_event_id: populated on success, None on failure
+    error_summary: populated on failure, None on success
+
+    Callers must wrap this in try/except to implement best-effort semantics.
+    A failure here must not propagate to the caller as an API error.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO calendar_decision_log
+                (operation, requested_at, target_calendar_id, outcome, google_event_id, error_summary)
+            VALUES (%s, %s::timestamptz, %s, %s, %s, %s)
+            """,
+            (operation, requested_at, target_calendar_id, outcome, google_event_id, error_summary),
+        )
+    conn.commit()
