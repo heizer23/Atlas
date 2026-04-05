@@ -1,6 +1,6 @@
 """
 Database access layer for calendar_connection, calendar_token, calendar_oauth_state,
-and (Sprint02) calendar_decision_log tables.
+calendar_decision_log (Sprint02), and calendar_event_index (Sprint03) tables.
 
 All DB reads and writes for this component go through this module.
 No token values are returned in API responses — this module returns raw dicts
@@ -202,13 +202,15 @@ def write_decision_log(
     outcome: str,
     google_event_id: Optional[str],
     error_summary: Optional[str],
+    atlas_event_id: Optional[str] = None,
 ) -> None:
     """Insert a row into calendar_decision_log.
 
-    operation: e.g. 'calendar_event_create'
+    operation: e.g. 'calendar_event_create', 'calendar_event_update', 'calendar_event_delete'
     outcome: 'success' or 'failure'
     google_event_id: populated on success, None on failure
     error_summary: populated on failure, None on success
+    atlas_event_id: populated by Sprint03 update/delete entries; None for Sprint02 create entries
 
     Callers must wrap this in try/except to implement best-effort semantics.
     A failure here must not propagate to the caller as an API error.
@@ -217,9 +219,114 @@ def write_decision_log(
         cur.execute(
             """
             INSERT INTO calendar_decision_log
-                (operation, requested_at, target_calendar_id, outcome, google_event_id, error_summary)
-            VALUES (%s, %s::timestamptz, %s, %s, %s, %s)
+                (operation, requested_at, target_calendar_id, outcome, google_event_id,
+                 error_summary, atlas_event_id)
+            VALUES (%s, %s::timestamptz, %s, %s, %s, %s, %s)
             """,
-            (operation, requested_at, target_calendar_id, outcome, google_event_id, error_summary),
+            (operation, requested_at, target_calendar_id, outcome, google_event_id,
+             error_summary, atlas_event_id),
+        )
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Sprint03 additions — event index
+# ---------------------------------------------------------------------------
+
+def get_event_index_by_atlas_id(
+    conn: psycopg2.extensions.connection,
+    atlas_event_id: str,
+) -> Optional[dict]:
+    """Return the calendar_event_index row for the given atlas_event_id, or None if absent.
+
+    Returns rows of any status (active, deleted, error).
+    Callers must check the 'status' field to determine how to proceed.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM calendar_event_index WHERE atlas_event_id = %s",
+            (atlas_event_id,),
+        )
+        return cur.fetchone()
+
+
+def upsert_event_index(
+    conn: psycopg2.extensions.connection,
+    atlas_event_id: str,
+    google_event_id: str,
+    calendar_id: str,
+) -> None:
+    """Insert or reactivate a calendar_event_index row.
+
+    If no row exists: insert with status='active', last_success_at=NOW().
+    If a row exists with any status (deleted or error): reactivate by setting
+    status='active', updating google_event_id, calendar_id, updated_at,
+    last_success_at=NOW(), and clearing last_error.
+
+    Uses ON CONFLICT (atlas_event_id) DO UPDATE for atomic upsert.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO calendar_event_index
+                (atlas_event_id, google_event_id, calendar_id, status, last_success_at)
+            VALUES (%s, %s, %s, 'active', NOW())
+            ON CONFLICT (atlas_event_id) DO UPDATE
+               SET google_event_id  = EXCLUDED.google_event_id,
+                   calendar_id      = EXCLUDED.calendar_id,
+                   status           = 'active',
+                   last_success_at  = NOW(),
+                   last_error       = NULL,
+                   updated_at       = NOW()
+            """,
+            (atlas_event_id, google_event_id, calendar_id),
+        )
+    conn.commit()
+
+
+def mark_event_index_deleted(
+    conn: psycopg2.extensions.connection,
+    atlas_event_id: str,
+    note: Optional[str] = None,
+) -> None:
+    """Set status='deleted' on the calendar_event_index row for the given atlas_event_id.
+
+    Updates updated_at. If note is provided, writes it to last_error for audit context
+    (e.g., 'remote event was already absent'). Never removes the row.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE calendar_event_index
+               SET status     = 'deleted',
+                   last_error = %s,
+                   updated_at = NOW()
+             WHERE atlas_event_id = %s
+            """,
+            (note, atlas_event_id),
+        )
+    conn.commit()
+
+
+def mark_event_index_error(
+    conn: psycopg2.extensions.connection,
+    atlas_event_id: str,
+    error_summary: str,
+) -> None:
+    """Set status='error' on the calendar_event_index row for the given atlas_event_id.
+
+    Writes error_summary to last_error. Updates updated_at.
+    Used when PATCH finds the Google event missing remotely.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE calendar_event_index
+               SET status     = 'error',
+                   last_error = %s,
+                   updated_at = NOW()
+             WHERE atlas_event_id = %s
+            """,
+            (error_summary, atlas_event_id),
         )
     conn.commit()
