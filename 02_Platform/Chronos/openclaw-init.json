@@ -2,6 +2,12 @@
   "messages": {
     "ackReactionScope": "group-mentions"
   },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "dmPolicy": "pairing"
+    }
+  },
   "agents": {
     "defaults": {
       "maxConcurrent": 4,

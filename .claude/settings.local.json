@@ -146,7 +146,24 @@
       "Bash(reg query:*)",
       "Bash(findstr \":8021\")",
       "Bash(findstr \"LISTENING\")",
-      "Bash(CALENDAR_CONNECTOR_PORT=8022 python run_local.py)"
+      "Bash(CALENDAR_CONNECTOR_PORT=8022 python run_local.py)",
+      "Bash(make chronos-up:*)",
+      "Bash(make chronos-ps:*)",
+      "Bash(sudo cat:*)",
+      "Bash(make chronos-reboot:*)",
+      "Bash(make calendar-build:*)",
+      "Bash(git remote:*)",
+      "Bash(ssh -o StrictHostKeyChecking=accept-new git@github.com)",
+      "Bash(make calendar-up:*)",
+      "Read(//mnt/data/chronos/**)",
+      "Read(//mnt/data/chronos/workspace/**)",
+      "Bash(make chronos-pair:*)",
+      "Bash(sudo cp:*)",
+      "Bash(xargs -I{} docker inspect {} --format \"{{.Name}}: {{json .HostConfig.Binds}}\")",
+      "WebFetch(domain:github.com)",
+      "Bash(git -C /home/linse/Prod/Atlas diff --name-only HEAD 03_Application/TaskTracker/backend/)",
+      "Bash(git -C /home/linse/Prod/Atlas stash list)",
+      "Bash(git -C /home/linse/Prod/Atlas log --oneline -3 -- 03_Application/TaskTracker/backend/routers/tasks.py)"
     ]
   }
 }

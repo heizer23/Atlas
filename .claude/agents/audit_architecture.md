@@ -29,6 +29,25 @@ Platform provides capability. Applications provide meaning. Dependencies flow do
 
 ---
 
+## Audit Run Setup
+
+Every audit run must produce its output in a dedicated folder under `01_System/AuditRuns/`.
+
+**Step 0 — Determine the run folder name:**
+- If the user provided a run folder name, use it exactly.
+- Otherwise, derive it from the audit scope and today's date (`MM_DD_YYYY`):
+  - Full system audit (all layers/components): `full_auditrun_<MM_DD_YYYY>`
+  - Single application audit: `<appname>_auditrun_<MM_DD_YYYY>`
+  - Single platform component audit: `<component>_auditrun_<MM_DD_YYYY>`
+
+**Step 0a — Create the folder if it does not exist:**
+1. Use Glob to check whether `01_System/AuditRuns/<run_name>/` already exists.
+2. If it does not exist, create it by writing the output file to that path (the write itself creates the directory hierarchy).
+
+**All output files must be written to `01_System/AuditRuns/<run_name>/`.**
+
+---
+
 ## Required Method
 
 Execute these steps in order. Do not skip steps. Do not produce findings before completing evidence gathering.
@@ -121,12 +140,17 @@ Every finding must use exactly one of these categories:
 
 ## Output
 
-Produce exactly one file: `Architecture_Audit_Report.md`
+Produce exactly one file: `01_System/AuditRuns/<run_name>/Architecture_Audit_Report.md`
 
 Write it in the following structure exactly:
 
 ```markdown
 # Architecture Audit Report
+
+> **Audit Run:** `<run_name>`
+> **Run Type:** full | app-specific | component-specific
+> **Agent:** audit_architecture
+> **Date:** <YYYY-MM-DD>
 
 ## 1. Executive Summary
 - Overall judgment (one short paragraph)

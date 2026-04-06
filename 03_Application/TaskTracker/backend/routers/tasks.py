@@ -14,12 +14,13 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 # ── Column schema — stable; matches tasktracker_schema.sql ───────────────────
 
 TASK_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="title",       label="Title",       type="string", sortable=True,  filterable=False),
-    ColumnSchema(key="status",      label="Status",      type="enum",   sortable=True,  filterable=True),
-    ColumnSchema(key="priority",    label="Priority",    type="enum",   sortable=True,  filterable=True),
-    ColumnSchema(key="due_date",    label="Due Date",    type="date",   sortable=True,  filterable=False),
-    ColumnSchema(key="created_at",  label="Created",     type="date",   sortable=True,  filterable=False),
-    ColumnSchema(key="description", label="Description", type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="title",        label="Title",       type="string", sortable=True,  filterable=False),
+    ColumnSchema(key="status",       label="Status",      type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="priority",     label="Priority",    type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="due_date",     label="Due Date",    type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="effort_hours", label="Effort (h)",  type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="created_at",   label="Created",     type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="description",  label="Description", type="string", sortable=False, filterable=False, detail_visible=True),
 ]
 
 VALID_STATUS   = {"open", "in_progress", "done"}
@@ -28,18 +29,20 @@ VALID_PRIORITY = {"low", "medium", "high"}
 # ── Request bodies ─────────────────────────────────────────────────────────────
 
 class TaskCreate(BaseModel):
-    title:       str
-    description: str | None = None
-    priority:    str = "medium"
-    due_date:    str | None = None
+    title:        str
+    description:  str | None = None
+    priority:     str = "medium"
+    due_date:     str | None = None
+    effort_hours: float | None = None
 
 
 class TaskUpdate(BaseModel):
-    title:       str | None = None
-    description: str | None = None
-    status:      str | None = None
-    priority:    str | None = None
-    due_date:    str | None = None
+    title:        str | None = None
+    description:  str | None = None
+    status:       str | None = None
+    priority:     str | None = None
+    due_date:     str | None = None
+    effort_hours: float | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,7 +104,7 @@ def list_tasks(
                 cur.execute(
                     """
                     select id, title, description, status, priority, due_date,
-                           created_at, updated_at
+                           effort_hours, created_at, updated_at
                     from tasktracker.tasks
                     where status = %s
                     order by created_at desc
@@ -115,7 +118,7 @@ def list_tasks(
                 cur.execute(
                     """
                     select id, title, description, status, priority, due_date,
-                           created_at, updated_at
+                           effort_hours, created_at, updated_at
                     from tasktracker.tasks
                     order by created_at desc
                     limit %s offset %s
@@ -145,13 +148,15 @@ def create_task(body: TaskCreate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", "title cannot be empty")
     if body.priority not in VALID_PRIORITY:
         return api_error("VALIDATION_ERROR", f"priority must be one of: {', '.join(sorted(VALID_PRIORITY))}")
+    if body.effort_hours is not None and body.effort_hours < 0:
+        return api_error("VALIDATION_ERROR", "effort_hours must be >= 0")
 
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into tasktracker.tasks (id, title, description, priority, due_date)
-                values (%s, %s, %s, %s, %s)
+                insert into tasktracker.tasks (id, title, description, priority, due_date, effort_hours)
+                values (%s, %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (
@@ -160,6 +165,7 @@ def create_task(body: TaskCreate) -> JSONResponse:
                     body.description or None,
                     body.priority,
                     body.due_date or None,
+                    body.effort_hours,
                 ),
             )
             row = cur.fetchone()
@@ -174,6 +180,8 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"status must be one of: {', '.join(sorted(VALID_STATUS))}")
     if body.priority and body.priority not in VALID_PRIORITY:
         return api_error("VALIDATION_ERROR", f"priority must be one of: {', '.join(sorted(VALID_PRIORITY))}")
+    if body.effort_hours is not None and body.effort_hours < 0:
+        return api_error("VALIDATION_ERROR", "effort_hours must be >= 0")
 
     fields: dict[str, Any] = {}
     if body.title       is not None: fields["title"]       = body.title.strip() or None
@@ -181,6 +189,8 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
     if body.status      is not None: fields["status"]      = body.status
     if body.priority    is not None: fields["priority"]    = body.priority
     if body.due_date    is not None: fields["due_date"]    = body.due_date or None
+    # Use model_fields_set to distinguish "not sent" (skip) from "explicitly null" (clear column)
+    if "effort_hours" in body.model_fields_set: fields["effort_hours"] = body.effort_hours
 
     if not fields:
         return api_error("VALIDATION_ERROR", "no fields provided to update")

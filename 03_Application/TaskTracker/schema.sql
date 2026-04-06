@@ -10,9 +10,10 @@ create table if not exists tasktracker.tasks (
                             check (status in ('open', 'in_progress', 'done')),
     priority    text        not null default 'medium'
                             check (priority in ('low', 'medium', 'high')),
-    due_date    date,
-    created_at  timestamptz not null default now(),
-    updated_at  timestamptz not null default now()
+    due_date     date,
+    effort_hours double precision check (effort_hours is null or effort_hours >= 0),
+    created_at   timestamptz not null default now(),
+    updated_at   timestamptz not null default now()
 );
 
 create index if not exists ix_tasks_status

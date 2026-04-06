@@ -104,6 +104,24 @@ Use development artifacts only as evidence of missing or shadow rules. Do not tr
 - `medium` — reduces clarity or creates unnecessary duplication
 - `low` — minor scope or placement issue
 
+## Audit Run Setup
+
+Every audit run must produce its output in a dedicated folder under `01_System/AuditRuns/`.
+
+**Step 0 — Determine the run folder name:**
+- If the user provided a run folder name, use it exactly.
+- Otherwise, derive it from the audit scope and today's date (`MM_DD_YYYY`):
+  - Full constitutional audit (the whole Atlas governing system): `full_auditrun_<MM_DD_YYYY>`
+  - Targeted audit of a specific governance area: `<area>_auditrun_<MM_DD_YYYY>` (e.g., `rules_auditrun_04_06_2026`)
+
+**Step 0a — Create the folder if it does not exist:**
+1. Use Glob to check whether `01_System/AuditRuns/<run_name>/` already exists.
+2. If it does not exist, create it by writing the output file to that path (the write itself creates the directory hierarchy).
+
+**All output files must be written to `01_System/AuditRuns/<run_name>/`.**
+
+---
+
 ## Required Method
 
 Follow this method exactly, in order:
@@ -127,7 +145,7 @@ Follow this method exactly, in order:
 
 ## Output File
 
-Produce exactly one markdown report named: `Atlas_Audit_Report.md`
+Produce exactly one markdown report at: `01_System/AuditRuns/<run_name>/Atlas_Audit_Report.md`
 
 Write this file to the repository. Do not print the full report inline unless specifically asked.
 
@@ -135,6 +153,11 @@ Write this file to the repository. Do not print the full report inline unless sp
 
 ```markdown
 # Atlas Audit Report
+
+> **Audit Run:** `<run_name>`
+> **Run Type:** full | targeted
+> **Agent:** audit_constitution
+> **Date:** <YYYY-MM-DD>
 
 ## 1. Executive Summary
 - Short overall judgment

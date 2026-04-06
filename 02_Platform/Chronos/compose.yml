@@ -8,6 +8,8 @@ services:
     environment:
       OPENCLAW_ALLOWED_ORIGINS: ${CHRONOS_ALLOWED_ORIGINS}
       ANTHROPIC_API_KEY: ${OPENCLAW_API}
+      TELEGRAM_BOT_TOKEN: ${TeleAtlasBotToken}
+      OPENAI_API_KEY: ${WhisperKey}
     volumes:
       - "${CHRONOS_STATE_DIR}:/home/node/.openclaw"
       - "${CHRONOS_WORKSPACE_DIR}:/workspace"
