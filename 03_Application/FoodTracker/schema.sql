@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS foodtracker.food_logs (
   -- Quality indicator
   confidence SMALLINT NOT NULL DEFAULT 3,
 
+  -- Alcohol tracking (Sprint 05)
+  -- Tracks alcohol content in grams. Default 0; used to derive the "alcohol"
+  -- pseudo-meal-type column in reports (entries where alcohol_g > 0).
+  alcohol_g NUMERIC(7,1) NOT NULL DEFAULT 0,
+
   -- Optional context
   notes TEXT,
 
@@ -51,7 +56,9 @@ CREATE TABLE IF NOT EXISTS foodtracker.food_logs (
 
   CHECK (sodium_mg >= 0),
 
-  CHECK (confidence BETWEEN 1 AND 5)
+  CHECK (confidence BETWEEN 1 AND 5),
+
+  CONSTRAINT food_logs_alcohol_g_nonneg CHECK (alcohol_g >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_food_logs_logged_at ON foodtracker.food_logs (logged_at);

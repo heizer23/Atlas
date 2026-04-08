@@ -10,11 +10,18 @@
  * Re-fetches the full payload after every mutating action.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -256,16 +263,20 @@ function StandardsSection({
 // ── DayPage ───────────────────────────────────────────────────────────────────
 
 export default function StandardsPage() {
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayIso());
   const [payload,     setPayload]     = useState<DayPagePayload | null>(null);
   const [isLoading,   setIsLoading]   = useState(true);
   const [error,       setError]       = useState<ApiError | null>(null);
   const [actionError,  setActionError]  = useState<ApiError | null>(null);
   const [actioningId,  setActioningId]  = useState<string | null>(null);
 
-  const fetchPayload = useCallback(async () => {
+  const isToday = useMemo(() => selectedDate === todayIso(), [selectedDate]);
+
+  const fetchPayload = useCallback(async (dateStr: string) => {
     setIsLoading(true);
     setError(null);
-    const res = await apiFetch<DayPagePayload>('/food/day');
+    const url = `/food/day?date=${dateStr}`;
+    const res = await apiFetch<DayPagePayload>(url);
     setIsLoading(false);
     if (isApiError(res)) {
       setError(res);
@@ -275,8 +286,31 @@ export default function StandardsPage() {
   }, []);
 
   useEffect(() => {
-    fetchPayload();
-  }, [fetchPayload]);
+    fetchPayload(selectedDate);
+  }, [fetchPayload, selectedDate]);
+
+  // ── Date navigation ─────────────────────────────────────────────────────────
+
+  function handlePrevDay() {
+    setSelectedDate((prev) => {
+      const d = new Date(prev + 'T00:00:00');
+      d.setDate(d.getDate() - 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+  }
+
+  function handleNextDay() {
+    if (isToday) return;
+    setSelectedDate((prev) => {
+      const d = new Date(prev + 'T00:00:00');
+      d.setDate(d.getDate() + 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
+  }
+
+  function handleDateInput(value: string) {
+    if (value) setSelectedDate(value);
+  }
 
   // ── Copy a today entry ─────────────────────────────────────────────────────
 
@@ -286,7 +320,7 @@ export default function StandardsPage() {
     try {
       const res = await apiFetch<unknown>(`/food/entries/${id}/copy`, { method: 'POST' });
       if (isApiError(res)) setActionError(res);
-      else await fetchPayload();
+      else await fetchPayload(selectedDate);
     } finally {
       setActioningId(null);
     }
@@ -300,7 +334,7 @@ export default function StandardsPage() {
     try {
       const res = await apiFetch<null>(`/food/entries/${id}`, { method: 'DELETE' });
       if (isApiError(res)) setActionError(res);
-      else await fetchPayload();
+      else await fetchPayload(selectedDate);
     } finally {
       setActioningId(null);
     }
@@ -314,7 +348,7 @@ export default function StandardsPage() {
     try {
       const res = await apiFetch<unknown>(`/food/standards/${standardId}/log`, { method: 'POST' });
       if (isApiError(res)) setActionError(res);
-      else await fetchPayload();
+      else await fetchPayload(selectedDate);
     } finally {
       setActioningId(null);
     }
@@ -351,6 +385,41 @@ export default function StandardsPage() {
     <div className="page">
       <div className="page-header">
         <h1 className="type-display">Day</h1>
+      </div>
+
+      {/* Date navigation controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
+        <button
+          className="btn-outlined"
+          onClick={handlePrevDay}
+          title="Previous day"
+          style={{ padding: '4px 12px', fontWeight: 600, fontSize: '1rem' }}
+        >
+          &#8592;
+        </button>
+        <input
+          type="date"
+          value={selectedDate}
+          max={todayIso()}
+          onChange={(e) => handleDateInput(e.target.value)}
+          style={{
+            padding: '4px 8px',
+            border: '1px solid var(--md-sys-color-outline)',
+            borderRadius: '4px',
+            background: 'var(--md-sys-color-surface)',
+            color: 'var(--md-sys-color-on-surface)',
+            fontSize: '0.9rem',
+          }}
+        />
+        <button
+          className="btn-outlined"
+          onClick={handleNextDay}
+          disabled={isToday}
+          title="Next day"
+          style={{ padding: '4px 12px', fontWeight: 600, fontSize: '1rem' }}
+        >
+          &#8594;
+        </button>
       </div>
 
       {actionError && (

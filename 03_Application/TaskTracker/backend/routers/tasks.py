@@ -32,7 +32,7 @@ TASK_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="description",  label="Description", type="string", sortable=False, filterable=False, detail_visible=True),
 ]
 
-VALID_STATUS   = {"open", "in_progress", "done"}
+VALID_STATUS   = {"open", "in_progress", "pending", "done"}
 VALID_PRIORITY = {"low", "medium", "high"}
 
 # ── Request bodies ─────────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ VALID_PRIORITY = {"low", "medium", "high"}
 class TaskCreate(BaseModel):
     title:        str
     description:  str | None = None
+    status:       str = "open"
     priority:     str = "medium"
     due_date:     str | None = None
     effort_hours: float | None = None
@@ -115,14 +116,20 @@ def single_row_dataset(row: Any) -> JSONResponse:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+VALID_VIEW = {"active", "pending_board"}
+
+
 @router.get("", response_model=None)
 def list_tasks(
     status:    str | None = None,
+    view:      str | None = None,
     page:      int = 1,
     page_size: int = 25,
 ) -> JSONResponse:
     if status and status not in VALID_STATUS:
         return api_error("INVALID_FILTER", f"status must be one of: {', '.join(sorted(VALID_STATUS))}")
+    if view and view not in VALID_VIEW:
+        return api_error("INVALID_FILTER", f"view must be one of: {', '.join(sorted(VALID_VIEW))}")
     if page < 1:
         return api_error("INVALID_PARAM", "page must be ≥ 1")
 
@@ -130,7 +137,63 @@ def list_tasks(
 
     with get_db() as conn:
         with conn.cursor() as cur:
-            if status:
+            if view == "active":
+                # Active view: open + in_progress, plus done tasks updated today
+                cur.execute(
+                    """
+                    select count(*) from tasktracker.tasks
+                    where status in ('open', 'in_progress')
+                       or (status = 'done' and updated_at::date >= current_date)
+                    """,
+                )
+                total = cur.fetchone()["count"]
+                cur.execute(
+                    """
+                    select id, title, description, status, priority, due_date,
+                           effort_hours, created_at, updated_at
+                    from tasktracker.tasks
+                    where status in ('open', 'in_progress')
+                       or (status = 'done' and updated_at::date >= current_date)
+                    order by created_at desc
+                    limit %s offset %s
+                    """,
+                    (page_size, offset),
+                )
+            elif view == "pending_board":
+                # Pending board: open + pending tasks
+                cur.execute(
+                    "select count(*) from tasktracker.tasks where status in ('open', 'pending')",
+                )
+                total = cur.fetchone()["count"]
+                cur.execute(
+                    """
+                    select id, title, description, status, priority, due_date,
+                           effort_hours, created_at, updated_at
+                    from tasktracker.tasks
+                    where status in ('open', 'pending')
+                    order by created_at desc
+                    limit %s offset %s
+                    """,
+                    (page_size, offset),
+                )
+            elif status == "done":
+                # Done view: sorted by last modified descending
+                cur.execute(
+                    "select count(*) from tasktracker.tasks where status = 'done'",
+                )
+                total = cur.fetchone()["count"]
+                cur.execute(
+                    """
+                    select id, title, description, status, priority, due_date,
+                           effort_hours, created_at, updated_at
+                    from tasktracker.tasks
+                    where status = 'done'
+                    order by updated_at desc
+                    limit %s offset %s
+                    """,
+                    (page_size, offset),
+                )
+            elif status:
                 cur.execute(
                     "select count(*) from tasktracker.tasks where status = %s",
                     (status,),
@@ -187,6 +250,8 @@ def list_tasks(
 def create_task(body: TaskCreate) -> JSONResponse:
     if not body.title.strip():
         return api_error("VALIDATION_ERROR", "title cannot be empty")
+    if body.status not in {"open", "pending"}:
+        return api_error("VALIDATION_ERROR", "status must be one of: open, pending")
     if body.priority not in VALID_PRIORITY:
         return api_error("VALIDATION_ERROR", f"priority must be one of: {', '.join(sorted(VALID_PRIORITY))}")
     if body.effort_hours is not None and body.effort_hours < 0:
@@ -196,14 +261,15 @@ def create_task(body: TaskCreate) -> JSONResponse:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into tasktracker.tasks (id, title, description, priority, due_date, effort_hours)
-                values (%s, %s, %s, %s, %s, %s)
+                insert into tasktracker.tasks (id, title, description, status, priority, due_date, effort_hours)
+                values (%s, %s, %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (
                     str(uuid.uuid4()),
                     body.title.strip(),
                     body.description or None,
+                    body.status,
                     body.priority,
                     body.due_date or None,
                     body.effort_hours,
@@ -317,4 +383,43 @@ def detach_task_label(task_id: str, label_id: str) -> Response:
         resp = client.delete(f"/api/objects/{task_id}/labels/{label_id}")
     if resp.status_code == 204:
         return Response(status_code=204)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+class LabelSetBody(BaseModel):
+    labels: list[str]
+
+
+@router.put("/{task_id}/labels", response_model=None)
+def set_task_labels(task_id: str, body: LabelSetBody) -> JSONResponse:
+    """Atomically replace all labels on a task with the provided list.
+
+    Fetches current labels, detaches each, then attaches the new set.
+    Returns the updated label list in the same shape as GET /{task_id}/labels.
+    """
+    with _label_client() as client:
+        # 1. Fetch current labels
+        resp = client.get(f"/api/objects/{task_id}/labels")
+        if resp.status_code != 200:
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+        current_labels: list[dict] = resp.json().get("labels", [])
+
+        # 2. Detach each existing label
+        for lbl in current_labels:
+            label_id = lbl.get("label_id") or lbl.get("id")
+            if label_id:
+                client.delete(f"/api/objects/{task_id}/labels/{label_id}")
+
+        # 3. Attach each new label by name
+        for raw_name in body.labels:
+            name = raw_name.strip()
+            if name:
+                client.post(
+                    f"/api/objects/{task_id}/labels",
+                    json={"label_name": name, "object_type": "task"},
+                )
+
+        # 4. Return updated label list
+        resp = client.get(f"/api/objects/{task_id}/labels")
+
     return JSONResponse(status_code=resp.status_code, content=resp.json())

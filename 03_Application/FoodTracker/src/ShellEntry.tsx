@@ -41,6 +41,7 @@ interface PreviewData {
   meat_g:     number;
   red_meat_g: number;
   sodium_mg:  number;
+  alcohol_g:  number;
   confidence: number;
   notes:      string | null;
 }
@@ -67,6 +68,7 @@ const PREVIEW_FIELDS: { key: keyof PreviewData; label: string }[] = [
   { key: 'meat_g',     label: 'Meat (g)' },
   { key: 'red_meat_g', label: 'Red Meat (g)' },
   { key: 'sodium_mg',  label: 'Sodium (mg)' },
+  { key: 'alcohol_g',  label: 'Alcohol (g)' },
   { key: 'confidence', label: 'Confidence' },
   { key: 'notes',      label: 'Notes' },
 ];
@@ -74,14 +76,15 @@ const PREVIEW_FIELDS: { key: keyof PreviewData; label: string }[] = [
 // ── FoodIntake ─────────────────────────────────────────────────────────────────
 
 export function FoodIntake() {
-  const [flow,        setFlow]        = useState<FlowState>('idle');
-  const [template,    setTemplate]    = useState<string | null>(null);
-  const [templateErr, setTemplateErr] = useState<ApiError | null>(null);
-  const [pastedJson,  setPastedJson]  = useState('');
-  const [preview,     setPreview]     = useState<PreviewData | null>(null);
-  const [success,     setSuccess]     = useState<SuccessData | null>(null);
-  const [formError,   setFormError]   = useState<ApiError | null>(null);
-  const [inFlight,    setInFlight]    = useState(false);
+  const [flow,           setFlow]           = useState<FlowState>('idle');
+  const [template,       setTemplate]       = useState<string | null>(null);
+  const [templateErr,    setTemplateErr]    = useState<ApiError | null>(null);
+  const [templateOpen,   setTemplateOpen]   = useState(false);
+  const [pastedJson,     setPastedJson]     = useState('');
+  const [preview,        setPreview]        = useState<PreviewData | null>(null);
+  const [success,        setSuccess]        = useState<SuccessData | null>(null);
+  const [formError,      setFormError]      = useState<ApiError | null>(null);
+  const [inFlight,       setInFlight]       = useState(false);
 
   // Fetch template on mount.
   // apiFetch always JSON.parse()s the response body. The template endpoint
@@ -182,40 +185,51 @@ export function FoodIntake() {
         </div>
 
         <section style={{ marginBottom: 'var(--space-md)' }}>
-          <h2 className="type-title" style={{ marginBottom: 'var(--space-sm)' }}>
-            JSON Template
-          </h2>
+          {/* Collapsible template disclosure — collapsed by default */}
+          <button
+            className="btn-outlined"
+            style={{ marginBottom: templateOpen ? 'var(--space-sm)' : 0 }}
+            onClick={() => setTemplateOpen((v) => !v)}
+            aria-expanded={templateOpen}
+          >
+            {templateOpen ? 'Hide template' : 'Show template'}
+          </button>
 
-          {templateErr ? (
-            <ErrorCard error={templateErr} />
-          ) : template === null ? (
-            <Skeleton />
-          ) : (
+          {templateOpen && (
             <>
-              <textarea
-                readOnly
-                value={template}
-                className="type-body"
-                style={{
-                  width: '100%',
-                  minHeight: '220px',
-                  fontFamily: 'monospace',
-                  fontSize: '0.875rem',
-                  padding: 'var(--space-sm)',
-                  background: 'var(--md-sys-color-surface)',
-                  border: '1px solid var(--md-sys-color-outline)',
-                  borderRadius: '4px',
-                  resize: 'vertical',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <button
-                className="btn-outlined"
-                style={{ marginTop: 'var(--space-sm)' }}
-                onClick={handleCopyTemplate}
-              >
-                Copy Template
-              </button>
+              {templateErr ? (
+                <ErrorCard error={templateErr} />
+              ) : template === null ? (
+                <Skeleton />
+              ) : (
+                <>
+                  <textarea
+                    readOnly
+                    value={template}
+                    className="type-body"
+                    style={{
+                      width: '100%',
+                      minHeight: '220px',
+                      fontFamily: 'monospace',
+                      fontSize: '0.875rem',
+                      padding: 'var(--space-sm)',
+                      background: 'var(--md-sys-color-surface)',
+                      border: '1px solid var(--md-sys-color-outline)',
+                      borderRadius: '4px',
+                      resize: 'vertical',
+                      boxSizing: 'border-box',
+                      marginTop: 'var(--space-xs)',
+                    }}
+                  />
+                  <button
+                    className="btn-outlined"
+                    style={{ marginTop: 'var(--space-sm)' }}
+                    onClick={handleCopyTemplate}
+                  >
+                    Copy Template
+                  </button>
+                </>
+              )}
             </>
           )}
         </section>

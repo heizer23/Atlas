@@ -239,6 +239,150 @@ function ThreeDotsMenu({
   );
 }
 
+// ── Date grouping helpers ─────────────────────────────────────────────────────
+
+/**
+ * Format a YYYY-MM-DD date string as a full date heading.
+ * e.g. "2026-04-08" → "Wednesday, 8 April 2026"
+ */
+function _formatDateHeading(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+/**
+ * Extract YYYY-MM-DD from a logged_at string (either YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD).
+ */
+function _dateKey(logged_at: string): string {
+  return logged_at.slice(0, 10);
+}
+
+// ── GroupedEntries ─────────────────────────────────────────────────────────────
+
+interface GroupedEntriesProps {
+  entries:          EntryRow[];
+  onToggleStandard: (id: string, desiredState: boolean) => void;
+  onCopy:           (id: string) => void;
+  onDeleteTrigger:  (id: string) => void;
+  navigate:         (path: string) => void;
+}
+
+function GroupedEntries({ entries, onToggleStandard, onCopy, onDeleteTrigger, navigate }: GroupedEntriesProps) {
+  // Group entries by date, most recent date first.
+  // Within each group, sort by logged_at ascending (earliest meal first).
+  const groupOrder: string[] = [];
+  const groupMap: Record<string, EntryRow[]> = {};
+
+  // entries are already sorted descending by logged_at from the backend
+  // We build groups maintaining date order (most recent first).
+  for (const entry of entries) {
+    const dk = _dateKey(entry.logged_at);
+    if (!groupMap[dk]) {
+      groupOrder.push(dk);
+      groupMap[dk] = [];
+    }
+    groupMap[dk].push(entry);
+  }
+
+  // Sort each group ascending by logged_at
+  for (const dk of groupOrder) {
+    groupMap[dk].sort((a, b) => a.logged_at.localeCompare(b.logged_at));
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+      {groupOrder.map((dk) => (
+        <div key={dk}>
+          {/* Date heading */}
+          <p
+            className="type-label"
+            style={{
+              color: 'var(--md-sys-color-on-surface-variant)',
+              fontWeight: 600,
+              marginBottom: 'var(--space-xs)',
+              marginTop: 0,
+            }}
+          >
+            {_formatDateHeading(dk)}
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+            {groupMap[dk].map((entry) => (
+              <div
+                key={entry.id}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-xs)',
+                  padding: 'var(--space-sm) var(--space-md)',
+                  background: 'var(--md-sys-color-surface)',
+                  border: '1px solid var(--md-sys-color-outline-variant)',
+                  borderRadius: '8px',
+                }}
+              >
+                {/* Entry summary row */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: 'var(--space-sm)',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div
+                    style={{ cursor: 'pointer', flex: 1 }}
+                    onClick={() => navigate(`/food/entries/${entry.id}`)}
+                    title="Open detail"
+                  >
+                    <p className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
+                      {entry.logged_at.includes('T') ? entry.logged_at.split('T')[1].slice(0, 5) : entry.logged_at}
+                      {' '}&middot;{' '}{entry.meal_type}
+                      {entry.standard && (
+                        <span
+                          style={{
+                            marginLeft: 'var(--space-xs)',
+                            fontSize: '0.75rem',
+                            color: 'var(--md-sys-color-primary)',
+                            fontWeight: 600,
+                          }}
+                        >
+                          STANDARD
+                        </span>
+                      )}
+                    </p>
+                    <p className="type-body" style={{ margin: 0, fontWeight: 500 }}>
+                      {entry.dish_name}
+                    </p>
+                    <p className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
+                      {entry.kcal} kcal
+                    </p>
+                  </div>
+
+                  {/* Three-dots row menu */}
+                  <ThreeDotsMenu
+                    entryId={entry.id}
+                    isStandard={entry.standard}
+                    onToggleStandard={onToggleStandard}
+                    onCopy={onCopy}
+                    onDeleteTrigger={onDeleteTrigger}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── EntriesPage ───────────────────────────────────────────────────────────────
 
 export default function EntriesPage() {
@@ -371,70 +515,13 @@ export default function EntriesPage() {
           No meal entries logged yet.
         </p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
-          {entries.map((entry) => (
-            <div
-              key={entry.id}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 'var(--space-xs)',
-                padding: 'var(--space-sm) var(--space-md)',
-                background: 'var(--md-sys-color-surface)',
-                border: '1px solid var(--md-sys-color-outline-variant)',
-                borderRadius: '8px',
-              }}
-            >
-              {/* Entry summary row */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                  gap: 'var(--space-sm)',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div
-                  style={{ cursor: 'pointer', flex: 1 }}
-                  onClick={() => navigate(`/food/entries/${entry.id}`)}
-                  title="Open detail"
-                >
-                  <p className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
-                    {entry.logged_at} &middot; {entry.meal_type}
-                    {entry.standard && (
-                      <span
-                        style={{
-                          marginLeft: 'var(--space-xs)',
-                          fontSize: '0.75rem',
-                          color: 'var(--md-sys-color-primary)',
-                          fontWeight: 600,
-                        }}
-                      >
-                        STANDARD
-                      </span>
-                    )}
-                  </p>
-                  <p className="type-body" style={{ margin: 0, fontWeight: 500 }}>
-                    {entry.dish_name}
-                  </p>
-                  <p className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
-                    {entry.kcal} kcal
-                  </p>
-                </div>
-
-                {/* Three-dots row menu */}
-                <ThreeDotsMenu
-                  entryId={entry.id}
-                  isStandard={entry.standard}
-                  onToggleStandard={handleToggleStandard}
-                  onCopy={handleCopy}
-                  onDeleteTrigger={handleDeleteTrigger}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
+        <GroupedEntries
+          entries={entries}
+          onToggleStandard={handleToggleStandard}
+          onCopy={handleCopy}
+          onDeleteTrigger={handleDeleteTrigger}
+          navigate={navigate}
+        />
       )}
     </div>
   );

@@ -1,23 +1,21 @@
 /**
- * TaskTracker ShellEntry — Sprint 02
+ * TaskTracker ShellEntry — Sprint 05
  *
- * Replaces platform TableView+DetailView with:
- *  - TaskRow card list with ThreeDotsMenu (mark-complete / delete)
- *  - TaskDetailEdit — fully editable task detail (app-local, not platform DetailView)
- *
- * effort_hours added throughout: create form, card chip, detail edit.
+ * Pending tab: two sections (Open / Pending) with effort summaries.
+ * Done tab: sorted by last-modified descending.
+ * Create: custom form with labels + "Create as Open" / "Create as Pending" buttons.
+ * Toggle buttons next to tab bar removed.
  *
  * Routes:
- *   /tasks  → Task list with create form
+ *   /tasks  → Task list
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
-import CreateForm from '@platform-ui/components/CreateForm';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
-import type { Row, FormField, ApiError } from '@platform-ui/api/types';
+import type { Row, ApiError } from '@platform-ui/api/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,30 +60,26 @@ interface AttachedLabel {
   attached_at: string;
 }
 
-// ── Form field definitions ────────────────────────────────────────────────────
-
-const TASK_FIELDS: FormField[] = [
-  { key: 'title',        label: 'Title',       type: 'string', required: true, placeholder: 'Task title' },
-  { key: 'description',  label: 'Description', type: 'string' },
-  { key: 'priority',     label: 'Priority',    type: 'enum',   required: true,
-    initialValue: 'medium',
-    options: [
-      { value: 'low',    label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high',   label: 'High' },
-    ],
-  },
-  { key: 'due_date',     label: 'Due Date',    type: 'date' },
-  { key: 'effort_hours', label: 'Effort (h)',  type: 'number', placeholder: 'e.g. 1.5' },
-];
-
 // ── Priority chip colours ─────────────────────────────────────────────────────
 
 const PRIORITY_COLOUR: Record<string, string> = {
   high:   'var(--md-sys-color-error)',
-  medium: '#b45309',   // amber-700 — warning tone
+  medium: '#b45309',
   low:    'var(--md-sys-color-on-surface-variant)',
 };
+
+const PRIORITY_SYMBOL: Record<string, string> = {
+  high:   '↑',
+  medium: '–',
+  low:    '↓',
+};
+
+// ── Effort formatting ─────────────────────────────────────────────────────────
+
+function formatEffort(hours: number): string {
+  if (hours === 0) return '0 h';
+  return Number.isInteger(hours) ? `${hours} h` : `${hours.toFixed(1)} h`;
+}
 
 // ── LinkModal ─────────────────────────────────────────────────────────────────
 
@@ -120,7 +114,6 @@ function LinkModal({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    // Register both objects (upsert — safe to call multiple times)
     await apiFetch('/linking/objects', {
       method: 'POST',
       body: JSON.stringify({ object_id: task.id, object_type: 'task', workspace_id: null, title: task.title }),
@@ -163,26 +156,26 @@ function LinkModal({
   };
 
   const modalStyle: React.CSSProperties = {
-    background:   'var(--md-sys-color-surface)',
-    border:       '1px solid var(--md-sys-color-outline-variant)',
-    borderRadius: '12px',
-    padding:      'var(--space-lg)',
-    width:        '420px',
-    maxWidth:     '90vw',
-    display:      'flex',
-    flexDirection:'column',
-    gap:          'var(--space-md)',
+    background:    'var(--md-sys-color-surface)',
+    border:        '1px solid var(--md-sys-color-outline-variant)',
+    borderRadius:  '12px',
+    padding:       'var(--space-lg)',
+    width:         '420px',
+    maxWidth:      '90vw',
+    display:       'flex',
+    flexDirection: 'column',
+    gap:           'var(--space-md)',
   };
 
   const inputStyle: React.CSSProperties = {
-    width:       '100%',
-    padding:     'var(--space-xs) var(--space-sm)',
-    borderRadius:'6px',
-    border:      '1px solid var(--md-sys-color-outline-variant)',
-    background:  'var(--md-sys-color-surface)',
-    color:       'var(--md-sys-color-on-surface)',
-    fontSize:    '0.95rem',
-    boxSizing:   'border-box',
+    width:        '100%',
+    padding:      'var(--space-xs) var(--space-sm)',
+    borderRadius: '6px',
+    border:       '1px solid var(--md-sys-color-outline-variant)',
+    background:   'var(--md-sys-color-surface)',
+    color:        'var(--md-sys-color-on-surface)',
+    fontSize:     '0.95rem',
+    boxSizing:    'border-box',
   };
 
   return (
@@ -282,10 +275,12 @@ function ThreeDotsMenu({
   taskId,
   onDelete,
   onLink,
+  onAddLabel,
 }: {
-  taskId:  string;
-  onDelete: (id: string) => void;
-  onLink:   (id: string) => void;
+  taskId:     string;
+  onDelete:   (id: string) => void;
+  onLink:     (id: string) => void;
+  onAddLabel: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -319,31 +314,50 @@ function ThreeDotsMenu({
         <div
           role="menu"
           style={{
-            position: 'absolute',
-            right: 0,
-            top: '100%',
-            marginTop: '4px',
-            background: 'var(--md-sys-color-surface)',
-            border: '1px solid var(--md-sys-color-outline-variant)',
+            position:     'absolute',
+            right:        0,
+            top:          '100%',
+            marginTop:    '4px',
+            background:   'var(--md-sys-color-surface)',
+            border:       '1px solid var(--md-sys-color-outline-variant)',
             borderRadius: '8px',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.15)',
-            minWidth: '160px',
-            zIndex: 200,
-            overflow: 'hidden',
+            boxShadow:    '0 2px 12px rgba(0,0,0,0.15)',
+            minWidth:     '160px',
+            zIndex:       200,
+            overflow:     'hidden',
           }}
         >
           <button
             role="menuitem"
             style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: 'var(--space-sm) var(--space-md)',
+              display:    'block',
+              width:      '100%',
+              textAlign:  'left',
+              padding:    'var(--space-sm) var(--space-md)',
               background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              color: 'var(--md-sys-color-on-surface)',
+              border:     'none',
+              cursor:     'pointer',
+              fontSize:   '0.9rem',
+              color:      'var(--md-sys-color-on-surface)',
+            }}
+            onClick={(e) => { e.stopPropagation(); setOpen(false); onAddLabel(taskId); }}
+          >
+            Add label
+          </button>
+
+          <button
+            role="menuitem"
+            style={{
+              display:     'block',
+              width:       '100%',
+              textAlign:   'left',
+              padding:     'var(--space-sm) var(--space-md)',
+              background:  'none',
+              border:      'none',
+              borderTop:   '1px solid var(--md-sys-color-outline-variant)',
+              cursor:      'pointer',
+              fontSize:    '0.9rem',
+              color:       'var(--md-sys-color-on-surface)',
             }}
             onClick={(e) => { e.stopPropagation(); setOpen(false); onLink(taskId); }}
           >
@@ -353,16 +367,16 @@ function ThreeDotsMenu({
           <button
             role="menuitem"
             style={{
-              display: 'block',
-              width: '100%',
-              textAlign: 'left',
-              padding: 'var(--space-sm) var(--space-md)',
-              background: 'none',
-              border: 'none',
-              borderTop: '1px solid var(--md-sys-color-outline-variant)',
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              color: 'var(--md-sys-color-error)',
+              display:     'block',
+              width:       '100%',
+              textAlign:   'left',
+              padding:     'var(--space-sm) var(--space-md)',
+              background:  'none',
+              border:      'none',
+              borderTop:   '1px solid var(--md-sys-color-outline-variant)',
+              cursor:      'pointer',
+              fontSize:    '0.9rem',
+              color:       'var(--md-sys-color-error)',
             }}
             onClick={(e) => { e.stopPropagation(); setOpen(false); onDelete(taskId); }}
           >
@@ -374,55 +388,235 @@ function ThreeDotsMenu({
   );
 }
 
+// ── LabelPopover ──────────────────────────────────────────────────────────────
+
+function LabelPopover({
+  taskId,
+  onClose,
+  onAttached,
+}: {
+  taskId:     string;
+  onClose:    () => void;
+  onAttached: () => void;
+}) {
+  const [query,        setQuery]        = useState('');
+  const [suggestions,  setSuggestions]  = useState<LabelRecord[]>([]);
+  const [attaching,    setAttaching]    = useState(false);
+  const debounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef      = useRef<HTMLInputElement>(null);
+  const containerRef  = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!value.trim()) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
+      if (!isApiError(res)) setSuggestions((res as { labels: LabelRecord[] }).labels ?? []);
+    }, 200);
+  }
+
+  async function attachLabel(labelName: string) {
+    if (!labelName.trim() || attaching) return;
+    setAttaching(true);
+    const res = await apiFetch<unknown>(`/tasks/${taskId}/labels`, {
+      method: 'POST',
+      body: JSON.stringify({ label_name: labelName.trim() }),
+    });
+    setAttaching(false);
+    if (!isApiError(res)) {
+      onAttached();
+      onClose();
+    }
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position:     'absolute',
+        right:        0,
+        top:          '100%',
+        marginTop:    '4px',
+        background:   'var(--md-sys-color-surface)',
+        border:       '1px solid var(--md-sys-color-outline-variant)',
+        borderRadius: '8px',
+        boxShadow:    '0 2px 12px rgba(0,0,0,0.15)',
+        width:        '240px',
+        zIndex:       300,
+        padding:      'var(--space-sm)',
+      }}
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        value={query}
+        onChange={(e) => handleQueryChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && query.trim()) {
+            e.preventDefault();
+            attachLabel(query);
+          }
+        }}
+        placeholder="Type to search or add…"
+        disabled={attaching}
+        style={{
+          width:        '100%',
+          padding:      'var(--space-xs) var(--space-sm)',
+          borderRadius: '6px',
+          border:       '1px solid var(--md-sys-color-outline-variant)',
+          background:   'var(--md-sys-color-surface)',
+          color:        'var(--md-sys-color-on-surface)',
+          fontSize:     '0.9rem',
+          boxSizing:    'border-box',
+        }}
+      />
+      {suggestions.length > 0 && (
+        <div style={{
+          marginTop:    '4px',
+          border:       '1px solid var(--md-sys-color-outline-variant)',
+          borderRadius: '6px',
+          overflow:     'hidden',
+          maxHeight:    '160px',
+          overflowY:    'auto',
+        }}>
+          {suggestions.map(s => (
+            <button
+              key={s.id}
+              onClick={() => attachLabel(s.name)}
+              style={{
+                display:      'block',
+                width:        '100%',
+                textAlign:    'left',
+                padding:      'var(--space-xs) var(--space-sm)',
+                background:   'none',
+                border:       'none',
+                borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+                cursor:       'pointer',
+                fontSize:     '0.875rem',
+                color:        'var(--md-sys-color-on-surface)',
+              }}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── TaskCard ──────────────────────────────────────────────────────────────────
+// pendingMode=true: toggle button moves tasks between open ↔ pending
+// pendingMode=false (default): toggle button marks done ↔ open
 
 function TaskCard({
   task,
   onOpen,
-  onMarkComplete,
+  onStatusToggle,
   onDelete,
   onLink,
+  onAddLabel,
+  pendingMode = false,
 }: {
   task:           TaskRow;
   onOpen:         (task: TaskRow) => void;
-  onMarkComplete: (id: string) => void;
+  onStatusToggle: (id: string, newStatus: string) => void;
   onDelete:       (id: string) => void;
   onLink:         (id: string) => void;
+  onAddLabel:     (id: string) => void;
+  pendingMode?:   boolean;
 }) {
-  const labels = task.labels ?? [];
+  const [labelPopoverOpen, setLabelPopoverOpen] = useState(false);
 
   const effortLabel =
     task.effort_hours != null ? `${task.effort_hours.toFixed(1)} h` : '—';
 
-  const priorityColour = PRIORITY_COLOUR[task.priority] ?? 'var(--md-sys-color-on-surface-variant)';
-  const priorityLabel  = task.priority.charAt(0).toUpperCase() + task.priority.slice(1);
+  const priorityColour  = PRIORITY_COLOUR[task.priority] ?? 'var(--md-sys-color-on-surface-variant)';
+  const prioritySymbol  = PRIORITY_SYMBOL[task.priority] ?? '–';
+  const priorityFullName = task.priority.charAt(0).toUpperCase() + task.priority.slice(1);
 
-  const isDone = task.status === 'done';
+  const isDone    = task.status === 'done';
+  const isPending = task.status === 'pending';
+
+  // Determine toggle button appearance and action
+  let toggleTitle: string;
+  let toggleNewStatus: string;
+  let toggleHighlighted: boolean;
+
+  if (pendingMode) {
+    if (isPending) {
+      toggleTitle      = 'Mark as open';
+      toggleNewStatus  = 'open';
+      toggleHighlighted = true;
+    } else {
+      toggleTitle      = 'Mark as pending';
+      toggleNewStatus  = 'pending';
+      toggleHighlighted = false;
+    }
+  } else {
+    if (isDone) {
+      toggleTitle      = 'Mark as open';
+      toggleNewStatus  = 'open';
+      toggleHighlighted = true;
+    } else {
+      toggleTitle      = 'Mark complete';
+      toggleNewStatus  = 'done';
+      toggleHighlighted = false;
+    }
+  }
+
+  function handleToggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    onStatusToggle(task.id, toggleNewStatus);
+  }
 
   return (
     <div
       onClick={() => onOpen(task)}
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-sm)',
-        padding: 'var(--space-sm) var(--space-md)',
-        background: 'var(--md-sys-color-surface)',
-        border: '1px solid var(--md-sys-color-outline-variant)',
+        display:      'flex',
+        alignItems:   'center',
+        gap:          'var(--space-sm)',
+        padding:      'var(--space-sm) var(--space-md)',
+        background:   'var(--md-sys-color-surface)',
+        border:       '1px solid var(--md-sys-color-outline-variant)',
         borderRadius: '8px',
-        cursor: 'pointer',
-        minWidth: 0,
+        cursor:       'pointer',
+        minWidth:     0,
       }}
     >
-      {/* Task name — flex:1, truncates */}
+      {/* Task name */}
       <span
         className="type-body"
         style={{
-          flex: 1,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          fontWeight: isDone ? 400 : 500,
+          flex:           1,
+          overflow:       'hidden',
+          textOverflow:   'ellipsis',
+          whiteSpace:     'nowrap',
+          fontWeight:     isDone ? 400 : 500,
           textDecoration: isDone ? 'line-through' : 'none',
           color: isDone
             ? 'var(--md-sys-color-on-surface-variant)'
@@ -432,80 +626,234 @@ function TaskCard({
         {task.title}
       </span>
 
-      {/* Label chips — all labels shown */}
-      {labels.map(label => (
-        <span
-          key={label.id}
-          className="type-label"
-          style={{
-            flexShrink: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '2px 8px',
-            borderRadius: '12px',
-            background: 'var(--md-sys-color-secondary-container)',
-            color: 'var(--md-sys-color-on-secondary-container)',
-            fontSize: '0.75rem',
-            fontWeight: 500,
-          }}
-        >
-          {label.name}
-        </span>
-      ))}
-
-      {/* Effort chip — fixed width */}
+      {/* Effort chip */}
       <span
         className="type-label"
         style={{
           flexShrink: 0,
-          minWidth: '44px',
-          textAlign: 'right',
-          color: 'var(--md-sys-color-on-surface-variant)',
-          fontSize: '0.8rem',
+          minWidth:   '44px',
+          textAlign:  'right',
+          color:      'var(--md-sys-color-on-surface-variant)',
+          fontSize:   '0.8rem',
         }}
       >
         {effortLabel}
       </span>
 
-      {/* Priority chip — fixed width */}
+      {/* Priority symbol */}
       <span
         className="type-label"
+        title={priorityFullName}
         style={{
           flexShrink: 0,
-          minWidth: '52px',
-          textAlign: 'center',
-          fontSize: '0.75rem',
+          minWidth:   '24px',
+          textAlign:  'center',
+          fontSize:   '1rem',
           fontWeight: 600,
-          color: priorityColour,
+          color:      priorityColour,
+          cursor:     'default',
         }}
       >
-        {priorityLabel}
+        {prioritySymbol}
       </span>
 
-      {/* Mark Complete — primary action, always visible */}
+      {/* Status toggle button */}
       <button
         className="btn-outlined"
-        disabled={isDone}
-        onClick={(e) => { e.stopPropagation(); if (!isDone) onMarkComplete(task.id); }}
+        onClick={handleToggle}
         style={{
-          flexShrink: 0,
-          fontSize: '0.8rem',
-          padding: '3px 10px',
-          opacity: isDone ? 0.45 : 1,
-          cursor: isDone ? 'default' : 'pointer',
+          flexShrink:  0,
+          fontSize:    '1rem',
+          padding:     '3px 10px',
+          minWidth:    '36px',
+          color:       toggleHighlighted ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
+          fontWeight:  toggleHighlighted ? 700 : 400,
+          borderColor: toggleHighlighted ? 'var(--md-sys-color-primary)' : undefined,
         }}
-        title={isDone ? 'Already completed' : 'Mark complete'}
+        title={toggleTitle}
       >
-        {isDone ? 'Done' : 'Complete'}
+        ✓
       </button>
 
-      {/* Three-dots menu — secondary actions only */}
-      <ThreeDotsMenu
-        taskId={task.id}
-        onDelete={onDelete}
-        onLink={onLink}
-      />
+      {/* Three-dots menu */}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <ThreeDotsMenu
+          taskId={task.id}
+          onDelete={onDelete}
+          onLink={onLink}
+          onAddLabel={() => setLabelPopoverOpen(true)}
+        />
+        {labelPopoverOpen && (
+          <LabelPopover
+            taskId={task.id}
+            onClose={() => setLabelPopoverOpen(false)}
+            onAttached={() => { setLabelPopoverOpen(false); onAddLabel(task.id); }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Shared label section used in both Detail and Create forms ─────────────────
+
+function LabelSection({
+  taskId,
+  attachedLabels,
+  onAttached,
+  onDetached,
+}: {
+  taskId:         string;
+  attachedLabels: AttachedLabel[];
+  onAttached:     (label: AttachedLabel) => void;
+  onDetached:     (labelId: string) => void;
+}) {
+  const [labelQuery,       setLabelQuery]       = useState('');
+  const [labelSuggestions, setLabelSuggestions] = useState<LabelRecord[]>([]);
+  const [labelAttaching,   setLabelAttaching]   = useState(false);
+  const labelDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const inputStyle: React.CSSProperties = {
+    width:        '100%',
+    padding:      'var(--space-xs) var(--space-sm)',
+    borderRadius: '6px',
+    border:       '1px solid var(--md-sys-color-outline-variant)',
+    background:   'var(--md-sys-color-surface)',
+    color:        'var(--md-sys-color-on-surface)',
+    fontSize:     '0.95rem',
+    boxSizing:    'border-box',
+  };
+
+  function handleLabelQueryChange(value: string) {
+    setLabelQuery(value);
+    if (labelDebounceRef.current) clearTimeout(labelDebounceRef.current);
+    if (!value.trim()) { setLabelSuggestions([]); return; }
+    labelDebounceRef.current = setTimeout(async () => {
+      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
+      if (!isApiError(res)) setLabelSuggestions((res as { labels: LabelRecord[] }).labels ?? []);
+    }, 200);
+  }
+
+  async function handleAttachLabel(labelName: string) {
+    if (!labelName.trim() || labelAttaching) return;
+    setLabelAttaching(true);
+    const res = await apiFetch<AttachedLabel>(`/tasks/${taskId}/labels`, {
+      method: 'POST',
+      body: JSON.stringify({ label_name: labelName.trim() }),
+    });
+    setLabelAttaching(false);
+    if (!isApiError(res)) {
+      const attached = res as AttachedLabel;
+      onAttached(attached);
+    }
+    setLabelQuery('');
+    setLabelSuggestions([]);
+  }
+
+  async function handleDetachLabel(labelId: string) {
+    const res = await apiFetch<unknown>(`/tasks/${taskId}/labels/${labelId}`, { method: 'DELETE' });
+    if (!isApiError(res)) onDetached(labelId);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '4px' }}>
+        Labels
+      </label>
+
+      {attachedLabels.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+          {attachedLabels.map(label => (
+            <span
+              key={label.label_id}
+              style={{
+                display:     'inline-flex',
+                alignItems:  'center',
+                gap:         '4px',
+                padding:     '3px 10px',
+                borderRadius: '12px',
+                background:  'var(--md-sys-color-secondary-container)',
+                color:       'var(--md-sys-color-on-secondary-container)',
+                fontSize:    '0.8rem',
+                fontWeight:  500,
+              }}
+            >
+              {label.label_name}
+              <button
+                onClick={() => handleDetachLabel(label.label_id)}
+                style={{
+                  background: 'none',
+                  border:     'none',
+                  cursor:     'pointer',
+                  padding:    '0',
+                  lineHeight: 1,
+                  color:      'var(--md-sys-color-on-secondary-container)',
+                  fontSize:   '0.75rem',
+                }}
+                title={`Remove label ${label.label_name}`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text"
+          value={labelQuery}
+          onChange={(e) => handleLabelQueryChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && labelQuery.trim()) {
+              e.preventDefault();
+              handleAttachLabel(labelQuery);
+            }
+          }}
+          placeholder="Type to search or add label…"
+          style={inputStyle}
+          disabled={labelAttaching}
+        />
+        {labelSuggestions.length > 0 && (
+          <div style={{
+            position:     'absolute',
+            top:          '100%',
+            left:         0,
+            right:        0,
+            zIndex:       100,
+            background:   'var(--md-sys-color-surface)',
+            border:       '1px solid var(--md-sys-color-outline-variant)',
+            borderRadius: '6px',
+            boxShadow:    '0 2px 8px rgba(0,0,0,0.12)',
+            maxHeight:    '180px',
+            overflowY:    'auto',
+          }}>
+            {labelSuggestions.map(s => (
+              <button
+                key={s.id}
+                onClick={() => handleAttachLabel(s.name)}
+                style={{
+                  display:      'block',
+                  width:        '100%',
+                  textAlign:    'left',
+                  padding:      'var(--space-xs) var(--space-sm)',
+                  background:   'none',
+                  border:       'none',
+                  borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+                  cursor:       'pointer',
+                  fontSize:     '0.9rem',
+                  color:        'var(--md-sys-color-on-surface)',
+                }}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <p style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', margin: '4px 0 0' }}>
+        Select a suggestion or press Enter to create and attach a new label.
+      </p>
     </div>
   );
 }
@@ -521,24 +869,18 @@ function TaskDetailEdit({
   onBack:  () => void;
   onSaved: (updated: TaskRow) => void;
 }) {
-  const [title,        setTitle]        = useState(task.title ?? '');
-  const [description,  setDescription]  = useState(task.description ?? '');
-  const [status,       setStatus]       = useState(task.status ?? 'open');
-  const [priority,     setPriority]     = useState(task.priority ?? 'medium');
-  const [dueDate,      setDueDate]      = useState(task.due_date ?? '');
-  const [effortHours,  setEffortHours]  = useState(
+  const [title,       setTitle]       = useState(task.title ?? '');
+  const [description, setDescription] = useState(task.description ?? '');
+  const [status,      setStatus]      = useState(task.status ?? 'open');
+  const [priority,    setPriority]    = useState(task.priority ?? 'medium');
+  const [dueDate,     setDueDate]     = useState(task.due_date ?? '');
+  const [effortHours, setEffortHours] = useState(
     task.effort_hours != null ? String(task.effort_hours) : ''
   );
-  const [saving,       setSaving]       = useState(false);
-  const [saveError,    setSaveError]    = useState<ApiError | null>(null);
-  const [linkGroups,   setLinkGroups]   = useState<LinkGroup[]>([]);
-
-  // Label state
-  const [attachedLabels,   setAttachedLabels]   = useState<AttachedLabel[]>([]);
-  const [labelQuery,       setLabelQuery]       = useState('');
-  const [labelSuggestions, setLabelSuggestions] = useState<LabelRecord[]>([]);
-  const [labelAttaching,   setLabelAttaching]   = useState(false);
-  const labelDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saving,          setSaving]          = useState(false);
+  const [saveError,       setSaveError]       = useState<ApiError | null>(null);
+  const [linkGroups,      setLinkGroups]      = useState<LinkGroup[]>([]);
+  const [attachedLabels,  setAttachedLabels]  = useState<AttachedLabel[]>([]);
 
   useEffect(() => {
     apiFetch<{ object_id: string; groups: LinkGroup[] }>(`/linking/objects/${task.id}/links`)
@@ -554,48 +896,11 @@ function TaskDetailEdit({
       });
   }, [task.id]);
 
-  function handleLabelQueryChange(value: string) {
-    setLabelQuery(value);
-    if (labelDebounceRef.current) clearTimeout(labelDebounceRef.current);
-    if (!value.trim()) { setLabelSuggestions([]); return; }
-    labelDebounceRef.current = setTimeout(async () => {
-      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
-      if (!isApiError(res)) setLabelSuggestions((res as { labels: LabelRecord[] }).labels ?? []);
-    }, 200);
-  }
-
-  async function handleAttachLabel(labelName: string) {
-    if (!labelName.trim() || labelAttaching) return;
-    setLabelAttaching(true);
-    const res = await apiFetch<AttachedLabel>(`/tasks/${task.id}/labels`, {
-      method: 'POST',
-      body: JSON.stringify({ label_name: labelName.trim() }),
-    });
-    setLabelAttaching(false);
-    if (!isApiError(res)) {
-      const attached = res as AttachedLabel;
-      setAttachedLabels(prev =>
-        prev.some(l => l.label_id === attached.label_id) ? prev : [...prev, attached]
-      );
-    }
-    setLabelQuery('');
-    setLabelSuggestions([]);
-  }
-
-  async function handleDetachLabel(labelId: string) {
-    const res = await apiFetch<unknown>(`/tasks/${task.id}/labels/${labelId}`, { method: 'DELETE' });
-    if (!isApiError(res)) {
-      setAttachedLabels(prev => prev.filter(l => l.label_id !== labelId));
-    }
-  }
-
   async function handleSave() {
     if (!title.trim()) return;
     setSaving(true);
     setSaveError(null);
 
-    // Always include effort_hours in the body so the backend model_fields_set
-    // sees it and can clear the column when the field was explicitly emptied.
     const effortValue = effortHours.trim() === '' ? null : parseFloat(effortHours);
 
     const body = {
@@ -623,28 +928,28 @@ function TaskDetailEdit({
   }
 
   const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: 'var(--space-xs) var(--space-sm)',
+    width:        '100%',
+    padding:      'var(--space-xs) var(--space-sm)',
     borderRadius: '6px',
-    border: '1px solid var(--md-sys-color-outline-variant)',
-    background: 'var(--md-sys-color-surface)',
-    color: 'var(--md-sys-color-on-surface)',
-    fontSize: '0.95rem',
-    boxSizing: 'border-box',
+    border:       '1px solid var(--md-sys-color-outline-variant)',
+    background:   'var(--md-sys-color-surface)',
+    color:        'var(--md-sys-color-on-surface)',
+    fontSize:     '0.95rem',
+    boxSizing:    'border-box',
   };
 
   const labelStyle: React.CSSProperties = {
-    display: 'block',
-    fontSize: '0.8rem',
-    fontWeight: 600,
-    color: 'var(--md-sys-color-on-surface-variant)',
+    display:      'block',
+    fontSize:     '0.8rem',
+    fontWeight:   600,
+    color:        'var(--md-sys-color-on-surface-variant)',
     marginBottom: '4px',
   };
 
   const fieldStyle: React.CSSProperties = {
-    display: 'flex',
+    display:       'flex',
     flexDirection: 'column',
-    gap: '4px',
+    gap:           '4px',
   };
 
   return (
@@ -663,22 +968,12 @@ function TaskDetailEdit({
 
         <div style={fieldStyle}>
           <label style={labelStyle}>Title *</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            style={inputStyle}
-          />
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
         </div>
 
         <div style={fieldStyle}>
           <label style={labelStyle}>Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            style={{ ...inputStyle, resize: 'vertical' }}
-          />
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
         </div>
 
         <div style={fieldStyle}>
@@ -686,6 +981,7 @@ function TaskDetailEdit({
           <select value={status} onChange={(e) => setStatus(e.target.value)} style={inputStyle}>
             <option value="open">Open</option>
             <option value="in_progress">In Progress</option>
+            <option value="pending">Pending</option>
             <option value="done">Done</option>
           </select>
         </div>
@@ -701,12 +997,7 @@ function TaskDetailEdit({
 
         <div style={fieldStyle}>
           <label style={labelStyle}>Due Date</label>
-          <input
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            style={inputStyle}
-          />
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
         </div>
 
         <div style={fieldStyle}>
@@ -722,106 +1013,18 @@ function TaskDetailEdit({
           />
         </div>
 
-        {/* ── Labels ─────────────────────────────────────────────────────── */}
-        <div style={fieldStyle}>
-          <label style={labelStyle}>Labels</label>
-
-          {/* Attached label chips */}
-          {attachedLabels.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-              {attachedLabels.map(label => (
-                <span
-                  key={label.label_id}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '3px 10px',
-                    borderRadius: '12px',
-                    background: 'var(--md-sys-color-secondary-container)',
-                    color: 'var(--md-sys-color-on-secondary-container)',
-                    fontSize: '0.8rem',
-                    fontWeight: 500,
-                  }}
-                >
-                  {label.label_name}
-                  <button
-                    onClick={() => handleDetachLabel(label.label_id)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '0',
-                      lineHeight: 1,
-                      color: 'var(--md-sys-color-on-secondary-container)',
-                      fontSize: '0.75rem',
-                    }}
-                    title={`Remove label ${label.label_name}`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Typeahead input */}
-          <div style={{ position: 'relative' }}>
-            <input
-              type="text"
-              value={labelQuery}
-              onChange={(e) => handleLabelQueryChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && labelQuery.trim()) {
-                  e.preventDefault();
-                  handleAttachLabel(labelQuery);
-                }
-              }}
-              placeholder="Type to search or add label…"
-              style={inputStyle}
-              disabled={labelAttaching}
-            />
-            {labelSuggestions.length > 0 && (
-              <div style={{
-                position:     'absolute',
-                top:          '100%',
-                left:         0,
-                right:        0,
-                zIndex:       100,
-                background:   'var(--md-sys-color-surface)',
-                border:       '1px solid var(--md-sys-color-outline-variant)',
-                borderRadius: '6px',
-                boxShadow:    '0 2px 8px rgba(0,0,0,0.12)',
-                maxHeight:    '180px',
-                overflowY:    'auto',
-              }}>
-                {labelSuggestions.map(s => (
-                  <button
-                    key={s.id}
-                    onClick={() => handleAttachLabel(s.name)}
-                    style={{
-                      display:    'block',
-                      width:      '100%',
-                      textAlign:  'left',
-                      padding:    'var(--space-xs) var(--space-sm)',
-                      background: 'none',
-                      border:     'none',
-                      borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-                      cursor:     'pointer',
-                      fontSize:   '0.9rem',
-                      color:      'var(--md-sys-color-on-surface)',
-                    }}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', margin: '4px 0 0' }}>
-            Select a suggestion or press Enter to create and attach a new label.
-          </p>
-        </div>
+        <LabelSection
+          taskId={task.id}
+          attachedLabels={attachedLabels}
+          onAttached={(label) =>
+            setAttachedLabels(prev =>
+              prev.some(l => l.label_id === label.label_id) ? prev : [...prev, label]
+            )
+          }
+          onDetached={(labelId) =>
+            setAttachedLabels(prev => prev.filter(l => l.label_id !== labelId))
+          }
+        />
 
         <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
           <button className="btn-primary" onClick={handleSave} disabled={saving || !title.trim()}>
@@ -868,25 +1071,308 @@ function TaskDetailEdit({
   );
 }
 
+// ── TaskCreatePanel ───────────────────────────────────────────────────────────
+// Custom create form with labels + two submit buttons (Create as Open / Pending).
+// Labels are attached immediately after the task is created.
+
+function TaskCreatePanel({
+  onCancel,
+  onCreated,
+}: {
+  onCancel:  () => void;
+  onCreated: (status: 'open' | 'pending') => void;
+}) {
+  const [title,        setTitle]        = useState('');
+  const [description,  setDescription]  = useState('');
+  const [priority,     setPriority]     = useState('medium');
+  const [dueDate,      setDueDate]      = useState('');
+  const [effortHours,  setEffortHours]  = useState('');
+  const [pendingLabels, setPendingLabels] = useState<string[]>([]);
+  const [labelQuery,   setLabelQuery]   = useState('');
+  const [labelSugs,    setLabelSugs]    = useState<LabelRecord[]>([]);
+  const [saving,       setSaving]       = useState(false);
+  const [saveError,    setSaveError]    = useState<ApiError | null>(null);
+  const labelDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleLabelQueryChange(value: string) {
+    setLabelQuery(value);
+    if (labelDebounceRef.current) clearTimeout(labelDebounceRef.current);
+    if (!value.trim()) { setLabelSugs([]); return; }
+    labelDebounceRef.current = setTimeout(async () => {
+      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
+      if (!isApiError(res)) setLabelSugs((res as { labels: LabelRecord[] }).labels ?? []);
+    }, 200);
+  }
+
+  function addPendingLabel(name: string) {
+    const trimmed = name.trim();
+    if (trimmed && !pendingLabels.includes(trimmed)) {
+      setPendingLabels(prev => [...prev, trimmed]);
+    }
+    setLabelQuery('');
+    setLabelSugs([]);
+  }
+
+  function removePendingLabel(name: string) {
+    setPendingLabels(prev => prev.filter(l => l !== name));
+  }
+
+  async function handleSubmit(status: 'open' | 'pending') {
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const effortValue = effortHours.trim() === '' ? null : parseFloat(effortHours);
+
+    const res = await apiFetch<{ rows: TaskRow[] }>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        title:        title.trim(),
+        description:  description.trim() || null,
+        status,
+        priority,
+        due_date:     dueDate || null,
+        effort_hours: effortValue,
+      }),
+    });
+
+    if (isApiError(res)) {
+      setSaving(false);
+      setSaveError(res);
+      return;
+    }
+
+    const newTask = (res as { rows: TaskRow[] }).rows?.[0];
+
+    if (newTask && pendingLabels.length > 0) {
+      await apiFetch(`/tasks/${newTask.id}/labels`, {
+        method: 'PUT',
+        body: JSON.stringify({ labels: pendingLabels }),
+      });
+    }
+
+    setSaving(false);
+    onCreated(status);
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width:        '100%',
+    padding:      'var(--space-xs) var(--space-sm)',
+    borderRadius: '6px',
+    border:       '1px solid var(--md-sys-color-outline-variant)',
+    background:   'var(--md-sys-color-surface)',
+    color:        'var(--md-sys-color-on-surface)',
+    fontSize:     '0.95rem',
+    boxSizing:    'border-box',
+  };
+
+  const labelStyle: React.CSSProperties = {
+    display:      'block',
+    fontSize:     '0.8rem',
+    fontWeight:   600,
+    color:        'var(--md-sys-color-on-surface-variant)',
+    marginBottom: '4px',
+  };
+
+  const fieldStyle: React.CSSProperties = {
+    display:       'flex',
+    flexDirection: 'column',
+    gap:           '4px',
+  };
+
+  return (
+    <div className="page">
+      <div className="page-header" style={{ marginBottom: 'var(--space-md)' }}>
+        <h1 className="type-display">New Task</h1>
+      </div>
+
+      {saveError && (
+        <div style={{ marginBottom: 'var(--space-sm)' }}>
+          <ErrorCard error={saveError} />
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Title *</label>
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} placeholder="Task title" />
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Description</label>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Priority</label>
+          <select value={priority} onChange={(e) => setPriority(e.target.value)} style={inputStyle}>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Due Date</label>
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+        </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Effort (h)</label>
+          <input
+            type="number"
+            value={effortHours}
+            onChange={(e) => setEffortHours(e.target.value)}
+            min={0}
+            step={0.5}
+            placeholder="e.g. 1.5"
+            style={inputStyle}
+          />
+        </div>
+
+        {/* ── Labels ─────────────────────────────────────────────────────── */}
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Labels</label>
+
+          {pendingLabels.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
+              {pendingLabels.map(name => (
+                <span
+                  key={name}
+                  style={{
+                    display:      'inline-flex',
+                    alignItems:   'center',
+                    gap:          '4px',
+                    padding:      '3px 10px',
+                    borderRadius: '12px',
+                    background:   'var(--md-sys-color-secondary-container)',
+                    color:        'var(--md-sys-color-on-secondary-container)',
+                    fontSize:     '0.8rem',
+                    fontWeight:   500,
+                  }}
+                >
+                  {name}
+                  <button
+                    onClick={() => removePendingLabel(name)}
+                    style={{
+                      background: 'none',
+                      border:     'none',
+                      cursor:     'pointer',
+                      padding:    '0',
+                      lineHeight: 1,
+                      color:      'var(--md-sys-color-on-secondary-container)',
+                      fontSize:   '0.75rem',
+                    }}
+                    title={`Remove ${name}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div style={{ position: 'relative' }}>
+            <input
+              type="text"
+              value={labelQuery}
+              onChange={(e) => handleLabelQueryChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && labelQuery.trim()) {
+                  e.preventDefault();
+                  addPendingLabel(labelQuery);
+                }
+              }}
+              placeholder="Type to search or add label…"
+              style={inputStyle}
+            />
+            {labelSugs.length > 0 && (
+              <div style={{
+                position:     'absolute',
+                top:          '100%',
+                left:         0,
+                right:        0,
+                zIndex:       100,
+                background:   'var(--md-sys-color-surface)',
+                border:       '1px solid var(--md-sys-color-outline-variant)',
+                borderRadius: '6px',
+                boxShadow:    '0 2px 8px rgba(0,0,0,0.12)',
+                maxHeight:    '180px',
+                overflowY:    'auto',
+              }}>
+                {labelSugs.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => addPendingLabel(s.name)}
+                    style={{
+                      display:      'block',
+                      width:        '100%',
+                      textAlign:    'left',
+                      padding:      'var(--space-xs) var(--space-sm)',
+                      background:   'none',
+                      border:       'none',
+                      borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+                      cursor:       'pointer',
+                      fontSize:     '0.9rem',
+                      color:        'var(--md-sys-color-on-surface)',
+                    }}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <p style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', margin: '4px 0 0' }}>
+            Select a suggestion or press Enter to add a label.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
+          <button
+            className="btn-primary"
+            onClick={() => handleSubmit('open')}
+            disabled={saving || !title.trim()}
+          >
+            {saving ? 'Creating…' : 'Create as Open'}
+          </button>
+          <button
+            className="btn-outlined"
+            onClick={() => handleSubmit('pending')}
+            disabled={saving || !title.trim()}
+          >
+            Create as Pending
+          </button>
+          <button className="btn-outlined" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ── TaskGroupedList ───────────────────────────────────────────────────────────
-// Groups tasks by their first label (primary label).
-// Unlabeled tasks appear under "Unlabeled" at the end.
-// Groups within named labels are sorted alphabetically.
 
 function TaskGroupedList({
   tasks,
   onOpen,
-  onMarkComplete,
+  onStatusToggle,
   onDelete,
   onLink,
+  onAddLabel,
+  pendingMode = false,
 }: {
   tasks:          TaskRow[];
   onOpen:         (task: TaskRow) => void;
-  onMarkComplete: (id: string) => void;
+  onStatusToggle: (id: string, newStatus: string) => void;
   onDelete:       (id: string) => void;
   onLink:         (id: string) => void;
+  onAddLabel:     (id: string) => void;
+  pendingMode?:   boolean;
 }) {
-  // Build groups: {labelName -> TaskRow[]}
   const groupMap = new Map<string, TaskRow[]>();
   const unlabeled: TaskRow[] = [];
 
@@ -900,7 +1386,6 @@ function TaskGroupedList({
     }
   }
 
-  // Sort named groups alphabetically
   const sortedNames = Array.from(groupMap.keys()).sort((a, b) => a.localeCompare(b));
 
   const groups: { name: string; tasks: TaskRow[] }[] = [
@@ -915,12 +1400,12 @@ function TaskGroupedList({
           <p
             className="type-label"
             style={{
-              fontSize: '0.75rem',
-              fontWeight: 700,
+              fontSize:      '0.75rem',
+              fontWeight:    700,
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
-              color: 'var(--md-sys-color-on-surface-variant)',
-              marginBottom: 'var(--space-xs)',
+              color:         'var(--md-sys-color-on-surface-variant)',
+              marginBottom:  'var(--space-xs)',
             }}
           >
             {group.name}
@@ -931,9 +1416,11 @@ function TaskGroupedList({
                 key={task.id}
                 task={task}
                 onOpen={onOpen}
-                onMarkComplete={onMarkComplete}
+                onStatusToggle={onStatusToggle}
                 onDelete={onDelete}
                 onLink={onLink}
+                onAddLabel={onAddLabel}
+                pendingMode={pendingMode}
               />
             ))}
           </div>
@@ -943,21 +1430,31 @@ function TaskGroupedList({
   );
 }
 
+// ── View types ────────────────────────────────────────────────────────────────
+
+type ViewTab = 'active' | 'pending' | 'done';
+
+function viewFetchUrl(view: ViewTab): string {
+  if (view === 'active')  return '/tasks?view=active';
+  if (view === 'pending') return '/tasks?view=pending_board';
+  return '/tasks?status=done';
+}
 
 // ── TasksPage ─────────────────────────────────────────────────────────────────
 
 function TasksPage() {
-  const [tasks,        setTasks]        = useState<TaskRow[] | null>(null);
-  const [isLoading,    setIsLoading]    = useState(true);
-  const [error,        setError]        = useState<ApiError | null>(null);
-  const [selected,     setSelected]     = useState<TaskRow | null>(null);
-  const [creating,     setCreating]     = useState(false);
-  const [actionError,  setActionError]  = useState<ApiError | null>(null);
-  const [linkingTask,  setLinkingTask]  = useState<TaskRow | null>(null);
+  const [view,        setView]        = useState<ViewTab>('active');
+  const [tasks,       setTasks]       = useState<TaskRow[] | null>(null);
+  const [isLoading,   setIsLoading]   = useState(true);
+  const [error,       setError]       = useState<ApiError | null>(null);
+  const [selected,    setSelected]    = useState<TaskRow | null>(null);
+  const [creating,    setCreating]    = useState(false);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
+  const [linkingTask, setLinkingTask] = useState<TaskRow | null>(null);
 
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (currentView: ViewTab) => {
     setIsLoading(true);
-    const res = await apiFetch<{ meta: object; schema: object[]; rows: TaskRow[] }>('/tasks');
+    const res = await apiFetch<{ meta: object; schema: object[]; rows: TaskRow[] }>(viewFetchUrl(currentView));
     setIsLoading(false);
     if (isApiError(res)) {
       setError(res);
@@ -968,25 +1465,21 @@ function TasksPage() {
   }, []);
 
   useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
+    fetchTasks(view);
+  }, [fetchTasks, view]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  async function handleMarkComplete(id: string) {
+  async function handleStatusToggle(id: string, newStatus: string) {
     setActionError(null);
     const res = await apiFetch<{ rows: TaskRow[] }>(`/tasks/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status: 'done' }),
+      body: JSON.stringify({ status: newStatus }),
     });
     if (isApiError(res)) {
       setActionError(res);
     } else {
-      // Optimistic update — replace task in local state
-      const updated = (res as { rows: TaskRow[] }).rows?.[0];
-      if (updated) {
-        setTasks((prev) => prev ? prev.map((t) => t.id === id ? updated : t) : prev);
-      }
+      fetchTasks(view);
     }
   }
 
@@ -1010,44 +1503,120 @@ function TasksPage() {
     setSelected(null);
   }
 
-  async function handleCreate(data: Record<string, string>) {
-    const body: Record<string, unknown> = { ...data };
-    // Coerce effort_hours to float if present and non-empty
-    if (typeof body.effort_hours === 'string') {
-      body.effort_hours = body.effort_hours.trim() === '' ? null : parseFloat(body.effort_hours as string);
-    }
-    const res = await apiFetch<unknown>('/tasks', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    if (isApiError(res)) return res;
+  function handleAddLabel(_id: string) {
+    fetchTasks(view);
+  }
+
+  function handleCreated(_status: 'open' | 'pending') {
     setCreating(false);
-    fetchTasks();
+    // Switch to the matching tab so the new task is visible
+    fetchTasks(view);
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render helpers ───────────────────────────────────────────────────────────
 
-  if (isLoading) {
+  function tabStyle(active: boolean): React.CSSProperties {
+    return {
+      padding:      '6px 16px',
+      borderRadius: '6px 6px 0 0',
+      border:       '1px solid var(--md-sys-color-outline-variant)',
+      borderBottom: active ? '1px solid var(--md-sys-color-surface)' : '1px solid var(--md-sys-color-outline-variant)',
+      background:   active ? 'var(--md-sys-color-surface)' : 'var(--md-sys-color-surface-variant)',
+      color:        active ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
+      fontWeight:   active ? 700 : 400,
+      fontSize:     '0.875rem',
+      cursor:       active ? 'default' : 'pointer',
+      marginRight:  '4px',
+    };
+  }
+
+  // ── Render pending tab (two sections: Open, then Pending) ────────────────────
+
+  function renderPendingTab() {
+    if (!tasks) return null;
+
+    const openTasks    = tasks.filter(t => t.status === 'open');
+    const pendingTasks = tasks.filter(t => t.status === 'pending');
+
+    const openEffort  = openTasks.reduce((sum, t)  => sum + (t.effort_hours ?? 0), 0);
+    const totalEffort = tasks.reduce((sum, t) => sum + (t.effort_hours ?? 0), 0);
+
+    const sectionHeaderStyle: React.CSSProperties = {
+      display:        'flex',
+      alignItems:     'center',
+      justifyContent: 'space-between',
+      marginBottom:   'var(--space-sm)',
+    };
+
+    const sectionLabelStyle: React.CSSProperties = {
+      fontSize:      '0.8rem',
+      fontWeight:    700,
+      letterSpacing: '0.06em',
+      textTransform: 'uppercase',
+      color:         'var(--md-sys-color-on-surface-variant)',
+    };
+
+    const effortBadgeStyle: React.CSSProperties = {
+      fontSize:     '0.8rem',
+      fontWeight:   600,
+      color:        'var(--md-sys-color-on-surface-variant)',
+      background:   'var(--md-sys-color-surface-variant)',
+      borderRadius: '4px',
+      padding:      '2px 8px',
+    };
+
+    const cardHandlers = {
+      onOpen:         setSelected,
+      onStatusToggle: handleStatusToggle,
+      onDelete:       handleDelete,
+      onLink:         handleLink,
+      onAddLabel:     handleAddLabel,
+    };
+
     return (
-      <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Tasks</h1>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+        {/* Total effort summary (open + pending) */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+            Total effort:&nbsp;
+            <strong>{formatEffort(totalEffort)}</strong>
+            {' '}(open + pending)
+          </span>
         </div>
-        <Skeleton />
+
+        {/* Open section */}
+        <div>
+          <div style={sectionHeaderStyle}>
+            <span style={sectionLabelStyle}>Open</span>
+            <span style={effortBadgeStyle}>{formatEffort(openEffort)}</span>
+          </div>
+          {openTasks.length === 0 ? (
+            <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
+              No open tasks.
+            </p>
+          ) : (
+            <TaskGroupedList tasks={openTasks} {...cardHandlers} pendingMode />
+          )}
+        </div>
+
+        {/* Pending section */}
+        <div>
+          <div style={sectionHeaderStyle}>
+            <span style={sectionLabelStyle}>Pending</span>
+          </div>
+          {pendingTasks.length === 0 ? (
+            <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
+              No pending tasks.
+            </p>
+          ) : (
+            <TaskGroupedList tasks={pendingTasks} {...cardHandlers} pendingMode />
+          )}
+        </div>
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Tasks</h1>
-        </div>
-        <ErrorCard error={error} />
-      </div>
-    );
-  }
+  // ── Early returns ────────────────────────────────────────────────────────────
 
   if (selected) {
     return (
@@ -1061,25 +1630,35 @@ function TasksPage() {
 
   if (creating) {
     return (
-      <div className="page">
-        <CreateForm
-          title="New Task"
-          fields={TASK_FIELDS}
-          submitLabel="Create"
-          onCancel={() => setCreating(false)}
-          onSubmit={handleCreate}
-        />
-      </div>
+      <TaskCreatePanel
+        onCancel={() => setCreating(false)}
+        onCreated={handleCreated}
+      />
     );
   }
 
+  // ── Main list render ─────────────────────────────────────────────────────────
+
   return (
     <div className="page">
-      <div className="page-header">
+      {/* Page header */}
+      <div className="page-header" style={{ marginBottom: 0 }}>
         <h1 className="type-display">Tasks</h1>
         <button className="btn-primary" onClick={() => setCreating(true)}>
           New Task
         </button>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{
+        display:      'flex',
+        alignItems:   'flex-end',
+        marginBottom: 'var(--space-md)',
+        borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+      }}>
+        <button style={tabStyle(view === 'active')}  onClick={() => setView('active')}>Active</button>
+        <button style={tabStyle(view === 'pending')} onClick={() => setView('pending')}>Pending</button>
+        <button style={tabStyle(view === 'done')}    onClick={() => setView('done')}>Done</button>
       </div>
 
       {actionError && (
@@ -1088,17 +1667,24 @@ function TasksPage() {
         </div>
       )}
 
-      {tasks === null || tasks.length === 0 ? (
+      {isLoading ? (
+        <Skeleton />
+      ) : error ? (
+        <ErrorCard error={error} />
+      ) : view === 'pending' ? (
+        renderPendingTab()
+      ) : tasks === null || tasks.length === 0 ? (
         <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-          No tasks yet. Create one to get started.
+          No tasks in this view.
         </p>
       ) : (
         <TaskGroupedList
           tasks={tasks}
           onOpen={setSelected}
-          onMarkComplete={handleMarkComplete}
+          onStatusToggle={handleStatusToggle}
           onDelete={handleDelete}
           onLink={handleLink}
+          onAddLabel={handleAddLabel}
         />
       )}
 

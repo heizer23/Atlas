@@ -16,7 +16,7 @@ router = APIRouter(prefix="/food", tags=["food-entries"])
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ALLOWED_MEAL_TYPES = {"breakfast", "lunch", "dinner", "snack", "other"}
+ALLOWED_MEAL_TYPES = {"breakfast", "lunch", "dinner", "snack", "drink", "other"}
 
 # Column order per architecture.json deferrals.application_implementer:
 # id (string, sortable=False, detail_visible=False),
@@ -86,6 +86,7 @@ def _serialise_entry_detail(row: dict) -> dict:
         "meat_g":     float(row["meat_g"]),
         "red_meat_g": float(row["red_meat_g"]),
         "sodium_mg":  float(row["sodium_mg"]),
+        "alcohol_g":          float(row["alcohol_g"]),
         "confidence":         int(row["confidence"]),
         "notes":              row["notes"],
         "created_at":         _dt_str(row["created_at"]),
@@ -167,7 +168,7 @@ def _validate_entry_edit_request(body: bytes) -> tuple[dict, None] | tuple[None,
             "meal_type",
             "MISSING_FIELD: field is absent",
         )
-    meal_type = str(raw_meal_type).strip()
+    meal_type = str(raw_meal_type).strip().lower()
     if meal_type not in ALLOWED_MEAL_TYPES:
         return None, _err(
             "VALIDATION_ERROR",
@@ -258,6 +259,8 @@ def _validate_entry_edit_request(body: bytes) -> tuple[dict, None] | tuple[None,
     if err: return None, err
     sodium_mg,  err = _check_optional_nonneg("sodium_mg");
     if err: return None, err
+    alcohol_g,  err = _check_optional_nonneg("alcohol_g");
+    if err: return None, err
 
     # Step 8 — confidence (optional, integer 1–5, default 3)
     raw_conf = data.get("confidence")
@@ -290,6 +293,7 @@ def _validate_entry_edit_request(body: bytes) -> tuple[dict, None] | tuple[None,
         "meat_g":     meat_g,
         "red_meat_g": red_meat_g,
         "sodium_mg":  sodium_mg,
+        "alcohol_g":  alcohol_g,
         "confidence": confidence,
         "notes":      notes,
     }
@@ -443,6 +447,7 @@ async def update_entry(entry_id: str, request: Request) -> JSONResponse:
                         meat_g      = %s,
                         red_meat_g  = %s,
                         sodium_mg   = %s,
+                        alcohol_g   = %s,
                         confidence  = %s,
                         notes       = %s,
                         updated_at  = CURRENT_TIMESTAMP
@@ -462,6 +467,7 @@ async def update_entry(entry_id: str, request: Request) -> JSONResponse:
                         validated["meat_g"],
                         validated["red_meat_g"],
                         validated["sodium_mg"],
+                        validated["alcohol_g"],
                         validated["confidence"],
                         validated["notes"],
                         entry_id,
@@ -589,12 +595,12 @@ def copy_entry(entry_id: str) -> JSONResponse:
                 INSERT INTO foodtracker.food_logs (
                     id, logged_at, meal_type, dish_name,
                     kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g,
-                    meat_g, red_meat_g, sodium_mg, confidence, notes,
+                    meat_g, red_meat_g, sodium_mg, alcohol_g, confidence, notes,
                     standard, source_standard_id
                 ) VALUES (
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
                     FALSE, NULL
                 ) RETURNING *
                 """,
@@ -612,6 +618,7 @@ def copy_entry(entry_id: str) -> JSONResponse:
                     source["meat_g"],
                     source["red_meat_g"],
                     source["sodium_mg"],
+                    source["alcohol_g"],
                     source["confidence"],
                     source["notes"],
                 ),

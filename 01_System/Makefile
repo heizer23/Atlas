@@ -454,6 +454,32 @@ numeric-schema:
 # endregion
 
 
+# region --- Platform: LinkingEngine
+LINKING_DIR=../02_Platform/LinkingEngine
+
+LINKING_COMPOSE=docker compose \
+	-f $(LINKING_DIR)/compose.yml \
+	$(ENV_FILES)
+
+linking-build:
+	$(LINKING_COMPOSE) build
+
+linking-up:
+	$(LINKING_COMPOSE) up -d
+
+linking-down:
+	$(LINKING_COMPOSE) down
+
+linking-logs:
+	$(LINKING_COMPOSE) logs -f
+
+linking-reboot:
+	$(LINKING_COMPOSE) down
+	$(LINKING_COMPOSE) up -d
+
+# endregion
+
+
 # region --- Platform: MCPGateway
 MCP_DIR=../02_Platform/MCPGateway
 
@@ -526,6 +552,7 @@ net-connect:
 	@docker network connect atlas-net atlas-notifications  2>/dev/null || true
 	@docker network connect atlas-net atlas-calendar-connector 2>/dev/null || true
 	@docker network connect atlas-net atlas-label-engine      2>/dev/null || true
+	@docker network connect atlas-net atlas-linking-engine    2>/dev/null || true
 	@docker network connect atlas-net atlas-numeric-series    2>/dev/null || true
 
 up:
@@ -548,6 +575,7 @@ up:
 	$(MAKE) calendar-build   calendar-up
 	$(MAKE) label-schema
 	$(MAKE) label-build      label-up
+	$(MAKE) linking-build    linking-up
 	$(MAKE) numeric-schema
 	$(MAKE) numeric-build    numeric-up
 	$(MAKE) cloudflared-up
@@ -560,6 +588,7 @@ down:
 	-$(MAKE) shell-down
 	-$(MAKE) cloudflared-down
 	-$(MAKE) numeric-down
+	-$(MAKE) linking-down
 	-$(MAKE) label-down
 	-$(MAKE) calendar-down
 	-$(MAKE) notif-down

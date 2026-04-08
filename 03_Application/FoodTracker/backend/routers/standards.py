@@ -16,10 +16,10 @@ Invariants enforced here:
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, Response
 
@@ -190,29 +190,63 @@ async def toggle_standard(entry_id: str, request: Request) -> JSONResponse:
 
 
 @router.get("/day", response_model=None)
-def get_day_page() -> JSONResponse:
+def get_day_page(date_param: str | None = Query(None, alias="date")) -> JSONResponse:
     """
-    GET /api/food/day
+    GET /api/food/day?date=YYYY-MM-DD
 
     Returns DayPagePayload: two collections —
-      today_entries: ALL rows logged today (logged_at::date = CURRENT_DATE),
+      today_entries: ALL rows logged on the selected date (defaults to today),
                      ordered by logged_at DESC
       standards:     all rows where standard=TRUE, ordered by meal_type, dish_name
+                     (always all standards — not filtered by date)
+
+    Sprint 05: optional `date` query parameter (YYYY-MM-DD). Defaults to CURRENT_DATE.
     """
+    # Determine target date
+    if date_param is not None:
+        try:
+            target_date = date.fromisoformat(date_param)
+        except ValueError:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": {
+                        "code": "INVALID_PARAM",
+                        "message": f"date '{date_param}' is not a valid YYYY-MM-DD date",
+                        "detail": {"field": "date", "received": date_param},
+                        "request_id": uuid.uuid4().hex[:8],
+                    }
+                },
+            )
+        target_date_str = target_date.isoformat()
+    else:
+        target_date_str = None  # use CURRENT_DATE in SQL
+
     with get_db() as conn:
         with conn.cursor() as cur:
-            # Query 1: all entries logged today
-            cur.execute(
-                """
-                SELECT *
-                FROM foodtracker.food_logs
-                WHERE logged_at::date = CURRENT_DATE
-                ORDER BY logged_at DESC
-                """
-            )
+            # Query 1: all entries logged on the target date
+            if target_date_str is not None:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM foodtracker.food_logs
+                    WHERE logged_at::date = %s::date
+                    ORDER BY logged_at DESC
+                    """,
+                    (target_date_str,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM foodtracker.food_logs
+                    WHERE logged_at::date = CURRENT_DATE
+                    ORDER BY logged_at DESC
+                    """
+                )
             today_entries = [_serialise_standard_log_result(dict(r)) for r in cur.fetchall()]
 
-            # Query 2: all standard dishes
+            # Query 2: all standard dishes (always all, not date-filtered)
             cur.execute(
                 """
                 SELECT id, meal_type, dish_name, kcal,

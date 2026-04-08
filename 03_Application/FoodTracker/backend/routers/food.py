@@ -16,7 +16,7 @@ router = APIRouter(prefix="/food", tags=["food"])
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ALLOWED_MEAL_TYPES = {"breakfast", "lunch", "dinner", "snack", "other"}
+ALLOWED_MEAL_TYPES = {"breakfast", "lunch", "dinner", "snack", "drink", "other"}
 
 TEMPLATE_JSON = """{
   "timestamp": "2026-03-20T12:30:00",
@@ -37,7 +37,8 @@ TEMPLATE_JSON = """{
     "good_fat_g": 0,
     "meat_g": 0,
     "red_meat_g": 0,
-    "sodium_mg": 0
+    "sodium_mg": 0,
+    "alcohol_g": 0
   },
   "confidence": 4,
   "notes": "estimated from description"
@@ -142,7 +143,7 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
             "meal_type",
             "MISSING_FIELD: field is absent",
         )
-    meal_type = str(raw_meal_type).strip()
+    meal_type = str(raw_meal_type).strip().lower()
     if meal_type not in ALLOWED_MEAL_TYPES:
         return None, _err(
             "VALIDATION_ERROR",
@@ -267,6 +268,10 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
     if sodium_err:
         return None, sodium_err
 
+    alcohol_val,  alcohol_err  = _check_optional_nonneg("alcohol_g",  nutrition.get("alcohol_g"))
+    if alcohol_err:
+        return None, alcohol_err
+
     # Cross-field checks — only reachable when both operands individually passed
     if good_fat_val is not None and good_fat_val > fat_g:
         return None, _err(
@@ -314,6 +319,7 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
     meat_g     = meat_val     if meat_val     is not None else 0.0
     red_meat_g = red_meat_val if red_meat_val is not None else 0.0
     sodium_mg  = sodium_val   if sodium_val   is not None else 0.0
+    alcohol_g  = alcohol_val  if alcohol_val  is not None else 0.0
 
     # Derive dish_name by joining items[].name with ", "
     dish_name = ", ".join(item["name"] for item in normalised_items)
@@ -343,6 +349,7 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
         "meat_g":     meat_g,
         "red_meat_g": red_meat_g,
         "sodium_mg":  sodium_mg,
+        "alcohol_g":  alcohol_g,
         "confidence": confidence,
         "notes":      notes,
     }
@@ -386,11 +393,11 @@ async def commit_meal(request: Request) -> JSONResponse:
                     INSERT INTO foodtracker.food_logs (
                         id, logged_at, meal_type, dish_name,
                         kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g,
-                        meat_g, red_meat_g, sodium_mg, confidence, notes
+                        meat_g, red_meat_g, sodium_mg, alcohol_g, confidence, notes
                     ) VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s
                     ) RETURNING *
                     """,
                     (
@@ -407,6 +414,7 @@ async def commit_meal(request: Request) -> JSONResponse:
                         normalised["meat_g"],
                         normalised["red_meat_g"],
                         normalised["sodium_mg"],
+                        normalised["alcohol_g"],
                         normalised["confidence"],
                         normalised["notes"],
                     ),

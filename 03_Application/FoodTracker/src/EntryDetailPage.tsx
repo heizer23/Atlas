@@ -40,6 +40,7 @@ interface EntryDetail {
   meat_g:     number;
   red_meat_g: number;
   sodium_mg:  number;
+  alcohol_g:  number;
   confidence: number;
   notes:      string | null;
   created_at: string;
@@ -63,6 +64,7 @@ interface EntryFormState {
   meat_g:     number;
   red_meat_g: number;
   sodium_mg:  number;
+  alcohol_g:  number;
   confidence: number;
   notes:      string;
 }
@@ -85,6 +87,7 @@ function entryToFormState(entry: EntryDetail): EntryFormState {
     meat_g:     entry.meat_g,
     red_meat_g: entry.red_meat_g,
     sodium_mg:  entry.sodium_mg,
+    alcohol_g:  entry.alcohol_g ?? 0,
     confidence: entry.confidence,
     notes:      entry.notes ?? '',
   };
@@ -114,6 +117,7 @@ function _buildPutBody(formState: EntryFormState): string {
     meat_g:     formState.meat_g,
     red_meat_g: formState.red_meat_g,
     sodium_mg:  formState.sodium_mg,
+    alcohol_g:  formState.alcohol_g,
     confidence: formState.confidence,
   };
   if (formState.notes.trim() !== '') {
@@ -452,6 +456,17 @@ export default function EntryDetailPage() {
             min={0}
             step="0.1"
             onChange={(e) => handleChange('sodium_mg', parseFloat(e.target.value) || 0)}
+            style={inputStyle}
+          />
+        </FieldRow>
+
+        <FieldRow label="Alcohol (g)">
+          <input
+            type="number"
+            value={formState.alcohol_g}
+            min={0}
+            step="0.1"
+            onChange={(e) => handleChange('alcohol_g', parseFloat(e.target.value) || 0)}
             style={inputStyle}
           />
         </FieldRow>

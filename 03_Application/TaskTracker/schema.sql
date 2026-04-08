@@ -7,7 +7,7 @@ create table if not exists tasktracker.tasks (
     title       text        not null,
     description text,
     status      text        not null default 'open'
-                            check (status in ('open', 'in_progress', 'done')),
+                            check (status in ('open', 'in_progress', 'pending', 'done')),
     priority    text        not null default 'medium'
                             check (priority in ('low', 'medium', 'high')),
     due_date     date,
