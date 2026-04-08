@@ -55,7 +55,7 @@ VERSION: <version string>
 **Rule ID format:** `R-[TYPE_CODE]-[SCOPE_CODE]-[NN]`
 
 Type codes: `CON`, `OPS`, `PRO`, `EXC`
-Scope codes: `BP`, `PL`, `PC`, `APP`
+Scope codes: `BP`, `PL`, `PC`, `APP`,  `AL`
 
 Examples: `R-CON-BP-01`, `R-PRO-BP-01`, `R-EXC-PC-01`
 
@@ -68,6 +68,7 @@ Only the following rules are centrally registered in `00_Blueprint/RULE_REGISTRY
 - `BLUEPRINT` scope rules
 - `PLATFORM_LAYER` rules
 - `PLATFORM_COMPONENT` rules
+- `APPLICATION_COMPONENT` rules
 - `EXCEPTION` rules that deviate from any of the above
 
 `APPLICATION`-scope rules are:
