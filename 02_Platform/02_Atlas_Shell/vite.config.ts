@@ -40,6 +40,9 @@ export default defineConfig({
       '/api/chronicle':      { target: 'http://localhost:8013', changeOrigin: true },
       '/api/notifications':  { target: 'http://localhost:8020', changeOrigin: true },
       '/api/devices':        { target: 'http://localhost:8020', changeOrigin: true },
+      '/api/linking':        { target: 'http://localhost:8040', changeOrigin: true },
+      '/api/series':         { target: 'http://localhost:8014', changeOrigin: true },
+      '/api/batch/series':   { target: 'http://localhost:8014', changeOrigin: true },
     },
   },
   test: {

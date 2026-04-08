@@ -1,21 +1,12 @@
 {
-  "generated_at": "2026-03-20T09:43:45.943692+00:00",
-  "source_root": "C:\\Users\\premm\\Programming\\Atlas\\Atlas",
-  "component_count": 12,
+  "generated_at": "2026-04-07T14:42:18.848249+00:00",
+  "source_root": "/home/linse/Prod/Atlas",
+  "component_count": 18,
   "components": [
     {
       "name": "SharedViews",
       "layer": "00_Blueprint",
       "path": "00_Blueprint/SharedViews",
-      "atlas_dependencies": [],
-      "external_libraries": [],
-      "internal_aliases": [],
-      "detected_entry_files": []
-    },
-    {
-      "name": "UI",
-      "layer": "00_Blueprint",
-      "path": "00_Blueprint/UI",
       "atlas_dependencies": [],
       "external_libraries": [],
       "internal_aliases": [],
@@ -34,13 +25,59 @@
       ]
     },
     {
-      "name": "01_Postgres",
-      "layer": "02_Platform",
-      "path": "02_Platform/01_Postgres",
+      "name": "AtlasPhone",
+      "layer": "01_System",
+      "path": "01_System/AtlasPhone",
+      "atlas_dependencies": [],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": []
+    },
+    {
+      "name": "AuditRuns",
+      "layer": "01_System",
+      "path": "01_System/AuditRuns",
+      "atlas_dependencies": [
+        "00_Blueprint/SharedViews",
+        "01_System/01_Access",
+        "02_Platform/01_Postgres",
+        "02_Platform/02_Atlas_Shell",
+        "02_Platform/CalendarConnector",
+        "02_Platform/Chronos",
+        "02_Platform/MCPGateway",
+        "02_Platform/Notifications",
+        "02_Platform/packages",
+        "03_Application/Chronicle",
+        "03_Application/FoodTracker",
+        "03_Application/TaskTracker",
+        "03_Application/WorkoutTracker"
+      ],
+      "external_libraries": [],
+      "internal_aliases": [],
+      "detected_entry_files": []
+    },
+    {
+      "name": "SystemMonitoring",
+      "layer": "01_System",
+      "path": "01_System/SystemMonitoring",
       "atlas_dependencies": [],
       "external_libraries": [],
       "internal_aliases": [],
       "detected_entry_files": [
+        "01_System/SystemMonitoring/README.md"
+      ]
+    },
+    {
+      "name": "01_Postgres",
+      "layer": "02_Platform",
+      "path": "02_Platform/01_Postgres",
+      "atlas_dependencies": [],
+      "external_libraries": [
+        "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/01_Postgres/CLAUDE.md",
         "02_Platform/01_Postgres/compose.yml"
       ]
     },
@@ -49,13 +86,16 @@
       "layer": "02_Platform",
       "path": "02_Platform/02_Atlas_Shell",
       "atlas_dependencies": [
-        "00_Blueprint/UI",
         "01_System/01_Access",
-        "02_Platform/UI",
+        "03_Application/Chronicle",
+        "03_Application/FoodTracker",
         "03_Application/TaskTracker",
         "03_Application/WorkoutTracker"
       ],
       "external_libraries": [
+        "@platform-ui/api",
+        "@platform-ui/components",
+        "@platform-ui/hooks",
         "@platform-ui/index.css",
         "@testing-library/jest-dom",
         "@testing-library/react",
@@ -63,9 +103,15 @@
         "@types/react",
         "@types/react-dom",
         "@vitejs/plugin-react",
+        "CreateForm from",
+        "DetailView from",
+        "ErrorCard from",
         "React",
         "React from",
         "ReactDOM from",
+        "Skeleton from",
+        "TableView from",
+        "WarningPlaceholder from",
         "jsdom",
         "path from",
         "react",
@@ -90,13 +136,115 @@
       ]
     },
     {
-      "name": "03_ErrorHandling",
+      "name": "CalendarConnector",
       "layer": "02_Platform",
-      "path": "02_Platform/03_ErrorHandling",
+      "path": "02_Platform/CalendarConnector",
+      "atlas_dependencies": [
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        ".",
+        "0.1.0",
+        "Dataset",
+        "DatasetMeta\nfrom platform_errorhandling.api_response import api_error\n\nfrom app.database import get_db\nfrom app.models import",
+        "Query\nfrom fastapi.responses import JSONResponse",
+        "RedirectResponse\n\nfrom platform_contracts.contracts import ColumnSchema",
+        "app",
+        "calendar_connector",
+        "fastapi",
+        "httpx",
+        "init_schema\nfrom app.routers import calendar\nfrom app.routers.calendar import _validate_target_calendar_id\n\nsetup_logging",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nfrom app.database import init_pool",
+        "logging\nfrom typing import Optional\n\nimport httpx\n\nfrom app.models import",
+        "logging\nfrom typing import Optional\n\nimport psycopg2.extensions\n\nlog",
+        "logging\nimport os\nfrom contextlib import contextmanager\nfrom pathlib import Path\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\nlog",
+        "logging\nimport os\nfrom urllib.parse import urlencode\n\nimport httpx\n\nlog",
+        "logging\nimport os\nimport secrets\nfrom datetime import datetime",
+        "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT",
+        "psycopg2-binary",
+        "pydantic",
+        "setuptools",
+        "setuptools.build_meta",
+        "timedelta",
+        "timezone\nfrom typing import Optional\n\nfrom fastapi import APIRouter"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/CalendarConnector/app/main.py",
+        "02_Platform/CalendarConnector/compose.yml",
+        "02_Platform/CalendarConnector/pyproject.toml"
+      ]
+    },
+    {
+      "name": "Chronos",
+      "layer": "02_Platform",
+      "path": "02_Platform/Chronos",
       "atlas_dependencies": [],
       "external_libraries": [],
       "internal_aliases": [],
-      "detected_entry_files": []
+      "detected_entry_files": [
+        "02_Platform/Chronos/README.md",
+        "02_Platform/Chronos/compose.yml"
+      ]
+    },
+    {
+      "name": "LabelEngine",
+      "layer": "02_Platform",
+      "path": "02_Platform/LabelEngine",
+      "atlas_dependencies": [
+        "02_Platform/01_Postgres",
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        "0.1.0",
+        "LabelRecord",
+        "LabelSearchResponse\nfrom app.service import LabelEngineError",
+        "LabelService\n\nrouter",
+        "ObjectLabelRecord",
+        "ObjectLabelsResponse\nfrom app.service import LabelEngineError",
+        "__future__",
+        "fastapi",
+        "label_engine",
+        "math\n\nimport psycopg2.extensions\n\nfrom app.models import",
+        "os\nfrom contextlib import contextmanager\nfrom pathlib import Path\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\n\ndef _build_url",
+        "psycopg2-binary",
+        "pydantic",
+        "uuid\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import JSONResponse\n\nfrom app.database import get_db\nfrom app.models import AttachLabelRequest",
+        "uuid\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import JSONResponse\n\nfrom app.database import get_db\nfrom app.models import CreateLabelRequest"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/LabelEngine/compose.yml",
+        "02_Platform/LabelEngine/pyproject.toml"
+      ]
+    },
+    {
+      "name": "LinkingEngine",
+      "layer": "02_Platform",
+      "path": "02_Platform/LinkingEngine",
+      "atlas_dependencies": [
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        "0.1.0",
+        "__future__",
+        "app",
+        "fastapi",
+        "init_schema\nfrom app.routers import links",
+        "linking_engine",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom app.database import init_pool",
+        "objects",
+        "os\nfrom contextlib import contextmanager\nfrom pathlib import Path\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\n\ndef _build_url",
+        "psycopg2-binary",
+        "pydantic",
+        "relation_definitions\n\ntry"
+      ],
+      "internal_aliases": [],
+      "detected_entry_files": [
+        "02_Platform/LinkingEngine/app/main.py",
+        "02_Platform/LinkingEngine/compose.yml",
+        "02_Platform/LinkingEngine/pyproject.toml"
+      ]
     },
     {
       "name": "MCPGateway",
@@ -120,45 +268,51 @@
       ]
     },
     {
-      "name": "UI",
+      "name": "Notifications",
       "layer": "02_Platform",
-      "path": "02_Platform/UI",
+      "path": "02_Platform/Notifications",
       "atlas_dependencies": [
-        "00_Blueprint/UI"
+        "02_Platform/packages"
       ],
       "external_libraries": [
-        "@types/react",
-        "@types/react-dom",
-        "@vitejs/plugin-react",
-        "ErrorCard from",
-        "Skeleton from",
-        "WarningPlaceholder from",
-        "eslint-plugin-react-dom",
-        "eslint-plugin-react-x",
-        "react",
-        "react from",
-        "react-dom",
-        "reactDom from",
-        "reactX from",
-        "recharts",
-        "type",
-        "typescript",
-        "vite"
+        "1.0.0",
+        "APScheduler",
+        "NotificationRecord\n\n\nclass NotificationNotFoundError",
+        "NotificationRecord\nfrom backend.service import NotificationNotFoundError",
+        "NotificationService\nfrom platform_errorhandling.api_response import api_error\n\nlog",
+        "backend",
+        "backend.routers",
+        "fastapi",
+        "firebase-admin",
+        "json\nimport os\n\nimport firebase_admin\nfrom firebase_admin import credentials",
+        "logging\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import JSONResponse\n\nfrom backend.models import NotificationCreateRequest",
+        "logging\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import JSONResponse\nfrom pydantic import BaseModel\n\nfrom backend.database import get_db\nfrom platform_errorhandling.api_response import api_error\n\nlog",
+        "logging\nfrom datetime import datetime",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom backend.database import init_pool\nfrom backend.fcm_client import init_fcm\nfrom backend.routers import devices",
+        "messaging\n\n\ndef init_fcm",
+        "notifications",
+        "notifications\nfrom backend.scheduler import start_scheduler",
+        "os\n\nfrom apscheduler.schedulers.background import BackgroundScheduler\nfrom apscheduler.triggers.interval import IntervalTrigger\n\nfrom backend.dispatch_job import dispatch_due_notifications\n\n_DISPATCH_INTERVAL",
+        "os\nfrom contextlib import contextmanager\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\n\ndef _build_url",
+        "psycopg2-binary",
+        "pydantic",
+        "stop_scheduler\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nsetup_logging",
+        "timezone\n\nfrom backend.database import get_db\nfrom backend.fcm_client import send_fcm_message\n\nlog",
+        "uuid\n\nfrom backend.database import get_db\nfrom backend.models import NotificationCreateRequest",
+        "uvicorn"
       ],
       "internal_aliases": [],
       "detected_entry_files": [
-        "02_Platform/UI/README.md",
-        "02_Platform/UI/compose.yml",
-        "02_Platform/UI/react/package.json"
+        "02_Platform/Notifications/backend/main.py",
+        "02_Platform/Notifications/compose.yml",
+        "02_Platform/Notifications/pyproject.toml"
       ]
     },
     {
       "name": "packages",
       "layer": "02_Platform",
       "path": "02_Platform/packages",
-      "atlas_dependencies": [
-        "00_Blueprint/UI"
-      ],
+      "atlas_dependencies": [],
       "external_libraries": [
         "HTMLResponse\n\nlog",
         "fastapi",
@@ -177,41 +331,124 @@
       ]
     },
     {
-      "name": "FoodTracker",
+      "name": "Chronicle",
       "layer": "03_Application",
-      "path": "03_Application/FoodTracker",
+      "path": "03_Application/Chronicle",
       "atlas_dependencies": [
-        "02_Platform/01_Postgres",
-        "02_Platform/MCPGateway"
-      ],
-      "external_libraries": [
-        "os\nimport uuid\nfrom datetime import datetime\nfrom typing import Optional\n\nimport psycopg\nfrom psycopg.rows import dict_row"
-      ],
-      "internal_aliases": [],
-      "detected_entry_files": []
-    },
-    {
-      "name": "TaskTracker",
-      "layer": "03_Application",
-      "path": "03_Application/TaskTracker",
-      "atlas_dependencies": [
-        "00_Blueprint/UI",
+        "00_Blueprint/SharedViews",
         "02_Platform/02_Atlas_Shell",
-        "02_Platform/03_ErrorHandling",
         "02_Platform/packages"
       ],
       "external_libraries": [
         "0.1.0",
         "@platform-ui/api",
         "@platform-ui/components",
-        "@platform-ui/hooks",
+        "CalendarPage from",
+        "DayDetailView from",
+        "ErrorCard from",
+        "React from",
+        "Skeleton from",
+        "SourceChooser from",
+        "SwimlaneRenderer from",
+        "backend",
+        "chronicle",
+        "fastapi",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom backend.database import init_pool\nfrom backend.routers import calendar\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nsetup_logging",
+        "os\nfrom contextlib import contextmanager\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\n\ndef _build_url",
+        "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT",
+        "platform_errorhandling",
+        "psycopg2-binary",
+        "pydantic",
+        "react",
+        "react-router-dom",
+        "type",
+        "uvicorn"
+      ],
+      "internal_aliases": [
+        "@atlas/shell"
+      ],
+      "detected_entry_files": [
+        "03_Application/Chronicle/backend/main.py",
+        "03_Application/Chronicle/compose.yml",
+        "03_Application/Chronicle/pyproject.toml"
+      ]
+    },
+    {
+      "name": "FoodTracker",
+      "layer": "03_Application",
+      "path": "03_Application/FoodTracker",
+      "atlas_dependencies": [
+        "02_Platform/02_Atlas_Shell",
+        "02_Platform/MCPGateway",
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        "0.1.0",
+        "@platform-ui/api",
+        "@platform-ui/components",
+        "Dataset",
+        "DatasetMeta\n\nrouter",
+        "EntriesPage from",
+        "EntryDetailPage from",
+        "ErrorCard from",
+        "PlainTextResponse\n\nfrom backend.database import get_db\nfrom platform_errorhandling import api_error\nfrom platform_contracts import ColumnSchema",
+        "Query\nfrom fastapi.responses import JSONResponse\n\nfrom backend.database import get_db\nfrom platform_contracts import ColumnSchema",
+        "React from",
+        "ReportPage from",
+        "Request\nfrom fastapi.responses import JSONResponse",
+        "Response\n\nfrom backend.database import get_db\nfrom platform_errorhandling import api_error\nfrom platform_contracts import ColumnSchema",
+        "Response\n\nfrom backend.database import get_db\nfrom platform_errorhandling import api_error as _api_err\n\nrouter",
+        "Skeleton from",
+        "StandardsPage from",
+        "backend",
+        "entries",
+        "fastapi",
+        "food-tracker",
+        "json\nimport uuid\nfrom datetime import datetime\nfrom typing import Any\n\nfrom fastapi import APIRouter\nfrom fastapi.requests import Request\nfrom fastapi.responses import JSONResponse",
+        "json\nimport uuid\nfrom datetime import datetime\nfrom typing import Any\n\nimport psycopg2\nimport psycopg2.errors\nfrom fastapi import APIRouter",
+        "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom backend.database import init_pool\nfrom backend.routers import food",
+        "os\nfrom contextlib import contextmanager\nfrom typing import Generator\n\nimport psycopg2\nimport psycopg2.extras\nimport psycopg2.pool\n\n\ndef _build_url",
+        "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT",
+        "os\nimport uuid\nfrom datetime import datetime\nfrom typing import Optional\n\nimport psycopg\nfrom psycopg.rows import dict_row",
+        "psycopg2-binary",
+        "pydantic",
+        "re\nimport uuid\nfrom dataclasses import dataclass\nfrom datetime import date",
+        "react",
+        "react-router-dom",
+        "report",
+        "standards\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nsetup_logging",
+        "timedelta\nfrom typing import Any\n\nimport psycopg2.extensions\nfrom fastapi import APIRouter",
+        "type",
+        "uvicorn"
+      ],
+      "internal_aliases": [
+        "@atlas/shell"
+      ],
+      "detected_entry_files": [
+        "03_Application/FoodTracker/CLAUDE.md",
+        "03_Application/FoodTracker/backend/main.py",
+        "03_Application/FoodTracker/compose.yml",
+        "03_Application/FoodTracker/pyproject.toml"
+      ]
+    },
+    {
+      "name": "TaskTracker",
+      "layer": "03_Application",
+      "path": "03_Application/TaskTracker",
+      "atlas_dependencies": [
+        "02_Platform/02_Atlas_Shell",
+        "02_Platform/packages"
+      ],
+      "external_libraries": [
+        "0.1.0",
+        "@platform-ui/api",
+        "@platform-ui/components",
         "CreateForm from",
         "Dataset",
         "DatasetMeta\n\nrouter",
-        "DetailView from",
         "ErrorCard from",
         "React from",
-        "TableView from",
+        "Skeleton from",
         "fastapi",
         "init_schema\nfrom backend.routers import tasks\nfrom platform_errorhandling.logging import setup_logging\nfrom platform_errorhandling.logFastapi import install_exception_handlers\nfrom platform_errorhandling.performance import install_request_timing\n\nsetup_logging",
         "logging\nfrom pathlib import Path\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\n\nfrom backend.database import init_pool",

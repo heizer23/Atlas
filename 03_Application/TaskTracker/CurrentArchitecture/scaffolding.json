@@ -1,0 +1,184 @@
+{
+  "sprint": "Sprint02-Optimization_and_Effort",
+  "component": "TaskTracker",
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/migrations/002_add_effort.sql",
+      "action": "create",
+      "owner": "sprint_implement",
+      "description": "Migration: add effort_hours column to tasktracker.tasks",
+      "content_spec": {
+        "sql": [
+          "BEGIN;",
+          "ALTER TABLE tasktracker.tasks ADD COLUMN IF NOT EXISTS effort_hours double precision;",
+          "ALTER TABLE tasktracker.tasks ADD CONSTRAINT tasks_effort_hours_non_negative CHECK (effort_hours IS NULL OR effort_hours >= 0);",
+          "COMMIT;"
+        ]
+      }
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "action": "modify",
+      "owner": "sprint_implement",
+      "description": "Update task router to include effort_hours throughout",
+      "changes": [
+        {
+          "location": "TASK_SCHEMA list",
+          "change": "Append ColumnSchema(key='effort_hours', label='Effort (h)', type='number', sortable=True, filterable=False)"
+        },
+        {
+          "location": "TaskCreate model",
+          "change": "Add field: effort_hours: float | None = None"
+        },
+        {
+          "location": "TaskUpdate model",
+          "change": "Add field: effort_hours: float | None = None"
+        },
+        {
+          "location": "create_task function — validation block",
+          "change": "Add: if body.effort_hours is not None and body.effort_hours < 0: return api_error('VALIDATION_ERROR', 'effort_hours must be >= 0')"
+        },
+        {
+          "location": "create_task function — INSERT statement",
+          "change": "Add effort_hours to insert column list and values"
+        },
+        {
+          "location": "update_task function — validation block",
+          "change": "Add: if body.effort_hours is not None and body.effort_hours < 0: return api_error('VALIDATION_ERROR', 'effort_hours must be >= 0')"
+        },
+        {
+          "location": "update_task function — fields dict construction",
+          "change": "Add: if 'effort_hours' in body.model_fields_set: fields['effort_hours'] = body.effort_hours — this distinguishes 'not provided' (skip) from 'explicitly set to null' (clear the column). Pydantic v2 populates model_fields_set with the names of fields that were present in the request JSON, including fields set to null."
+        },
+        {
+          "location": "list_tasks and single_row SELECT queries",
+          "change": "Add effort_hours to the explicit SELECT column list in both status-filtered and unfiltered queries"
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "action": "rewrite",
+      "owner": "sprint_implement",
+      "description": "Full rewrite of ShellEntry.tsx. Replaces platform TableView+DetailView with app-local TaskRow card list and TaskDetailEdit. Adds ThreeDotsMenu. Adds effort_hours to create form and detail edit.",
+      "structure": {
+        "imports": [
+          "useState, useEffect, useRef, useCallback from 'react'",
+          "Routes, Route from 'react-router-dom'",
+          "apiFetch, isApiError from '@platform-ui/api/client'",
+          "CreateForm from '@platform-ui/components/CreateForm'",
+          "ErrorCard from '@platform-ui/components/ErrorCard'",
+          "Skeleton from '@platform-ui/components/Skeleton'",
+          "type Row, FormField, ApiError from '@platform-ui/api/types'"
+        ],
+        "local_types": [
+          "interface TaskRow extends Row { id: string; title: string; description?: string; status: string; priority: string; due_date?: string; effort_hours?: number | null; created_at?: string; }"
+        ],
+        "local_components": [
+          {
+            "name": "ThreeDotsMenu",
+            "props": "{ taskId: string; onMarkComplete: (id: string) => void; onDelete: (id: string) => void; }",
+            "behaviour": "Renders ⋮ button; toggles dropdown with 'Mark complete' and 'Delete' items; closes on outside click via useRef+useEffect"
+          },
+          {
+            "name": "TaskRow",
+            "props": "{ task: TaskRow; onOpen: (task: TaskRow) => void; onMarkComplete: (id: string) => void; onDelete: (id: string) => void; }",
+            "behaviour": "Card container. Flex row: name (flex:1, truncate) | effort chip | priority chip | ThreeDotsMenu. onClick on card body (excluding three-dots zone) calls onOpen.",
+            "effort_display": "effort_hours != null ? `${effort_hours} h` : '—'",
+            "priority_display": "Capitalised label with colour: high=error, medium=warning/amber, low=surface-variant"
+          },
+          {
+            "name": "TaskDetailEdit",
+            "props": "{ task: TaskRow; onBack: () => void; onSaved: (updated: TaskRow) => void; }",
+            "behaviour": "Pre-fills all fields from task prop. Calls PATCH /tasks/{id} on save. Calls onBack on cancel. Calls onSaved with updated row on success. Renders title (text), description (textarea), status (select), priority (select), due_date (date), effort_hours (number, min=0, step=0.5). Shows ErrorCard on API error. When building the PATCH body, always include effort_hours in the payload — if the user has cleared the effort input, send effort_hours: null explicitly (do not omit the key). This ensures the backend model_fields_set includes the field and the column is cleared."
+          }
+        ],
+        "main_component": {
+          "name": "TasksPage",
+          "state": [
+            "tasks: TaskRow[] | null",
+            "isLoading: boolean",
+            "error: ApiError | null",
+            "selected: TaskRow | null",
+            "creating: boolean",
+            "actionError: ApiError | null"
+          ],
+          "data_fetch": "useCallback fetchTasks -> apiFetch('/tasks') -> setTasks(dataset.rows)",
+          "useEffect": "fetchTasks on mount",
+          "handlers": [
+            "handleMarkComplete(id) — PATCH /tasks/{id} {status:'done'} — optimistic update local state",
+            "handleDelete(id) — DELETE /tasks/{id} — filter from local state on success",
+            "handleSaved(updated) — replace task in local state by id",
+            "handleCreate(data) — POST /tasks — on success setCreating(false), fetchTasks()"
+          ],
+          "render_tree": {
+            "if_loading": "<Skeleton />",
+            "if_error": "<ErrorCard />",
+            "if_selected": "<TaskDetailEdit task={selected} onBack={...} onSaved={...} />",
+            "if_creating": "<CreateForm title='New Task' fields={TASK_FIELDS} ... />",
+            "default": "page-header + task card list (tasks.map(t => <TaskRow ... />)) + empty state"
+          }
+        },
+        "TASK_FIELDS": [
+          "{ key: 'title',        label: 'Title',       type: 'string', required: true, placeholder: 'Task title' }",
+          "{ key: 'description',  label: 'Description', type: 'string' }",
+          "{ key: 'priority',     label: 'Priority',    type: 'enum', required: true, options: [low,medium,high] }",
+          "{ key: 'due_date',     label: 'Due Date',    type: 'date' }",
+          "{ key: 'effort_hours', label: 'Effort (h)',  type: 'number', placeholder: 'e.g. 1.5' }"
+        ]
+      }
+    },
+    {
+      "path": "03_Application/TaskTracker/schema.sql",
+      "action": "modify",
+      "owner": "sprint_implement",
+      "description": "Add effort_hours column definition to schema.sql to keep it in sync with migrations",
+      "changes": [
+        {
+          "location": "tasktracker.tasks table definition",
+          "change": "Add: effort_hours double precision CHECK (effort_hours IS NULL OR effort_hours >= 0),"
+        }
+      ]
+    }
+  ],
+
+  "files_unchanged": [
+    "03_Application/TaskTracker/backend/main.py",
+    "03_Application/TaskTracker/backend/database.py",
+    "03_Application/TaskTracker/backend/__init__.py",
+    "03_Application/TaskTracker/backend/routers/__init__.py",
+    "03_Application/TaskTracker/Dockerfile",
+    "03_Application/TaskTracker/compose.yml",
+    "03_Application/TaskTracker/pyproject.toml",
+    "03_Application/TaskTracker/run_local.py",
+    "03_Application/TaskTracker/src/shellConfig.ts",
+    "03_Application/TaskTracker/CLAUDE.md",
+    "02_Platform/02_Atlas_Shell/platform-ui/components/TableView.tsx",
+    "02_Platform/02_Atlas_Shell/platform-ui/components/DetailView.tsx"
+  ],
+
+  "execution_order": [
+    "1. Create migrations/002_add_effort.sql",
+    "2. Modify schema.sql",
+    "3. Modify backend/routers/tasks.py",
+    "4. Rewrite src/ShellEntry.tsx"
+  ],
+
+  "test_checklist": [
+    "POST /tasks with effort_hours=1.5 — row returned contains effort_hours=1.5",
+    "POST /tasks with no effort_hours — row returned, effort_hours=null, no error",
+    "POST /tasks with effort_hours=-1 — returns VALIDATION_ERROR",
+    "PATCH /tasks/{id} with effort_hours=2.0 — row updated",
+    "PATCH /tasks/{id} with effort_hours=-0.5 — returns VALIDATION_ERROR",
+    "GET /tasks — effort_hours present in schema and all rows",
+    "Mobile viewport: task list renders without horizontal overflow",
+    "Three-dots menu: Mark complete transitions task status to done",
+    "Three-dots menu: Delete removes task from list",
+    "Row tap opens TaskDetailEdit pre-filled with task values",
+    "TaskDetailEdit: Save with valid changes — list reflects updated values",
+    "TaskDetailEdit: Cancel — returns to list, no changes",
+    "TaskDetailEdit: effort_hours field rejects negative values",
+    "Existing tasks (effort_hours=null) render '—' in effort chip",
+    "Create form includes effort_hours field; submit with and without it"
+  ]
+}

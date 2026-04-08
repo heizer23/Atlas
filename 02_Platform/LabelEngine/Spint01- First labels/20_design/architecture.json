@@ -1,0 +1,281 @@
+{
+  "component_name": "label_engine",
+  "layer": "02_Platform",
+  "source_definition": "00_input/draft.md",
+  "summary": "Provides a many-to-many label store and query API that any object-bearing application can use to attach, remove, search, and group objects by named labels.",
+
+  "classification": {
+    "why_platform": "Labels are a reusable classification primitive with no domain meaning — the same attach/remove/search/group capability applies equally to tasks, meals, workouts, or any other object type registered in the system. No workflow rules, status transitions, or business-specific behaviour live here.",
+    "non_goals": [
+      "label hierarchy",
+      "label priority",
+      "label colors",
+      "filtering UI",
+      "label management screen",
+      "UI rendering of any kind",
+      "serving Dataset-shaped responses directly to the Atlas Shell UI",
+      "owning or understanding the domain meaning of attached objects"
+    ]
+  },
+
+  "contracts": {
+    "consumes": [
+      "Shared Postgres instance (02_Platform/01_Postgres) via ATLAS_PG_* environment variables",
+      "platform_errorhandling package (02_Platform/packages/platform_errorhandling) for structured logging and exception handling",
+      "objects.id — the universal object identifier that callers are responsible for registering before attaching labels"
+    ],
+    "provides": [
+      "Label search by prefix: returns all labels whose name starts with the query string",
+      "Label creation: creates a named label, returns the created record",
+      "Label attach: idempotently attaches a label to an object by name (creates label inline if absent)",
+      "Label remove: removes a specific label from a specific object",
+      "Labels for object: returns all labels attached to a given object, ordered by attachment time ascending",
+      "Grouped object query: returns objects grouped by their primary label (first-attached), with an Unlabeled group last, scoped by object_type"
+    ],
+    "invariants": [
+      "A (object_id, label_id) pair is unique — duplicate attachments are silently ignored (INSERT … ON CONFLICT DO NOTHING)",
+      "label.name must be a non-empty string after stripping whitespace",
+      "primary label is always the label with the smallest attached_at for that object_id — ties broken by label_id ascending",
+      "Unlabeled group always appears last in grouped responses",
+      "Groups within a grouped response are ordered alphabetically by label name",
+      "The labels schema is isolated in its own Postgres schema named 'labels' and does not reference tables in other schemas",
+      "object_type values are case-sensitive and must be lowercase (e.g., 'task', not 'Task'). Callers are responsible for supplying a lowercase value. LabelEngine does not normalize casing on write or read."
+    ],
+    "failure_modes": [
+      "LABEL_NAME_EMPTY — label name is blank after strip; returns 422",
+      "OBJECT_NOT_FOUND — object_id does not exist in the caller's domain; LabelEngine does not validate this — callers are responsible for pre-checking object existence",
+      "LABEL_NOT_FOUND — label_id supplied to remove endpoint does not exist; returns 404",
+      "ATTACHMENT_NOT_FOUND — (object_id, label_id) pair does not exist when attempting remove; returns 404",
+      "DB_UNAVAILABLE — connection pool exhausted or Postgres unreachable; returns 503",
+      "OBJECT_TYPE_REQUIRED — grouped query called without object_type parameter; returns 422"
+    ]
+  },
+
+  "shared_views": {
+    "consumes": [],
+    "provides": [
+      "LabelRecord: { id: str, name: str }",
+      "ObjectLabelRecord: { object_id: str, label_id: str, label_name: str, attached_at: str (ISO-8601) }",
+      "GroupedObjectsResponse: { meta: { total: int, page: int, page_size: int, page_count: int }, groups: [ { label: str | 'Unlabeled', items: [ { id: str, primary_label: str | null, labels: list[str] } ] } ] }",
+      "LabelSearchResponse: { labels: list[LabelRecord] }",
+      "ObjectLabelsResponse: { labels: list[ObjectLabelRecord] }"
+    ]
+  },
+
+  "interfaces": {
+    "consumes": [
+      "psycopg2 connection pool (internal, via app/database.py)",
+      "platform_errorhandling.logging.setup_logging",
+      "platform_errorhandling.logFastapi.install_exception_handlers",
+      "platform_errorhandling.performance.install_request_timing"
+    ],
+    "provides": [
+      "HTTP API mounted at /api prefix — all routes listed in exposed_surfaces"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/labels",
+        "purpose": "Search labels by name prefix. Query param: q (string, optional). Match is case-insensitive prefix — e.g., q=out matches 'Outside'. Uses ix_labels_name_lower index. Returns LabelSearchResponse."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/labels",
+        "purpose": "Create a new label. Body: { name: str }. Returns LabelRecord. Raises LABEL_NAME_EMPTY on blank name."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/objects/{object_id}/labels",
+        "purpose": "Attach a label to an object by name. Body: { label_name: str }. Creates label if absent. Idempotent on duplicate. Returns ObjectLabelRecord for the attachment."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/objects/{object_id}/labels/{label_id}",
+        "purpose": "Remove a label from an object. Raises ATTACHMENT_NOT_FOUND if the pair does not exist."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/objects/{object_id}/labels",
+        "purpose": "Return all labels attached to the given object, ordered by attached_at ascending. Returns ObjectLabelsResponse."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/groups",
+        "purpose": "Return objects grouped by primary label for a given object_type. Query params: object_type (required), page (optional, default 1), page_size (optional, default 50). Returns GroupedObjectsResponse. Raises OBJECT_TYPE_REQUIRED if object_type is absent."
+      }
+    ]
+  },
+
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "request_received",
+      "description": "FastAPI receives HTTP request. platform_errorhandling middleware logs request and installs structured exception handlers.",
+      "inputs": ["HTTP request"],
+      "outputs": ["validated path/query/body parameters via Pydantic models"]
+    },
+    {
+      "step": 2,
+      "name": "label_name_validation",
+      "description": "For endpoints that accept a label name, strip whitespace and raise LABEL_NAME_EMPTY (422) if the result is empty. Applies to POST /api/labels and POST /api/objects/{object_id}/labels.",
+      "inputs": ["raw label_name string"],
+      "outputs": ["normalized label_name string or 422 error response"]
+    },
+    {
+      "step": 3,
+      "name": "label_resolution",
+      "description": "For the attach endpoint: query labels table for an exact case-insensitive match on name. If found, use existing label_id. If not found, INSERT new label and return generated id. This is the inline creation path.",
+      "inputs": ["normalized label_name"],
+      "outputs": ["label_id (existing or newly created)"]
+    },
+    {
+      "step": 4,
+      "name": "attachment_write",
+      "description": "For the attach endpoint: INSERT INTO labels.object_labels (object_id, label_id, attached_at) with ON CONFLICT (object_id, label_id) DO NOTHING. attached_at is set to now() on first insert; ignored on conflict.",
+      "inputs": ["object_id", "label_id"],
+      "outputs": ["ObjectLabelRecord for the (object_id, label_id) pair, whether newly inserted or pre-existing"]
+    },
+    {
+      "step": 5,
+      "name": "primary_label_resolution",
+      "description": "For the grouped query endpoint: for each object_id in scope, determine the primary label by selecting the object_labels row with the minimum attached_at (ties broken by label_id ASC). Objects with no labels are assigned to the Unlabeled group.",
+      "inputs": ["object_type filter", "all labels.object_labels rows for matching objects"],
+      "outputs": ["map of object_id -> primary_label_name, object_id -> all_label_names"]
+    },
+    {
+      "step": 6,
+      "name": "group_assembly",
+      "description": "For the grouped query endpoint: assemble GroupedObjectsResponse. Pagination is applied to the flat object list before grouping: the total matching object count is counted first, then the page slice (offset/limit) is taken from the ordered flat list, then those objects are grouped. total in meta = total matching objects for the given object_type (unpaginated). page_count = ceil(total / page_size). Sort named groups alphabetically by label name. Append Unlabeled group last.",
+      "inputs": ["primary_label map", "all_labels map", "page", "page_size"],
+      "outputs": ["GroupedObjectsResponse"]
+    },
+    {
+      "step": 7,
+      "name": "error_serialization",
+      "description": "All failure modes produce a JSONResponse matching the R-CON-BP-04 ApiError envelope: { error: { code, message, detail, request_id } }. platform_errorhandling.api_error helper is used.",
+      "inputs": ["failure mode code and message"],
+      "outputs": ["JSONResponse with appropriate HTTP status code"]
+    }
+  ],
+
+  "dependencies": {
+    "internal_required": [
+      { "component": "02_Platform/01_Postgres", "role": "persistent storage for labels and object_labels tables" },
+      { "component": "02_Platform/packages/platform_errorhandling", "role": "structured logging, exception handler installation, api_error helper" }
+    ],
+    "internal_optional": [
+      { "component": "02_Platform/packages/platform_contracts", "role": "ApiError shape reference — not imported directly; LabelEngine uses api_error helper from platform_errorhandling which already wraps this shape" }
+    ],
+    "external_required": [
+      { "name": "fastapi>=0.115", "role": "HTTP framework", "reuse_existing": true },
+      { "name": "uvicorn[standard]>=0.32", "role": "ASGI server", "reuse_existing": true },
+      { "name": "psycopg2-binary>=2.9", "role": "Postgres driver", "reuse_existing": true },
+      { "name": "pydantic>=2.0", "role": "request/response model validation", "reuse_existing": true }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any import from 03_Application — dependency direction violation per R-CON-PL-02",
+      "Domain-specific workflow logic (task status transitions, workout rules, etc.)",
+      "Direct Dataset construction for UI — GroupedObjectsResponse is consumed by application backends, not the Atlas Shell directly"
+    ]
+  },
+
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "20_Data/schema.sql",
+    "persistence_type": "postgres",
+    "notes": "Owns 'labels' schema with two tables: labels.labels and labels.object_labels. The object_labels table includes attached_at TIMESTAMPTZ NOT NULL DEFAULT now() to support the primary-label ordering invariant (first-attached rule). This column was absent from the draft data model and is added here to satisfy the ordering invariant."
+  },
+
+  "deferrals": {
+    "platform_implementer": [
+      "Implement app/database.py: connection pool init, get_db context manager, init_schema (load from 20_Data/schema.sql with inline DDL fallback)",
+      "Implement app/service.py: all label business logic — search, create, attach (with inline creation), remove, get-for-object, grouped-query with primary-label resolution",
+      "Implement app/routers/labels.py: GET /api/labels, POST /api/labels",
+      "Implement app/routers/objects.py: POST /api/objects/{object_id}/labels, DELETE /api/objects/{object_id}/labels/{label_id}, GET /api/objects/{object_id}/labels",
+      "Implement app/routers/groups.py: GET /api/groups with object_type required param",
+      "Implement app/main.py: FastAPI app, CORS middleware (localhost regex), mount all routers at /api prefix, startup event calling init_pool + init_schema",
+      "Implement Dockerfile following LinkingEngine pattern exactly",
+      "Implement compose.yml: bind to 127.0.0.1:8050:8000, atlas-net external network, ATLAS_PG_* env vars, log volume",
+      "Implement pyproject.toml: project name label_engine, same dependency set as LinkingEngine",
+      "Implement pagination for GET /api/groups using paginate-items-before-grouping model: count total matching objects, apply page/page_size offset to the flat ordered list, then group. Populate meta.total, meta.page, meta.page_size, meta.page_count in GroupedObjectsResponse.",
+      "Label name matching on attach: decide case-insensitive exact match or case-sensitive — document the choice; case-insensitive is recommended for UX consistency"
+    ],
+    "ui_implementer": [
+      "Label picker component (shared between task detail view and task list three-dot menu): text input with live search calling GET /api/labels?q=, Create 'X' option when no match, chip display with remove button",
+      "Task detail view: Labels section rendering chips for each label, + Add label button opening the label picker",
+      "Task list three-dot menu: Set Labels action opening compact label picker",
+      "Task list grouped view: consume GET /api/groups?object_type=task and render section headers by label name, Unlabeled last — this endpoint is consumed via TaskTracker's backend proxy, not called directly from the UI",
+      "Note: the Atlas Shell UI must not call LabelEngine endpoints directly — TaskTracker backend proxies all label operations and serves Dataset-shaped responses to the UI where the UI contract applies"
+    ],
+    "test_writer": [
+      "POST /api/labels: happy path creates label and returns LabelRecord; blank name returns 422 LABEL_NAME_EMPTY",
+      "GET /api/labels?q=: returns labels matching prefix; empty q returns all labels; no match returns empty list",
+      "POST /api/objects/{object_id}/labels: attaches existing label by name; creates new label inline and attaches; duplicate attach is idempotent (no error, no duplicate row)",
+      "DELETE /api/objects/{object_id}/labels/{label_id}: removes existing attachment; returns 404 ATTACHMENT_NOT_FOUND when pair absent",
+      "GET /api/objects/{object_id}/labels: returns labels in attached_at ascending order; returns empty list for object with no labels",
+      "GET /api/groups?object_type=task: groups are alphabetical by label name; Unlabeled always last; object with multiple labels appears under first-attached label only; object with no labels appears in Unlabeled; missing object_type param returns 422 OBJECT_TYPE_REQUIRED",
+      "Primary-label tie-breaking: two labels attached at same timestamp are broken by label_id ASC",
+      "DB_UNAVAILABLE: all write endpoints return 503 when pool exhausted",
+      "Label name normalisation: leading/trailing whitespace is stripped before persistence and before name matching"
+    ],
+    "reviewer": [
+      "Verify pagination strategy for GET /api/groups is documented in implementation_notes before marking implementation complete",
+      "Verify case-sensitivity decision for label name matching is documented",
+      "Verify Dockerfile build context matches LinkingEngine pattern (repo root context, platform_packages copy)",
+      "Verify labels schema does not reference linking schema tables or any other schema cross-reference",
+      "Verify compose.yml port does not collide with LinkingEngine (8040) or other registered services"
+    ]
+  },
+
+  "deferred_decisions": [
+    "Pagination granularity for GET /api/groups: RESOLVED — paginate items before grouping. total = total matching objects for the given object_type (unpaginated count). page_count = ceil(total / page_size). See internal_flow[6] and GroupedObjectsResponse in shared_views.",
+    "Label name case sensitivity for search and inline creation matching. Case-insensitive is recommended but not mandated here.",
+    "Whether GET /api/groups should accept additional filter params (e.g. label_id to scope a single group) — deferred to a later sprint.",
+    "Label deletion endpoint (remove a label entirely, cascading detach from all objects) — not in scope for Sprint01."
+  ],
+
+  "risks": [
+    {
+      "risk": "GroupedObjectsResponse is not a Dataset",
+      "impact": "TaskTracker backend must transform GroupedObjectsResponse into per-group Datasets before serving the UI. If TaskTracker implementer calls LabelEngine directly from the frontend, the UI data contract (R-CON-BP-04) is violated. This must be enforced at review."
+    },
+    {
+      "risk": "attached_at tie in primary-label resolution",
+      "impact": "Two labels attached in the same transaction get the same attached_at. The label_id ASC tiebreaker produces a deterministic but arbitrary ordering in this case. For UX correctness, the implementer should ensure attach operations for distinct labels are not batched in a single transaction."
+    },
+    {
+      "risk": "object_id is a foreign concept — LabelEngine does not validate object existence",
+      "impact": "Orphaned label attachments (labels pointing to deleted objects) will persist. Callers are responsible for cleanup. A later sprint may add a cascade-delete hook or a cleanup job."
+    },
+    {
+      "risk": "Port assignment not yet registered",
+      "impact": "Port 8050 is proposed for LabelEngine. If another service already uses 8050 on the host, compose will fail at startup. Reviewer must verify no collision exists."
+    }
+  ],
+
+  "open_questions": [
+    {
+      "question": "Is port 8050 free on the Atlas host, or should a different port be assigned?",
+      "owner": "implementer"
+    },
+    {
+      "question": "Should label name matching on inline creation be case-insensitive (recommended) or case-sensitive? This affects whether 'outside' and 'Outside' become one label or two.",
+      "owner": "implementer"
+    },
+    {
+      "question": "Should GET /api/groups paginate objects before grouping, or paginate the group list itself?",
+      "owner": "RESOLVED — paginate objects before grouping. See deferred_decisions[0] and internal_flow[6]."
+    },
+    {
+      "question": "Should LabelEngine expose a health endpoint (GET /health) consistent with other platform services?",
+      "owner": "implementer"
+    }
+  ],
+
+  "_resolved_orchestrator_questions": {
+    "service_topology": "Standalone FastAPI service, identical pattern to LinkingEngine. Separate Dockerfile, compose.yml, port binding, and pyproject.toml. Not embedded in any existing service. Evidence: LinkingEngine is a standalone service at port 8040 with its own Dockerfile and compose.yml. LabelEngine follows the same structural pattern.",
+    "dataset_contract_for_grouped_endpoint": "GroupedObjectsResponse is NOT a Dataset. LabelEngine is a platform backend service — it does not serve the Atlas Shell UI directly. The UI data contract (R-CON-BP-04) applies to endpoints consumed by the UI. GET /api/groups is consumed by the TaskTracker application backend, which is responsible for transforming the response into Dataset shape before exposing it to the UI. No exception to R-CON-BP-04 is required; the boundary is correctly placed. LabelEngine exposes GroupedObjectsResponse as a typed backend-to-backend contract.",
+    "primary_label_ordering": "Added attached_at TIMESTAMPTZ NOT NULL DEFAULT now() to labels.object_labels. Primary label = row with MIN(attached_at) for that object_id. Ties broken by label_id ASC for full determinism. This column is absent from the draft and is a required addition. See schema.sql."
+  }
+}

@@ -163,7 +163,13 @@
       "WebFetch(domain:github.com)",
       "Bash(git -C /home/linse/Prod/Atlas diff --name-only HEAD 03_Application/TaskTracker/backend/)",
       "Bash(git -C /home/linse/Prod/Atlas stash list)",
-      "Bash(git -C /home/linse/Prod/Atlas log --oneline -3 -- 03_Application/TaskTracker/backend/routers/tasks.py)"
+      "Bash(git -C /home/linse/Prod/Atlas log --oneline -3 -- 03_Application/TaskTracker/backend/routers/tasks.py)",
+      "Bash(make label-schema:*)",
+      "Bash(make label-build:*)",
+      "Bash(make task-build:*)",
+      "Bash(make net-connect:*)",
+      "Bash(make shell-build:*)",
+      "Bash(make:*)"
     ]
   }
 }

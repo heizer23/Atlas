@@ -1,0 +1,298 @@
+{
+  "component_name": "numeric_series",
+  "layer": "03_Application",
+  "source_definition": "00_input/draft.md",
+  "summary": "Stores user-defined numeric measurement series, each named by a LabelEngine label, and exposes list, detail, and batch API surfaces for tracking values over time.",
+  "classification": {
+    "why_application": "Owns domain rules for measurement entries (one numeric value + timestamp per entry), enforces series lifecycle (label + measurements), and determines what constitutes a 'latest value', 'sparkline', and 'series history' for a specific user-facing product loop.",
+    "non_goals": [
+      "Multi-user support and authentication",
+      "Units conversion or units metadata",
+      "Composite measurements in one record",
+      "Alerts, targets, trends, insights, or anomaly detection",
+      "Tagging, folders, or custom grouping",
+      "Custom sorting beyond label name",
+      "Rich charting beyond sparkline and detail history",
+      "Import/export",
+      "Attachments, notes, or comments"
+    ],
+    "not_platform": "The measurement lifecycle, sparkline derivation, and series-read API are specific to this product's tracking domain. No other application consumes these behaviors. Promoting them to platform would encode application-specific meaning in a shared service."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine HTTP API: POST /api/labels (create label), GET /api/labels (search labels)",
+      "LabelEngine Postgres shared schema: labels.labels table (read label name by id)",
+      "02_Platform/packages: platform_contracts (Dataset, DatasetMeta, ColumnSchema), platform_errorhandling (api_error, logging, FastAPI handlers)",
+      "02_Platform/01_Postgres: shared Postgres instance (ATLAS_PG_* env vars)"
+    ],
+    "provides": [
+      "List of all series with sparkline and latest value (sorted by label name)",
+      "Full measurement history for a single series (editable)",
+      "Create / update / delete measurement entries",
+      "Delete a series (label + all measurements)",
+      "Batch read of multiple series with their measurements (external API for OpenClaw)",
+      "Add measurements for an existing label (external API for OpenClaw)"
+    ],
+    "invariants": [
+      "Every measurement entry has exactly one numeric value and one timestamp",
+      "Latest value is always derived from the measurement with the most recent recorded_at",
+      "A label can exist with zero measurements",
+      "Deleting a series removes all its measurement entries",
+      "Label names are managed exclusively through LabelEngine; NumericSeries never creates label name strings independently",
+      "Batch read returns a result entry for every requested label_id, including empty series; full measurement history is returned for each series (no windowing)"
+    ],
+    "failure_modes": [
+      "LABEL_NOT_FOUND: label_id referenced by a write does not exist in LabelEngine",
+      "MEASUREMENT_NOT_FOUND: measurement id not found or does not belong to the given label",
+      "SERIES_NOT_FOUND: label_id has no series record (not tracked by NumericSeries)",
+      "LABEL_ENGINE_UNAVAILABLE: LabelEngine HTTP call fails; label creation/search blocked",
+      "INVALID_VALUE: measurement value is not a valid finite number",
+      "INVALID_TIMESTAMP: recorded_at cannot be parsed as ISO-8601"
+    ]
+  },
+  "shared_views": {
+    "consumes": ["labels.labels (read-only: id, name)"],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine HTTP: POST /api/labels — create label when user names a new series",
+      "LabelEngine HTTP: GET /api/labels?q= — search/autocomplete label names",
+      "LabelEngine Postgres: labels.labels — joined for label name on list queries"
+    ],
+    "provides": [
+      "GET  /api/series             — list all series (label name, sparkline data, latest value)",
+      "POST /api/series             — create a new series (creates label via LabelEngine, registers series)",
+      "GET  /api/series/{label_id}  — detail: full measurement history for a label",
+      "DELETE /api/series/{label_id} — delete series and all its measurements",
+      "POST /api/series/{label_id}/measurements        — add a measurement entry",
+      "PATCH /api/series/{label_id}/measurements/{id}  — edit a measurement (value and/or timestamp)",
+      "DELETE /api/series/{label_id}/measurements/{id} — delete a measurement entry",
+      "POST /api/batch/series       — batch read: return measurements for a list of label_ids",
+      "POST /api/series/{label_id}/values — external write: add one or more measurements for OpenClaw"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/series",
+        "purpose": "Returns all tracked series sorted by label name. The response is a Dataset where sparkline_values is encoded as a JSON string (ColumnType: 'string') so that the UI Data Contract's closed ColumnType set is not violated. The SeriesListPage frontend component must parse sparkline_values and render the sparkline — standard platform TableView is not suitable for this surface; a custom list component is required.",
+        "ui_contract": "Dataset | ApiError — sparkline_values column type: 'string' (JSON-encoded float array); NOT rendered by standard TableView"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/series",
+        "purpose": "Creates a new series: calls LabelEngine to create the label, inserts a series record.",
+        "ui_contract": "ApiError | 201 with {label_id, label_name}"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/series/{label_id}",
+        "purpose": "Returns full measurement history for the series as a Dataset, sorted by recorded_at DESC.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/series/{label_id}",
+        "purpose": "Deletes the series record and all its measurements. Does not delete the label from LabelEngine.",
+        "ui_contract": "ApiError | 204"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/series/{label_id}/measurements",
+        "purpose": "Adds a new measurement entry to the series.",
+        "ui_contract": "ApiError | 201 with {id, label_id, value, recorded_at}"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/series/{label_id}/measurements/{id}",
+        "purpose": "Edits an existing measurement entry (value and/or recorded_at).",
+        "ui_contract": "ApiError | 200 with {id, label_id, value, recorded_at}"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/series/{label_id}/measurements/{id}",
+        "purpose": "Deletes a single measurement entry.",
+        "ui_contract": "ApiError | 204"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/batch/series",
+        "purpose": "Batch read: accepts a list of label_ids and returns each with its full measurement history including empty series.",
+        "ui_contract": "none — external contract for OpenClaw; returns {series: [{label_id, label_name, measurements: [{id, value, recorded_at}]}]}"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/series/{label_id}/values",
+        "purpose": "External write endpoint for OpenClaw: accepts one or more {value, recorded_at} entries and appends them to the series.",
+        "ui_contract": "none — external contract; returns {inserted: int} | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "label_creation",
+      "description": "When a user creates a new series, the backend calls LabelEngine POST /api/labels with the desired name. On success it receives a label_id. It then inserts a row into numeric_series.series (label_id). The label_id is the stable identifier for the series.",
+      "inputs": ["label_name (string)"],
+      "outputs": ["label_id (uuid)", "series record inserted"]
+    },
+    {
+      "step": 2,
+      "name": "measurement_write",
+      "description": "For add and edit operations, the backend validates value (finite float) and recorded_at (ISO-8601). It upserts into numeric_series.measurements. Sparkline and latest value are always derived at read time — no materialized summary columns.",
+      "inputs": ["label_id", "value (float)", "recorded_at (ISO-8601)"],
+      "outputs": ["measurement record (id, label_id, value, recorded_at)"]
+    },
+    {
+      "step": 3,
+      "name": "list_read",
+      "description": "For the list view, the backend joins numeric_series.series with labels.labels on label_id to get names, then for each series queries the N most recent measurements for sparkline values and selects the single measurement with MAX(recorded_at) as the latest value. Result is sorted by label name ascending. sparkline_values is serialized as a JSON string (e.g. '[1.2, 3.4, 5.6]') in the Dataset row so that the ColumnType remains 'string'. The UI Implementer must parse this field in SeriesListPage; standard platform TableView must not be used for this surface.",
+      "inputs": ["none (returns all series)"],
+      "outputs": ["Dataset: rows with {id=label_id (string), label_name (string), latest_value (number or null), sparkline_values (string, JSON-encoded float array)}"]
+    },
+    {
+      "step": 4,
+      "name": "detail_read",
+      "description": "For the detail view, the backend fetches all measurements for the given label_id ordered by recorded_at DESC. Returns as Dataset with schema {id, value, recorded_at}.",
+      "inputs": ["label_id"],
+      "outputs": ["Dataset: rows with {id, value, recorded_at}"]
+    },
+    {
+      "step": 5,
+      "name": "series_delete",
+      "description": "Deletes all measurements for label_id then deletes the series record. The LabelEngine label is not deleted — it remains in LabelEngine's registry. The caller is responsible for not re-adding a series on the same label_id after deletion unless intended.",
+      "inputs": ["label_id"],
+      "outputs": ["204 No Content"]
+    },
+    {
+      "step": 6,
+      "name": "batch_read",
+      "description": "Accepts a list of label_ids. The backend queries labels.labels directly for ALL requested label_ids (not only those in numeric_series.series) to retrieve label_name. For each label_id: if a series record exists in numeric_series.series, fetch all measurements; otherwise return an empty measurements array. A label_id that does not exist in labels.labels at all is included with label_name: null and empty measurements. Returns structured response (not Dataset) for external API contract.",
+      "inputs": ["label_ids: list[uuid string]"],
+      "outputs": ["{series: [{label_id, label_name (string|null), measurements: [{id, value, recorded_at}]}]}"]
+    },
+    {
+      "step": 7,
+      "name": "external_write",
+      "description": "Accepts label_id and a list of {value, recorded_at} entries. Validates each entry. Inserts all valid entries. Returns {inserted: int}. If label_id is not found in numeric_series.series, the behavior must be explicitly chosen before implementation (open question).",
+      "inputs": ["label_id", "entries: [{value, recorded_at}]"],
+      "outputs": ["{inserted: int} | ApiError"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/LabelEngine", "role": "Label creation and name lookup via HTTP API; label table read via shared Postgres schema"},
+      {"component": "02_Platform/01_Postgres", "role": "Shared Postgres instance for private application schema"},
+      {"component": "02_Platform/packages", "role": "platform_contracts (Dataset/DatasetMeta/ColumnSchema), platform_errorhandling (api_error, logging, FastAPI handlers)"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request/response models", "reuse_existing": true},
+      {"name": "httpx", "role": "HTTP client for LabelEngine API calls", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any direct manipulation of the labels.labels or labels.object_labels tables beyond read-only join on label_id/name",
+      "Encoding units, health-domain, or composite metric logic in this slice",
+      "Materializing sparkline or latest_value as stored columns in this slice"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "20_Data/schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement backend/main.py: FastAPI app with CORS, platform middleware, router registration, startup pool/schema init",
+      "Implement backend/database.py: psycopg2 connection pool using ATLAS_PG_* env vars, get_db context manager, init_schema from 20_Data/schema.sql",
+      "Implement backend/routers/series.py: all CRUD endpoints for series and measurements",
+      "Implement backend/routers/batch.py: batch read and external write endpoints",
+      "Implement backend/service.py: business logic for sparkline derivation (N most recent values), latest_value selection, label creation via LabelEngine, validation",
+      "Implement backend/label_client.py: httpx client for LabelEngine HTTP API (create label, search labels)",
+      "Apply schema.sql via init_schema on startup",
+      "Decide unknown-label behavior for external write (open question) before implementing POST /api/series/{label_id}/values",
+      "Configure LABEL_ENGINE_URL env var (default http://atlas-label-engine:8000)",
+      "Write compose.yml and Dockerfile following TaskTracker pattern; use port 8014"
+    ],
+    "ui_implementer": [
+      "Implement SeriesListPage: table or custom list rendering label_name, sparkline (use recharts Sparkline or similar), latest_value; row click navigates to detail",
+      "Implement SeriesDetailPage: Dataset table of measurements with edit-in-row or per-row edit form; add measurement form; delete measurement button; delete series button",
+      "Implement CreateSeriesForm using platform CreateForm primitive (field: label_name)",
+      "Wire frontend routes: /series (list) and /series/:label_id (detail)",
+      "Register NumericSeries routes in Atlas Shell Router.tsx",
+      "Sparkline: display up to N recent values as a small inline chart; empty state shows blank or dash",
+      "After any mutation (add/edit/delete measurement, delete series), invalidate and re-fetch list view"
+    ],
+    "test_writer": [
+      "Test series creation: valid name creates label in LabelEngine and inserts series record",
+      "Test series creation: LabelEngine unavailable returns 503",
+      "Test measurement add: valid value and timestamp inserts record",
+      "Test measurement add: non-finite value (NaN, Infinity) returns INVALID_VALUE error",
+      "Test measurement add: unparseable timestamp returns INVALID_TIMESTAMP error",
+      "Test measurement edit: updates value and recorded_at correctly",
+      "Test measurement delete: removes entry; list latest_value updates",
+      "Test series delete: removes series and all measurements; series no longer appears in list",
+      "Test detail read: returns measurements sorted by recorded_at DESC",
+      "Test list read: sorted by label name ascending",
+      "Test list read: series with no measurements shows null latest_value and empty sparkline",
+      "Test batch read: returns all requested label_ids including empty series",
+      "Test batch read: unknown label_id returns empty measurements (not error)",
+      "Test external write: inserts multiple measurements in single call",
+      "Test external write: unknown label behavior (once decision is made)"
+    ],
+    "reviewer": [
+      "Verify sparkline data is derived at read time and not stored",
+      "Verify LabelEngine label is not deleted when a series is deleted",
+      "Verify batch read includes unknown label_ids as empty series, not 404",
+      "Verify external write endpoint validation matches API contract",
+      "Verify no domain logic leaks into platform layer",
+      "Verify compose.yml port does not conflict with existing services"
+    ]
+  },
+  "deferred_decisions": [
+    "Sparkline window size (N most recent values): implementer should choose a sensible default (e.g. 20) and surface as configuration if needed",
+    "Label name global uniqueness: LabelEngine enforces this — NumericSeries inherits whatever constraint LabelEngine applies; confirm with LabelEngine behavior before implementation",
+    "Soft-delete vs hard-delete for series: draft says delete removes history; hard delete is specified; implementer must verify this is acceptable"
+  ],
+  "risks": [
+    {
+      "risk": "LabelEngine label and NumericSeries series are not atomically created",
+      "impact": "If LabelEngine create succeeds but NumericSeries insert fails, a label exists without a series. Retry by the user would fail on label name conflict. Mitigation: detect duplicate-name error from LabelEngine and treat as recovery path."
+    },
+    {
+      "risk": "Sparkline derivation at read time may be slow with many series",
+      "impact": "List view latency increases linearly with series count. Acceptable for this slice per draft constraints. Will require re-evaluation if series count grows significantly."
+    },
+    {
+      "risk": "Unknown-label behavior for external write is unresolved",
+      "impact": "Implementation cannot be completed for POST /api/series/{label_id}/values without an explicit product decision. Block on this before implementation."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "For the external write endpoint (OpenClaw), if the label_id does not exist in numeric_series.series, should it be rejected (404), auto-created (insert series record), or configurable?",
+      "owner": "product"
+    },
+    {
+      "question": "Should label names be globally unique or can duplicates exist? LabelEngine controls this — implementer must verify LabelEngine's uniqueness constraint.",
+      "owner": "architecture"
+    },
+    {
+      "question": "Should deleting a series be recoverable (soft delete) or permanent (hard delete)? Draft says delete removes history, implying hard delete.",
+      "owner": "product"
+    },
+    {
+      "question": "Are measurements editable inline in the detail list, or through a per-row edit form?",
+      "owner": "product"
+    },
+    {
+      "question": "Resolved: batch-read API returns full measurement history. No windowing in this slice.",
+      "owner": "architecture"
+    }
+  ]
+}

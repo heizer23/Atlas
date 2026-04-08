@@ -1,0 +1,10 @@
+[project]
+name = "linking_engine"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "psycopg2-binary>=2.9",
+    "pydantic>=2.0",
+]

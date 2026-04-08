@@ -1,0 +1,23 @@
+services:
+  label-engine:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/LabelEngine/Dockerfile
+    container_name: atlas-label-engine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8050:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    volumes:
+      - ${DATA_ROOT}/label-engine/logs:/app/logs
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

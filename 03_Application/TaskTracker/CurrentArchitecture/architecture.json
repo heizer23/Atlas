@@ -1,0 +1,159 @@
+{
+  "sprint": "Sprint02-Optimization_and_Effort",
+  "component": "TaskTracker",
+  "layer": "03_Application",
+  "description": "Adds an effort field to tasks, redesigns the mobile task row to eliminate horizontal scrolling, and makes the task detail view editable.",
+
+  "open_question_resolutions": {
+    "effort_required_or_optional": "optional — effort is nullable; existing tasks remain valid without it",
+    "effort_unit": "double (hours) — the smallest-change path per the spec recommendation; integer-minutes can be adopted in a later sprint for calendar integration",
+    "effort_display": "display as '2.5 h' — one decimal place, suffix 'h'; blank/null renders as '—'",
+    "effort_truncation_mobile": "task name truncates with text-overflow: ellipsis; effort and priority chips are fixed-width and never truncate",
+    "effort_in_create_form": "yes — effort is included in the create form in this sprint; it is optional so users who skip it are not blocked",
+    "detail_edit_scope": "all currently visible task fields: title, description, status, priority, due_date, effort"
+  },
+
+  "data_layer": {
+    "migration": {
+      "file": "migrations/002_add_effort.sql",
+      "description": "Adds nullable double-precision effort_hours column to tasktracker.tasks",
+      "sql_summary": "ALTER TABLE tasktracker.tasks ADD COLUMN effort_hours double precision CHECK (effort_hours IS NULL OR effort_hours >= 0);"
+    },
+    "schema_change": {
+      "table": "tasktracker.tasks",
+      "new_column": "effort_hours",
+      "type": "double precision",
+      "nullable": true,
+      "constraint": "effort_hours >= 0 OR effort_hours IS NULL",
+      "default": null,
+      "backward_compatible": true
+    }
+  },
+
+  "backend_layer": {
+    "file": "backend/routers/tasks.py",
+    "changes": [
+      {
+        "what": "Add effort_hours to TASK_SCHEMA",
+        "detail": "New ColumnSchema entry: key='effort_hours', label='Effort (h)', type='number', sortable=True, filterable=False"
+      },
+      {
+        "what": "Add effort_hours to TaskCreate",
+        "detail": "Optional field effort_hours: float | None = None; validated >= 0 if provided"
+      },
+      {
+        "what": "Add effort_hours to TaskUpdate",
+        "detail": "Optional field effort_hours: float | None = None; validated >= 0 if provided"
+      },
+      {
+        "what": "Include effort_hours in INSERT and SELECT queries",
+        "detail": "All SELECT * and INSERT INTO statements already cover effort_hours via the existing wildcard/column-list patterns; update explicit column lists in create_task and list_tasks to include effort_hours"
+      },
+      {
+        "what": "Validate effort_hours >= 0 in create_task and update_task",
+        "detail": "Return api_error('VALIDATION_ERROR', 'effort_hours must be >= 0') if provided value is negative"
+      }
+    ],
+    "backward_compatibility": "Existing rows have effort_hours = NULL. row_to_dict already handles None gracefully. No breaking change."
+  },
+
+  "frontend_layer": {
+    "overview": "ShellEntry.tsx is the sole frontend file. It is restructured to support: (a) a mobile card-list view for tasks with ThreeDotsMenu, (b) an editable detail view replacing the read-only DetailView platform primitive.",
+
+    "components_introduced": [
+      {
+        "name": "TaskRow",
+        "location": "src/ShellEntry.tsx (local component)",
+        "description": "Mobile-optimised card row showing task name (truncated), effort chip, priority chip, and a three-dots menu. Tapping the card body opens detail. Three-dots menu has 'Mark Complete' and 'Delete' actions.",
+        "layout": "Single flex row: [name (flex:1, overflow:ellipsis)] [effort chip] [priority chip] [ThreeDotsMenu (flexShrink:0)]",
+        "design_reference": "FoodTracker/src/EntriesPage.tsx — card container + ThreeDotsMenu pattern"
+      },
+      {
+        "name": "ThreeDotsMenu",
+        "location": "src/ShellEntry.tsx (local component)",
+        "description": "Vertical three-dots (⋮) button that opens a dropdown menu. Menu items: 'Mark complete' (PATCH status=done) and 'Delete' (DELETE). Click-outside closes the menu.",
+        "design_reference": "FoodTracker/src/EntriesPage.tsx ThreeDotsMenu"
+      },
+      {
+        "name": "TaskDetailEdit",
+        "location": "src/ShellEntry.tsx (local component)",
+        "description": "Replaces the read-only platform DetailView for task detail. Renders all task fields (title, description, status, priority, due_date, effort_hours) as editable inputs. Save submits PATCH /tasks/{id}. Cancel discards changes and returns to list.",
+        "fields_rendered": [
+          { "key": "title",        "type": "text",   "required": true },
+          { "key": "description",  "type": "textarea", "required": false },
+          { "key": "status",       "type": "select", "options": ["open", "in_progress", "done"] },
+          { "key": "priority",     "type": "select", "options": ["low", "medium", "high"] },
+          { "key": "due_date",     "type": "date",   "required": false },
+          { "key": "effort_hours", "type": "number", "required": false, "min": 0, "step": 0.5 }
+        ],
+        "note": "This is an app-local component — platform DetailView does not support editing and is not extended here"
+      }
+    ],
+
+    "components_removed": [
+      {
+        "name": "TableView (platform)",
+        "reason": "Platform TableView renders a <table> which causes horizontal overflow on mobile. Replaced with the TaskRow card-list pattern for the tasks page."
+      },
+      {
+        "name": "DetailView (platform)",
+        "reason": "Platform DetailView is read-only. Replaced with app-local TaskDetailEdit which is editable."
+      }
+    ],
+
+    "task_create_form_change": {
+      "description": "Add effort_hours to TASK_FIELDS in the existing CreateForm usage",
+      "new_field": { "key": "effort_hours", "label": "Effort (h)", "type": "number", "placeholder": "e.g. 1.5" }
+    },
+
+    "data_flow": {
+      "list": "GET /tasks?page=N — response is Dataset; rows extracted and rendered as TaskRow cards",
+      "mark_complete": "PATCH /tasks/{id} body {status: 'done'} — on success update local state (no full re-fetch required)",
+      "delete": "DELETE /tasks/{id} — on success filter row from local state",
+      "open_detail": "State: selected task row stored in component state; TaskDetailEdit rendered with current values pre-filled",
+      "save_detail": "PATCH /tasks/{id} body {all edited fields} — on success update local state and return to list",
+      "create": "POST /tasks — on success setCreating(false) and refetch list"
+    },
+
+    "mobile_layout_invariants": [
+      "No horizontal overflow on the task list at any viewport width",
+      "Task name truncates at available space; effort and priority chips remain visible",
+      "ThreeDotsMenu is always reachable without scrolling",
+      "Row tap (outside three-dots zone) opens detail"
+    ]
+  },
+
+  "platform_contracts": {
+    "dataset_contract": "Retained — all endpoints continue to return Dataset. effort_hours added to TASK_SCHEMA.",
+    "ui_contract_version": "v0.3",
+    "row_actions": "list endpoint declares row_actions=['edit','delete']; edit is handled via row click, delete via three-dots menu",
+    "create_form": "Platform CreateForm primitive is retained for task creation; effort_hours added as a number field"
+  },
+
+  "non_scope": [
+    "Desktop/tablet layout — unchanged",
+    "Google Calendar integration",
+    "Sorting, filtering, or grouping changes",
+    "Bulk or inline edit",
+    "New task actions beyond mark-complete and delete",
+    "Platform TableView or DetailView changes — app-local components are used instead"
+  ],
+
+  "dependencies": [
+    {
+      "name": "platform_contracts (Python)",
+      "path": "02_Platform/packages/platform_contracts/contracts.py",
+      "usage": "ColumnSchema, Dataset, DatasetMeta — unchanged"
+    },
+    {
+      "name": "platform-ui",
+      "path": "02_Platform/02_Atlas_Shell/platform-ui",
+      "usage": "apiFetch, isApiError, ErrorCard, Skeleton, CreateForm — retained; TableView and DetailView no longer used on tasks page"
+    },
+    {
+      "name": "platform_errorhandling",
+      "path": "02_Platform/03_ErrorHandling",
+      "usage": "api_error helper — unchanged"
+    }
+  ]
+}

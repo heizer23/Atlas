@@ -392,6 +392,68 @@ ui-reboot:
 # endregion
 
 
+# region --- Platform: LabelEngine
+LABEL_DIR=../02_Platform/LabelEngine
+
+LABEL_COMPOSE=docker compose \
+	-f $(LABEL_DIR)/compose.yml \
+	$(ENV_FILES)
+
+label-build:
+	$(LABEL_COMPOSE) build
+
+label-up:
+	$(LABEL_COMPOSE) up -d
+
+label-down:
+	$(LABEL_COMPOSE) down
+
+label-logs:
+	$(LABEL_COMPOSE) logs -f
+
+label-reboot:
+	$(LABEL_COMPOSE) down
+	$(LABEL_COMPOSE) up -d
+
+label-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < "$(LABEL_DIR)/Spint01- First labels/20_Data/schema.sql"
+
+# endregion
+
+
+# region --- Application: NumericSeries
+NUMERIC_DIR=../03_Application/NumericSeries
+
+NUMERIC_COMPOSE=docker compose \
+	-f $(NUMERIC_DIR)/compose.yml \
+	$(ENV_FILES)
+
+numeric-build:
+	$(NUMERIC_COMPOSE) build
+
+numeric-up:
+	$(NUMERIC_COMPOSE) up -d
+
+numeric-down:
+	$(NUMERIC_COMPOSE) down
+
+numeric-logs:
+	$(NUMERIC_COMPOSE) logs -f
+
+numeric-reboot:
+	$(NUMERIC_COMPOSE) down
+	$(NUMERIC_COMPOSE) up -d
+
+numeric-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(NUMERIC_DIR)/Sprint01/20_Data/schema.sql
+
+# endregion
+
+
 # region --- Platform: MCPGateway
 MCP_DIR=../02_Platform/MCPGateway
 
@@ -463,6 +525,8 @@ net-connect:
 	@docker network connect atlas-net atlas-cloudflared    2>/dev/null || true
 	@docker network connect atlas-net atlas-notifications  2>/dev/null || true
 	@docker network connect atlas-net atlas-calendar-connector 2>/dev/null || true
+	@docker network connect atlas-net atlas-label-engine      2>/dev/null || true
+	@docker network connect atlas-net atlas-numeric-series    2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -482,6 +546,10 @@ up:
 	$(MAKE) chronicle-build  chronicle-up
 	$(MAKE) notif-build      notif-up
 	$(MAKE) calendar-build   calendar-up
+	$(MAKE) label-schema
+	$(MAKE) label-build      label-up
+	$(MAKE) numeric-schema
+	$(MAKE) numeric-build    numeric-up
 	$(MAKE) cloudflared-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
@@ -491,6 +559,8 @@ up:
 down:
 	-$(MAKE) shell-down
 	-$(MAKE) cloudflared-down
+	-$(MAKE) numeric-down
+	-$(MAKE) label-down
 	-$(MAKE) calendar-down
 	-$(MAKE) notif-down
 	-$(MAKE) chronicle-down

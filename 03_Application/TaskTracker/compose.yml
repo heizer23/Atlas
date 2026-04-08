@@ -13,6 +13,7 @@ services:
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
+      LABEL_ENGINE_URL:  http://atlas-label-engine:8000
     volumes:
       - ${DATA_ROOT}/tasktracker/logs:/app/logs
     networks:

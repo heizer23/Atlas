@@ -1,0 +1,363 @@
+{
+  "component_name": "label_engine",
+  "target_root": "02_Platform/LabelEngine",
+  "directories": [
+    "02_Platform/LabelEngine",
+    "02_Platform/LabelEngine/app",
+    "02_Platform/LabelEngine/app/routers",
+    "02_Platform/LabelEngine/tests"
+  ],
+  "files": [
+    {
+      "path": "02_Platform/LabelEngine/pyproject.toml",
+      "stub_kind": "toml_config",
+      "role": "Package metadata and dependency declaration for label_engine",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "Container image build: copies platform_packages from repo root context, installs dependencies, runs uvicorn on port 8000",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/compose.yml",
+      "stub_kind": "compose_config",
+      "role": "Docker Compose service definition: binds 127.0.0.1:8050:8000, atlas-net external network, ATLAS_PG_* env vars, log volume mount",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entrypoint: creates app, adds CORS middleware, installs platform_errorhandling handlers, mounts all routers at /api prefix, registers startup event",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "singleton",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management and schema initialisation. Owns labels schema DDL. Provides get_db context manager.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "methods": [
+            {
+              "name": "init_pool",
+              "visibility": "public",
+              "args": [],
+              "returns": "None",
+              "purpose": "Initialise the psycopg2 SimpleConnectionPool using ATLAS_PG_* environment variables"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "methods": [
+            {
+              "name": "init_schema",
+              "visibility": "public",
+              "args": [],
+              "returns": "None",
+              "purpose": "Execute schema.sql idempotently to create labels schema tables; falls back to inline DDL if file is absent"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "methods": [
+            {
+              "name": "get_db",
+              "visibility": "public",
+              "args": [],
+              "returns": "Generator[psycopg2.extensions.connection, None, None]",
+              "purpose": "Context manager that checks out a connection from the pool and returns it on exit; rolls back on exception"
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_build_url",
+          "purpose": "Construct DSN string from ATLAS_PG_* env vars or DATABASE_URL override"
+        },
+        {
+          "kind": "function",
+          "name": "_run_inline_ddl",
+          "purpose": "Inline DDL fallback — must be kept in sync with 20_Data/schema.sql"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/models.py",
+      "stub_kind": "python_module",
+      "role": "Pydantic models for all request bodies and response envelopes. These are the shared_views provided by this component.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "LabelRecord",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "id: str, name: str"
+        },
+        {
+          "kind": "class",
+          "name": "ObjectLabelRecord",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "object_id: str, label_id: str, label_name: str, attached_at: str"
+        },
+        {
+          "kind": "class",
+          "name": "GroupItem",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "id: str, primary_label: str | None, labels: list[str]"
+        },
+        {
+          "kind": "class",
+          "name": "LabelGroup",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "label: str, items: list[GroupItem]"
+        },
+        {
+          "kind": "class",
+          "name": "LabelSearchResponse",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "labels: list[LabelRecord]"
+        },
+        {
+          "kind": "class",
+          "name": "ObjectLabelsResponse",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "labels: list[ObjectLabelRecord]"
+        },
+        {
+          "kind": "class",
+          "name": "GroupedObjectsResponse",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "groups: list[LabelGroup]"
+        },
+        {
+          "kind": "class",
+          "name": "CreateLabelRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "name: str"
+        },
+        {
+          "kind": "class",
+          "name": "AttachLabelRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "label_name: str"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/service.py",
+      "stub_kind": "python_module",
+      "role": "All label business logic. Receives a db connection; performs SQL; returns typed model instances. No HTTP concerns.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "LabelService",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "search_labels",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "q: str"],
+              "returns": "list[LabelRecord]",
+              "purpose": "Return labels whose name starts with q (case-insensitive prefix match). Empty q returns all labels."
+            },
+            {
+              "name": "create_label",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "name: str"],
+              "returns": "LabelRecord",
+              "purpose": "Insert a new label with the given name and return the created record. Caller must have validated name is non-empty."
+            },
+            {
+              "name": "attach_label",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "object_id: str", "label_name: str"],
+              "returns": "ObjectLabelRecord",
+              "purpose": "Resolve or create label by name, then INSERT attachment with ON CONFLICT DO NOTHING. Return the ObjectLabelRecord for the (object_id, label_id) pair."
+            },
+            {
+              "name": "remove_label",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "object_id: str", "label_id: str"],
+              "returns": "None",
+              "purpose": "Delete the (object_id, label_id) attachment row. Raises LabelEngineError with code ATTACHMENT_NOT_FOUND if the row does not exist."
+            },
+            {
+              "name": "get_labels_for_object",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "object_id: str"],
+              "returns": "list[ObjectLabelRecord]",
+              "purpose": "Return all labels for the given object ordered by attached_at ASC, label_id ASC."
+            },
+            {
+              "name": "get_grouped_objects",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "object_type: str", "page: int", "page_size: int"],
+              "returns": "GroupedObjectsResponse",
+              "purpose": "Query all object_ids of the given type from the labels schema, determine primary label per object (MIN attached_at, ties by label_id ASC), assemble GroupedObjectsResponse with groups sorted alphabetically and Unlabeled last."
+            }
+          ]
+        },
+        {
+          "kind": "class",
+          "name": "LabelEngineError",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": "code: str, message: str, status: int"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_resolve_or_create_label",
+          "purpose": "Exact name lookup (case-insensitive) then INSERT if absent. Returns label_id. Used internally by attach_label only."
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/routers/labels.py",
+      "stub_kind": "python_module",
+      "role": "HTTP routes for label search and creation. Mounts at /api via main.py.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "methods": []
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "search_labels",
+          "purpose": "GET /api/labels handler — validates q param, calls LabelService.search_labels, returns LabelSearchResponse"
+        },
+        {
+          "kind": "function",
+          "name": "create_label",
+          "purpose": "POST /api/labels handler — validates name via CreateLabelRequest, calls LabelService.create_label, returns LabelRecord; raises 422 on LABEL_NAME_EMPTY"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/routers/objects.py",
+      "stub_kind": "python_module",
+      "role": "HTTP routes for label attachment and retrieval on objects. Mounts at /api via main.py.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "methods": []
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "attach_label",
+          "purpose": "POST /api/objects/{object_id}/labels handler — calls LabelService.attach_label, returns ObjectLabelRecord"
+        },
+        {
+          "kind": "function",
+          "name": "remove_label",
+          "purpose": "DELETE /api/objects/{object_id}/labels/{label_id} handler — calls LabelService.remove_label; returns 404 on ATTACHMENT_NOT_FOUND"
+        },
+        {
+          "kind": "function",
+          "name": "get_object_labels",
+          "purpose": "GET /api/objects/{object_id}/labels handler — calls LabelService.get_labels_for_object, returns ObjectLabelsResponse"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/routers/groups.py",
+      "stub_kind": "python_module",
+      "role": "HTTP route for grouped object query. Mounts at /api via main.py.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "methods": []
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "get_grouped_objects",
+          "purpose": "GET /api/groups handler — requires object_type query param (422 OBJECT_TYPE_REQUIRED if absent), calls LabelService.get_grouped_objects, returns GroupedObjectsResponse"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/LabelEngine/tests/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/tests/test_labels.py",
+      "stub_kind": "python_module",
+      "role": "Test stubs for label CRUD and search scenarios. Bodies deferred to Test_Writer.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/tests/test_objects.py",
+      "stub_kind": "python_module",
+      "role": "Test stubs for attach, remove, and get-labels-for-object scenarios. Bodies deferred to Test_Writer.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/tests/test_groups.py",
+      "stub_kind": "python_module",
+      "role": "Test stubs for grouped query scenarios including primary-label resolution and Unlabeled ordering. Bodies deferred to Test_Writer.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

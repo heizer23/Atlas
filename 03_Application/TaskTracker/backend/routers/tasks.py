@@ -1,13 +1,22 @@
+import os
 import uuid
 from typing import Any
 
+import httpx
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from backend.database import get_db
 from platform_errorhandling import api_error
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
+
+# ── LabelEngine client ────────────────────────────────────────────────────────
+
+LABEL_ENGINE_URL = os.environ.get("LABEL_ENGINE_URL", "http://localhost:8050")
+
+def _label_client() -> httpx.Client:
+    return httpx.Client(base_url=LABEL_ENGINE_URL, timeout=5.0)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -57,6 +66,32 @@ def row_to_dict(row: Any) -> dict[str, Any]:
     if d.get("updated_at"):
         d["updated_at"] = d["updated_at"].date().isoformat()
     return d
+
+
+def fetch_labels_for_tasks(conn: Any, task_ids: list[str]) -> dict[str, list[dict[str, str]]]:
+    """Return a mapping of task_id -> [{id, name}, ...] ordered by attached_at ASC."""
+    if not task_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            select ol.object_id, l.id as label_id, l.name as label_name
+            from labels.object_labels ol
+            join labels.labels l on l.id = ol.label_id
+            where ol.object_id = any(%s)
+              and ol.object_type = 'task'
+            order by ol.object_id, ol.attached_at, ol.label_id
+            """,
+            (task_ids,),
+        )
+        rows = cur.fetchall()
+    result: dict[str, list[dict[str, str]]] = {}
+    for r in rows:
+        tid = r["object_id"]
+        if tid not in result:
+            result[tid] = []
+        result[tid].append({"id": r["label_id"], "name": r["label_name"]})
+    return result
 
 
 def dataset_response(dataset: Dataset) -> JSONResponse:
@@ -127,6 +162,12 @@ def list_tasks(
                 )
 
             rows = [row_to_dict(r) for r in cur.fetchall()]
+
+        # Embed labels into each row using a single batch query
+        task_ids = [r["id"] for r in rows]
+        labels_by_task = fetch_labels_for_tasks(conn, task_ids)
+        for r in rows:
+            r["labels"] = labels_by_task.get(r["id"], [])
 
     return dataset_response(Dataset(
         meta=DatasetMeta(
@@ -233,3 +274,47 @@ def delete_task(task_id: str) -> JSONResponse:
         **{"schema": TASK_SCHEMA},
         rows=[],
     ))
+
+
+# ── Label proxy endpoints ─────────────────────────────────────────────────────
+# Thin forwards to LabelEngine.  object_type is always "task".
+
+class LabelAttachBody(BaseModel):
+    label_name: str
+
+
+@router.get("/labels/search", response_model=None)
+def search_labels(q: str = "") -> JSONResponse:
+    """Proxy: search labels by prefix via LabelEngine."""
+    with _label_client() as client:
+        resp = client.get("/api/labels", params={"q": q})
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@router.get("/{task_id}/labels", response_model=None)
+def get_task_labels(task_id: str) -> JSONResponse:
+    """Proxy: return labels attached to a task."""
+    with _label_client() as client:
+        resp = client.get(f"/api/objects/{task_id}/labels")
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@router.post("/{task_id}/labels", response_model=None)
+def attach_task_label(task_id: str, body: LabelAttachBody) -> JSONResponse:
+    """Proxy: attach a label to a task."""
+    with _label_client() as client:
+        resp = client.post(
+            f"/api/objects/{task_id}/labels",
+            json={"label_name": body.label_name, "object_type": "task"},
+        )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@router.delete("/{task_id}/labels/{label_id}", response_model=None)
+def detach_task_label(task_id: str, label_id: str) -> Response:
+    """Proxy: detach a label from a task."""
+    with _label_client() as client:
+        resp = client.delete(f"/api/objects/{task_id}/labels/{label_id}")
+    if resp.status_code == 204:
+        return Response(status_code=204)
+    return JSONResponse(status_code=resp.status_code, content=resp.json())

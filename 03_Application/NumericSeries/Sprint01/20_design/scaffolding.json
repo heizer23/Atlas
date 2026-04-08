@@ -1,0 +1,314 @@
+{
+  "component_name": "numeric_series",
+  "target_root": "03_Application/NumericSeries",
+  "directories": [
+    "03_Application/NumericSeries",
+    "03_Application/NumericSeries/backend",
+    "03_Application/NumericSeries/backend/routers",
+    "03_Application/NumericSeries/frontend",
+    "03_Application/NumericSeries/frontend/src",
+    "03_Application/NumericSeries/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/NumericSeries/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entry point: configures CORS, installs platform middleware, registers routers, and runs schema init on startup.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "router",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Psycopg2 connection pool management using ATLAS_PG_* env vars; get_db context manager; init_schema loads and executes 20_Data/schema.sql.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "pattern": "service",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "None",
+          "purpose": "Initialize the global psycopg2 connection pool from ATLAS_PG_* environment variables."
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "pattern": "service",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "None",
+          "purpose": "Execute schema.sql against the database to create or migrate tables."
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "pattern": "service",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "Generator[psycopg2.extensions.connection, None, None]",
+          "purpose": "Context manager that yields a database connection from the pool and returns it on exit."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_build_url",
+          "visibility": "private",
+          "purpose": "Construct the Postgres DSN from environment variables."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/models.py",
+      "stub_kind": "python_module",
+      "role": "Pydantic request and response models for all endpoints. No domain logic.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "CreateSeriesRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["label_name: str"]
+        },
+        {
+          "kind": "class",
+          "name": "AddMeasurementRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["value: float", "recorded_at: str"]
+        },
+        {
+          "kind": "class",
+          "name": "EditMeasurementRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["value: float | None", "recorded_at: str | None"]
+        },
+        {
+          "kind": "class",
+          "name": "BatchReadRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["label_ids: list[str]"]
+        },
+        {
+          "kind": "class",
+          "name": "ExternalWriteRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["entries: list[ExternalWriteEntry]"]
+        },
+        {
+          "kind": "class",
+          "name": "ExternalWriteEntry",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["value: float", "recorded_at: str"]
+        },
+        {
+          "kind": "class",
+          "name": "MeasurementRecord",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["id: str", "label_id: str", "value: float", "recorded_at: str"]
+        },
+        {
+          "kind": "class",
+          "name": "SeriesRecord",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["label_id: str", "label_name: str"]
+        },
+        {
+          "kind": "class",
+          "name": "BatchSeriesEntry",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["label_id: str", "label_name: str | None", "measurements: list[MeasurementRecord]"]
+        },
+        {
+          "kind": "class",
+          "name": "BatchReadResponse",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["series: list[BatchSeriesEntry]"]
+        },
+        {
+          "kind": "class",
+          "name": "ExternalWriteResponse",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["inserted: int"]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/service.py",
+      "stub_kind": "python_module",
+      "role": "Business logic: sparkline derivation, latest_value selection, measurement validation, and series read model assembly. No HTTP concerns.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "NumericSeriesService",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "get_sparkline_values",
+              "visibility": "public",
+              "args": ["conn: connection", "label_id: str", "limit: int"],
+              "returns": "list[float]",
+              "purpose": "Return the N most recent measurement values ordered by recorded_at ASC (for sparkline left-to-right rendering)."
+            },
+            {
+              "name": "get_latest_value",
+              "visibility": "public",
+              "args": ["conn: connection", "label_id: str"],
+              "returns": "float | None",
+              "purpose": "Return the value of the measurement with the most recent recorded_at, or None if no measurements exist."
+            },
+            {
+              "name": "validate_measurement",
+              "visibility": "public",
+              "args": ["value: float", "recorded_at: str"],
+              "returns": "None",
+              "purpose": "Raise NumericSeriesError with INVALID_VALUE or INVALID_TIMESTAMP if the inputs are not valid."
+            },
+            {
+              "name": "list_series_rows",
+              "visibility": "public",
+              "args": ["conn: connection"],
+              "returns": "list[dict]",
+              "purpose": "Return all series joined with label names, each augmented with latest_value and sparkline_values, sorted by label name ascending."
+            },
+            {
+              "name": "get_measurement_history",
+              "visibility": "public",
+              "args": ["conn: connection", "label_id: str"],
+              "returns": "list[dict]",
+              "purpose": "Return all measurements for label_id ordered by recorded_at DESC."
+            },
+            {
+              "name": "assemble_batch",
+              "visibility": "public",
+              "args": ["conn: connection", "label_ids: list[str]"],
+              "returns": "list[dict]",
+              "purpose": "Query labels.labels unconditionally for all requested label_ids to obtain label_name. For each: if a series record exists in numeric_series.series, return all measurements; otherwise return empty measurements array. label_name is null for label_ids not found in labels.labels."
+            }
+          ]
+        },
+        {
+          "kind": "class",
+          "name": "NumericSeriesError",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["code: str", "message: str", "status: int"]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/label_client.py",
+      "stub_kind": "python_module",
+      "role": "HTTP client for LabelEngine API: creates labels and searches labels. Isolated so the rest of the application does not import httpx directly.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "LabelClient",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "create_label",
+              "visibility": "public",
+              "args": ["name: str"],
+              "returns": "dict",
+              "purpose": "POST /api/labels to LabelEngine. Returns {id, name} on success. Raises LabelClientError on HTTP error or unavailability."
+            },
+            {
+              "name": "search_labels",
+              "visibility": "public",
+              "args": ["q: str"],
+              "returns": "list[dict]",
+              "purpose": "GET /api/labels?q=<q> from LabelEngine. Returns list of {id, name}."
+            }
+          ]
+        },
+        {
+          "kind": "class",
+          "name": "LabelClientError",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": ["code: str", "message: str", "status: int"]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/routers/series.py",
+      "stub_kind": "python_module",
+      "role": "HTTP router for series and measurement CRUD endpoints: list, create, detail, delete series; add, edit, delete measurements.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/routers/batch.py",
+      "stub_kind": "python_module",
+      "role": "HTTP router for batch read and external write endpoints consumed by OpenClaw.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/frontend/src/SeriesListPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "List view: renders all series sorted by label name, each row showing label name, sparkline, and latest value. Row click navigates to detail.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "SeriesListPage",
+          "pattern": "router",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/frontend/src/SeriesDetailPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Detail view: shows full measurement history for a series with add/edit/delete actions and delete-series button.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "SeriesDetailPage",
+          "pattern": "router",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}
