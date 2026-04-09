@@ -1,0 +1,167 @@
+{
+  "component_name": "tasktracker",
+  "layer": "03_Application",
+  "source_definition": "00_input/draft.md",
+  "summary": "Resolves three audit findings in TaskTracker's label integration: replace direct SQL cross-schema read with HTTP batch call, and transform two GET proxy endpoints to return Dataset.",
+  "classification": {
+    "why_application": "Changes are scoped to TaskTracker's label proxy endpoints and internal label-fetch helper. The fix applies app-specific route transformation and domain-shaped Dataset construction. No reusable platform capability is being added.",
+    "non_goals": [
+      "Mutation proxy endpoints (POST attach, DELETE detach, PUT set): no change",
+      "set_task_labels (PUT): no change",
+      "Embedded labels field in list_tasks Dataset rows or TASK_SCHEMA (F-004): separate sprint",
+      "Any LabelEngine changes"
+    ],
+    "not_platform": "These changes are specific to TaskTracker's label proxy behavior and its Dataset shaping for task-related label reads."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine POST /api/objects/labels/batch — BatchLabelsRequest { object_ids: list[str], object_type: str } → BatchLabelsResponse { labels: dict[str, list[{id, name, attached_at}]] }",
+      "LabelEngine GET /api/labels — label search by prefix → { labels: [{id, name}] }",
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema — canonical UI contract (R-CON-BP-04)",
+      "platform_errorhandling.api_error — canonical error shape"
+    ],
+    "provides": [
+      "GET /tasks/labels/search — Dataset with columns [id: string, name: string]",
+      "GET /tasks/{task_id}/labels — Dataset with columns [id: string, name: string, attached_at: date]",
+      "list_tasks continues to embed labels per-row via HTTP batch call (no SQL cross-schema access)"
+    ],
+    "invariants": [
+      "GET /tasks/labels/search and GET /tasks/{task_id}/labels return Dataset | ApiError — never a bespoke shape",
+      "fetch_labels_for_tasks does not hold a DB connection parameter; it uses _label_client() exclusively",
+      "The batch call uses object_type='task' consistently"
+    ],
+    "failure_modes": [
+      "LabelEngine unreachable: fetch_labels_for_tasks returns {} (empty map); list_tasks rows get empty labels list",
+      "LabelEngine unreachable on search_labels: upstream HTTP status propagated with Dataset fallback not required — ApiError acceptable",
+      "LabelEngine unreachable on get_task_labels: upstream HTTP status propagated — ApiError acceptable",
+      "LabelEngine returns non-200 on batch: fetch_labels_for_tasks returns {} silently"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine POST /api/objects/labels/batch via _label_client()",
+      "LabelEngine GET /api/labels via _label_client()",
+      "LabelEngine GET /api/objects/{task_id}/labels via _label_client()"
+    ],
+    "provides": [
+      "GET /tasks/labels/search?q=<prefix> → Dataset | ApiError",
+      "GET /tasks/{task_id}/labels → Dataset | ApiError"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /tasks/labels/search",
+        "purpose": "Search labels by prefix for autocomplete; returns Dataset with id and name columns",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /tasks/{task_id}/labels",
+        "purpose": "Return labels attached to a specific task; returns Dataset with id, name, attached_at columns",
+        "ui_contract": "Dataset | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "replace_fetch_labels_for_tasks",
+      "description": "Remove the SQL implementation of fetch_labels_for_tasks (tasks.py:72–95). Replace with an HTTP call to POST /api/objects/labels/batch via _label_client(). Drop the conn parameter. Return type remains dict[str, list[dict]]. On non-200 response return {}. The call site in list_tasks (line ~231) drops the conn argument.",
+      "inputs": ["task_ids: list[str]"],
+      "outputs": ["dict[str, list[{id, name, attached_at}]] keyed by task_id; empty dict on error or empty input"]
+    },
+    {
+      "step": 2,
+      "name": "transform_search_labels",
+      "description": "search_labels endpoint: after receiving the LabelEngine response, extract items from resp.json().get('labels', []). Construct Dataset with meta(object_type='label', label='Labels', total=len(items), page=1, page_size=len(items), row_actions=[]) and schema [id: string, name: string]. rows are [{id: item['id'], name: item['name']} for item in items]. Return via dataset_response(). On non-200 from LabelEngine, propagate error status using JSONResponse.",
+      "inputs": ["q: str (query param, default '')"],
+      "outputs": ["Dataset with id and name columns | JSONResponse with upstream error status"]
+    },
+    {
+      "step": 3,
+      "name": "transform_get_task_labels",
+      "description": "get_task_labels endpoint: after receiving the LabelEngine response, extract items from resp.json().get('labels', []). Construct Dataset with meta(object_type='task_label', label='Task Labels', total=len(items), page=1, page_size=len(items), row_actions=['delete']) and schema [id: string, name: string, attached_at: date]. rows are [{id: lbl['label_id'], name: lbl['label_name'], attached_at: lbl['attached_at']} for lbl in items]. Return via dataset_response(). On non-200 from LabelEngine, propagate error status using JSONResponse.",
+      "inputs": ["task_id: str (path param)"],
+      "outputs": ["Dataset with id, name, attached_at columns | JSONResponse with upstream error status"]
+    },
+    {
+      "step": 4,
+      "name": "update_shellentry_call_sites",
+      "description": "Update four call sites in ShellEntry.tsx that consume bespoke label shapes. (a) Lines ~435–436: search_labels autocomplete in LabelPanel — change res.labels cast to res.rows.map(r => ({id: r.id as string, name: r.name as string})). (b) Lines ~732–733: search_labels autocomplete in TaskEditPanel — same transformation. (c) Lines ~893–895: get_task_labels initial load in TaskEditPanel — change res.labels cast to res.rows.map(r => ({label_id: r.id as string, label_name: r.name as string, attached_at: r.attached_at as string})). (d) Lines ~1102–1103: search_labels autocomplete in TaskCreatePanel.handleLabelQueryChange — same transformation as (a) and (b): res.rows.map(r => ({id: r.id as string, name: r.name as string})). The apiFetch generic type parameter changes from { labels: T } to a structural type with rows field for all four sites.",
+      "inputs": ["ShellEntry.tsx current call sites consuming { labels: [...] } shapes"],
+      "outputs": ["ShellEntry.tsx four call sites consuming res.rows with correct field mapping"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_contracts/contracts.py", "role": "Dataset, DatasetMeta, ColumnSchema — already imported in tasks.py"},
+      {"component": "02_Platform/LabelEngine (running service)", "role": "POST /api/objects/labels/batch — batch label read endpoint added in LabelEngine Sprint02"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "httpx", "role": "HTTP client for _label_client(); already in use", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Direct SQL access to labels.* schema from TaskTracker (boundary violation F-001)",
+      "Returning bespoke { labels: [...] } shapes from GET /tasks/labels/search or GET /tasks/{task_id}/labels (contract violation F-002)",
+      "Importing from LabelEngine's internal Python modules"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "none"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Replace fetch_labels_for_tasks body (tasks.py:72–95): remove SQL logic and conn parameter; implement HTTP batch call as specified in internal_flow step 1",
+      "Update list_tasks call site (tasks.py:~231): remove conn argument from fetch_labels_for_tasks call",
+      "Transform search_labels (tasks.py GET /tasks/labels/search): replace pass-through JSONResponse with Dataset construction as specified in internal_flow step 2",
+      "Transform get_task_labels (tasks.py GET /tasks/{task_id}/labels): replace pass-through JSONResponse with Dataset construction as specified in internal_flow step 3",
+      "Update ShellEntry.tsx four call sites as specified in internal_flow step 4 (lines ~435, ~732, ~893, ~1102)"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "GET /tasks/labels/search?q=foo — verify response is Dataset shape with meta.object_type='label' and rows containing id and name",
+      "GET /tasks/{task_id}/labels — verify response is Dataset shape with meta.object_type='task_label' and rows containing id, name, attached_at",
+      "list_tasks — verify no SQL query against labels.* schema is executed; labels arrive via batch HTTP call",
+      "fetch_labels_for_tasks with empty list — verify returns {} without calling LabelEngine",
+      "fetch_labels_for_tasks when LabelEngine returns non-200 — verify returns {} without raising",
+      "ShellEntry autocomplete — verify suggestions populate correctly from res.rows",
+      "ShellEntry task label display — verify attached labels render correctly from res.rows"
+    ],
+    "reviewer": [
+      "Confirm conn parameter is fully removed from fetch_labels_for_tasks signature and all call sites",
+      "Confirm search_labels no longer passes through LabelEngine's raw response shape",
+      "Confirm get_task_labels no longer passes through LabelEngine's raw response shape",
+      "Confirm all four ShellEntry.tsx call sites are updated (lines ~435, ~732, ~893, ~1102)",
+      "Confirm no import of labels.* SQL schema remains in tasks.py"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "LabelEngine Sprint02 batch endpoint not yet deployed",
+      "impact": "fetch_labels_for_tasks will return {} on every call; list_tasks will show empty labels for all tasks until the service is available"
+    },
+    {
+      "risk": "LabelEngine batch response field name mismatch",
+      "impact": "Sprint02 architecture defines BatchLabelRecord as {id, name, attached_at}. The draft.md cites the same shape. If the actual deployed endpoint uses different field names, the row-building code in fetch_labels_for_tasks will silently produce empty or malformed label records."
+    },
+    {
+      "risk": "ShellEntry.tsx apiFetch generic type parameter",
+      "impact": "The existing call sites use apiFetch<{ labels: T }>. Changing to consume res.rows requires the type parameter to be compatible with Dataset or to use a structural type asserting rows exists. If apiFetch enforces the generic strictly, a type assertion or import of Dataset type may be needed."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should search_labels propagate LabelEngine non-200 status codes directly, or wrap them in an api_error response? The draft does not specify error handling for the proxy endpoints.",
+      "owner": "implementer"
+    }
+  ]
+}

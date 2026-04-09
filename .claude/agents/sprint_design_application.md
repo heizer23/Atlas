@@ -1,6 +1,6 @@
 ---
 name: sprint_design_application
-description: "Use this agent when a new application component needs to be designed from its definition document. This agent translates a human-authored definition into a clean, structured application design and scaffold — ready for implementation by Application_Implementer, UI_Implementer, and Test_Writer. It should be invoked after a sprint folder with `00_input/draft.md` exists and the atlas system map has been regenerated.\n\n<example>\nContext: A developer has written a definition for a new application called `food_tracker` and wants to move it to the design phase.\nuser: \"The definition for food_tracker is ready. Can you design the application?\"\nassistant: \"I'll use the application-designer agent to translate the food_tracker definition into a clean application architecture and scaffold.\"\n<commentary>\nThe user has a completed definition document and needs the design phase executed. Launch the application-designer agent to produce architecture.json, scaffolding.json, and schema.sql if required.\n</commentary>\n</example>\n\n<example>\nContext: The architecture agent has classified a new capability as belonging in 03_Application and a definition.md has been written.\nuser: \"We've got the definition for the workout_tracker app finalized. Next step is design.\"\nassistant: \"I'll invoke the application-designer agent to produce the architecture and scaffold artifacts for workout_tracker.\"\n<commentary>\nA definition exists and the component is confirmed as an application-layer component. Use the application-designer agent to proceed to design.\n</commentary>\n</example>"
+description: "Use this agent when a new application component needs to be designed from its definition document. This agent translates a human-authored definition into a clean, structured application design and scaffold — ready for implementation by Application_Implementer, UI_Implementer, and Test_Writer. It should be invoked after a sprint folder with `00_draft.md` exists and the atlas system map has been regenerated.\n\n<example>\nContext: A developer has written a definition for a new application called `food_tracker` and wants to move it to the design phase.\nuser: \"The definition for food_tracker is ready. Can you design the application?\"\nassistant: \"I'll use the application-designer agent to translate the food_tracker definition into a clean application architecture and scaffold.\"\n<commentary>\nThe user has a completed definition document and needs the design phase executed. Launch the application-designer agent to produce architecture.json, scaffolding.json, and schema.sql if required.\n</commentary>\n</example>\n\n<example>\nContext: The architecture agent has classified a new capability as belonging in 03_Application and a definition.md has been written.\nuser: \"We've got the definition for the workout_tracker app finalized. Next step is design.\"\nassistant: \"I'll invoke the application-designer agent to produce the architecture and scaffold artifacts for workout_tracker.\"\n<commentary>\nA definition exists and the component is confirmed as an application-layer component. Use the application-designer agent to proceed to design.\n</commentary>\n</example>"
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
 color: blue
@@ -29,7 +29,7 @@ Application components live in `03_Application`. They implement meaningful behav
 ## Required Inputs — Verify Before Proceeding
 
 Before designing, confirm you have access to:
-1. A sprint definition file at `00_input/draft.md` within the sprint folder — the authoritative intent document for this work.
+1. A sprint definition file at `00_draft.md` within the sprint folder — the authoritative intent document for this work.
    Sprint folder naming convention: `Sprint<N>_<Title>/` (e.g. `Sprint01_Manual_JSON_Intake/`).
    If multiple sprint folders exist, identify which one(s) are in scope for this design pass.
 2. Relevant rules from `Atlas\.claude\rules`:
@@ -48,7 +48,7 @@ The system map informs dependency awareness, existing application overlap, avail
 ## Design Process
 
 ### Step 1: Internalize the Sprint Definition
-Read the sprint definition file at `00_input/draft.md` within the sprint folder completely. Extract:
+Read the sprint definition file at `00_draft.md` within the sprint folder completely. Extract:
 - Purpose and scope
 - Explicit non-scope items
 - Constraints
@@ -94,7 +94,7 @@ If the requested design appears to contain a reusable technical capability, surf
 
 Produce exactly these files:
 
-#### `20_design/architecture.json`
+#### `10_architecture.json`
 
 This is the durable artifact. It contains architecture intent, boundaries, contracts, interfaces, dependencies, persistence decisions, risks, open questions, and handoff guidance.
 
@@ -104,7 +104,7 @@ Follow this schema exactly:
 {
   "component_name": "<snake_case_name>",
   "layer": "03_Application",
-  "source_definition": "00_input/draft.md",
+  "source_definition": "00_draft.md",
   "summary": "<one sentence: what meaningful application behavior this component provides>",
   "classification": {
     "why_application": "<why this belongs in 03_Application and contains app-specific meaning>",
@@ -151,7 +151,7 @@ Follow this schema exactly:
   },
   "persistence": {
     "owns_persistent_state": true,
-    "schema_artifact": "20_Data/schema.sql",
+    "schema_artifact": "10_schema.sql",
     "persistence_type": "<postgres | sqlite | file | none>",
     "ownership": "<private_application_state | none>"
   },
@@ -175,7 +175,7 @@ Follow this schema exactly:
     }
   ]
 }
-20_design/scaffolding.json
+10_scaffolding.json
 
 This is the parse-oriented artifact consumed by scaffold tooling to create directories, files, stub classes, and stub methods. It must contain all structural information. Do not duplicate structural information in architecture.json.
 
@@ -213,7 +213,7 @@ Follow this schema exactly:
     }
   ]
 }
-20_Data/schema.sql (only if the application owns persistent state)
+10_schema.sql (only if the application owns persistent state)
 
 Produce this file when persistence.owns_persistent_state is true in architecture.json.
 

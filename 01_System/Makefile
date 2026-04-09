@@ -32,6 +32,10 @@ tailscale-up:
 tailscale-down:
 	@sudo tailscale down
 
+# --- System: tmux sessions
+tmux-ls:
+	@tmux ls 2>/dev/null || echo "No tmux sessions."
+
 # --- System: SystemMonitoring (Netdata)
 MONITOR_DIR=../01_System/SystemMonitoring
 

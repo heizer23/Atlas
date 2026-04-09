@@ -69,30 +69,18 @@ def row_to_dict(row: Any) -> dict[str, Any]:
     return d
 
 
-def fetch_labels_for_tasks(conn: Any, task_ids: list[str]) -> dict[str, list[dict[str, str]]]:
-    """Return a mapping of task_id -> [{id, name}, ...] ordered by attached_at ASC."""
+def fetch_labels_for_tasks(task_ids: list[str]) -> dict[str, list[dict]]:
+    """Return a mapping of task_id -> [{id, name, attached_at}, ...] via LabelEngine batch API."""
     if not task_ids:
         return {}
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            select ol.object_id, l.id as label_id, l.name as label_name
-            from labels.object_labels ol
-            join labels.labels l on l.id = ol.label_id
-            where ol.object_id = any(%s)
-              and ol.object_type = 'task'
-            order by ol.object_id, ol.attached_at, ol.label_id
-            """,
-            (task_ids,),
+    with _label_client() as client:
+        resp = client.post(
+            "/api/objects/labels/batch",
+            json={"object_ids": task_ids, "object_type": "task"},
         )
-        rows = cur.fetchall()
-    result: dict[str, list[dict[str, str]]] = {}
-    for r in rows:
-        tid = r["object_id"]
-        if tid not in result:
-            result[tid] = []
-        result[tid].append({"id": r["label_id"], "name": r["label_name"]})
-    return result
+    if resp.status_code != 200:
+        return {}
+    return resp.json().get("labels", {})
 
 
 def dataset_response(dataset: Dataset) -> JSONResponse:
@@ -228,7 +216,7 @@ def list_tasks(
 
         # Embed labels into each row using a single batch query
         task_ids = [r["id"] for r in rows]
-        labels_by_task = fetch_labels_for_tasks(conn, task_ids)
+        labels_by_task = fetch_labels_for_tasks(task_ids)
         for r in rows:
             r["labels"] = labels_by_task.get(r["id"], [])
 
@@ -351,18 +339,56 @@ class LabelAttachBody(BaseModel):
 
 @router.get("/labels/search", response_model=None)
 def search_labels(q: str = "") -> JSONResponse:
-    """Proxy: search labels by prefix via LabelEngine."""
+    """Search labels by prefix via LabelEngine; returns Dataset."""
     with _label_client() as client:
         resp = client.get("/api/labels", params={"q": q})
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    if resp.status_code != 200:
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+    items = resp.json().get("labels", [])
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="label",
+            label="Labels",
+            total=len(items),
+            page=1,
+            page_size=len(items),
+            row_actions=[],
+        ),
+        **{"schema": [
+            ColumnSchema(key="id",   label="ID",   type="string"),
+            ColumnSchema(key="name", label="Name", type="string"),
+        ]},
+        rows=[{"id": item["id"], "name": item["name"]} for item in items],
+    ))
 
 
 @router.get("/{task_id}/labels", response_model=None)
 def get_task_labels(task_id: str) -> JSONResponse:
-    """Proxy: return labels attached to a task."""
+    """Return labels attached to a task via LabelEngine; returns Dataset."""
     with _label_client() as client:
         resp = client.get(f"/api/objects/{task_id}/labels")
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    if resp.status_code != 200:
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+    items = resp.json().get("labels", [])
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="task_label",
+            label="Task Labels",
+            total=len(items),
+            page=1,
+            page_size=len(items),
+            row_actions=["delete"],
+        ),
+        **{"schema": [
+            ColumnSchema(key="id",          label="ID",       type="string"),
+            ColumnSchema(key="name",        label="Name",     type="string"),
+            ColumnSchema(key="attached_at", label="Attached", type="date"),
+        ]},
+        rows=[
+            {"id": lbl["label_id"], "name": lbl["label_name"], "attached_at": lbl["attached_at"]}
+            for lbl in items
+        ],
+    ))
 
 
 @router.post("/{task_id}/labels", response_model=None)

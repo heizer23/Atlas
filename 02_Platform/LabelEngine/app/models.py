@@ -65,3 +65,20 @@ class CreateLabelRequest(BaseModel):
 class AttachLabelRequest(BaseModel):
     label_name:  str
     object_type: str  # caller-supplied; must be lowercase (DB CHECK constraint enforces)
+
+
+# ── Batch read models ─────────────────────────────────────────────────────────
+
+class BatchLabelRecord(BaseModel):
+    id:          str
+    name:        str
+    attached_at: str  # ISO-8601
+
+
+class BatchLabelsRequest(BaseModel):
+    object_ids:  list[str]
+    object_type: str
+
+
+class BatchLabelsResponse(BaseModel):
+    labels: dict[str, list[BatchLabelRecord]]

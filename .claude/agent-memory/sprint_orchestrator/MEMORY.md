@@ -8,6 +8,7 @@
 - [LinkingEngine Sprint01 Pattern](project_linking_engine_sprint01.md) — Generic object-linking Platform service; AWAITING_HUMAN_REVIEW; pre-existing app code reconciled with design artifacts
 
 - [LabelEngine Sprint01 Pattern](project_labelengine_sprint01.md) — Minimal label/object many-to-many; AWAITING_HUMAN_REVIEW; human gate required before sprint_implement_reviewer; design gap (AttachLabelRequest.object_type) resolved by implementer
+- [LabelEngine Sprint02 Pattern](project_labelengine_sprint02.md) — Batch read endpoint (POST /api/objects/labels/batch); AWAITING_HUMAN_REVIEW; route ordering risk mitigated; fixes F-001 TaskTracker boundary violation
 - [NumericSeries Sprint01 Pattern](project_numericseries_sprint01.md) — Time-series measurement tracker; recharts sparkline; AWAITING_HUMAN_REVIEW; open question resolved as 404 on unknown label external write
 
 ## Feedback

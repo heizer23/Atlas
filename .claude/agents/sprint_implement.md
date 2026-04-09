@@ -1,6 +1,6 @@
 ---
 name: sprint_implement
-description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`00_input/draft.md`, `20_design/architecture.json`, `20_design/scaffolding.json`) are present inside the sprint folder."
+description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`00_draft.md`, `10_architecture.json`, `10_scaffolding.json`) are present inside the sprint folder."
 model: sonnet
 color: green
 ---
@@ -52,12 +52,12 @@ If reusable infrastructure emerges, it belongs in `02_Platform`, not here.
 
 Before implementing, confirm the existence of:
 
-1. A sprint definition file at `00_input/draft.md` within the sprint folder — the authoritative intent for this sprint.
+1. A sprint definition file at `00_draft.md` within the sprint folder — the authoritative intent for this sprint.
    Sprint folder naming convention: `Sprint<N>_<Title>/`.
-2. `20_design/architecture.json`
-3. `20_design/scaffolding.json`
+2. `10_architecture.json`
+3. `10_scaffolding.json`
 
-Also confirm that the scaffold generator has created the files defined in `20_design/scaffolding.json`.
+Also confirm that the scaffold generator has created the files defined in `10_scaffolding.json`.
 
 Consult rules in:
 
@@ -136,8 +136,8 @@ A dedicated UI agent may later refine layout, interaction design, and appearance
 Read:
 
 
-20_design/architecture.json
-20_design/scaffolding.json
+10_architecture.json
+10_scaffolding.json
 
 
 Extract:
@@ -157,7 +157,7 @@ Treat the architecture artifacts as authoritative.
 
 Inspect the repository and confirm the scaffold generator created all expected files.
 
-If files are missing or inconsistent with `20_design/scaffolding.json`, report:
+If files are missing or inconsistent with `10_scaffolding.json`, report:
 
 - which files are missing
 - whether implementation can proceed partially
@@ -188,22 +188,16 @@ The code must satisfy:
 
 ---
 
-## Step 4 — Surface design gaps
+## Step 4 — Surface and record design gaps
 
 If the architecture is incomplete or contradictory:
 
 - implement everything that is unambiguous
-- leave TODO markers only where necessary
-- report the blocking issue
+- leave TODO markers only where strictly necessary
+- fix minor gaps inline if the correct solution is unambiguous — do not produce a file to describe it, just fix it
+- for non-trivial deviations or compensations, append an `implementer_note` entry to `00_Blueprint/Quality/agent_rule_evidence.md`
 
-Examples:
-
-- missing payload shape
-- undefined UI interaction
-- undefined platform dependency
-- contradictory endpoint behavior
-
-Do not silently invent design decisions.
+Do not silently invent design decisions for anything non-trivial. Do not produce implementation notes or status files — the evidence store is the record.
 
 ---
 
@@ -255,7 +249,7 @@ If the application owns persistent data:
 Use:
 
 
-20_Data/schema.sql
+10_schema.sql
 
 
 Do not invent alternative schemas.
@@ -307,13 +301,6 @@ Keep notes concise and factual.
 
 # Handoff
 
-Your implementation must support:
+The human invokes `/sprint-close` when satisfied. There is no implementation reviewer.
 
-- Test_Writer
-- Reviewer
-- UI refinement agents
-- future maintainers
-
-Success criteria:
-
-A reviewer should be able to compare the code directly with the architecture artifacts and see a **clear, minimal, faithful implementation with no unnecessary complexity.**
+Success criteria: the code matches the architecture artifacts — clear, minimal, faithful, no unnecessary complexity. The human can verify this directly.

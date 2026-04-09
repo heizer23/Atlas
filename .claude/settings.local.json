@@ -169,7 +169,10 @@
       "Bash(make task-build:*)",
       "Bash(make net-connect:*)",
       "Bash(make shell-build:*)",
-      "Bash(make:*)"
+      "Bash(make:*)",
+      "Bash(systemctl list-units:*)",
+      "Bash(xargs -I{} readlink {})",
+      "Bash(tmux source:*)"
     ]
   }
 }

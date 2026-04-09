@@ -22,7 +22,8 @@ sudo apt install -y \
   apt-transport-https \
   gnupg \
   lsb-release \
-  make
+  make \
+  tmux
 
 # ---- Tailscale (System access) ----
 echo "==> Ensuring Tailscale is installed"

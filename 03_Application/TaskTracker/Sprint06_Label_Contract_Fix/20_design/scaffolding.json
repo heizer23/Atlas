@@ -1,0 +1,108 @@
+{
+  "component_name": "tasktracker",
+  "target_root": "03_Application/TaskTracker",
+  "directories": [],
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "stub_kind": "python_module",
+      "role": "Modify existing router: replace SQL-based fetch_labels_for_tasks with HTTP batch call; transform search_labels and get_task_labels to return Dataset",
+      "modifications": [
+        {
+          "target": "fetch_labels_for_tasks",
+          "action": "replace_body",
+          "description": "Remove conn parameter and SQL implementation. New signature: fetch_labels_for_tasks(task_ids: list[str]) -> dict[str, list[dict]]. Body: if not task_ids, return {}. Use _label_client() to POST /api/objects/labels/batch with json={'object_ids': task_ids, 'object_type': 'task'}. If resp.status_code != 200, return {}. Return resp.json().get('labels', {})."
+        },
+        {
+          "target": "list_tasks call site ~line 231",
+          "action": "update_call_site",
+          "description": "Change fetch_labels_for_tasks(conn, task_ids) to fetch_labels_for_tasks(task_ids). Remove conn argument."
+        },
+        {
+          "target": "search_labels",
+          "action": "replace_body",
+          "description": "After fetching from LabelEngine GET /api/labels, extract items = resp.json().get('labels', []). If resp.status_code != 200, return JSONResponse(status_code=resp.status_code, content=resp.json()). Return dataset_response(Dataset(meta=DatasetMeta(object_type='label', label='Labels', total=len(items), page=1, page_size=len(items), row_actions=[]), **{'schema': [ColumnSchema(key='id', label='ID', type='string'), ColumnSchema(key='name', label='Name', type='string')]}, rows=[{'id': item['id'], 'name': item['name']} for item in items]))."
+        },
+        {
+          "target": "get_task_labels",
+          "action": "replace_body",
+          "description": "After fetching from LabelEngine GET /api/objects/{task_id}/labels, extract items = resp.json().get('labels', []). If resp.status_code != 200, return JSONResponse(status_code=resp.status_code, content=resp.json()). Return dataset_response(Dataset(meta=DatasetMeta(object_type='task_label', label='Task Labels', total=len(items), page=1, page_size=len(items), row_actions=['delete']), **{'schema': [ColumnSchema(key='id', label='ID', type='string'), ColumnSchema(key='name', label='Name', type='string'), ColumnSchema(key='attached_at', label='Attached', type='date')]}, rows=[{'id': lbl['label_id'], 'name': lbl['label_name'], 'attached_at': lbl['attached_at']} for lbl in items]))."
+        }
+      ],
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "fetch_labels_for_tasks",
+          "pattern": "service_helper",
+          "methods": [
+            {
+              "name": "fetch_labels_for_tasks",
+              "visibility": "public",
+              "args": ["task_ids: list[str]"],
+              "returns": "dict[str, list[dict]]",
+              "purpose": "Call LabelEngine batch endpoint; return map of task_id to label records; return {} on empty input or error"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "search_labels",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "search_labels",
+              "visibility": "public",
+              "args": ["q: str = ''"],
+              "returns": "JSONResponse",
+              "purpose": "Proxy label search to LabelEngine; return Dataset with id and name columns"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_task_labels",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "get_task_labels",
+              "visibility": "public",
+              "args": ["task_id: str"],
+              "returns": "JSONResponse",
+              "purpose": "Proxy task label fetch to LabelEngine; return Dataset with id, name, attached_at columns"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Modify existing frontend: update three call sites that consume bespoke label shapes to consume Dataset res.rows instead",
+      "modifications": [
+        {
+          "target": "LabelPanel — search call site (~line 435–436)",
+          "action": "update_call_site",
+          "description": "Change apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=...`) and (res as { labels: LabelRecord[] }).labels to: apiFetch<{ rows: { id: string; name: string }[] }>(`/tasks/labels/search?q=...`) and setSuggestions(res.rows.map(r => ({ id: r.id as string, name: r.name as string })) ?? [])"
+        },
+        {
+          "target": "TaskEditPanel — search call site (~line 732–733)",
+          "action": "update_call_site",
+          "description": "Same transformation as LabelPanel search call site: consume res.rows with id and name mapping."
+        },
+        {
+          "target": "TaskEditPanel — get_task_labels load call site (~line 893–895)",
+          "action": "update_call_site",
+          "description": "Change apiFetch<{ labels: AttachedLabel[] }>(`/tasks/${task.id}/labels`) and (res as { labels: AttachedLabel[] }).labels to: apiFetch<{ rows: { id: string; name: string; attached_at: string }[] }>(`/tasks/${task.id}/labels`) and setAttachedLabels(res.rows.map(r => ({ label_id: r.id as string, label_name: r.name as string, attached_at: r.attached_at as string })) ?? [])"
+        },
+        {
+          "target": "TaskCreatePanel — search call site (~line 1102–1103)",
+          "action": "update_call_site",
+          "description": "Change apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=...`) and (res as { labels: LabelRecord[] }).labels to: apiFetch<{ rows: { id: string; name: string }[] }>(`/tasks/labels/search?q=...`) and setLabelSugs(res.rows.map(r => ({ id: r.id as string, name: r.name as string })) ?? []). This is the handleLabelQueryChange function inside TaskCreatePanel."
+        }
+      ],
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

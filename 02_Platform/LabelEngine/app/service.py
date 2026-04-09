@@ -16,6 +16,7 @@ import math
 import psycopg2.extensions
 
 from app.models import (
+    BatchLabelRecord,
     GroupedMeta,
     GroupedObjectsResponse,
     GroupItem,
@@ -348,6 +349,56 @@ class LabelService:
             ),
             groups=groups,
         )
+
+    # ── Batch label read ──────────────────────────────────────────────────────
+
+    def get_labels_for_objects(
+        self,
+        conn: psycopg2.extensions.connection,
+        object_ids: list[str],
+        object_type: str,
+    ) -> dict[str, list[BatchLabelRecord]]:
+        """
+        Return labels for a set of object_ids filtered by object_type.
+
+        Uses a single ANY(%s) query. Result dict is zero-filled: every
+        requested object_id appears as a key, even if no labels are attached.
+        Labels within each list are ordered by attached_at ASC, label_id ASC
+        (consistent with get_labels_for_object ordering).
+
+        Caller must validate that object_ids is non-empty before calling this
+        method (the router short-circuits on empty input).
+        """
+        # Initialise zero-fill result from input list
+        result: dict[str, list[BatchLabelRecord]] = {oid: [] for oid in object_ids}
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select ol.object_id, ol.label_id, l.name as label_name,
+                       ol.attached_at
+                from labels.object_labels ol
+                join labels.labels l on l.id = ol.label_id
+                where ol.object_id = any(%s)
+                  and ol.object_type = %s
+                order by ol.attached_at asc, ol.label_id asc
+                """,
+                (object_ids, object_type),
+            )
+            rows = cur.fetchall()
+
+        for r in rows:
+            oid = r["object_id"]
+            if oid in result:
+                result[oid].append(
+                    BatchLabelRecord(
+                        id          = r["label_id"],
+                        name        = r["label_name"],
+                        attached_at = r["attached_at"].isoformat(),
+                    )
+                )
+
+        return result
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

@@ -1,0 +1,29 @@
+{
+  "sprint_name": "Sprint06_Label_Contract_Fix",
+  "component_name": "TaskTracker",
+  "layer": "03_Application",
+  "current_state": "AWAITING_HUMAN_REVIEW",
+  "last_completed_step": "sprint_implement",
+  "next_recommended_agent": "sprint_implement_reviewer",
+  "required_inputs": [
+    "00_input/draft.md",
+    "20_design/architecture.json",
+    "20_design/scaffolding.json",
+    "20_design/design_review.md",
+    "20_design/design_review2.md",
+    "20_design/design_corrections.md",
+    "30_implementation/implementation_notes.md",
+    "40_status/implementation_status.md"
+  ],
+  "blocking": false,
+  "block_reason": null,
+  "human_gate_required": true,
+  "notes": [
+    "specs-reviewer stage skipped: mature application with detailed draft",
+    "design_review.md: APPROVED_WITH_CHANGES (missing fourth ShellEntry call site)",
+    "design_corrections.md: fourth call site added",
+    "design_review2.md: APPROVED",
+    "Implementation complete: tasks.py and ShellEntry.tsx modified",
+    "HUMAN GATE: confirm implementation before invoking sprint_implement_reviewer"
+  ]
+}

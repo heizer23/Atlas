@@ -36,32 +36,16 @@ def init_pool() -> None:
 
 
 def init_schema() -> None:
-    """Run schema DDL on startup — idempotent (uses IF NOT EXISTS)."""
+    """Run schema DDL on startup — idempotent (uses IF NOT EXISTS).
+
+    Executes schema.sql as the single canonical source of truth.
+    """
+    schema_path = os.path.join(os.path.dirname(__file__), "..", "schema.sql")
+    with open(schema_path) as f:
+        ddl = f.read()
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                create schema if not exists tasktracker;
-
-                create table if not exists tasktracker.tasks (
-                    id          uuid        primary key default gen_random_uuid(),
-                    title       text        not null,
-                    description text,
-                    status      text        not null default 'open'
-                                            check (status in ('open', 'in_progress', 'done')),
-                    priority    text        not null default 'medium'
-                                            check (priority in ('low', 'medium', 'high')),
-                    due_date    date,
-                    created_at  timestamptz not null default now(),
-                    updated_at  timestamptz not null default now()
-                );
-
-                create index if not exists ix_tasks_status
-                    on tasktracker.tasks(status);
-
-                create index if not exists ix_tasks_created_at
-                    on tasktracker.tasks(created_at desc);
-            """)
-        conn.commit()
+            cur.execute(ddl)
 
 
 @contextmanager

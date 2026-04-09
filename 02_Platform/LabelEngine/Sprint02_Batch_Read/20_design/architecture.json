@@ -1,0 +1,147 @@
+{
+  "component_name": "label_engine",
+  "layer": "02_Platform",
+  "source_definition": "00_input/draft.md",
+  "summary": "Adds a batch read endpoint to LabelEngine that returns labels for a set of object IDs in a single HTTP call.",
+  "classification": {
+    "why_platform": "This is a generic read capability over the existing labels.object_labels schema. It carries no domain meaning — it exposes raw label records keyed by caller-supplied UUIDs. Any application consuming LabelEngine can use it.",
+    "non_goals": [
+      "Pagination of batch results",
+      "Filtering by label name within the batch",
+      "Changes to existing single-object endpoints",
+      "Changes to TaskTracker (separate sprint)"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "labels.object_labels table (Postgres, schema owned by LabelEngine Sprint01)",
+      "labels.labels table (Postgres, schema owned by LabelEngine Sprint01)"
+    ],
+    "provides": [
+      "POST /api/objects/labels/batch — given a list of object_ids and an object_type, returns all attached labels for each object_id in one response",
+      "Zero-fill guarantee: every requested object_id appears as a key in the response, even if it has no labels attached"
+    ],
+    "invariants": [
+      "Response keys exactly match the input object_ids list (no extras, no omissions)",
+      "Labels within each object's list are ordered by attached_at ASC, label_id ASC (consistent with existing per-object ordering)",
+      "object_type is always required; requests without it are rejected 422",
+      "Requests with more than 200 object_ids are rejected 422 BATCH_TOO_LARGE before any DB query",
+      "An empty object_ids list returns an empty map immediately without a DB query"
+    ],
+    "failure_modes": [
+      "422 BATCH_TOO_LARGE — object_ids.length > 200",
+      "422 OBJECT_TYPE_REQUIRED — object_type missing or empty string",
+      "422 OBJECT_IDS_REQUIRED — object_ids field missing from body (Pydantic validation)",
+      "503 DB_UNAVAILABLE — connection pool exhausted or DB unreachable"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": [
+      "BatchLabelsRequest — { object_ids: list[str], object_type: str }",
+      "BatchLabelRecord — { id: str, name: str, attached_at: str (ISO-8601) }",
+      "BatchLabelsResponse — { labels: dict[str, list[BatchLabelRecord]] }"
+    ]
+  },
+  "interfaces": {
+    "consumes": [],
+    "provides": [
+      "POST /api/objects/labels/batch — BatchLabelsRequest → BatchLabelsResponse"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/objects/labels/batch",
+        "purpose": "Return labels for multiple objects in one call; zero-fills missing object IDs"
+      },
+      {
+        "type": "python_api",
+        "name": "LabelService.get_labels_for_objects",
+        "purpose": "Execute a single parameterized SQL query for a batch of object_ids and object_type; return a dict keyed by object_id"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "validate_request",
+      "description": "Router receives POST body. If object_ids is empty, return {} immediately. If len(object_ids) > 200, return 422 BATCH_TOO_LARGE. If object_type is missing or empty-after-strip, return 422 OBJECT_TYPE_REQUIRED.",
+      "inputs": ["BatchLabelsRequest body"],
+      "outputs": ["validated object_ids list", "validated object_type string", "OR 422 error response"]
+    },
+    {
+      "step": 2,
+      "name": "query_db",
+      "description": "Call LabelService.get_labels_for_objects(conn, object_ids, object_type). Service executes one query: SELECT ol.object_id, ol.label_id, l.name, ol.attached_at FROM labels.object_labels ol JOIN labels.labels l ON l.id = ol.label_id WHERE ol.object_id = ANY(%s) AND ol.object_type = %s ORDER BY ol.attached_at ASC, ol.label_id ASC.",
+      "inputs": ["validated object_ids list", "validated object_type string", "DB connection"],
+      "outputs": ["list of raw rows: (object_id, label_id, label_name, attached_at)"]
+    },
+    {
+      "step": 3,
+      "name": "build_response",
+      "description": "Service initialises result dict with all requested object_ids mapped to empty lists (zero-fill). Iterates DB rows and appends BatchLabelRecord to the appropriate key. Returns BatchLabelsResponse.",
+      "inputs": ["input object_ids list (for zero-fill keys)", "list of raw DB rows"],
+      "outputs": ["BatchLabelsResponse with all requested object_id keys populated"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/LabelEngine/app/service.py", "role": "LabelService — extended with get_labels_for_objects method"},
+      {"component": "02_Platform/LabelEngine/app/models.py", "role": "new Pydantic models: BatchLabelsRequest, BatchLabelRecord, BatchLabelsResponse"},
+      {"component": "02_Platform/LabelEngine/app/database.py", "role": "get_db — existing connection pool accessor"},
+      {"component": "02_Platform/LabelEngine/app/routers/objects.py", "role": "existing router file — new route added here"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "psycopg2", "role": "PostgreSQL driver, ANY(%s) array parameter", "reuse_existing": true},
+      {"name": "pydantic", "role": "request/response model validation", "reuse_existing": true},
+      {"name": "fastapi", "role": "HTTP routing", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Direct SQL access from router (all DB access via LabelService)",
+      "Separate DB queries per object_id (must be a single batched ANY(%s) query)",
+      "Any application-specific logic or domain interpretation"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "none"
+  },
+  "deferrals": {
+    "platform_implementer": [
+      "Add BatchLabelRecord, BatchLabelsRequest, BatchLabelsResponse to app/models.py",
+      "Add get_labels_for_objects(conn, object_ids, object_type) to LabelService in app/service.py using ANY(%s) query; zero-fill from input list",
+      "Add POST /api/objects/labels/batch route to app/routers/objects.py with validation logic from internal_flow step 1",
+      "Route must be placed before the per-object routes to avoid FastAPI matching 'labels' as an object_id in /api/objects/{object_id}/labels — verify route ordering in objects.py"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "Happy path: two objects each with labels — verify both appear with correct label lists and ordering",
+      "Partial hit: one object has labels, one has none — verify zero-fill (empty list, not absent key)",
+      "Empty object_ids: verify immediate {} return, no DB call",
+      "Over-limit: 201 object_ids — verify 422 BATCH_TOO_LARGE",
+      "object_type mismatch: request object_type does not match stored attachment object_type — verify labels from other types are NOT returned",
+      "Missing object_type: verify 422 OBJECT_TYPE_REQUIRED",
+      "All requested IDs have no labels: verify all keys present with empty lists"
+    ],
+    "reviewer": [
+      "Confirm route ordering in objects.py: /api/objects/labels/batch must not be shadowed by /api/objects/{object_id}/labels",
+      "Confirm zero-fill is implemented from the input list, not the DB result set",
+      "Confirm ALL(%s) is used (single query) not N per-object queries"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Route ordering conflict",
+      "impact": "If POST /api/objects/labels/batch is registered after the per-object routes in objects.py, FastAPI may match 'labels' as an object_id literal in /api/objects/{object_id}/labels, routing the batch request to the wrong handler. Implementer must verify ordering."
+    },
+    {
+      "risk": "Large batch memory pressure",
+      "impact": "200 objects × many labels fetched in one query result. At the 200-object cap this is expected to be manageable, but should be noted for future limit review if label density grows."
+    }
+  ],
+  "open_questions": []
+}

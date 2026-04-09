@@ -27,10 +27,10 @@ Do not place components outside this structure unless explicitly requested.
 
 ## Security
 
-See R-OPS-BP-02 (`.claude/rules/R-OPS-BP-02_security.md`).
+See R-OPS-BP-02 (`.claude/rules/R-OPS-BP.md`).
 
 ## Repository references
-- Rule registry: `00_Blueprint/RULE_REGISTRY.md`
+- Rule system: `00_Blueprint/Rule_System.md`
 - Error handling: `02_Platform/03_ErrorHandling/`
 
 ## Agent delegation

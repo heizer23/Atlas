@@ -1,0 +1,88 @@
+{
+  "component_name": "label_engine",
+  "target_root": "02_Platform/LabelEngine",
+  "directories": [],
+  "files": [
+    {
+      "path": "02_Platform/LabelEngine/app/models.py",
+      "stub_kind": "python_module",
+      "role": "Add three new Pydantic models for the batch endpoint; all existing models remain unchanged",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "BatchLabelRecord",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "BatchLabelsRequest",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "BatchLabelsResponse",
+          "pattern": "data_model",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/service.py",
+      "stub_kind": "python_module",
+      "role": "Extend LabelService with get_labels_for_objects; all existing methods remain unchanged",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "LabelService",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "get_labels_for_objects",
+              "visibility": "public",
+              "args": [
+                "conn: psycopg2.extensions.connection",
+                "object_ids: list[str]",
+                "object_type: str"
+              ],
+              "returns": "dict[str, list[BatchLabelRecord]]",
+              "purpose": "Execute one ANY(%s) query for all object_ids filtered by object_type; return dict keyed by object_id with zero-filled empty lists for IDs with no labels"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/routers/objects.py",
+      "stub_kind": "python_module",
+      "role": "Add POST /api/objects/labels/batch route; all existing routes remain unchanged; new route must be declared before existing per-object routes to avoid path parameter shadowing",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "batch_labels",
+          "pattern": null,
+          "methods": [
+            {
+              "name": "batch_labels",
+              "visibility": "public",
+              "args": ["body: BatchLabelsRequest"],
+              "returns": "BatchLabelsResponse | JSONResponse",
+              "purpose": "Validate request, short-circuit on empty input, enforce 200-item limit, call LabelService.get_labels_for_objects, return BatchLabelsResponse"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/tests/test_objects.py",
+      "stub_kind": "python_module",
+      "role": "Add batch endpoint test stubs; all existing stubs remain unchanged",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

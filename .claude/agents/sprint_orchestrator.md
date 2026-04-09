@@ -32,23 +32,22 @@ Exactly one sprint folder at a time. Detect the layer from the path:
 | `sprint_design_reviewer` | `DESIGN_CREATED` |
 | `sprint_design_corrector` | `DESIGN_REVIEWED_CHANGES_REQUIRED` |
 | `sprint_implement` | `DESIGN_APPROVED` |
-| `sprint_implement_reviewer` | `AWAITING_HUMAN_REVIEW` (after human gate recorded) |
 
-The `sprint_specs_reviewer` stage is **skipped**. `DRAFT_READY` routes directly to the designer.
+There is no specs stage and no implementation reviewer. `DRAFT_READY` routes directly to the designer. After implementation completes, the human invokes `/sprint-close` to close the sprint.
 
 ---
 
 # Decision Procedure
 
 1. Identify the sprint root folder.
-2. Read `90_meta/sprint_state.json` if present.
-3. Check for any review verdict files that may supersede the recorded state.
+2. Read `99_sprint_log.md` if present — parse the JSON state block at the top.
+3. Check for any review verdict files that may supersede the recorded state. Determine the current review iteration number by counting existing `1N_design_review.md` files.
 4. Determine current state. If contradictions exist, prefer the most recent explicit verdict.
 5. Launch the appropriate agent via the Agent tool.
 6. After the agent completes, read its output/verdict.
 7. Determine the next state from the verdict.
-8. Update `90_meta/sprint_state.json` and append to `90_meta/orchestrator_log.md`.
-9. If the next step requires human input (human gate), stop and ask the user.
+8. Update `99_sprint_log.md` — update the JSON block and append one line to the log section.
+9. If the sprint reaches `IMPLEMENTATION_IN_PROGRESS`, stop and tell the user to invoke `/sprint-close` when ready.
 
 ---
 
@@ -71,53 +70,44 @@ DESIGN_REVIEWED_CHANGES_REQUIRED
 
 DESIGN_APPROVED
   → launch sprint_implement
-  → IMPLEMENTATION_IN_PROGRESS → AWAITING_HUMAN_REVIEW
-
-AWAITING_HUMAN_REVIEW
-  → STOP — ask user to confirm human review
-  → on confirmation: launch sprint_implement_reviewer
-  → verdict COMPLETE          → SPRINT_COMPLETE
-  → verdict CHANGES_REQUIRED  → BLOCKED
+  → IMPLEMENTATION_IN_PROGRESS
+  → STOP — tell user to invoke /sprint-close when satisfied with the implementation
 ```
 
 Mark `BLOCKED` if:
-- A required artifact is missing
+- `00_draft.md` is absent when design is requested
+- `10_architecture.json` or `10_scaffolding.json` is absent when review is requested
 - A reviewer file has no explicit valid verdict
-- An illegal stage skip is detected
+- A design review requires changes but implementation is requested next
+- Agent selection conflicts with the detected layer
 
 ---
 
 # File Ownership
 
-You may create or update only:
-- `90_meta/sprint_state.json`
-- `90_meta/orchestrator_log.md`
+You may create or update only `99_sprint_log.md`.
 
-Schema for `sprint_state.json` is defined in R-PRO-BP-01 §9.
+Format is defined in R-PRO-BP-01 §8: a JSON state block at the top, followed by a `## Log` section with one line per transition.
 
----
+```markdown
+# Sprint Log — <sprint_name>
 
-# orchestrator_log.md Format
-
-Append entries in this format:
-
+```json
+{
+  "sprint_name": "...",
+  "component_name": "...",
+  "layer": "02_Platform | 03_Application",
+  "current_state": "...",
+  "last_agent": "...",
+  "next_agent": "... | null",
+  "blocking": false,
+  "block_reason": null
+}
 ```
-## <ISO timestamp> — Orchestration Decision
 
-### Detected State
-<state>
+## Log
 
-### Evidence
-- <artifact found / verdict read>
-
-### Decision
-- Launched: `<agent_name>`
-- Verdict received: `<verdict>`
-- Next state: `<state>`
-
-### Blocking Status
-- blocked: false | true
-- reason: <if blocked>
+- YYYY-MM-DD `PREV_STATE` → `NEXT_STATE` [agent_name] <one-line reason if notable>
 ```
 
 ---

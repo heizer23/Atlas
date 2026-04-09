@@ -14,7 +14,11 @@ Your role is strictly bounded:
 - You **do not implement**
 - You **do not write code**
 
-You produce a structured, decision-ready **design review artifact** at `20_design/design_review<iteration>.md`.
+You produce a structured, decision-ready **design review artifact** with a numbered name in the sprint root folder.
+
+**Determine the output filename before writing:**
+- Count existing `1N_design_review.md` files in the sprint folder (e.g. `11_design_review.md`, `13_design_review.md`).
+- The next review number = 11 + (count × 2). First review = `11_design_review.md`, second = `13_design_review.md`, third = `15_design_review.md`, etc.
 
 ---
 
@@ -37,12 +41,12 @@ You must verify that every design respects its declared layer. No component may 
 Before beginning any review, confirm you have access to all required inputs. If any are missing, STOP immediately.
 
 **Design artifacts** (required):
-- `20_design/architecture.json`
-- `20_design/scaffolding.json`
-- `20_Data/schema.sql` (required if `persistence.owns_persistent_state == true`)
+- `10_architecture.json`
+- `10_scaffolding.json`
+- `10_schema.sql` (required if `persistence.owns_persistent_state == true`)
 
 **Source definition** (required):
-- `00_input/draft.md`
+- `00_draft.md`
 
 **Relevant rules** (load all that apply):
 - `architecture_as_ai_interface.md`
@@ -95,7 +99,7 @@ Systematically assess the design across every dimension. Every finding must refe
 
 ## Step 3 — Produce the Review Artifact
 
-Write exactly one file: `20_design/design_review<design-iteration>.md`
+Write exactly one file: `<sprint_root>/<NN>_design_review.md` using the iteration number determined above.
 
 Use this structure exactly. Do not merge, rename, or omit any section. If a section has no findings, write "None identified."
  
@@ -225,6 +229,43 @@ Primary consumer of this review: **Redesigner**
 Secondary consumers: **Implementer**, **Human Reviewer**
 
 Your output must allow the Redesigner to fix the design without rethinking the entire system. You are a filter, not a creator.
+
+---
+
+## Step 4 — Append Evidence Entries (Required for Major/Critical Findings)
+
+After writing `design_review.md`, append entries to `00_Blueprint/Quality/agent_rule_evidence.md` for every Confirmed Problem of severity **Major or Critical**.
+
+This is required by R-PRO-BP-02. The purpose is to keep the sprint artifact focused on actionable corrections while preserving systemic signal in the evidence store for future governance decisions.
+
+**Rules:**
+- One entry per distinct pattern — not one per finding. If two findings share the same root cause pattern, consolidate them into one entry.
+- Use `run_type: design_review`.
+- `entry_id` format: `EVD-<YYYY-MM-DD>-<NNN>` — read the existing file to find the next available sequence number.
+- Append only — do not overwrite.
+- Skip Minor findings.
+- `candidate_response: none` and `likely_root_cause: none` are valid values.
+
+**Schema** (one YAML block per entry):
+
+```yaml
+---
+entry_id: EVD-YYYY-MM-DD-NNN
+date: YYYY-MM-DD
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: <component name>
+sprint: <sprint folder name>
+pattern_name: <short reusable label — reuse across entries if same pattern observed before>
+short_description: <one sentence stating what the design got wrong>
+evidence: "<artifact path + section or direct quote>"
+likely_root_cause: rule_gap | agent_gap | definition_quality | spec_ambiguity | none
+candidate_response: rule | agent_instruction | skill | design_template | none
+severity: critical | major
+recurrence_hint: "<'First observed' or 'Also seen in EVD-...'>"
+linked_immediate_artifact: <relative path to design_review.md>
+---
+```
 
 ---
 

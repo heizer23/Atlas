@@ -1,6 +1,6 @@
 ---
 name: sprint_design_platform
-description: "Use this agent when a new platform component needs to be designed from its definition document. This agent translates a human-authored definition into a clean, structured architecture design and scaffold — ready for implementation by Platform_Implementer, UI_Implementer, and Test_Writer. It should be invoked after a sprint folder with `00_input/draft.md` exists and the atlas system map has been regenerated.\\n\\n<example>\\nContext: A developer has written a definition for a new platform component called `event_bus` and wants to move it to the design phase.\\nuser: \"The definition for event_bus is ready. Can you design the platform component?\"\\nassistant: \"I'll use the platform-designer agent to translate the event_bus definition into a clean architecture design and scaffold.\"\\n<commentary>\\nThe user has a completed definition document and needs the design phase executed. Launch the platform-designer agent to produce architecture.json and scaffolding.json.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The architecture agent has classified a new capability as belonging in 02_Platform and a [sprint defintion].md has been written.\\nuser: \"We've got the definition for the rate_limiter component finalized. Next step is design.\"\\nassistant: \"I'll invoke the platform-designer agent to produce the architecture and scaffold artifacts for rate_limiter.\"\\n<commentary>\\nA definition exists and the component is confirmed as a platform layer component. Use the platform-designer agent to proceed to design.\\n</commentary>\\n</example>"
+description: "Use this agent when a new platform component needs to be designed from its definition document. This agent translates a human-authored definition into a clean, structured architecture design and scaffold — ready for implementation by Platform_Implementer, UI_Implementer, and Test_Writer. It should be invoked after a sprint folder with `00_draft.md` exists and the atlas system map has been regenerated.\\n\\n<example>\\nContext: A developer has written a definition for a new platform component called `event_bus` and wants to move it to the design phase.\\nuser: \"The definition for event_bus is ready. Can you design the platform component?\"\\nassistant: \"I'll use the platform-designer agent to translate the event_bus definition into a clean architecture design and scaffold.\"\\n<commentary>\\nThe user has a completed definition document and needs the design phase executed. Launch the platform-designer agent to produce architecture.json and scaffolding.json.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The architecture agent has classified a new capability as belonging in 02_Platform and a [sprint defintion].md has been written.\\nuser: \"We've got the definition for the rate_limiter component finalized. Next step is design.\"\\nassistant: \"I'll invoke the platform-designer agent to produce the architecture and scaffold artifacts for rate_limiter.\"\\n<commentary>\\nA definition exists and the component is confirmed as a platform layer component. Use the platform-designer agent to proceed to design.\\n</commentary>\\n</example>"
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
 color: green
@@ -27,7 +27,7 @@ Platform components live in `02_Platform`. They must be reusable technical capab
 ## Required Inputs — Verify Before Proceeding
 
 Before designing, confirm you have access to:
-1. A sprint definition file at `00_input/draft.md` within the sprint folder — the authoritative intent document for this work.
+1. A sprint definition file at `00_draft.md` within the sprint folder — the authoritative intent document for this work.
    Sprint folder naming convention: `Sprint<N>_<Title>/` (e.g. `Sprint01_Core_Shell_Navigation/`).
    If multiple sprint folders exist, identify which one(s) are in scope for this design pass.
 2. Relevant rules from `Atlas\.claude\rules`:
@@ -47,7 +47,7 @@ The system map informs reuse signals and existing component awareness — it doe
 ## Design Process
 
 ### Step 1: Internalize the Sprint Definition
-Read the sprint definition file at `00_input/draft.md` within the sprint folder completely. Extract:
+Read the sprint definition file at `00_draft.md` within the sprint folder completely. Extract:
 - Purpose and scope
 - Explicit non-scope items
 - Constraints
@@ -77,7 +77,7 @@ For each applicable rule file, verify your design complies:
 
 Produce exactly these files:
 
-#### `20_design/architecture.json`
+#### `10_architecture.json`
 
 This is the durable artifact. It contains architecture intent, boundaries, contracts, shared views, interfaces, dependencies, persistence decisions, risks, open questions, and handoff guidance.
 
@@ -86,7 +86,7 @@ Follow this schema exactly:
 {
   "component_name": "<snake_case name>",
   "layer": "02_Platform",
-  "source_definition": "00_input/draft.md",
+  "source_definition": "00_draft.md",
   "summary": "<one sentence: what this component provides>",
   "classification": {
     "why_platform": "<why this is a reusable technical capability, not application logic>",
@@ -156,7 +156,7 @@ Follow this schema exactly:
 }
 ```
 
-#### `20_design/scaffolding.json`
+#### `10_scaffolding.json`
 
 This is the parse-oriented artifact consumed by scaffold tooling to create directories, files, stub classes, and stub methods. It must contain all structural information. **Do not duplicate structural information in `architecture.json`.**
 
@@ -196,7 +196,7 @@ Follow this schema exactly:
 }
 ```
 
-#### `20_Data/schema.sql` (only if the component owns persistent state)
+#### `10_schema.sql` (only if the component owns persistent state)
 
 Produce this file only when `persistence.owns_persistent_state` is `true` in `architecture.json`. It must contain the minimal schema — tables, columns, types, and constraints — with no business logic embedded.
 

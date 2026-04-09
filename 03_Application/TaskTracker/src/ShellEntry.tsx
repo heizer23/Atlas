@@ -432,8 +432,8 @@ function LabelPopover({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!value.trim()) { setSuggestions([]); return; }
     debounceRef.current = setTimeout(async () => {
-      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
-      if (!isApiError(res)) setSuggestions((res as { labels: LabelRecord[] }).labels ?? []);
+      const res = await apiFetch<{ rows: { id: string; name: string }[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
+      if (!isApiError(res)) setSuggestions((res as { rows: { id: string; name: string }[] }).rows?.map(r => ({ id: r.id, name: r.name })) ?? []);
     }, 200);
   }
 
@@ -729,8 +729,8 @@ function LabelSection({
     if (labelDebounceRef.current) clearTimeout(labelDebounceRef.current);
     if (!value.trim()) { setLabelSuggestions([]); return; }
     labelDebounceRef.current = setTimeout(async () => {
-      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
-      if (!isApiError(res)) setLabelSuggestions((res as { labels: LabelRecord[] }).labels ?? []);
+      const res = await apiFetch<{ rows: { id: string; name: string }[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
+      if (!isApiError(res)) setLabelSuggestions((res as { rows: { id: string; name: string }[] }).rows?.map(r => ({ id: r.id, name: r.name })) ?? []);
     }, 200);
   }
 
@@ -890,9 +890,9 @@ function TaskDetailEdit({
   }, [task.id]);
 
   useEffect(() => {
-    apiFetch<{ labels: AttachedLabel[] }>(`/tasks/${task.id}/labels`)
+    apiFetch<{ rows: { id: string; name: string; attached_at: string }[] }>(`/tasks/${task.id}/labels`)
       .then(res => {
-        if (!isApiError(res)) setAttachedLabels((res as { labels: AttachedLabel[] }).labels ?? []);
+        if (!isApiError(res)) setAttachedLabels((res as { rows: { id: string; name: string; attached_at: string }[] }).rows?.map(r => ({ label_id: r.id, label_name: r.name, attached_at: r.attached_at })) ?? []);
       });
   }, [task.id]);
 
@@ -1099,8 +1099,8 @@ function TaskCreatePanel({
     if (labelDebounceRef.current) clearTimeout(labelDebounceRef.current);
     if (!value.trim()) { setLabelSugs([]); return; }
     labelDebounceRef.current = setTimeout(async () => {
-      const res = await apiFetch<{ labels: LabelRecord[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
-      if (!isApiError(res)) setLabelSugs((res as { labels: LabelRecord[] }).labels ?? []);
+      const res = await apiFetch<{ rows: { id: string; name: string }[] }>(`/tasks/labels/search?q=${encodeURIComponent(value)}`);
+      if (!isApiError(res)) setLabelSugs((res as { rows: { id: string; name: string }[] }).rows?.map(r => ({ id: r.id, name: r.name })) ?? []);
     }, 200);
   }
 

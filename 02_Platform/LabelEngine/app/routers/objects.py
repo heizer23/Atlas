@@ -17,7 +17,13 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
-from app.models import AttachLabelRequest, ObjectLabelRecord, ObjectLabelsResponse
+from app.models import (
+    AttachLabelRequest,
+    BatchLabelsRequest,
+    BatchLabelsResponse,
+    ObjectLabelRecord,
+    ObjectLabelsResponse,
+)
 from app.service import LabelEngineError, LabelService
 
 router  = APIRouter()
@@ -36,6 +42,36 @@ def _api_error(code: str, message: str, status: int = 400, detail=None) -> JSONR
             }
         },
     )
+
+
+@router.post(
+    "/objects/labels/batch",
+    response_model=BatchLabelsResponse,
+    status_code=200,
+)
+def batch_labels(body: BatchLabelsRequest) -> BatchLabelsResponse | JSONResponse:
+    """
+    Return labels for multiple objects in one call.
+
+    - Empty object_ids: returns {} immediately (no DB query).
+    - More than 200 object_ids: 422 BATCH_TOO_LARGE.
+    - object_type is required; missing or empty → 422 OBJECT_TYPE_REQUIRED.
+    - Every requested object_id appears in the response (zero-fill with []).
+    """
+    if not body.object_ids:
+        return BatchLabelsResponse(labels={})
+
+    if len(body.object_ids) > 200:
+        return _api_error("BATCH_TOO_LARGE", "object_ids must contain 200 or fewer items.", status=422)
+
+    object_type = body.object_type.strip()
+    if not object_type:
+        return _api_error("OBJECT_TYPE_REQUIRED", "object_type must not be empty.", status=422)
+
+    with get_db() as conn:
+        labels = _svc.get_labels_for_objects(conn, body.object_ids, object_type)
+
+    return BatchLabelsResponse(labels=labels)
 
 
 @router.post(
