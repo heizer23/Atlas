@@ -43,8 +43,8 @@ Service runs on port 8014 as specified in architecture.json deferrals. Container
 `react-sparklines` is not installed. Used recharts `LineChart` with height=28 and no axes/grid to render an inline sparkline. This satisfies the requirement to render sparkline_values as a visual chart without relying on unavailable dependencies.
 
 ### Shell registration
-- Added `import '../../../../03_Application/NumericSeries/src/shellConfig'` to `02_Platform/02_Atlas_Shell/src/shell/main.tsx`
-- Added `/api/series` and `/api/batch/series` proxy entries to `02_Platform/02_Atlas_Shell/vite.config.ts` targeting port 8014
+- Added `import '../../../../03_Application/NumericSeries/src/shellConfig'` to `02_Platform/Atlas_Shell/src/shell/main.tsx`
+- Added `/api/series` and `/api/batch/series` proxy entries to `02_Platform/Atlas_Shell/vite.config.ts` targeting port 8014
 
 ---
 

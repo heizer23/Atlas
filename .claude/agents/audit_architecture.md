@@ -58,9 +58,8 @@ The audit report must be written to:
 
 Rules:
 
-<Component> must match the audited component (e.g. TaskTracker)
-If the user provides an explicit path, use it exactly
-Do not derive names automatically
+<Component> must match the component folder name exactly (e.g. Atlas_Shell, TaskTracker, Postgres)
+The canonical path is authoritative. Do not accept caller-provided paths that deviate from it — if a conflicting path is given, use the canonical path and note the discrepancy in the report header.
 Create directories implicitly when writing
 
 Required Method
@@ -152,6 +151,13 @@ F. Exception Hygiene
   deviations without formal exception record
   → classify as exception_missing_record
 
+  For every existing exception record, verify it against current implementation:
+  - does the referenced file, component, or mechanism still exist?
+  - does the stated reason still apply?
+  - if the exception is no longer valid, classify as stale_exception_record (severity: low)
+
+  Stale exception records mislead future agents — they are findings, not free passes.
+
 G. Missing Rule Signals
   inconsistent patterns across implementations
   unclear governance areas
@@ -168,6 +174,7 @@ Use exactly one:
   likely_orphaned
   boundary_drift
   exception_missing_record
+  stale_exception_record
   missing_rule_signal
   verification_required
 

@@ -10,7 +10,7 @@ CANONICAL_SOURCE: .claude/rules/R-PRO-BP.md
 
 This document is the canonical definition of the Atlas sprint process.
 
-All sprint agents (orchestrator, designers, reviewers, implementers) must treat this document as authoritative. When agent instructions conflict with this document, this document wins.
+When agent instructions, skill instructions, or older local sprint conventions conflict with this document, this document wins. The agent must follow this document and record the conflict in 00_Blueprint/Quality/agent_rule_conflicts.md.
 
 **Prospective application** (`00_Blueprint/Rule_System.md §6`): This rule applies to sprints initiated after 2026-04-09. Sprint folders produced before this date are not required to conform and must not be flagged as violations.
 

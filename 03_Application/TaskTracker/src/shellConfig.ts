@@ -1,7 +1,7 @@
 /**
  * TaskTracker — Atlas Shell registration.
  *
- * Imported as a side-effect by 02_Platform/02_Atlas_Shell/src/shell/main.tsx.
+ * Imported as a side-effect by 02_Platform/Atlas_Shell/src/shell/main.tsx.
  * Do not import this file from anywhere else.
  */
 
@@ -15,10 +15,14 @@ AppRegistry.register({
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [
-    { id: 'tasks', label: 'Tasks', path: '/tasks', order: 1 },
+    { id: 'tasks-active',  label: 'Active',  path: '/tasks',         order: 1 },
+    { id: 'tasks-pending', label: 'Pending', path: '/tasks/pending', order: 2 },
+    { id: 'tasks-done',    label: 'Done',    path: '/tasks/done',    order: 3 },
   ],
 
   desktopNav: [
-    { id: 'tasks', label: 'Tasks', path: '/tasks', order: 1 },
+    { id: 'tasks-active',  label: 'Active',  path: '/tasks',         order: 1 },
+    { id: 'tasks-pending', label: 'Pending', path: '/tasks/pending', order: 2 },
+    { id: 'tasks-done',    label: 'Done',    path: '/tasks/done',    order: 3 },
   ],
 });

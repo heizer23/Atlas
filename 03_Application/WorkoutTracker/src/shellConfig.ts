@@ -1,7 +1,7 @@
 /**
  * WorkoutTracker — Atlas Shell registration.
  *
- * Imported as a side-effect by 02_Platform/02_Atlas_Shell/src/shell/main.tsx.
+ * Imported as a side-effect by 02_Platform/Atlas_Shell/src/shell/main.tsx.
  * Do not import this file from anywhere else.
  */
 

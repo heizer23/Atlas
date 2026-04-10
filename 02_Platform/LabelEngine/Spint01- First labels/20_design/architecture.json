@@ -20,7 +20,7 @@
 
   "contracts": {
     "consumes": [
-      "Shared Postgres instance (02_Platform/01_Postgres) via ATLAS_PG_* environment variables",
+      "Shared Postgres instance (02_Platform/Postgres) via ATLAS_PG_* environment variables",
       "platform_errorhandling package (02_Platform/packages/platform_errorhandling) for structured logging and exception handling",
       "objects.id — the universal object identifier that callers are responsible for registering before attaching labels"
     ],
@@ -160,7 +160,7 @@
 
   "dependencies": {
     "internal_required": [
-      { "component": "02_Platform/01_Postgres", "role": "persistent storage for labels and object_labels tables" },
+      { "component": "02_Platform/Postgres", "role": "persistent storage for labels and object_labels tables" },
       { "component": "02_Platform/packages/platform_errorhandling", "role": "structured logging, exception handler installation, api_error helper" }
     ],
     "internal_optional": [

@@ -496,7 +496,7 @@ export default function EntryDetailPage() {
       {/* Save controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
         <button
-          className="btn-primary"
+          className="btn-filled"
           onClick={handleSave}
           disabled={isSaving}
         >

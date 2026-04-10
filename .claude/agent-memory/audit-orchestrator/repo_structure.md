@@ -28,7 +28,7 @@ Snapshot as of 2026-04-06. Verify against current sprint_state.json files before
 | Atlas_Shell | No active sprint | Deployed | 3 registered exceptions (EXC-PC-01/02/03) |
 | MCPGateway | No active sprint | Deployed | Unregistered exception: imports from foodtracker.tools |
 | Postgres | No active sprint | Deployed | Handles all app schemas via migrations |
-| Chronos | No active sprint | Deployed | AI agent runtime at 02_Platform/Chronos/ |
+| Chronos | No active sprint | Deployed | AI agent runtime at 01_System/Chronos/ |
 
 ## Sprint Conventions
 

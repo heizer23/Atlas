@@ -290,22 +290,17 @@ export default function ReportPage() {
       <style>{REPORT_OUTLINE_STYLE}</style>
 
       <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Report</h1>
-        </div>
-
-        {/* Controls row */}
+        {/* Controls row — all 3 dropdowns equal width, label above */}
         <div
           style={{
             display:      'flex',
-            flexWrap:     'wrap',
             gap:          'var(--space-sm)',
-            alignItems:   'center',
             marginBottom: 'var(--space-md)',
+            width:        '100%',
           }}
         >
-          {/* Scope selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Scope */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
             <label className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
               Scope
             </label>
@@ -314,10 +309,11 @@ export default function ReportPage() {
               value={scope}
               onChange={(e) => handleScopeChange(e.target.value as Scope)}
               style={{
-                padding:      '4px 8px',
+                width:        '100%',
+                padding:      '8px 12px',
                 background:   'var(--md-sys-color-surface)',
                 border:       '1px solid var(--md-sys-color-outline)',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-input, 4px)',
                 color:        'var(--md-sys-color-on-surface)',
                 cursor:       'pointer',
               }}
@@ -329,33 +325,34 @@ export default function ReportPage() {
             </select>
           </div>
 
-          {/* Mode selector — hidden when scope=week */}
-          {scope !== 'week' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <label className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-                Mode
-              </label>
-              <select
-                className="type-body"
-                value={mode}
-                onChange={(e) => handleModeChange(e.target.value as Mode)}
-                style={{
-                  padding:      '4px 8px',
-                  background:   'var(--md-sys-color-surface)',
-                  border:       '1px solid var(--md-sys-color-outline)',
-                  borderRadius: '4px',
-                  color:        'var(--md-sys-color-on-surface)',
-                  cursor:       'pointer',
-                }}
-              >
-                <option value="daily">Daily</option>
-                <option value="aggregated">Aggregated</option>
-              </select>
-            </div>
-          )}
+          {/* Mode — always visible, disabled when scope=week */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+            <label className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+              Mode
+            </label>
+            <select
+              className="type-body"
+              value={mode}
+              disabled={scope === 'week'}
+              onChange={(e) => handleModeChange(e.target.value as Mode)}
+              style={{
+                width:        '100%',
+                padding:      '8px 12px',
+                background:   'var(--md-sys-color-surface)',
+                border:       '1px solid var(--md-sys-color-outline)',
+                borderRadius: 'var(--radius-input, 4px)',
+                color:        'var(--md-sys-color-on-surface)',
+                cursor:       scope === 'week' ? 'not-allowed' : 'pointer',
+                opacity:      scope === 'week' ? 0.5 : 1,
+              }}
+            >
+              <option value="daily">Daily</option>
+              <option value="aggregated">Aggregated</option>
+            </select>
+          </div>
 
-          {/* kcal / protein toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* View */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
             <label className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
               View
             </label>
@@ -364,10 +361,11 @@ export default function ReportPage() {
               value={metric}
               onChange={(e) => setMetric(e.target.value as NutMetric)}
               style={{
-                padding:      '4px 8px',
+                width:        '100%',
+                padding:      '8px 12px',
                 background:   'var(--md-sys-color-surface)',
                 border:       '1px solid var(--md-sys-color-outline)',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-input, 4px)',
                 color:        'var(--md-sys-color-on-surface)',
                 cursor:       'pointer',
               }}
@@ -376,17 +374,6 @@ export default function ReportPage() {
               <option value="protein">Protein (g)</option>
             </select>
           </div>
-
-          {/* Dataset label + reported days */}
-          {currentDataset && (
-            <span
-              className="type-label"
-              style={{ color: 'var(--md-sys-color-on-surface-variant)', marginLeft: 'auto' }}
-            >
-              {currentDataset.meta.label}
-              {reportedDays > 0 && ` · ${reportedDays} day${reportedDays !== 1 ? 's' : ''} logged`}
-            </span>
-          )}
         </div>
 
         {/* Chart */}

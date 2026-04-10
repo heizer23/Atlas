@@ -60,7 +60,7 @@ monitor-logs:
 
 
 # region --- System: Chronos
-CHRONOS_DIR=../02_Platform/Chronos
+CHRONOS_DIR=../01_System/Chronos
 
 CHRONOS_COMPOSE=docker compose \
 	-f $(CHRONOS_DIR)/compose.yml \
@@ -102,7 +102,7 @@ chronos-pair:
 
 # region --- Platform
 # --- Platform: Postgres
-PG_DIR=../02_Platform/01_Postgres
+PG_DIR=../02_Platform/Postgres
 
 PG_COMPOSE=docker compose \
 	-f $(PG_DIR)/compose.yml \
@@ -163,7 +163,7 @@ schema-chronicle:
 	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PG_SCHEMA_CHRONICLE)
 
 migrate:
-	@python3 ../02_Platform/01_Postgres/migrate.py
+	@python3 ../02_Platform/Postgres/migrate.py
 
 pg-wait:
 	@echo "==> Waiting for Postgres to be ready..."
@@ -345,7 +345,7 @@ calendar-schema:
 
 
 # region --- Platform: Atlas Shell
-SHELL_DIR=../02_Platform/02_Atlas_Shell
+SHELL_DIR=../02_Platform/Atlas_Shell
 
 SHELL_COMPOSE=docker compose \
 	-f $(SHELL_DIR)/compose.yml \
@@ -512,7 +512,7 @@ mcp-reboot:
 
 
 # region --- System: Cloudflared tunnel
-CLOUDFLARED_DIR=01_Access/cloudflared
+CLOUDFLARED_DIR=Access/cloudflared
 
 CLOUDFLARED_COMPOSE=docker compose \
 	-f $(CLOUDFLARED_DIR)/compose.yml \

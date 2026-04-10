@@ -43,9 +43,9 @@ This folder is the canonical current-architecture snapshot. Agents that need to 
 
 Check the Makefile at `01_System/Makefile` for an existing entry referencing `component_root`.
 
-**If an entry already exists:** no Makefile changes needed — skip to Step 3.
+**If an entry already exists and no entries to it a required:** no Makefile changes needed — skip to Step 3.
 
-**If this is a new component:** add a region block following the established pattern. Derive the Make target prefix as follows:
+**If this is a new component or some changes require changes in the make file:** add a region block following the established pattern. Derive the Make target prefix as follows:
 - Take `component_name`, lowercase it, strip `Tracker`/`Engine`/`Connector`/`Series`/`Gateway` suffixes, use the result as the prefix (e.g. `LabelEngine` → `label`, `TaskTracker` → `task`, `CalendarConnector` → `calendar`).
 - If the derived prefix conflicts with an existing target, use the full snake_case lowercase name.
 
@@ -147,6 +147,11 @@ Update `<sprint_folder>/99_sprint_log.md`:
 - Append one line to the log: `- <YYYY-MM-DD> \`IMPLEMENTATION_IN_PROGRESS\` → \`SPRINT_COMPLETE\` [/sprint-close]`
 
 ---
+
+## Step 7 - Update PLATFORM_SERVICES
+
+If a platformm component was changed, update Atlas/02_Platform/PLATFORM_SERVICES.md
+and make the new api calls available to chronos
 
 ## Step 7 — Report
 

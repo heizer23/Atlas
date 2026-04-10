@@ -60,7 +60,13 @@ const EXERCISE_FIELDS: FormField[] = [
   { key: "comment",   label: "Comment",     type: "string" },
 ];
 
-const SET_COLORS = ["#6750A4", "#7965AF", "#8B7AB9", "#9D8FC4", "#AFA4CF"];
+const SET_COLORS = [
+  "var(--atlas-chart-1)",
+  "var(--atlas-chart-2)",
+  "var(--atlas-chart-3)",
+  "var(--atlas-chart-4)",
+  "var(--md-sys-color-secondary)",
+];
 
 // ── HistoryChart ──────────────────────────────────────────────────────────────
 
@@ -93,7 +99,7 @@ function HistoryChart({
               style={{
                 flex: 1,
                 height: 20,
-                background: "#CAC4D0",
+                background: "var(--md-sys-color-outline-variant)",
                 borderRadius: "3px 3px 0 0",
               }}
             />
@@ -105,12 +111,12 @@ function HistoryChart({
       <div
         style={{
           height: 200,
-          background: "#F8F6FA",
+          background: "var(--md-sys-color-surface-variant)",
           borderRadius: 8,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: "#49454F",
+          color: "var(--md-sys-color-on-surface-variant)",
           fontSize: 14,
         }}
       >
@@ -148,20 +154,20 @@ function HistoryChart({
   }
 
   return (
-    <div style={{ background: "#F8F6FA", borderRadius: 8, padding: 16 }}>
+    <div style={{ background: "var(--md-sys-color-surface-variant)", borderRadius: 8, padding: 16 }}>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="0" stroke="#E6E1E5" vertical={false} />
+          <CartesianGrid strokeDasharray="0" stroke="var(--md-sys-color-outline-variant)" vertical={false} />
           <XAxis dataKey="workout_date" axisLine={false} tickLine={false} tick={false} />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "#49454F", fontSize: 11 }}
+            tick={{ fill: "var(--md-sys-color-on-surface-variant)", fontSize: 11 }}
           />
           <Tooltip
             contentStyle={{
-              backgroundColor: "#FFFBFE",
-              border: "1px solid #E6E1E5",
+              backgroundColor: "var(--md-sys-color-surface)",
+              border: "1px solid var(--md-sys-color-outline-variant)",
               borderRadius: 8,
               fontSize: 12,
             }}
@@ -225,40 +231,23 @@ function ExerciseRow({
         alignItems: "center",
         padding: "12px 16px",
         minHeight: 80,
-        borderBottom: "1px solid #CAC4D0",
+        borderBottom: "1px solid var(--md-sys-color-outline-variant)",
         gap: 12,
         cursor: "pointer",
         position: "relative",
         transition: "background 200ms",
         background: "transparent",
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(103,80,164,.08)")}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
     >
-      <div
-        style={{
-          width: 40,
-          height: 40,
-          flexShrink: 0,
-          background: "#E7E0EC",
-          borderRadius: "50%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <span className="material-symbols-rounded" style={{ fontSize: 20, color: "#49454F" }}>
-          fitness_center
-        </span>
-      </div>
-
       <div style={{ flex: "0 0 100px", flexShrink: 0 }}>
         <div
           style={{
             fontSize: 16,
             fontWeight: 500,
             lineHeight: "24px",
-            color: "#1C1B1F",
+            color: "var(--md-sys-color-on-surface)",
             letterSpacing: ".15px",
           }}
         >
@@ -270,7 +259,7 @@ function ExerciseRow({
               fontSize: 14,
               fontWeight: 400,
               lineHeight: "20px",
-              color: "#49454F",
+              color: "var(--md-sys-color-on-surface-variant)",
               letterSpacing: ".25px",
             }}
           >
@@ -293,7 +282,7 @@ function ExerciseRow({
             border: "none",
             borderRadius: "50%",
             background: "transparent",
-            color: "#49454F",
+            color: "var(--md-sys-color-on-surface-variant)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -313,7 +302,7 @@ function ExerciseRow({
               top: "calc(100% + 4px)",
               right: 0,
               minWidth: 168,
-              background: "#ECE6F0",
+              background: "var(--md-sys-color-surface-variant)",
               borderRadius: 4,
               boxShadow: "0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)",
               padding: "8px 0",
@@ -331,18 +320,18 @@ function ExerciseRow({
                 fontSize: 14,
                 fontWeight: 400,
                 letterSpacing: ".25px",
-                color: "#1C1B1F",
+                color: "var(--md-sys-color-on-surface)",
                 cursor: "pointer",
               }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(28,27,31,.08)")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
-              <span className="material-symbols-rounded" style={{ fontSize: 18, color: "#49454F" }}>
+              <span className="material-symbols-rounded" style={{ fontSize: 18, color: "var(--md-sys-color-on-surface-variant)" }}>
                 edit
               </span>
               Edit
             </div>
-            <div style={{ height: 1, background: "#CAC4D0", margin: "8px 0" }} />
+            <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "8px 0" }} />
             <div
               onClick={onDelete}
               style={{
@@ -354,13 +343,13 @@ function ExerciseRow({
                 fontSize: 14,
                 fontWeight: 400,
                 letterSpacing: ".25px",
-                color: "#1C1B1F",
+                color: "var(--md-sys-color-on-surface)",
                 cursor: "pointer",
               }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(28,27,31,.08)")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
-              <span className="material-symbols-rounded" style={{ fontSize: 18, color: "#49454F" }}>
+              <span className="material-symbols-rounded" style={{ fontSize: 18, color: "var(--md-sys-color-on-surface-variant)" }}>
                 delete
               </span>
               Delete
@@ -403,15 +392,15 @@ function ExerciseList({
   }, []);
 
   if (!dataset)
-    return <p className="type-body" style={{ padding: 16 }}>Loading…</p>;
+    return <p className="type-body">Loading…</p>;
   if (dataset.rows.length === 0)
-    return <p className="type-body" style={{ padding: 16 }}>No exercises yet.</p>;
+    return <p className="type-body">No exercises yet.</p>;
 
   return (
     <div
       ref={listRef}
       style={{
-        background: "#FFFBFE",
+        background: "var(--md-sys-color-surface)",
         borderRadius: 12,
         boxShadow: "0px 1px 2px rgba(0,0,0,.3), 0px 1px 3px 1px rgba(0,0,0,.15)",
         overflow: "hidden",
@@ -513,25 +502,24 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
   return (
     <div className="page">
       <div className="page-toolbar">
-        <button className="btn-text" onClick={onBack}>
-          ← Back
+        <button className="icon-btn" onClick={onBack} aria-label="Back">
+          <span className="material-symbols-rounded">arrow_back</span>
         </button>
-        <div style={{ flex: 1 }} />
       </div>
 
       {error && <ErrorCard error={error} />}
 
-      <div style={{ padding: "0 16px 16px" }}>
+      <div style={{ padding: "0 0 16px" }}>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           style={{
             width: "100%",
             border: "none",
-            borderBottom: "2px solid #6750A4",
+            borderBottom: "2px solid var(--md-sys-color-primary)",
             fontSize: 22,
             fontWeight: 500,
-            color: "#1C1B1F",
+            color: "var(--md-sys-color-on-surface)",
             background: "transparent",
             padding: "4px 0",
             outline: "none",
@@ -542,20 +530,20 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
 
       <div
         style={{
-          padding: "0 16px 16px",
+          padding: "0 0 16px",
           display: "flex",
           alignItems: "center",
           gap: 8,
         }}
       >
-        <label style={{ fontSize: 14, color: "#49454F", minWidth: 60 }}>
+        <label style={{ fontSize: 14, color: "var(--md-sys-color-on-surface-variant)", minWidth: 60 }}>
           Weight
         </label>
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            border: "1px solid #CAC4D0",
+            border: "1px solid var(--md-sys-color-outline-variant)",
             borderRadius: 8,
             overflow: "hidden",
             flex: "0 0 140px",
@@ -571,25 +559,25 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
               border: "none",
               padding: "8px 12px",
               fontSize: 16,
-              color: "#1C1B1F",
+              color: "var(--md-sys-color-on-surface)",
               background: "transparent",
               outline: "none",
             }}
           />
-          <span style={{ paddingRight: 12, fontSize: 14, color: "#49454F" }}>
+          <span style={{ paddingRight: 12, fontSize: 14, color: "var(--md-sys-color-on-surface-variant)" }}>
             kg
           </span>
         </div>
       </div>
 
-      <div style={{ height: 1, background: "#CAC4D0", margin: "0 16px 16px" }} />
+      <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 0 16px" }} />
 
       <div
         style={{
           display: "flex",
           flexDirection: "column",
           gap: 8,
-          padding: "0 16px 16px",
+          padding: "0 0 16px",
         }}
       >
         {[0, 1, 2, 3, 4].map((i) => {
@@ -602,9 +590,9 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                 alignItems: "center",
                 gap: 8,
                 padding: "10px 12px",
-                border: `1px solid ${done ? "#6750A4" : "#E6E1E5"}`,
+                border: `1px solid ${done ? "var(--md-sys-color-primary)" : "var(--md-sys-color-outline-variant)"}`,
                 borderRadius: 8,
-                background: done ? "rgba(103,80,164,.06)" : "#FFFBFE",
+                background: done ? "color-mix(in srgb, var(--md-sys-color-primary) 6%, transparent)" : "var(--md-sys-color-surface)",
                 transition: "all 0.15s",
               }}
             >
@@ -613,7 +601,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                   flex: "0 0 44px",
                   fontSize: 14,
                   fontWeight: 500,
-                  color: done ? "#6750A4" : "#49454F",
+                  color: done ? "var(--md-sys-color-primary)" : "var(--md-sys-color-on-surface-variant)",
                 }}
               >
                 Set {i + 1}
@@ -625,14 +613,14 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                   height: 32,
                   borderRadius: 16,
                   border: "none",
-                  background: "#E7E0EC",
+                  background: "var(--md-sys-color-surface-variant)",
                   cursor: "pointer",
                   flexShrink: 0,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: 18,
-                  color: "#49454F",
+                  color: "var(--md-sys-color-on-surface-variant)",
                 }}
               >
                 −
@@ -657,11 +645,11 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                   style={{
                     width: "100%",
                     textAlign: "center",
-                    border: "1px solid #CAC4D0",
+                    border: "1px solid var(--md-sys-color-outline-variant)",
                     borderRadius: 8,
                     padding: "6px 40px 6px 8px",
                     fontSize: 16,
-                    color: "#1C1B1F",
+                    color: "var(--md-sys-color-on-surface)",
                     background: "transparent",
                     outline: "none",
                     boxSizing: "border-box",
@@ -672,7 +660,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                     position: "absolute",
                     right: 10,
                     fontSize: 12,
-                    color: "#79747E",
+                    color: "var(--md-sys-color-on-surface-variant)",
                     pointerEvents: "none",
                   }}
                 >
@@ -686,14 +674,14 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                   height: 32,
                   borderRadius: 16,
                   border: "none",
-                  background: "#E7E0EC",
+                  background: "var(--md-sys-color-surface-variant)",
                   cursor: "pointer",
                   flexShrink: 0,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: 18,
-                  color: "#49454F",
+                  color: "var(--md-sys-color-on-surface-variant)",
                 }}
               >
                 +
@@ -712,7 +700,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
                   borderRadius: 18,
                   border: "none",
                   flexShrink: 0,
-                  background: done ? "#6750A4" : "#E7E0EC",
+                  background: done ? "var(--md-sys-color-primary)" : "var(--md-sys-color-surface-variant)",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
@@ -723,7 +711,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
               >
                 <span
                   className="material-symbols-rounded"
-                  style={{ fontSize: 18, color: done ? "#fff" : "#49454F" }}
+                  style={{ fontSize: 18, color: done ? "var(--md-sys-color-on-primary)" : "var(--md-sys-color-on-surface-variant)" }}
                 >
                   {done ? "check" : "close"}
                 </span>
@@ -733,9 +721,9 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
         })}
       </div>
 
-      <div style={{ height: 1, background: "#CAC4D0", margin: "0 16px 16px" }} />
+      <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 0 16px" }} />
 
-      <div style={{ padding: "0 16px 16px" }}>
+      <div style={{ padding: "0 0 16px" }}>
         <HistoryChart
           history={filteredHistory}
           size="full"
@@ -743,14 +731,14 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
         />
       </div>
 
-      <div style={{ height: 1, background: "#CAC4D0", margin: "0 16px 16px" }} />
+      <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 0 16px" }} />
 
-      <div style={{ padding: "0 16px 16px" }}>
+      <div style={{ padding: "0 0 16px" }}>
         <label
           style={{
             display: "block",
             fontSize: 14,
-            color: "#49454F",
+            color: "var(--md-sys-color-on-surface-variant)",
             marginBottom: 8,
           }}
         >
@@ -763,12 +751,12 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
           rows={3}
           style={{
             width: "100%",
-            border: "1px solid #CAC4D0",
+            border: "1px solid var(--md-sys-color-outline-variant)",
             borderRadius: 8,
             padding: "10px 12px",
             fontSize: 14,
-            color: "#1C1B1F",
-            background: "#FFFBFE",
+            color: "var(--md-sys-color-on-surface)",
+            background: "var(--md-sys-color-surface)",
             outline: "none",
             resize: "vertical",
             fontFamily: "inherit",
@@ -777,7 +765,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
         />
       </div>
 
-      <div style={{ display: "flex", gap: 12, padding: "0 16px 24px" }}>
+      <div style={{ display: "flex", gap: 12, padding: "0 0 24px" }}>
         <button
           className="btn-filled"
           onClick={handleSave}
@@ -823,9 +811,9 @@ function SessionList({
   }, []);
 
   if (!dataset)
-    return <p className="type-body" style={{ padding: 16 }}>Loading…</p>;
+    return <p className="type-body">Loading…</p>;
   if (dataset.rows.length === 0)
-    return <p className="type-body" style={{ padding: 16 }}>No sessions yet.</p>;
+    return <p className="type-body">No sessions yet.</p>;
 
   function fmtDate(val: unknown) {
     const d = new Date(String(val));
@@ -838,7 +826,7 @@ function SessionList({
     <div
       ref={listRef}
       style={{
-        background: "#FFFBFE",
+        background: "var(--md-sys-color-surface)",
         borderRadius: 12,
         boxShadow: "0px 1px 2px rgba(0,0,0,.3), 0px 1px 3px 1px rgba(0,0,0,.15)",
         overflow: "hidden",
@@ -856,7 +844,7 @@ function SessionList({
             display: "flex",
             alignItems: "center",
             padding: "14px 16px",
-            borderBottom: "1px solid #CAC4D0",
+            borderBottom: "1px solid var(--md-sys-color-outline-variant)",
             gap: 12,
             cursor: "pointer",
             position: "relative",
@@ -864,38 +852,18 @@ function SessionList({
             background: "transparent",
           }}
           onMouseEnter={(e) =>
-            (e.currentTarget.style.background = "rgba(103,80,164,.08)")
+            (e.currentTarget.style.background = "color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent)")
           }
           onMouseLeave={(e) =>
             (e.currentTarget.style.background = "transparent")
           }
         >
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              flexShrink: 0,
-              background: "#E7E0EC",
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span
-              className="material-symbols-rounded"
-              style={{ fontSize: 20, color: "#49454F" }}
-            >
-              calendar_today
-            </span>
-          </div>
-
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
                 fontSize: 16,
                 fontWeight: 500,
-                color: "#1C1B1F",
+                color: "var(--md-sys-color-on-surface)",
                 letterSpacing: ".15px",
               }}
             >
@@ -904,7 +872,7 @@ function SessionList({
             <div
               style={{
                 fontSize: 14,
-                color: "#49454F",
+                color: "var(--md-sys-color-on-surface-variant)",
                 letterSpacing: ".25px",
               }}
             >
@@ -915,11 +883,11 @@ function SessionList({
           <div
             style={{
               flexShrink: 0,
-              background: "#E7E0EC",
+              background: "var(--md-sys-color-surface-variant)",
               borderRadius: 12,
               padding: "2px 10px",
               fontSize: 12,
-              color: "#49454F",
+              color: "var(--md-sys-color-on-surface-variant)",
             }}
           >
             {String(row.exercise_count)} ex
@@ -939,7 +907,7 @@ function SessionList({
                 border: "none",
                 borderRadius: "50%",
                 background: "transparent",
-                color: "#49454F",
+                color: "var(--md-sys-color-on-surface-variant)",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
@@ -962,7 +930,7 @@ function SessionList({
                   top: "calc(100% + 4px)",
                   right: 0,
                   minWidth: 160,
-                  background: "#ECE6F0",
+                  background: "var(--md-sys-color-surface-variant)",
                   borderRadius: 4,
                   boxShadow:
                     "0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)",
@@ -984,7 +952,7 @@ function SessionList({
                     fontSize: 14,
                     fontWeight: 400,
                     letterSpacing: ".25px",
-                    color: "#1C1B1F",
+                    color: "var(--md-sys-color-on-surface)",
                     cursor: "pointer",
                   }}
                   onMouseEnter={(e) =>
@@ -996,14 +964,14 @@ function SessionList({
                 >
                   <span
                     className="material-symbols-rounded"
-                    style={{ fontSize: 18, color: "#49454F" }}
+                    style={{ fontSize: 18, color: "var(--md-sys-color-on-surface-variant)" }}
                   >
                     content_copy
                   </span>
                   Copy
                 </div>
                 <div
-                  style={{ height: 1, background: "#CAC4D0", margin: "4px 0" }}
+                  style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "4px 0" }}
                 />
                 <div
                   onClick={() => {
@@ -1019,7 +987,7 @@ function SessionList({
                     fontSize: 14,
                     fontWeight: 400,
                     letterSpacing: ".25px",
-                    color: "#B3261E",
+                    color: "var(--md-sys-color-error)",
                     cursor: "pointer",
                   }}
                   onMouseEnter={(e) =>
@@ -1031,7 +999,7 @@ function SessionList({
                 >
                   <span
                     className="material-symbols-rounded"
-                    style={{ fontSize: 18, color: "#B3261E" }}
+                    style={{ fontSize: 18, color: "var(--md-sys-color-error)" }}
                   >
                     delete
                   </span>
@@ -1300,7 +1268,8 @@ function LogView() {
       <div className="page">
         <div className="page-toolbar">
           <button
-            className="btn-text"
+            className="icon-btn"
+            aria-label="Back to sessions"
             onClick={() => {
               setInnerView("sessions");
               setSelectedSession(null);
@@ -1310,14 +1279,15 @@ function LogView() {
               setHistoryByExercise({});
             }}
           >
-            ← Sessions
+            <span className="material-symbols-rounded">arrow_back</span>
           </button>
           <h1 className="type-headline">{heading}</h1>
           <button
-            className="btn-filled"
+            className="icon-btn filled"
+            aria-label="Add exercise"
             onClick={() => setInnerView("exercise-add")}
           >
-            +
+            <span className="material-symbols-rounded">add</span>
           </button>
         </div>
 
@@ -1325,9 +1295,7 @@ function LogView() {
         {mutateError && <ErrorCard error={mutateError} />}
 
         {exerciseLoading && !exerciseDataset && (
-          <p className="type-body" style={{ padding: 16 }}>
-            Loading…
-          </p>
+          <p className="type-body">Loading…</p>
         )}
 
         <ExerciseList
@@ -1352,13 +1320,13 @@ function LogView() {
 
   return (
     <div className="page">
-      <div className="page-toolbar">
-        <h1 className="type-headline">Workout Sessions</h1>
+      <div className="page-header">
         <button
-          className="btn-filled"
+          className="icon-btn filled"
+          aria-label="New session"
           onClick={() => setInnerView("session-create")}
         >
-          + New Session
+          <span className="material-symbols-rounded">add</span>
         </button>
       </div>
 
@@ -1379,10 +1347,7 @@ function LogView() {
 function PerformanceView() {
   return (
     <div className="page">
-      <div className="page-toolbar">
-        <h1 className="type-headline">Performance</h1>
-      </div>
-      <p className="type-body" style={{ padding: 16, color: "var(--md-sys-color-on-surface-variant)" }}>
+      <p className="type-body" style={{ color: "var(--md-sys-color-on-surface-variant)" }}>
         Performance analytics coming soon.
       </p>
     </div>
@@ -1392,10 +1357,7 @@ function PerformanceView() {
 function HistoryView() {
   return (
     <div className="page">
-      <div className="page-toolbar">
-        <h1 className="type-headline">History</h1>
-      </div>
-      <p className="type-body" style={{ padding: 16, color: "var(--md-sys-color-on-surface-variant)" }}>
+      <p className="type-body" style={{ color: "var(--md-sys-color-on-surface-variant)" }}>
         Full workout history coming soon.
       </p>
     </div>
@@ -1487,10 +1449,7 @@ function SettingsView() {
 
   return (
     <div className="page">
-      <div className="page-toolbar">
-        <h1 className="type-headline">Settings</h1>
-      </div>
-      <div style={{ padding: 16 }}>
+      <div>
         <h2 className="type-title" style={{ marginBottom: 4 }}>Daily Workout Reminder</h2>
         <p className="type-body" style={{ color: "var(--md-sys-color-on-surface-variant)", marginBottom: 16 }}>
           Push notification to your phone at a set time each day.

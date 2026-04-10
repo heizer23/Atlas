@@ -4,7 +4,7 @@
  * Fetches GET /api/food/day on mount and after any mutating action.
  * Renders two sections:
  *
- *   Top    — Today: ALL entries logged today, with a Delete button per row
+ *   Top    — Total: ALL entries logged for the selected day, with Delete/Copy per row
  *   Bottom — Standards: all standard dishes grouped by meal_type, click to log a copy
  *
  * Re-fetches the full payload after every mutating action.
@@ -21,6 +21,16 @@ import type { ApiError } from '@platform-ui/api/types';
 function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatGermanDate(iso: string): string {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('de-DE', {
+    weekday: 'long',
+    day:     'numeric',
+    month:   'long',
+    year:    'numeric',
+  });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -75,10 +85,10 @@ function TodaySection({
     return (
       <section style={{ marginBottom: 'var(--space-lg)' }}>
         <h2 className="type-title" style={{ marginBottom: 'var(--space-sm)' }}>
-          Today
+          Total
         </h2>
         <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-          Nothing logged yet today.
+          Noch nichts eingetragen.
         </p>
       </section>
     );
@@ -90,7 +100,7 @@ function TodaySection({
   return (
     <section style={{ marginBottom: 'var(--space-lg)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 'var(--space-sm)' }}>
-        <h2 className="type-title">Today</h2>
+        <h2 className="type-title">Total</h2>
         <span className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
           {totalKcal} kcal &middot; P {totalProtein.toFixed(1)} g
         </span>
@@ -135,22 +145,20 @@ function TodaySection({
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-xs)', flexShrink: 0 }}>
                 <button
-                  className="btn-outlined"
-                  style={{ fontSize: '1rem', padding: '2px 10px', fontWeight: 600 }}
+                  className="icon-btn"
                   disabled={busy}
                   onClick={() => onCopy(entry.id)}
                   title="Add a copy"
                 >
-                  +
+                  <span className="material-symbols-rounded">add</span>
                 </button>
                 <button
-                  className="btn-outlined"
-                  style={{ fontSize: '1rem', padding: '2px 10px', fontWeight: 600, color: 'var(--md-sys-color-error)', borderColor: 'var(--md-sys-color-error)' }}
+                  className="icon-btn danger"
                   disabled={busy}
                   onClick={() => onDelete(entry.id)}
-                  title="Remove one"
+                  title="Remove"
                 >
-                  −
+                  <span className="material-symbols-rounded">remove</span>
                 </button>
               </div>
             </div>
@@ -308,10 +316,6 @@ export default function StandardsPage() {
     });
   }
 
-  function handleDateInput(value: string) {
-    if (value) setSelectedDate(value);
-  }
-
   // ── Copy a today entry ─────────────────────────────────────────────────────
 
   async function handleCopy(id: string) {
@@ -356,90 +360,55 @@ export default function StandardsPage() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  if (isLoading) {
-    return (
-      <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Day</h1>
-        </div>
-        <Skeleton />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Day</h1>
-        </div>
-        <ErrorCard error={error} />
-      </div>
-    );
-  }
-
   const todayEntries = payload?.today_entries ?? [];
   const standards    = payload?.standards     ?? [];
 
   return (
     <div className="page">
-      <div className="page-header">
-        <h1 className="type-display">Day</h1>
-      </div>
 
-      {/* Date navigation controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
-        <button
-          className="btn-outlined"
-          onClick={handlePrevDay}
-          title="Previous day"
-          style={{ padding: '4px 12px', fontWeight: 600, fontSize: '1rem' }}
-        >
-          &#8592;
+      {/* Date navigation — arrows at edges, date centered as page heading */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <button className="icon-btn" onClick={handlePrevDay} aria-label="Previous day">
+          <span className="material-symbols-rounded">chevron_left</span>
         </button>
-        <input
-          type="date"
-          value={selectedDate}
-          max={todayIso()}
-          onChange={(e) => handleDateInput(e.target.value)}
-          style={{
-            padding: '4px 8px',
-            border: '1px solid var(--md-sys-color-outline)',
-            borderRadius: '4px',
-            background: 'var(--md-sys-color-surface)',
-            color: 'var(--md-sys-color-on-surface)',
-            fontSize: '0.9rem',
-          }}
-        />
+
+        <h1 className="type-headline" style={{ textAlign: 'center', flex: 1 }}>
+          {formatGermanDate(selectedDate)}
+        </h1>
+
         <button
-          className="btn-outlined"
+          className="icon-btn"
           onClick={handleNextDay}
           disabled={isToday}
-          title="Next day"
-          style={{ padding: '4px 12px', fontWeight: 600, fontSize: '1rem' }}
+          aria-label="Next day"
+          style={{ opacity: isToday ? 0.3 : 1 }}
         >
-          &#8594;
+          <span className="material-symbols-rounded">chevron_right</span>
         </button>
       </div>
 
-      {actionError && (
-        <div style={{ marginBottom: 'var(--space-sm)' }}>
-          <ErrorCard error={actionError} />
-        </div>
+      {actionError && <ErrorCard error={actionError} />}
+
+      {isLoading ? (
+        <Skeleton />
+      ) : error ? (
+        <ErrorCard error={error} />
+      ) : (
+        <>
+          <TodaySection
+            entries={todayEntries}
+            onCopy={handleCopy}
+            onDelete={handleDelete}
+            actioningId={actioningId}
+          />
+
+          <StandardsSection
+            standards={standards}
+            onLogCopy={handleLogCopy}
+            isActioning={actioningId}
+          />
+        </>
       )}
-
-      <TodaySection
-        entries={todayEntries}
-        onCopy={handleCopy}
-        onDelete={handleDelete}
-        actioningId={actioningId}
-      />
-
-      <StandardsSection
-        standards={standards}
-        onLogCopy={handleLogCopy}
-        isActioning={actioningId}
-      />
     </div>
   );
 }

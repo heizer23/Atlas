@@ -23,7 +23,7 @@
       "LabelEngine HTTP API: POST /api/labels (create label), GET /api/labels (search labels)",
       "LabelEngine Postgres shared schema: labels.labels table (read label name by id)",
       "02_Platform/packages: platform_contracts (Dataset, DatasetMeta, ColumnSchema), platform_errorhandling (api_error, logging, FastAPI handlers)",
-      "02_Platform/01_Postgres: shared Postgres instance (ATLAS_PG_* env vars)"
+      "02_Platform/Postgres: shared Postgres instance (ATLAS_PG_* env vars)"
     ],
     "provides": [
       "List of all series with sparkline and latest value (sorted by label name)",
@@ -182,7 +182,7 @@
   "dependencies": {
     "internal_required": [
       {"component": "02_Platform/LabelEngine", "role": "Label creation and name lookup via HTTP API; label table read via shared Postgres schema"},
-      {"component": "02_Platform/01_Postgres", "role": "Shared Postgres instance for private application schema"},
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance for private application schema"},
       {"component": "02_Platform/packages", "role": "platform_contracts (Dataset/DatasetMeta/ColumnSchema), platform_errorhandling (api_error, logging, FastAPI handlers)"}
     ],
     "internal_optional": [],

@@ -13,15 +13,15 @@
       "detected_entry_files": []
     },
     {
-      "name": "01_Access",
+      "name": "Access",
       "layer": "01_System",
-      "path": "01_System/01_Access",
+      "path": "01_System/Access",
       "atlas_dependencies": [],
       "external_libraries": [],
       "internal_aliases": [],
       "detected_entry_files": [
-        "01_System/01_Access/Tailscale/readme.md",
-        "01_System/01_Access/cloudflared/compose.yml"
+        "01_System/Access/Tailscale/readme.md",
+        "01_System/Access/cloudflared/compose.yml"
       ]
     },
     {
@@ -39,11 +39,11 @@
       "path": "01_System/AuditRuns",
       "atlas_dependencies": [
         "00_Blueprint/SharedViews",
-        "01_System/01_Access",
-        "02_Platform/01_Postgres",
-        "02_Platform/02_Atlas_Shell",
+        "01_System/Access",
+        "02_Platform/Postgres",
+        "02_Platform/Atlas_Shell",
         "02_Platform/CalendarConnector",
-        "02_Platform/Chronos",
+        "01_System/Chronos",
         "02_Platform/MCPGateway",
         "02_Platform/Notifications",
         "02_Platform/packages",
@@ -68,25 +68,25 @@
       ]
     },
     {
-      "name": "01_Postgres",
+      "name": "Postgres",
       "layer": "02_Platform",
-      "path": "02_Platform/01_Postgres",
+      "path": "02_Platform/Postgres",
       "atlas_dependencies": [],
       "external_libraries": [
         "os\nimport subprocess\nimport sys\nfrom pathlib import Path\n\nREPO_ROOT"
       ],
       "internal_aliases": [],
       "detected_entry_files": [
-        "02_Platform/01_Postgres/CLAUDE.md",
-        "02_Platform/01_Postgres/compose.yml"
+        "02_Platform/Postgres/CLAUDE.md",
+        "02_Platform/Postgres/compose.yml"
       ]
     },
     {
-      "name": "02_Atlas_Shell",
+      "name": "Atlas_Shell",
       "layer": "02_Platform",
-      "path": "02_Platform/02_Atlas_Shell",
+      "path": "02_Platform/Atlas_Shell",
       "atlas_dependencies": [
-        "01_System/01_Access",
+        "01_System/Access",
         "03_Application/Chronicle",
         "03_Application/FoodTracker",
         "03_Application/TaskTracker",
@@ -129,10 +129,10 @@
         "@atlas/shell"
       ],
       "detected_entry_files": [
-        "02_Platform/02_Atlas_Shell/compose.yml",
-        "02_Platform/02_Atlas_Shell/package.json",
-        "02_Platform/02_Atlas_Shell/src/index.ts",
-        "02_Platform/02_Atlas_Shell/src/shell/Router.tsx"
+        "02_Platform/Atlas_Shell/compose.yml",
+        "02_Platform/Atlas_Shell/package.json",
+        "02_Platform/Atlas_Shell/src/index.ts",
+        "02_Platform/Atlas_Shell/src/shell/Router.tsx"
       ]
     },
     {
@@ -178,13 +178,13 @@
     {
       "name": "Chronos",
       "layer": "02_Platform",
-      "path": "02_Platform/Chronos",
+      "path": "01_System/Chronos",
       "atlas_dependencies": [],
       "external_libraries": [],
       "internal_aliases": [],
       "detected_entry_files": [
-        "02_Platform/Chronos/README.md",
-        "02_Platform/Chronos/compose.yml"
+        "01_System/Chronos/README.md",
+        "01_System/Chronos/compose.yml"
       ]
     },
     {
@@ -192,7 +192,7 @@
       "layer": "02_Platform",
       "path": "02_Platform/LabelEngine",
       "atlas_dependencies": [
-        "02_Platform/01_Postgres",
+        "02_Platform/Postgres",
         "02_Platform/packages"
       ],
       "external_libraries": [
@@ -336,7 +336,7 @@
       "path": "03_Application/Chronicle",
       "atlas_dependencies": [
         "00_Blueprint/SharedViews",
-        "02_Platform/02_Atlas_Shell",
+        "02_Platform/Atlas_Shell",
         "02_Platform/packages"
       ],
       "external_libraries": [
@@ -378,7 +378,7 @@
       "layer": "03_Application",
       "path": "03_Application/FoodTracker",
       "atlas_dependencies": [
-        "02_Platform/02_Atlas_Shell",
+        "02_Platform/Atlas_Shell",
         "02_Platform/MCPGateway",
         "02_Platform/packages"
       ],
@@ -436,7 +436,7 @@
       "layer": "03_Application",
       "path": "03_Application/TaskTracker",
       "atlas_dependencies": [
-        "02_Platform/02_Atlas_Shell",
+        "02_Platform/Atlas_Shell",
         "02_Platform/packages"
       ],
       "external_libraries": [
@@ -477,8 +477,8 @@
       "layer": "03_Application",
       "path": "03_Application/WorkoutTracker",
       "atlas_dependencies": [
-        "02_Platform/01_Postgres",
-        "02_Platform/02_Atlas_Shell",
+        "02_Platform/Postgres",
+        "02_Platform/Atlas_Shell",
         "02_Platform/packages"
       ],
       "external_libraries": [

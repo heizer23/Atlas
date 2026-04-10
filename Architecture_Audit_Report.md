@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-The Atlas implementation is largely coherent. The four-layer model is respected, the UI Data Contract (`R-CON-BP-04`) is consistently applied across the majority of endpoints, and the platform boundary is properly maintained with the known exception pattern recorded in `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`. The formal exception register (`R-EXC-PC-01`, `R-EXC-PC-02`, `R-EXC-PC-03`) correctly covers all detected Atlas Shell deviations.
+The Atlas implementation is largely coherent. The four-layer model is respected, the UI Data Contract (`R-CON-BP-04`) is consistently applied across the majority of endpoints, and the platform boundary is properly maintained with the known exception pattern recorded in `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`. The formal exception register (`R-EXC-PC-01`, `R-EXC-PC-02`, `R-EXC-PC-03`) correctly covers all detected Atlas Shell deviations.
 
 The most structurally significant finding is that seven FoodTracker endpoints return **ad hoc response shapes that are not `Dataset` or `ApiError` and have no formal exception record**: `GET /food/validate`, `GET /food/entries/{id}`, `GET /food/standards`, `GET /food/day`, `POST /food/standards/{id}/log`, `PATCH /food/entries/{id}/standard`, and `DELETE /food/standards/{id}/today-instance`. These collectively constitute contract violations. The Chronicle calendar endpoints also return bespoke shapes; these are partially justified in a code comment but without a formal exception record.
 
@@ -61,9 +61,9 @@ Outside of these findings, the system is structurally sound. Dependency directio
 
 | Exception ID | Covers | Location |
 |---|---|---|
-| R-EXC-PC-01 | Application nav content in Shell | `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` |
-| R-EXC-PC-02 | Shell lazy imports Application layer | `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` |
-| R-EXC-PC-03 | ShellErrorBoundary `request_id` unspecified for client errors | `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` |
+| R-EXC-PC-01 | Application nav content in Shell | `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` |
+| R-EXC-PC-02 | Shell lazy imports Application layer | `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` |
+| R-EXC-PC-03 | ShellErrorBoundary `request_id` unspecified for client errors | `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` |
 
 ### Contracts Consulted
 
@@ -80,13 +80,13 @@ Outside of these findings, the system is structurally sound. Dependency directio
 - `00_Blueprint/SharedViews/chronicle.sql`
 
 **Platform:**
-- `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`
-- `02_Platform/02_Atlas_Shell/src/types.ts`
-- `02_Platform/02_Atlas_Shell/src/registry/AppRegistry.ts`
-- `02_Platform/02_Atlas_Shell/src/shell/Router.tsx`
-- `02_Platform/02_Atlas_Shell/src/shell/ShellLayout.tsx` (not read, no findings expected)
-- `02_Platform/02_Atlas_Shell/src/shell/main.tsx`
-- `02_Platform/02_Atlas_Shell/src/index.ts`
+- `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`
+- `02_Platform/Atlas_Shell/src/types.ts`
+- `02_Platform/Atlas_Shell/src/registry/AppRegistry.ts`
+- `02_Platform/Atlas_Shell/src/shell/Router.tsx`
+- `02_Platform/Atlas_Shell/src/shell/ShellLayout.tsx` (not read, no findings expected)
+- `02_Platform/Atlas_Shell/src/shell/main.tsx`
+- `02_Platform/Atlas_Shell/src/index.ts`
 - `02_Platform/packages/platform_contracts/contracts.py`
 - `02_Platform/packages/platform_contracts/__init__.py`
 - `02_Platform/packages/platform_errorhandling/api_response.py`

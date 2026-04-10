@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
@@ -254,7 +254,7 @@ function LinkModal({
 
         <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
           <button
-            className="btn-primary"
+            className="btn-filled"
             onClick={handleCreate}
             disabled={saving || !selectedTarget}
           >
@@ -954,8 +954,11 @@ function TaskDetailEdit({
 
   return (
     <div className="page">
-      <div className="page-header" style={{ marginBottom: 'var(--space-md)' }}>
-        <h1 className="type-display">Edit Task</h1>
+      <div className="page-toolbar">
+        <button className="icon-btn" aria-label="Back" onClick={onBack}>
+          <span className="material-symbols-rounded">arrow_back</span>
+        </button>
+        <h1 className="type-headline">Edit Task</h1>
       </div>
 
       {saveError && (
@@ -1027,7 +1030,7 @@ function TaskDetailEdit({
         />
 
         <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
-          <button className="btn-primary" onClick={handleSave} disabled={saving || !title.trim()}>
+          <button className="btn-filled" onClick={handleSave} disabled={saving || !title.trim()}>
             {saving ? 'Saving…' : 'Save'}
           </button>
           <button className="btn-outlined" onClick={onBack} disabled={saving}>
@@ -1182,8 +1185,11 @@ function TaskCreatePanel({
 
   return (
     <div className="page">
-      <div className="page-header" style={{ marginBottom: 'var(--space-md)' }}>
-        <h1 className="type-display">New Task</h1>
+      <div className="page-toolbar">
+        <button className="icon-btn" aria-label="Cancel" onClick={onCancel}>
+          <span className="material-symbols-rounded">arrow_back</span>
+        </button>
+        <h1 className="type-headline">New Task</h1>
       </div>
 
       {saveError && (
@@ -1331,7 +1337,7 @@ function TaskCreatePanel({
 
         <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
           <button
-            className="btn-primary"
+            className="btn-filled"
             onClick={() => handleSubmit('open')}
             disabled={saving || !title.trim()}
           >
@@ -1397,17 +1403,7 @@ function TaskGroupedList({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
       {groups.map(group => (
         <div key={group.name}>
-          <p
-            className="type-label"
-            style={{
-              fontSize:      '0.75rem',
-              fontWeight:    700,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-              color:         'var(--md-sys-color-on-surface-variant)',
-              marginBottom:  'var(--space-xs)',
-            }}
-          >
+          <p className="section-label" style={{ marginBottom: 'var(--space-xs)' }}>
             {group.name}
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
@@ -1443,7 +1439,11 @@ function viewFetchUrl(view: ViewTab): string {
 // ── TasksPage ─────────────────────────────────────────────────────────────────
 
 function TasksPage() {
-  const [view,        setView]        = useState<ViewTab>('active');
+  const location = useLocation();
+  const view: ViewTab =
+    location.pathname === '/tasks/pending' ? 'pending' :
+    location.pathname === '/tasks/done'    ? 'done'    : 'active';
+
   const [tasks,       setTasks]       = useState<TaskRow[] | null>(null);
   const [isLoading,   setIsLoading]   = useState(true);
   const [error,       setError]       = useState<ApiError | null>(null);
@@ -1513,23 +1513,6 @@ function TasksPage() {
     fetchTasks(view);
   }
 
-  // ── Render helpers ───────────────────────────────────────────────────────────
-
-  function tabStyle(active: boolean): React.CSSProperties {
-    return {
-      padding:      '6px 16px',
-      borderRadius: '6px 6px 0 0',
-      border:       '1px solid var(--md-sys-color-outline-variant)',
-      borderBottom: active ? '1px solid var(--md-sys-color-surface)' : '1px solid var(--md-sys-color-outline-variant)',
-      background:   active ? 'var(--md-sys-color-surface)' : 'var(--md-sys-color-surface-variant)',
-      color:        active ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
-      fontWeight:   active ? 700 : 400,
-      fontSize:     '0.875rem',
-      cursor:       active ? 'default' : 'pointer',
-      marginRight:  '4px',
-    };
-  }
-
   // ── Render pending tab (two sections: Open, then Pending) ────────────────────
 
   function renderPendingTab() {
@@ -1540,30 +1523,6 @@ function TasksPage() {
 
     const openEffort  = openTasks.reduce((sum, t)  => sum + (t.effort_hours ?? 0), 0);
     const totalEffort = tasks.reduce((sum, t) => sum + (t.effort_hours ?? 0), 0);
-
-    const sectionHeaderStyle: React.CSSProperties = {
-      display:        'flex',
-      alignItems:     'center',
-      justifyContent: 'space-between',
-      marginBottom:   'var(--space-sm)',
-    };
-
-    const sectionLabelStyle: React.CSSProperties = {
-      fontSize:      '0.8rem',
-      fontWeight:    700,
-      letterSpacing: '0.06em',
-      textTransform: 'uppercase',
-      color:         'var(--md-sys-color-on-surface-variant)',
-    };
-
-    const effortBadgeStyle: React.CSSProperties = {
-      fontSize:     '0.8rem',
-      fontWeight:   600,
-      color:        'var(--md-sys-color-on-surface-variant)',
-      background:   'var(--md-sys-color-surface-variant)',
-      borderRadius: '4px',
-      padding:      '2px 8px',
-    };
 
     const cardHandlers = {
       onOpen:         setSelected,
@@ -1586,9 +1545,9 @@ function TasksPage() {
 
         {/* Open section */}
         <div>
-          <div style={sectionHeaderStyle}>
-            <span style={sectionLabelStyle}>Open</span>
-            <span style={effortBadgeStyle}>{formatEffort(openEffort)}</span>
+          <div className="section-header">
+            <span className="section-label">Open</span>
+            <span className="section-badge">{formatEffort(openEffort)}</span>
           </div>
           {openTasks.length === 0 ? (
             <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
@@ -1601,8 +1560,8 @@ function TasksPage() {
 
         {/* Pending section */}
         <div>
-          <div style={sectionHeaderStyle}>
-            <span style={sectionLabelStyle}>Pending</span>
+          <div className="section-header">
+            <span className="section-label">Pending</span>
           </div>
           {pendingTasks.length === 0 ? (
             <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
@@ -1642,23 +1601,10 @@ function TasksPage() {
   return (
     <div className="page">
       {/* Page header */}
-      <div className="page-header" style={{ marginBottom: 0 }}>
-        <h1 className="type-display">Tasks</h1>
-        <button className="btn-primary" onClick={() => setCreating(true)}>
-          New Task
+      <div className="page-header">
+        <button className="icon-btn filled" aria-label="New task" onClick={() => setCreating(true)}>
+          <span className="material-symbols-rounded">add</span>
         </button>
-      </div>
-
-      {/* Tab bar */}
-      <div style={{
-        display:      'flex',
-        alignItems:   'flex-end',
-        marginBottom: 'var(--space-md)',
-        borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-      }}>
-        <button style={tabStyle(view === 'active')}  onClick={() => setView('active')}>Active</button>
-        <button style={tabStyle(view === 'pending')} onClick={() => setView('pending')}>Pending</button>
-        <button style={tabStyle(view === 'done')}    onClick={() => setView('done')}>Done</button>
       </div>
 
       {actionError && (

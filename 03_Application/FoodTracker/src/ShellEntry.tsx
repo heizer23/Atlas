@@ -180,10 +180,6 @@ export function FoodIntake() {
   if (flow === 'idle') {
     return (
       <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Log a Meal</h1>
-        </div>
-
         <section style={{ marginBottom: 'var(--space-md)' }}>
           {/* Collapsible template disclosure — collapsed by default */}
           <button
@@ -259,7 +255,7 @@ export function FoodIntake() {
           />
 
           <button
-            className="btn-primary"
+            className="btn-filled"
             style={{ marginTop: 'var(--space-sm)' }}
             onClick={handleLogMeal}
             disabled={inFlight || pastedJson.trim() === ''}
@@ -316,7 +312,7 @@ export function FoodIntake() {
           <button className="btn-outlined" onClick={handleBack} disabled={inFlight}>
             Back
           </button>
-          <button className="btn-primary" onClick={handleAccept} disabled={inFlight}>
+          <button className="btn-filled" onClick={handleAccept} disabled={inFlight}>
             {inFlight ? 'Saving…' : 'Accept'}
           </button>
         </div>

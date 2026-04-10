@@ -128,7 +128,7 @@ Use existing conventions for:
 
 Do not introduce new patterns when an existing one already fits.
 
-For backend endpoints, respect the `Dataset` / `ApiError` contract defined in `R-CON-BP-04`. Import types from canonical locations (`02_Platform/02_Atlas_Shell/platform-ui/api/types.ts` or `02_Platform/packages/platform_contracts/contracts.py`). Never redefine them locally.
+For backend endpoints, respect the `Dataset` / `ApiError` contract defined in `R-CON-BP-04`. Import types from canonical locations (`02_Platform/Atlas_Shell/platform-ui/api/types.ts` or `02_Platform/packages/platform_contracts/contracts.py`). Never redefine them locally.
 
 ### Step 5: Self-Verify
 

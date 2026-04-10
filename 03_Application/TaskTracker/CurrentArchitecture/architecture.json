@@ -147,7 +147,7 @@
     },
     {
       "name": "platform-ui",
-      "path": "02_Platform/02_Atlas_Shell/platform-ui",
+      "path": "02_Platform/Atlas_Shell/platform-ui",
       "usage": "apiFetch, isApiError, ErrorCard, Skeleton, CreateForm — retained; TableView and DetailView no longer used on tasks page"
     },
     {

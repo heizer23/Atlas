@@ -168,3 +168,88 @@ severity: major
 recurrence_hint: "First observed — pattern likely recurs whenever a draft describes frontend changes by partial enumeration rather than by querying the codebase for all usages of the affected pattern"
 linked_immediate_artifact: 03_Application/TaskTracker/Sprint06_Label_Contract_Fix/20_design/design_review.md
 ---
+
+---
+entry_id: EVD-2026-04-09-009
+date: 2026-04-09
+source_agent: audit_architecture
+run_type: audit
+component: atlas_shell
+sprint: n/a
+pattern_name: application_domain_css_in_platform_stylesheet
+short_description: TaskTracker-specific CSS classes (.tasks-toolbar, .tasks-filters, .filter-chip) were added to platform-ui/index.css, the platform-level design token and component stylesheet.
+evidence: "platform-ui/index.css:610-645 — three CSS blocks with the comment '/* ─── Tasks page ─── */' define .tasks-toolbar, .tasks-filters, .filter-chip, and .filter-chip.active; no other application has corresponding blocks in this file; no platform UI primitive component uses these class names"
+likely_root_cause: rule_gap
+candidate_response: rule
+severity: major
+recurrence_hint: "First observed — will recur as each application adds custom page chrome; no rule currently prohibits application CSS blocks in platform-ui/index.css"
+linked_immediate_artifact: 02_Platform/Atlas_Shell/Architecture_Audit_Report.md
+---
+
+---
+entry_id: EVD-2026-04-09-010
+date: 2026-04-09
+source_agent: audit_architecture
+run_type: audit
+component: atlas_shell
+sprint: n/a
+pattern_name: exception_record_references_superseded_file
+short_description: Both active exception records in ARCHITECTURE_EXCEPTIONS.md cite src/apps/index.ts as the deviating file, but this file does not exist; the actual mechanism is main.tsx side-effect imports of application shellConfig.ts files.
+evidence: "ARCHITECTURE_EXCEPTIONS.md R-EXC-PC-01: 'defined in src/apps/index.ts'; R-EXC-PC-02: 'via React.lazy(() => import(\"@workout/ShellEntry\")) in src/apps/index.ts'; Glob(src/apps/**) returns no results; main.tsx:40-44 performs side-effect imports of 03_Application/*/src/shellConfig files"
+likely_root_cause: definition_quality
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — pattern of exception records becoming stale after implementation refactoring"
+linked_immediate_artifact: 02_Platform/Atlas_Shell/Architecture_Audit_Report.md
+---
+
+---
+entry_id: EVD-2026-04-09-011
+date: 2026-04-09
+source_agent: audit_architecture
+run_type: audit
+component: atlas_shell
+sprint: n/a
+pattern_name: duplicated_aggregation_utility_across_chart_components
+short_description: An identical agg() aggregation function (sum/avg/count/max/min) is copy-pasted verbatim into BarChart.tsx, LineChart.tsx, and ComboChart.tsx with no shared utility module.
+evidence: "BarChart.tsx:102-112, LineChart.tsx:72-82, ComboChart.tsx:102-112 — all three define function agg(vals: number[], method: string): number with identical switch bodies; parameter type is string rather than the Aggregation union type defined in types.ts"
+likely_root_cause: none
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — bounded to platform-ui chart components"
+linked_immediate_artifact: 02_Platform/Atlas_Shell/Architecture_Audit_Report.md
+---
+
+---
+entry_id: EVD-2026-04-09-012
+date: 2026-04-09
+source_agent: audit_architecture
+run_type: audit
+component: atlas_shell
+sprint: n/a
+pattern_name: platform_ui_hidden_shared_mutable_state
+short_description: WarningPlaceholder mutates the internal request log ring buffer of client.ts by calling getRequestLog() and directly invoking unshift() on the returned live array reference, with no declared write interface.
+evidence: "WarningPlaceholder.tsx:13-21 — const log = getRequestLog(); log.unshift({...}); client.ts:50 — export function getRequestLog(): RequestLogEntry[] { return requestLog; } returns the live array, not a copy; UI_Data_Contract.md §4 acknowledges the [PLATFORM GAP] injection behavior but does not specify the mechanism or which components may write to the log"
+likely_root_cause: rule_gap
+candidate_response: rule
+severity: major
+recurrence_hint: "First observed — governance gap MS-001; may recur as additional platform-ui components are built that need to surface diagnostic events"
+linked_immediate_artifact: 02_Platform/Atlas_Shell/Architecture_Audit_Report.md
+---
+
+---
+entry_id: EVD-2026-04-09-013
+date: 2026-04-09
+source_agent: audit_architecture
+run_type: audit
+component: atlas_shell
+sprint: n/a
+pattern_name: contract_document_version_header_mismatch
+short_description: UI_Data_Contract.md header declares v0.4 but R-CON-BP-04 in the rule registry declares VERSION v0.5; the document body contains v0.5 content (§9 Endpoint Categories) but the version header was not bumped.
+evidence: "UI_Data_Contract.md:3 — '> **Version:** v0.4'; UI_Data_Contract.md:258-267 — §9 Endpoint Categories and Dataset Obligation is present; UI_Data_Contract.md:291 — '- Added §9 (Endpoint Categories and Dataset Obligation)' listed under 'Changes from v0.3' while header still reads v0.4; R-CON-BP.md R-CON-BP-04: 'VERSION: v0.5'"
+likely_root_cause: definition_quality
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — version header drift between rule registry and contract document"
+linked_immediate_artifact: 02_Platform/Atlas_Shell/Architecture_Audit_Report.md
+---

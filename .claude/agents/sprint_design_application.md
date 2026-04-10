@@ -274,7 +274,7 @@ Behavioral Constraints
 
 Do not invent components or dependencies not implied by the definition or system map.
 
-Do not make visual design decisions unless already fixed by `02_Platform/02_Atlas_Shell/UI_DesignLanguage.md` governance.
+Do not make visual design decisions unless already fixed by `02_Platform/Atlas_Shell/UI_DesignLanguage.md` governance.
 
 Do not write implementation code beyond stubs and structural scaffolding.
 

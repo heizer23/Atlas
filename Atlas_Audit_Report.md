@@ -159,7 +159,7 @@ Atlas remains a substantially coherent constitutional system with a clear four-l
 - **rule_type:** constitutional
 - **hardness:** hard
 - **duplicates:** Elaborated in `.claude/rules/02_platform_boundary.md` (substantial elaboration); restated in `designer-platform.md`, `designer-application.md`, `implementer.md`, `design-reviewer.md`
-- **conflicts:** Known violation in `02_Platform/02_Atlas_Shell/src/apps/index.ts` — application-specific nav content embedded in platform component; documented in user memory as accepted exception
+- **conflicts:** Known violation in `02_Platform/Atlas_Shell/src/apps/index.ts` — application-specific nav content embedded in platform component; documented in user memory as accepted exception
 - **enforcement_status:** Enforced by design reviewer; known exception accepted without formal exception record in Blueprint
 - **notes:** The violation is documented only in user-level memory (`project_atlas_shell_rule_exceptions.md`). There is no formal architectural exception record.
 
@@ -242,7 +242,7 @@ Atlas remains a substantially coherent constitutional system with a clear four-l
 - **rule_type:** elaboration of R-06
 - **hardness:** hard
 - **duplicates:** Restated in designer agents; reviewers check this explicitly
-- **conflicts:** Known violation: `02_Platform/02_Atlas_Shell/src/apps/index.ts` imports Application layer lazily. Accepted as exception, documented in user memory only.
+- **conflicts:** Known violation: `02_Platform/Atlas_Shell/src/apps/index.ts` imports Application layer lazily. Accepted as exception, documented in user memory only.
 - **enforcement_status:** Actively enforced by design-reviewer and designer agents
 - **notes:** The known Atlas Shell violation inverts this rule.
 
@@ -650,15 +650,15 @@ Atlas remains a substantially coherent constitutional system with a clear four-l
 - **category:** gap
 - **severity:** medium
 - **title:** No Formal Record of Accepted Rule Violations (Atlas Shell Exceptions)
-- **claim:** Three confirmed rule violations in `02_Platform/02_Atlas_Shell` (Rule 02, Rule 05, Rule 07) are documented as "accepted exceptions" only in user-level memory (`~/.claude/projects/.../memory/project_atlas_shell_rule_exceptions.md`). There is no formal exception record in the Atlas repository.
+- **claim:** Three confirmed rule violations in `02_Platform/Atlas_Shell` (Rule 02, Rule 05, Rule 07) are documented as "accepted exceptions" only in user-level memory (`~/.claude/projects/.../memory/project_atlas_shell_rule_exceptions.md`). There is no formal exception record in the Atlas repository.
 - **evidence:**
-  - `project_atlas_shell_rule_exceptions.md`: "Three rule violations were identified in the `02_Platform/02_Atlas_Shell` design and accepted as-is pending a future system audit"
+  - `project_atlas_shell_rule_exceptions.md`: "Three rule violations were identified in the `02_Platform/Atlas_Shell` design and accepted as-is pending a future system audit"
   - Memory is 8 days old; the exceptions were deferred "to next system audit" — this audit is that event
-  - No corresponding exception record exists in `02_Platform/02_Atlas_Shell/`, `.claude/rules/`, or Blueprint
+  - No corresponding exception record exists in `02_Platform/Atlas_Shell/`, `.claude/rules/`, or Blueprint
 - **why_it_matters:** Accepted exceptions that exist only in external memory are invisible to the repository. Any agent operating on the Atlas Shell will encounter these rule violations without context, and will either flag them as blockers or silently normalize them — both are wrong outcomes. The "pending future system audit" condition has now been met.
-- **affected_artifacts:** `02_Platform/02_Atlas_Shell/` (design artifacts), `~/.claude/.../memory/project_atlas_shell_rule_exceptions.md`
-- **recommended_action:** Create a formal exception record at `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` documenting the three exceptions, their accepted rationale, and their resolution criteria. This makes them discoverable by agents operating in that component. Decide whether to resolve or formally accept-indefinitely each exception.
-- **promotion_target:** `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`
+- **affected_artifacts:** `02_Platform/Atlas_Shell/` (design artifacts), `~/.claude/.../memory/project_atlas_shell_rule_exceptions.md`
+- **recommended_action:** Create a formal exception record at `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` documenting the three exceptions, their accepted rationale, and their resolution criteria. This makes them discoverable by agents operating in that component. Decide whether to resolve or formally accept-indefinitely each exception.
+- **promotion_target:** `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`
 - **confidence:** high
 
 ---
@@ -732,7 +732,7 @@ Atlas remains a substantially coherent constitutional system with a clear four-l
 - **description:** No architectural exception record mechanism exists in Atlas
 - **evidence_of_need:** Atlas Shell violations (Rule 02, 05, 07) accepted as exceptions are recorded in user memory outside the repository. FoodTracker sprint process exception is recorded in agent memory. No Atlas component has a formal exception record artifact. The audit rule (R-08) says violations must be surfaced — but there is no defined place to record accepted violations as formal exceptions with rationale and resolution criteria.
 - **likely_target:** A per-component `ARCHITECTURE_EXCEPTIONS.md` pattern, or a global `.claude/rules/exceptions/` directory for formally accepted deviations
-- **recommendation:** Define an exception record pattern. At minimum: create `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` to resolve the deferred Atlas Shell violations. Document the pattern in `.claude/rules` or Blueprint so future accepted exceptions have a known home.
+- **recommendation:** Define an exception record pattern. At minimum: create `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` to resolve the deferred Atlas Shell violations. Document the pattern in `.claude/rules` or Blueprint so future accepted exceptions have a known home.
 
 ---
 
@@ -777,7 +777,7 @@ Add `APPROVED_WITH_CHANGES` to the sprint-orchestrator's valid verdict list with
 Rename `component_architecture.json` → `architecture.json` and `component_scaffold.json` → `scaffolding.json` in `03_Application/FoodTracker/Sprint04_Standard Dishes/20_design/`. Update any references within those files if they self-reference. This restores orchestrator-detectability of Sprint04's design artifacts.
 
 **Priority 4 — Create Atlas Shell exception record (F-08, G-02)**
-Create `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` formally documenting the three accepted violations (Rule 02, 05, 07), their rationale, and resolution criteria. Remove the item from user-level memory or update it to point to the repository record.
+Create `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` formally documenting the three accepted violations (Rule 02, 05, 07), their rationale, and resolution criteria. Remove the item from user-level memory or update it to point to the repository record.
 
 **Priority 5 — Verify and update chronicle.sql (F-10)**
 Check whether Sprint02 was completed and the SQL view extended. If so, update `00_Blueprint/SharedViews/chronicle.sql` to include `application_group` and `sort_order` columns to keep the Blueprint contract artifact current.

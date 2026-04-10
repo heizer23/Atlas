@@ -153,8 +153,8 @@
     "03_Application/TaskTracker/run_local.py",
     "03_Application/TaskTracker/src/shellConfig.ts",
     "03_Application/TaskTracker/CLAUDE.md",
-    "02_Platform/02_Atlas_Shell/platform-ui/components/TableView.tsx",
-    "02_Platform/02_Atlas_Shell/platform-ui/components/DetailView.tsx"
+    "02_Platform/Atlas_Shell/platform-ui/components/TableView.tsx",
+    "02_Platform/Atlas_Shell/platform-ui/components/DetailView.tsx"
   ],
 
   "execution_order": [

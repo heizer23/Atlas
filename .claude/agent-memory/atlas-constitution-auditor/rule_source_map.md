@@ -42,8 +42,8 @@ Last updated: 2026-03-24 (First Audit)
 
 | Location | Rules Violated | Disposition |
 |---|---|---|
-| `02_Platform/02_Atlas_Shell/src/apps/index.ts` | R-06 (platform boundary), R-11 (dependency direction) | Accepted; documented in user memory only (should be in `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`) |
-| `02_Platform/02_Atlas_Shell` (ShellErrorBoundary) | R-12 (UI Data Contract — request_id undefined) | Accepted; documented in user memory only |
+| `02_Platform/Atlas_Shell/src/apps/index.ts` | R-06 (platform boundary), R-11 (dependency direction) | Accepted; documented in user memory only (should be in `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md`) |
+| `02_Platform/Atlas_Shell` (ShellErrorBoundary) | R-12 (UI Data Contract — request_id undefined) | Accepted; documented in user memory only |
 
 ## Known Process Exceptions
 

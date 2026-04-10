@@ -22,5 +22,5 @@ Access at [http://localhost:8000](http://localhost:8000).
 
 ## DB Schema
 
-Contract: `02_Platform/01_Postgres/ObjectSchemas/workout_schema.sql`.
+Contract: `02_Platform/Postgres/ObjectSchemas/workout_schema.sql`.
 Single table `workout.workout_log` with `workout_id` for session grouping.

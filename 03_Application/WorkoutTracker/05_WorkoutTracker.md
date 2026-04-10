@@ -37,7 +37,7 @@ Access model:
 Code is disposable; data contracts are not
 The WorkoutTracker application is bound to the following schema:
 
-- `02_Platform/01_Postgres/ObjectSchemas/workout_schema.sql`
+- `02_Platform/Postgres/ObjectSchemas/workout_schema.sql`
 
 This file defines:
 - all durable domain objects

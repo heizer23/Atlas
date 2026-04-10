@@ -1,0 +1,358 @@
+{
+  "component_name": "atlas_shell",
+  "target_root": "02_Platform/Atlas_Shell",
+  "directories": [
+    "02_Platform/Atlas_Shell/00_Definition",
+    "02_Platform/Atlas_Shell/10_Design",
+    "02_Platform/Atlas_Shell/src",
+    "02_Platform/Atlas_Shell/src/registry",
+    "02_Platform/Atlas_Shell/src/shell",
+    "02_Platform/Atlas_Shell/src/navigation",
+    "02_Platform/Atlas_Shell/src/launcher",
+    "02_Platform/Atlas_Shell/src/hooks",
+    "02_Platform/Atlas_Shell/tests"
+  ],
+  "files": [
+    {
+      "path": "02_Platform/Atlas_Shell/package.json",
+      "stub_kind": "json_config",
+      "role": "NPM manifest for the standalone shell Vite application. Declares react, react-dom, react-router, typescript, vite as dependencies. Sets 'name' to 'atlas-shell'.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/vite.config.ts",
+      "stub_kind": "typescript_module",
+      "role": "Vite configuration for the standalone shell application. Must define two module aliases: '@atlas/shell' pointing to './src/index.ts' (so the shell can self-reference during development) and '@platform-ui' pointing to the resolved path of '02_Platform/UI/react/src/'. No other alias definitions.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "default",
+          "purpose": "Vite defineConfig export with @atlas/shell and @platform-ui resolve aliases"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/tsconfig.json",
+      "stub_kind": "json_config",
+      "role": "TypeScript configuration for the shell application. Must include path mappings for '@atlas/shell' and '@platform-ui' matching the Vite alias targets.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/index.html",
+      "stub_kind": "html_entry",
+      "role": "Vite HTML entry point for the shell application. References src/main.tsx as the module script entry.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/compose.yml",
+      "stub_kind": "docker_compose",
+      "role": "Docker Compose service definition for the shell container. Serves as the UI host for all Atlas applications, replacing the 02_Platform/UI compose host. Must connect to atlas-net. Exposes the shell on the configured port accessible via the Cloudflare Tunnel at linspad.net.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/types.ts",
+      "stub_kind": "typescript_module",
+      "role": "Exported public contract types: AppConfig and NavItem. These are the stable integration contracts that all Atlas applications depend on. Exported from @atlas/shell via src/index.ts.",
+      "public_objects": [
+        {
+          "kind": "interface",
+          "name": "NavItem",
+          "fields": [
+            { "name": "id", "type": "string" },
+            { "name": "label", "type": "string" },
+            { "name": "path", "type": "string" },
+            { "name": "order", "type": "number" }
+          ],
+          "methods": []
+        },
+        {
+          "kind": "interface",
+          "name": "AppConfig",
+          "fields": [
+            { "name": "appId", "type": "string" },
+            { "name": "label", "type": "string" },
+            { "name": "basePath", "type": "string" },
+            { "name": "component", "type": "React.ComponentType" },
+            { "name": "mobilePrimaryNav", "type": "NavItem[]" },
+            { "name": "desktopNav", "type": "NavItem[]" },
+            { "name": "secondaryMenu", "type": "NavItem[]?" }
+          ],
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/registry/AppRegistry.ts",
+      "stub_kind": "typescript_module",
+      "role": "Module-level registry. Exported as a plain const object (not a class). Internal state is a module-private _apps: AppConfig[] array — never exposed directly. Has no React dependency — pure TypeScript.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "AppRegistry",
+          "purpose": "Plain exported object backed by module-private _apps: AppConfig[]. Not a class — no constructor, no getInstance(). All state is private to this module.",
+          "methods": [
+            {
+              "name": "register",
+              "visibility": "public",
+              "args": ["config: AppConfig"],
+              "returns": "void",
+              "purpose": "Validate and store an AppConfig. On schema violation: log console.error with SHELL_INVALID_APP_CONFIG and skip — do not throw. On duplicate appId: log console.error with SHELL_DUPLICATE_APP_ID and skip — do not throw. Registration failures are non-fatal; the shell continues with the remaining valid configs."
+            },
+            {
+              "name": "getAll",
+              "visibility": "public",
+              "args": [],
+              "returns": "AppConfig[]",
+              "purpose": "Return all successfully registered AppConfig objects in registration order"
+            },
+            {
+              "name": "getByPath",
+              "visibility": "public",
+              "args": ["path: string"],
+              "returns": "AppConfig | undefined",
+              "purpose": "Return the AppConfig whose basePath is a prefix of the given path; return undefined if none match"
+            },
+            {
+              "name": "clear",
+              "visibility": "public",
+              "args": [],
+              "returns": "void",
+              "purpose": "Reset the registry to empty state; intended for use in tests only"
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "validateAppConfig",
+          "args": ["config: unknown"],
+          "returns": "AppConfig | null",
+          "purpose": "Assert that an object conforms to the AppConfig interface. Returns the validated AppConfig on success. Returns null on failure (missing required field, wrong type, missing component). component is valid if typeof === 'function' (regular component) or typeof === 'object' and non-null (React.lazy). Caller (register()) logs and skips on null return — never throws."
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/hooks/useShell.ts",
+      "stub_kind": "typescript_module",
+      "role": "React hook providing shell navigation state to components. Reads from ShellContext via useContext(ShellContext). Throws a descriptive error if called outside of a ShellLayout provider tree.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "useShell",
+          "args": [],
+          "returns": "{ activeApp: AppConfig | undefined; allApps: AppConfig[] }",
+          "purpose": "Call useContext(ShellContext); throw 'useShell must be used inside ShellLayout' if context is undefined; otherwise return { activeApp, allApps } from context value"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/ShellContext.ts",
+      "stub_kind": "typescript_module",
+      "role": "Shared React context for shell navigation state. Defined here and exported so both ShellLayout (provider) and useShell (consumer) can import from a single source. Never import ShellContext from anywhere other than this file.",
+      "public_objects": [
+        {
+          "kind": "interface",
+          "name": "ShellContextValue",
+          "purpose": "Shape of the shell context: activeApp (AppConfig | undefined — the app matching the current URL) and allApps (AppConfig[] — full registry snapshot)."
+        },
+        {
+          "kind": "constant",
+          "name": "ShellContext",
+          "purpose": "React.createContext<ShellContextValue | undefined>(undefined). Provided by ShellLayout; consumed by useShell. Undefined default; useShell throws descriptively if consumed outside ShellLayout."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/main.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Composition root. The ONLY shell file permitted to import from 03_Application. Imports each application's shellConfig.ts as a side-effect (e.g. import '../../../03_Application/WorkoutTracker/src/shellConfig'). Each shellConfig calls AppRegistry.register() internally — main.tsx never calls register() directly. After all side-effect imports, calls ReactDOM.createRoot(document.getElementById('root')).render(<BrowserRouter><Router /></BrowserRouter>). BrowserRouter is mounted here, not inside Router.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/Router.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Routing component. Does NOT own BrowserRouter — that is mounted in main.tsx. Renders <Routes> with three cases: (1) path='/' → <AppLauncher />; (2) for each app from AppRegistry.getAll(), path='{app.basePath}/*' → <ShellLayout><Suspense fallback={loading indicator}><app.component /></Suspense></ShellLayout>; (3) path='*' → <ShellNotFound />.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "Router",
+          "pattern": "react_component",
+          "args": [],
+          "returns": "JSX.Element",
+          "purpose": "Render <Routes> from AppRegistry.getAll(); root '/' → AppLauncher; each app basePath → ShellLayout wrapping config.component inside React.Suspense; '*' → ShellNotFound. BrowserRouter is owned by main.tsx, not here."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "ShellNotFound",
+          "args": [],
+          "returns": "JSX.Element",
+          "purpose": "Not-found view rendered when no registered app matches the current path; surfaces the SHELL_ROUTE_NOT_FOUND failure mode"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/ShellLayout.tsx",
+      "stub_kind": "typescript_module",
+      "role": "React layout component. Receives {children} from Router (the rendered app content). Derives activeApp by calling AppRegistry.getAll() and useLocation(), finding the AppConfig whose basePath is a prefix of location.pathname. Provides ShellContext({ activeApp, allApps }) to the child tree. Renders Sidebar (viewport ≥1024px: persistent; 768-1023px: collapsible with hamburger toggle) or BottomNav (viewport <768px), plus {children} as the content area.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "ShellLayout",
+          "pattern": "react_component",
+          "args": ["{ children: React.ReactNode }"],
+          "returns": "JSX.Element",
+          "purpose": "Derive activeApp from useLocation() + AppRegistry.getAll() (prefix match on basePath); provide ShellContext({ activeApp, allApps }); render Sidebar (≥768px) or BottomNav (<768px) alongside children"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/shell.css",
+      "stub_kind": "css_module",
+      "role": "Shell-level styles. Uses exclusively Blueprint CSS custom properties from @platform-ui (--md-sys-color-*, --space-*, typography scale, elevation shadows). No hardcoded hex values. Defines layout grid, responsive breakpoints, sidebar structure, bottom nav structure, and overlay surfaces.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/navigation/Sidebar.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Desktop and tablet left-sidebar navigation component. Persistent on desktop. Collapsible with hamburger toggle on tablet. Renders AppLauncher button at top, then desktopNav items from the active AppConfig.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "Sidebar",
+          "pattern": "react_component",
+          "args": [],
+          "returns": "JSX.Element",
+          "purpose": "Render the left sidebar with AppLauncher button at top and desktopNav items from the active AppConfig; manage collapsible state on tablet viewport"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "SidebarNavItem",
+          "args": ["{ item: NavItem; isActive: boolean }"],
+          "returns": "JSX.Element",
+          "purpose": "Render a single navigation item with correct active/inactive visual state per Blueprint DesignLanguage section 8 Selected state (primary-container background, on-primary-container text)"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/navigation/BottomNav.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Mobile bottom navigation bar. Renders mobilePrimaryNav items from the active AppConfig. Enforces a hard maximum of 5 items — truncates and emits console.warn with appId and overflow count on violation. Renders a More button when the active AppConfig.secondaryMenu is non-empty.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "BottomNav",
+          "pattern": "react_component",
+          "args": [],
+          "returns": "JSX.Element",
+          "purpose": "Render the mobile bottom navigation bar; enforce 5-item cap; include More button when secondaryMenu has items; open MoreMenu on More tap"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "BottomNavItem",
+          "args": ["{ item: NavItem; isActive: boolean }"],
+          "returns": "JSX.Element",
+          "purpose": "Render a single bottom nav item with active/inactive state per Blueprint DesignLanguage section 10 Navigation Bar mapping (primary-container indicator pill)"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/navigation/MoreMenu.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Mobile secondary menu overlay. Renders the active application's secondaryMenu entries as navigation targets. Triggered by the More button in BottomNav. Uses elevation level 2 per Blueprint DesignLanguage section 5.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "MoreMenu",
+          "pattern": "react_component",
+          "args": ["{ open: boolean; onClose: () => void }"],
+          "returns": "JSX.Element",
+          "purpose": "Render overlay surface listing secondaryMenu items from the active AppConfig; close on item selection or backdrop tap"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/launcher/AppLauncher.tsx",
+      "stub_kind": "typescript_module",
+      "role": "Root-path view and launcher panel. Renders all registered applications from AppRegistry.getAll() as selectable entries. Entry point for cross-application switching. Handles empty registry with an explicit SHELL_NO_APPS_REGISTERED empty state.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "AppLauncher",
+          "pattern": "react_component",
+          "args": [],
+          "returns": "JSX.Element",
+          "purpose": "Render all registered applications as navigation targets; render explicit empty state when registry is empty (SHELL_NO_APPS_REGISTERED)"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "AppEntry",
+          "args": ["{ config: AppConfig }"],
+          "returns": "JSX.Element",
+          "purpose": "Render a single application card in the launcher; navigates to config.basePath on selection"
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/index.ts",
+      "stub_kind": "typescript_module",
+      "role": "Public module entry point for the @atlas/shell alias. Re-exports all public types and components. This is the only file that application frontends should import from when using @atlas/shell.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "SHELL_PUBLIC_EXPORTS",
+          "purpose": "Re-exports: AppConfig, NavItem (from src/types.ts); AppRegistry (from src/registry/AppRegistry.ts); ShellLayout, Router (from src/shell/); useShell (from src/hooks/useShell.ts); AppLauncher (from src/launcher/)"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/tests/AppRegistry.test.ts",
+      "stub_kind": "typescript_test",
+      "role": "Unit tests for AppRegistry. Covers all named failure modes and happy-path contract guarantees. See component_architecture.json deferrals.test_writer for required test scenarios.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/tests/BottomNav.test.tsx",
+      "stub_kind": "typescript_test",
+      "role": "Component tests for BottomNav. Covers 5-item cap enforcement, console.warn on overflow, active item state, More button visibility, and MoreMenu trigger.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/tests/Router.test.tsx",
+      "stub_kind": "typescript_test",
+      "role": "Component tests for Router. Covers root path rendering AppLauncher, known basePath routing to application outlet, and unknown path rendering ShellNotFound.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/tests/ShellLayout.test.tsx",
+      "stub_kind": "typescript_test",
+      "role": "Component tests for ShellLayout. Covers desktop viewport (Sidebar rendered, BottomNav absent), mobile viewport (BottomNav rendered, Sidebar absent), and tablet viewport (collapsible Sidebar with hamburger toggle).",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

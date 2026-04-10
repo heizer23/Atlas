@@ -128,13 +128,13 @@ The `Dataset` structure is defined in two authoritative files. Import from them 
 
 | File | Language |
 |---|---|
-| `02_Platform/02_Atlas_Shell/platform-ui/api/types.ts` | TypeScript |
+| `02_Platform/Atlas_Shell/platform-ui/api/types.ts` | TypeScript |
 | `02_Platform/packages/platform_contracts/contracts.py` | Python |
 
 ### Contract Reference
 
 Full type definitions, chart mappings, validation rules, error envelope, and examples:
-`02_Platform/02_Atlas_Shell/platform-ui/api/UI_Data_Contract.md`
+`02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md`
 
 ### Stability Requirement
 

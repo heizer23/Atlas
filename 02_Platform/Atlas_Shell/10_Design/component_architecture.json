@@ -1,0 +1,331 @@
+{
+  "component_name": "atlas_shell",
+  "layer": "02_Platform",
+  "source_definition": "00_Definition/definition.md",
+  "summary": "Atlas Shell is the standalone Vite frontend host for all Atlas applications: it owns global navigation rendering, responsive layout, application switching, and the AppConfig registration contract that all applications integrate through.",
+
+  "classification": {
+    "why_platform": "The shell provides a reusable technical capability — navigation host, layout engine, application registry, top-level routing — shared across all Atlas applications without encoding any domain-specific logic or workflow. Applications plug in via the AppConfig contract; the shell renders exclusively from that contract and carries no application meaning.",
+    "non_goals": [
+      "Domain logic of any kind",
+      "Business rules or data access",
+      "Application-specific UI logic or page content",
+      "Owning application-internal routes",
+      "Owning settings content (applications own settings content; shell owns only the menu entry point)",
+      "Authentication or authorization logic",
+      "Serving or hosting backend data",
+      "Promoting AppConfig to 00_Blueprint (explicitly decided against — see definition section 16)"
+    ]
+  },
+
+  "contracts": {
+    "consumes": [
+      "AppConfig registration object from each integrated application (see shared_views.consumes: AppConfig)",
+      "Blueprint UI governance: 00_Blueprint/UI/02_UI_DesignLanguage (token system, typography, elevation, motion, navigation patterns)",
+      "Blueprint UI data contract: 00_Blueprint/UI/01_UI_Contract",
+      "Blueprint UI implementation standards: 00_Blueprint/UI/03_UI_Implementation",
+      "Platform UI primitives from 02_Platform/UI/react/src/ via the @platform-ui alias (components/, api/, hooks/, index.css)"
+    ],
+    "provides": [
+      "ShellLayout: a React layout component wrapping all application content with navigation chrome",
+      "AppRegistry: a runtime registry that applications register AppConfig objects into",
+      "Router: a top-level router that maps registered basePaths to application roots and renders AppLauncher at root",
+      "Sidebar: desktop left-sidebar navigation rendered from the active AppConfig.desktopNav",
+      "BottomNav: mobile bottom navigation bar rendered from the active AppConfig.mobilePrimaryNav (hard max 5 items)",
+      "AppLauncher: root-path view listing all registered applications for cross-app switching",
+      "MoreMenu: mobile overlay surface rendering the active AppConfig.secondaryMenu",
+      "@atlas/shell module alias: the sole import surface for applications consuming shell types and components"
+    ],
+    "invariants": [
+      "The shell renders navigation exclusively from registered AppConfig objects — no hard-coded application names or routes exist anywhere in shell source",
+      "No import from 03_Application/* exists in shell source files — dependency direction rule prohibits this",
+      "Bottom navigation never renders more than 5 items (hard constraint per definition section 16 and Blueprint DesignLanguage section 2)",
+      "The shell owns top-level routing; applications own all routes beneath their registered basePath",
+      "AppConfig is the sole integration contract between applications and the shell",
+      "All visual tokens reference Blueprint CSS custom properties exclusively — no hardcoded hex values in shell source",
+      "02_Platform/UI/react/src/ primitives are consumed only through the @platform-ui alias, never via relative paths crossing component boundaries"
+    ],
+    "failure_modes": [
+      "SHELL_NO_APPS_REGISTERED: Registry is empty at render time; launcher renders an explicit empty state",
+      "SHELL_INVALID_APP_CONFIG: An AppConfig fails schema validation on registration (missing required field, wrong type, or missing component); registration is skipped with console.error — does not throw; app does not appear in navigation",
+      "SHELL_ROUTE_NOT_FOUND: No registered app matches the current path; shell renders a not-found view",
+      "SHELL_MOBILE_NAV_OVERFLOW: An AppConfig declares more than 5 mobilePrimaryNav items; shell truncates to 5 and emits console.warn with the app id and overflow count",
+      "SHELL_DUPLICATE_APP_ID: Two apps attempt to register the same appId; second registration is skipped with console.error — does not throw; first registration is preserved"
+    ]
+  },
+
+  "shared_views": {
+    "consumes": [
+      "AppConfig: { appId: string, label: string, basePath: string, component: React.ComponentType, mobilePrimaryNav: NavItem[], desktopNav: NavItem[], secondaryMenu?: NavItem[] }",
+      "NavItem: { id: string, label: string, path: string, order: number }",
+      "Blueprint UI token system as defined in 00_Blueprint/UI/02_UI_DesignLanguage",
+      "Platform UI primitives (TableView, ErrorCard, Skeleton, etc.) from 02_Platform/UI/react/src/ via @platform-ui alias"
+    ],
+    "provides": [
+      "AppConfig (TypeScript interface): { appId, label, basePath, component: React.ComponentType, mobilePrimaryNav, desktopNav, secondaryMenu? } — exported from @atlas/shell; the stable registration contract that all Atlas applications must conform to",
+      "NavItem (TypeScript interface): { id, label, path, order: number } — exported from @atlas/shell; order determines render sequence"
+    ]
+  },
+
+  "interfaces": {
+    "consumes": [
+      "react-router BrowserRouter and routing primitives for top-level route management",
+      "AppConfig objects pushed by applications at their startup entry points",
+      "@platform-ui alias pointing to 02_Platform/UI/react/src/ for shared UI primitives and the Blueprint token CSS"
+    ],
+    "provides": [
+      "AppRegistry.register(config: AppConfig): void — validates and stores an AppConfig; on schema violation or duplicate appId logs console.error and skips — does not throw",
+      "AppRegistry.getAll(): AppConfig[] — returns all registered apps in registration order",
+      "AppRegistry.getByPath(path: string): AppConfig | undefined — returns the AppConfig whose basePath is a prefix of the given path",
+      "AppRegistry.clear(): void — resets registry to empty; test-only",
+      "ShellLayout React component — wraps application page content with viewport-appropriate navigation chrome",
+      "useShell(): { activeApp: AppConfig | undefined, allApps: AppConfig[] } — React hook providing shell navigation state to any component in the tree"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "typescript_module",
+        "name": "@atlas/shell",
+        "purpose": "Module alias exposing all public shell types and components; this is the only import path applications should use"
+      },
+      {
+        "type": "react_component",
+        "name": "ShellLayout",
+        "purpose": "Top-level layout wrapper: renders Sidebar (desktop/tablet) or BottomNav (mobile) from viewport breakpoint, plus an outlet for application page content"
+      },
+      {
+        "type": "react_component",
+        "name": "Sidebar",
+        "purpose": "Desktop left-sidebar: persistent on desktop, collapsible with hamburger toggle on tablet; renders desktopNav from active AppConfig"
+      },
+      {
+        "type": "react_component",
+        "name": "BottomNav",
+        "purpose": "Mobile bottom navigation bar: renders mobilePrimaryNav from active AppConfig; enforces 5-item cap; shows More button when secondaryMenu is non-empty"
+      },
+      {
+        "type": "react_component",
+        "name": "AppLauncher",
+        "purpose": "Root-path view listing all registered applications to allow cross-app switching; rendered by Router at the root path and accessible via the launcher button in Sidebar and BottomNav"
+      },
+      {
+        "type": "react_component",
+        "name": "MoreMenu",
+        "purpose": "Mobile overlay surface rendering the active AppConfig.secondaryMenu entries; triggered by the More button in BottomNav; uses elevation level 2 per Blueprint rules"
+      },
+      {
+        "type": "react_component",
+        "name": "Router",
+        "purpose": "Top-level router: renders AppLauncher at root path, maps registered basePaths to application roots, renders ShellNotFound for unmatched paths"
+      },
+      {
+        "type": "typescript_api",
+        "name": "AppRegistry.register",
+        "purpose": "Validates an AppConfig and stores it in the module-level registry object; rejects duplicates and schema violations with named failure modes"
+      },
+      {
+        "type": "typescript_api",
+        "name": "useShell",
+        "purpose": "React hook returning the active AppConfig for the current URL path and the full registry; backing store mechanism is deferred to implementer"
+      }
+    ]
+  },
+
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "app_registration",
+      "description": "Each application owns a shellConfig.ts file (in its own src/ directory) that calls AppRegistry.register(config) and sets component to React.lazy(() => import('./App')). main.tsx imports these files as side-effects only — no application logic enters the shell. main.tsx is the composition root: it is the only shell file permitted to import from 03_Application, and only via side-effect imports of shellConfig files. The registry validates the AppConfig schema, checks for a duplicate appId, and stores the config. Invalid or duplicate configs are skipped with console.error — registration does not throw.",
+      "inputs": ["Side-effect imports of app shellConfig.ts files in main.tsx"],
+      "outputs": ["Stored AppConfig in registry per app, or named failure mode on rejection"]
+    },
+    {
+      "step": 2,
+      "name": "component_tree_and_routing",
+      "description": "main.tsx mounts <BrowserRouter><Router /></BrowserRouter>. Router calls AppRegistry.getAll() and renders <Routes> with: (1) Route path='/' → <AppLauncher />; (2) for each registered app, Route path='{app.basePath}/*' → <ShellLayout><Suspense fallback={loading indicator}><app.component /></Suspense></ShellLayout>; (3) Route path='*' → <ShellNotFound />. config.component is rendered inside React.Suspense to support lazy-loaded app components. BrowserRouter is mounted in main.tsx — Router never owns its own BrowserRouter.",
+      "inputs": ["AppRegistry contents", "Current URL path"],
+      "outputs": ["Active route rendered: AppLauncher | ShellLayout(app.component) | ShellNotFound"]
+    },
+    {
+      "step": 3,
+      "name": "layout_render",
+      "description": "ShellLayout receives {children} (the rendered app content from Router). It calls AppRegistry.getAll() and useLocation() to derive activeApp — the AppConfig whose basePath is a prefix of location.pathname. It provides ShellContext({ activeApp, allApps }) to the child tree via React context. It then renders Sidebar (viewport ≥1024px: persistent; 768-1023px: collapsible with hamburger toggle) or BottomNav (viewport <768px) alongside {children}. Both navigation surfaces read from ShellContext via useShell().",
+      "inputs": ["children (React.ReactNode from Router)", "AppRegistry contents", "Current URL path (useLocation)", "Viewport breakpoint"],
+      "outputs": ["ShellContext provided to child tree", "Sidebar or BottomNav rendered alongside application content"]
+    },
+    {
+      "step": 4,
+      "name": "nav_item_activation",
+      "description": "Navigation items are rendered with active state when the current path matches the item's path. Active state uses primary-container background and on-primary-container text per Blueprint DesignLanguage section 8 (Selected state).",
+      "inputs": ["Current URL path", "NavItem list from active AppConfig"],
+      "outputs": ["Navigation items with correct active/inactive visual state per Blueprint tokens"]
+    },
+    {
+      "step": 5,
+      "name": "more_menu_render",
+      "description": "On mobile, MoreMenu is triggered when the user taps the More button in BottomNav. It renders the active application's secondaryMenu entries as navigation targets. It closes on item selection or backdrop tap.",
+      "inputs": ["Active AppConfig.secondaryMenu", "User interaction (More button tap)"],
+      "outputs": ["Visible MoreMenu overlay with secondary nav items"]
+    },
+    {
+      "step": 6,
+      "name": "app_switching",
+      "description": "AppLauncher renders all registered applications from AppRegistry.getAll() as selectable entries. Selecting an entry navigates to that application's basePath. AppLauncher is accessible at the root path and via the launcher button in Sidebar and BottomNav.",
+      "inputs": ["AppRegistry.getAll() result"],
+      "outputs": ["Navigation to selected application basePath"]
+    }
+  ],
+
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "00_Blueprint/UI/02_UI_DesignLanguage",
+        "role": "Governs all visual tokens, typography, elevation, motion, and navigation component patterns used in shell components"
+      },
+      {
+        "component": "00_Blueprint/UI/01_UI_Contract",
+        "role": "Defines the stable UI data contract; any shell-exposed data surfaces must conform to it"
+      },
+      {
+        "component": "00_Blueprint/UI/03_UI_Implementation",
+        "role": "Defines frontend implementation standards (stack, primitives, patterns) that shell code must follow"
+      },
+      {
+        "component": "02_Platform/UI",
+        "role": "Source of shared UI primitives (components/, api/, hooks/, index.css) consumed via the @platform-ui alias; the shell host supersedes the 02_Platform/UI Vite host but retains the primitives"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "react",
+        "role": "Component rendering framework",
+        "reuse_existing": true
+      },
+      {
+        "name": "react-dom",
+        "role": "DOM mounting for the standalone shell Vite application",
+        "reuse_existing": true
+      },
+      {
+        "name": "react-router",
+        "role": "Top-level routing primitives for basePath-to-application routing",
+        "reuse_existing": true
+      },
+      {
+        "name": "typescript",
+        "role": "Type-safe enforcement of the AppConfig and NavItem contracts",
+        "reuse_existing": true
+      },
+      {
+        "name": "vite",
+        "role": "Build tooling and dev server for the standalone shell application; consistent with existing Atlas UI toolchain",
+        "reuse_existing": true
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Logic imports from 03_Application/* in any shell file other than main.tsx — main.tsx is the composition root and is explicitly permitted to import app shellConfig side-effect modules; all other shell files must remain free of application imports",
+      "Domain logic of any kind inside shell source files",
+      "Hard-coded application names, routes, or navigation entries inside shell source",
+      "Direct coupling to application-specific data models or API endpoints",
+      "Any component library (MUI, Radix, etc.) not sanctioned by 00_Blueprint/UI governance",
+      "Relative path imports from 02_Platform/UI internals — use the @platform-ui alias exclusively",
+      "Hex color values in component or CSS files — use Blueprint CSS custom properties only"
+    ]
+  },
+
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "none"
+  },
+
+  "deferrals": {
+    "platform_implementer": [
+      "Configure the standalone Vite application: package.json, vite.config.ts, tsconfig.json, index.html with the @atlas/shell and @platform-ui module aliases",
+      "Configure the @platform-ui alias in vite.config.ts pointing to 02_Platform/UI/react/src/",
+      "Configure compose.yml for the shell container as the UI host; ensure it replaces the 02_Platform/UI compose host and is connected to atlas-net",
+      "Implement AppConfig and NavItem TypeScript interfaces in src/types.ts and export them from src/index.ts via @atlas/shell",
+      "Implement AppRegistry as a plain exported const object (not a class) backed by a module-private _apps: AppConfig[] array; methods: register(), getAll(), getByPath(), clear(); emit named failure mode strings on rejection; no constructor, no getInstance(), no class syntax",
+      "Each application must provide a shellConfig.ts in its own src/ directory that calls AppRegistry.register({ appId, label, basePath, component: React.lazy(() => import('./App')), ... }) — the app owns its config, the shell does not",
+      "main.tsx is the composition root: import each app's shellConfig.ts as a side-effect (import '../../../03_Application/WorkoutTracker/src/shellConfig'), then call ReactDOM.createRoot. This is the only shell file permitted to reference 03_Application paths.",
+      "Implement ShellLayout with viewport-breakpoint logic selecting between Sidebar (desktop/tablet) and BottomNav (mobile); provide ShellContext to the child tree",
+      "Implement Sidebar rendering AppLauncher button at top, then desktopNav items from active AppConfig; implement tablet collapsible state with hamburger toggle",
+      "Implement BottomNav rendering mobilePrimaryNav from active AppConfig; enforce 5-item hard cap with console.warn on overflow including appId and overflow count; include More button when secondaryMenu is non-empty",
+      "Implement MoreMenu as a mobile overlay surface at elevation level 2 rendering secondaryMenu items; close on item selection or backdrop tap",
+      "Implement AppLauncher rendering all registered apps from AppRegistry.getAll(); handle SHELL_NO_APPS_REGISTERED with an explicit empty state",
+      "Implement Router: AppLauncher at root path, basePath-prefix routing to application roots, ShellNotFound for unmatched paths",
+      "Implement useShell() using React Context: useShell reads from ShellContext via useContext(ShellContext); ShellLayout provides the context value; useShell throws a descriptive error if called outside ShellLayout — this is the resolved backing store (React Context)",
+      "Handle all five named failure modes with observable behavior — no silent no-ops",
+      "Audit and remove the existing import from 03_Application/WorkoutTracker recorded in the system map — this is a dependency direction violation",
+      "Document how application Vite projects configure the @atlas/shell alias to resolve against the shell source — each application's vite.config.ts must declare this alias pointing to 02_Platform/Atlas_Shell/src/index.ts"
+    ],
+    "ui_implementer": [
+      "Implement shell.css using exclusively Blueprint CSS custom properties (--md-sys-color-*, --space-*, typography scale from index.css via @platform-ui)",
+      "Implement active nav item state: primary-container background, on-primary-container text per Blueprint DesignLanguage section 8 (Selected state)",
+      "Implement all interaction states (hover, focus, active, disabled) per Blueprint DesignLanguage section 8",
+      "Implement motion and transitions per Blueprint DesignLanguage section 9 (150ms state transitions, 250ms component enter, 200ms overlay appear)",
+      "Implement responsive breakpoints: desktop sidebar persistent, tablet sidebar collapsible, mobile bottom nav replaces sidebar",
+      "Apply elevation level 2 shadow to MoreMenu per Blueprint DesignLanguage section 5",
+      "Apply elevation level 1 shadow to Sidebar panel and BottomNav bar per Blueprint DesignLanguage section 5",
+      "Resolve the stale line in 00_Blueprint/UI/03_UI_Implementation section 11 that lists 'Bottom Nav' as out of scope — this contradicts the updated DesignLanguage section 2 and 10; flag this for a human reviewer before shipping"
+    ],
+    "test_writer": [
+      "AppRegistry: register valid config — appears in getAll() and getByPath(basePath)",
+      "AppRegistry: register duplicate appId — skips with console.error (SHELL_DUPLICATE_APP_ID), does not throw, first preserved",
+      "AppRegistry: register config with missing required field — skips with console.error (SHELL_INVALID_APP_CONFIG), does not throw",
+      "AppRegistry: register config with missing component field — skips with console.error (SHELL_INVALID_APP_CONFIG), does not throw",
+      "AppRegistry: getByPath with unknown path — returns undefined",
+      "AppRegistry: getByPath with path that is a sub-path of a registered basePath — returns the correct AppConfig",
+      "AppRegistry: clear() resets registry to empty",
+      "BottomNav: AppConfig with exactly 5 mobilePrimaryNav items — all 5 rendered, no warning",
+      "BottomNav: AppConfig with 6 mobilePrimaryNav items — renders 5, emits console.warn with appId and count",
+      "BottomNav: AppConfig with non-empty secondaryMenu — More button rendered",
+      "BottomNav: AppConfig with empty secondaryMenu — More button not rendered",
+      "Router: root path renders AppLauncher",
+      "Router: known basePath renders correct application outlet",
+      "Router: unknown path renders ShellNotFound view",
+      "ShellLayout: desktop viewport — Sidebar rendered, BottomNav not rendered",
+      "ShellLayout: mobile viewport — BottomNav rendered, Sidebar not rendered",
+      "ShellLayout: tablet viewport — collapsible Sidebar rendered with hamburger toggle",
+      "MoreMenu: renders secondaryMenu items from active AppConfig",
+      "MoreMenu: closes on item selection",
+      "AppLauncher: renders all registered applications",
+      "AppLauncher: renders empty state when registry is empty",
+      "useShell: returns correct activeApp when current path matches a registered basePath",
+      "useShell: returns undefined activeApp when current path matches no registered basePath"
+    ],
+    "reviewer": [
+      "Confirm that only main.tsx contains imports from 03_Application/* (side-effect shellConfig imports only) — all other shell source files must contain zero 03_Application references",
+      "Confirm no hard-coded application names, route strings, or navigation entries exist in shell source",
+      "Confirm all CSS references Blueprint CSS custom properties, never raw hex values",
+      "Confirm AppConfig is the sole integration surface between applications and the shell — no other coupling mechanism",
+      "Confirm SHELL_DUPLICATE_APP_ID and SHELL_INVALID_APP_CONFIG failure modes log console.error and skip — confirm they do not throw and do not silently no-op",
+      "Confirm tablet collapsible sidebar behavior is implemented and covered by tests",
+      "Confirm the @platform-ui alias is used for all 02_Platform/UI primitive imports — no relative cross-component paths",
+      "Confirm 00_Blueprint/UI/03_UI_Implementation section 11 no longer lists Bottom Nav as out of scope — this was corrected; verify the fix is present"
+    ]
+  },
+
+  "deferred_decisions": [
+    "CSS strategy: CSS modules, plain CSS — must use Blueprint tokens exclusively; mechanism is deferred (definition section 17)"
+  ],
+
+  "risks": [
+    {
+      "risk": "Stale 03_Application/WorkoutTracker import in current shell codebase",
+      "impact": "The self-registration pattern resolves the design-level concern: main.tsx is the composition root and permitted for side-effect imports; all other shell files are forbidden from referencing 03_Application. Any existing direct import in non-main.tsx shell files is a codebase defect that must be removed before implementation proceeds."
+    },
+    {
+      "risk": "AppConfig contract stability: owned by the shell, not promoted to Blueprint",
+      "impact": "Definition section 16 explicitly decides AppConfig is not promoted to 00_Blueprint. Applications import it from the shell. If the shell evolves AppConfig without a versioning discipline, all registered applications will break. The implementer should treat the AppConfig interface as if it were governed — introduce a CHANGELOG or version comment in types.ts."
+    }
+  ],
+
+  "open_questions": [
+    {
+      "question": "The definition references linspad.net as the root URL. Is this already routed through the Cloudflare Tunnel in 01_System/Access to the shell container, or does the shell compose.yml need a new tunnel rule?",
+      "owner": "implementer"
+    }
+  ]
+}

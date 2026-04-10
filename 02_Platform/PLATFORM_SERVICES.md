@@ -20,9 +20,18 @@ All services run on `atlas-net` (Docker external network). All except MCPGateway
 
 ---
 
+## Components intentionally excluded from this index
+
+| Component | Location | Why excluded |
+|---|---|---|
+| Atlas_Shell | `02_Platform/Atlas_Shell` | UI runtime, not an HTTP service. Application backends do not call it. |
+| Chronos | `01_System/Chronos` | System-level AI gateway (self-classified as `01_System`). Not a platform capability consumed by applications. |
+
+---
+
 ## Infrastructure (non-HTTP)
 
-### Shared Postgres (`02_Platform/01_Postgres`)
+### Shared Postgres (`02_Platform/Postgres`)
 
 Shared database instance used by all platform services. Not called directly via HTTP. Access is via `ATLAS_PG_*` environment variables. Each service owns its own schema namespace inside the shared instance (e.g. `labels`, `linking`, `notifications`). Cross-schema SQL joins are forbidden — services must call each other via HTTP.
 

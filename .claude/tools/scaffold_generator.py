@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "scaffold",
         nargs="?",
-        default=r"Atlas\02_Platform\02_Atlas_Shell\10_Design\component_scaffold.json",
+        default=r"Atlas\02_Platform\Atlas_Shell\10_Design\component_scaffold.json",
         help="Path to the scaffold JSON file",
     )
     parser.add_argument(

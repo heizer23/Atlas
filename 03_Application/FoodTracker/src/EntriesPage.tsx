@@ -92,11 +92,7 @@ function DeleteConfirmDialog({
           <button className="btn-outlined" onClick={onCancel}>
             Cancel
           </button>
-          <button
-            className="btn-primary"
-            style={{ background: 'var(--md-sys-color-error)', color: 'var(--md-sys-color-on-error)' }}
-            onClick={onConfirm}
-          >
+          <button className="btn-danger" onClick={onConfirm}>
             Delete
           </button>
         </div>
@@ -473,9 +469,7 @@ export default function EntriesPage() {
   if (isLoading) {
     return (
       <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Entries</h1>
-        </div>
+
         <Skeleton />
       </div>
     );
@@ -484,9 +478,7 @@ export default function EntriesPage() {
   if (error) {
     return (
       <div className="page">
-        <div className="page-header">
-          <h1 className="type-display">Entries</h1>
-        </div>
+
         <ErrorCard error={error} />
       </div>
     );

@@ -47,7 +47,7 @@ Everything else audited is either conformant or covered by existing formal excep
 | R-CON-BP-01 | `.claude/rules/R-CON-BP.md` |
 | R-CON-BP-02 | `.claude/rules/R-CON-BP.md` |
 | R-CON-BP-03 | `.claude/rules/R-CON-BP.md` |
-| R-CON-BP-04 | `.claude/rules/R-CON-BP.md` + `02_Platform/02_Atlas_Shell/platform-ui/api/UI_Data_Contract.md` |
+| R-CON-BP-04 | `.claude/rules/R-CON-BP.md` + `02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md` |
 | R-CON-BP-06 | `.claude/rules/R-CON-BP.md` |
 | R-CON-BP-07 | `.claude/rules/R-CON-BP.md` |
 | R-CON-BP-09 | `.claude/rules/R-CON-BP.md` |
@@ -60,12 +60,12 @@ Everything else audited is either conformant or covered by existing formal excep
 
 ### Contracts consulted
 
-- `02_Platform/02_Atlas_Shell/platform-ui/api/UI_Data_Contract.md` (v0.3)
+- `02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md` (v0.3)
 - `02_Platform/packages/platform_contracts/contracts.py`
 
 ### Formal exceptions inspected
 
-- `02_Platform/02_Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` — R-EXC-PC-01, R-EXC-PC-02, R-EXC-PC-03 (none apply to TaskTracker directly; confirmed no TaskTracker-specific exception file exists)
+- `02_Platform/Atlas_Shell/ARCHITECTURE_EXCEPTIONS.md` — R-EXC-PC-01, R-EXC-PC-02, R-EXC-PC-03 (none apply to TaskTracker directly; confirmed no TaskTracker-specific exception file exists)
 
 ### Components and files inspected
 
@@ -131,7 +131,7 @@ Everything else audited is either conformant or covered by existing formal excep
   - No `ARCHITECTURE_EXCEPTIONS.md` exists in `03_Application/TaskTracker/` to record this deviation.
   - R-CON-BP-04: "All application endpoints that provide UI-visible data must return a `Dataset`." The frontend renders these labels in the detail view and label popover — they are UI-visible data.
 - **rule_refs:** R-CON-BP-04
-- **contract_refs:** `02_Platform/02_Atlas_Shell/platform-ui/api/UI_Data_Contract.md` §1, §5
+- **contract_refs:** `02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md` §1, §5
 - **affected_artifacts:**
   - `03_Application/TaskTracker/backend/routers/tasks.py` (lines 352–425)
   - `03_Application/TaskTracker/src/ShellEntry.tsx` (label-consuming call sites)
@@ -209,7 +209,7 @@ Everything else audited is either conformant or covered by existing formal excep
   - TaskTracker's label endpoints (F-02) are a concrete instance of this gap: they are UI-visible (labels appear in detail view) but are action/proxy endpoints, not reporting endpoints.
   - FoodTracker and Chronicle have `ARCHITECTURE_EXCEPTIONS.md` files — suggesting the need for exceptions has been encountered before — but the Atlas rule set does not distinguish reporting endpoints from action/proxy endpoints.
 - **rule_refs:** R-CON-BP-04
-- **contract_refs:** `02_Platform/02_Atlas_Shell/platform-ui/api/UI_Data_Contract.md` §9
+- **contract_refs:** `02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md` §9
 - **affected_artifacts:** Governance gap — not a single file.
 - **why_it_matters:** Without a rule, teams must either apply R-CON-BP-04 literally to all endpoints (impractical for 204 deletes and thin proxies) or rely on judgment. Inconsistent application across applications makes auditing non-deterministic. FoodTracker may have resolved this differently from TaskTracker.
 - **recommended_action:** Atlas governance should clarify R-CON-BP-04 scope: does it apply to (a) all endpoints, (b) only GET/read endpoints, or (c) only endpoints consumed by platform UI rendering primitives (TableView, DetailView, charts)? A clarification or sub-rule would eliminate the ambiguity and prevent future exception proliferation.

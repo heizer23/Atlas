@@ -22,7 +22,7 @@ Sprint01 delivered: Blueprint SQL view, single-source heatmap, flat SourceChoose
 
 **Port:** 8013. **AppRegistry:** appId='chronicle', basePath='/chronicle'.
 
-**Shell registration:** Side-effect import added to `02_Platform/02_Atlas_Shell/src/shell/main.tsx` in Sprint01.
+**Shell registration:** Side-effect import added to `02_Platform/Atlas_Shell/src/shell/main.tsx` in Sprint01.
 
 **Makefile targets:** schema-chronicle, chronicle-build, chronicle-up, chronicle-down, chronicle-logs, chronicle-reboot — all present from Sprint01.
 
