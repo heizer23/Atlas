@@ -13,6 +13,8 @@ services:
     volumes:
       - "${CHRONOS_STATE_DIR}:/home/node/.openclaw"
       - "${CHRONOS_WORKSPACE_DIR}:/workspace"
+      - "${CHRONOS_PATCHES_DIR}/lib/web/fetch/body.js:/app/node_modules/undici/lib/web/fetch/body.js:ro"
+      - "${CHRONOS_PATCHES_DIR}/lib/web/fetch/response.js:/app/node_modules/undici/lib/web/fetch/response.js:ro"
     networks:
       - atlas-net
 
