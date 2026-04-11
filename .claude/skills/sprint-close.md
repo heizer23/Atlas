@@ -25,17 +25,29 @@ Derive `component_root` from `layer` and `component_name`:
 
 ---
 
-## Step 1 — Copy architecture files to `00_architecture/`
+## Step 1 — Write clean architecture files to `00_architecture/`
 
-Create or overwrite `<component_root>/00_architecture/` with the latest design artifacts from the sprint:
+Create or overwrite `<component_root>/00_architecture/` with cleaned versions of the sprint design artifacts.
+
+**For `10_architecture.json` and `10_scaffolding.json`:** run the strip script to remove sprint markers before writing:
+
+```bash
+python3 /home/linse/Prod/Atlas/.claude/tools/strip_sprint_markers.py \
+  <sprint_folder>/10_architecture.json \
+  <component_root>/00_architecture/architecture.json
+
+python3 /home/linse/Prod/Atlas/.claude/tools/strip_sprint_markers.py \
+  <sprint_folder>/10_scaffolding.json \
+  <component_root>/00_architecture/scaffolding.json
+```
+
+**For `10_schema.sql`:** copy directly (no markers in SQL files):
 
 | Source (sprint folder) | Destination |
 |---|---|
-| `10_architecture.json` | `<component_root>/00_architecture/architecture.json` |
-| `10_scaffolding.json` | `<component_root>/00_architecture/scaffolding.json` |
 | `10_schema.sql` | `<component_root>/00_architecture/schema.sql` _(only if present)_ |
 
-This folder is the canonical current-architecture snapshot. Agents that need to understand the component without walking sprint history read from here.
+This folder is the canonical current-architecture snapshot. Both `architecture.json` and `scaffolding.json` are always clean — no sprint markers, no removed entries, no `sprint_note` field.
 
 ---
 
@@ -127,14 +139,14 @@ If the Makefile has a `<prefix>-schema` target and the schema is new (component 
 
 ---
 
-## Step 5 — Regenerate the system map
+## Step 5 — Regenerate the developer reference
 
 ```bash
 cd /home/linse/Prod/Atlas
-python3 .claude/tools/generate_atlas_system_map.py
+python3 .claude/tools/generate_atlas_dev_ref.py
 ```
 
-Report whether the map was updated successfully.
+This regenerates `.claude/supportDocs/atlas_dev_ref.md` — the canonical development reference for Claude Code. Report whether it was updated successfully.
 
 ---
 
@@ -148,11 +160,6 @@ Update `<sprint_folder>/99_sprint_log.md`:
 
 ---
 
-## Step 7 - Update PLATFORM_SERVICES
-
-If a platformm component was changed, update Atlas/02_Platform/PLATFORM_SERVICES.md
-and make the new api calls available to chronos
-
 ## Step 7 — Report
 
 Print a short summary:
@@ -162,4 +169,4 @@ Print a short summary:
 - Makefile: updated | unchanged
 - Bootstrap: updated | unchanged
 - Service: rebuilt and running | error (with detail)
-- System map: regenerated
+- Developer reference: regenerated

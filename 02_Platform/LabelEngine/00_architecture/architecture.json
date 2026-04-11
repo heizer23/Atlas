@@ -1,0 +1,240 @@
+{
+  "component_name": "label_engine",
+  "layer": "02_Platform",
+  "source_definition": "00_architecture/architecture.json",
+  "summary": "Generic label management service that creates labels, attaches and detaches them from application objects by type-scoped string identity, and exposes search, reverse-lookup, batch-read, and grouped-object query capabilities to any Atlas application.",
+  "classification": {
+    "why_platform": "LabelEngine provides reusable label primitives — creation, attachment, search, grouping — without encoding any application-specific business rules. It stores and retrieves labels by generic (object_id, object_type) addressing, leaving domain meaning entirely to consuming applications.",
+    "non_goals": [
+      "Per-user isolation or authentication",
+      "Label schema validation or type enforcement beyond non-empty name",
+      "Label hierarchy or parent-child relationships",
+      "Interpretation of object_type semantics — that belongs to each application",
+      "Pagination of label search results"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via DATABASE_URL or ATLAS_PG_* environment variables",
+      "labels.labels table (id text PK, name text NOT NULL, created_at timestamptz)",
+      "labels.object_labels table (object_id text, label_id text FK, object_type text lowercase-constrained, attached_at timestamptz) — composite PK (object_id, label_id)",
+      "platform_errorhandling — optional; structured logging, exception handlers, request timing (install_exception_handlers, install_request_timing, setup_logging)"
+    ],
+    "provides": [
+      "HTTP API: GET /api/labels?q=<prefix> — case-insensitive prefix label search; empty q returns all labels ordered by name ASC",
+      "HTTP API: GET /api/labels/used?object_type=<str> — all distinct labels attached to at least one object of the given type, ordered by name ASC",
+      "HTTP API: POST /api/labels — create a named label; returns 201 LabelRecord",
+      "HTTP API: GET /api/objects/{object_id}/labels — all labels attached to an object, ordered by attached_at ASC then label_id ASC",
+      "HTTP API: POST /api/objects/{object_id}/labels — attach a label to an object by name; creates the label inline if not found; idempotent",
+      "HTTP API: DELETE /api/objects/{object_id}/labels/{label_id} — detach a label from an object; returns 204",
+      "HTTP API: POST /api/objects/labels/batch — return labels for up to 200 objects in one call, scoped by object_type; zero-fills missing entries",
+      "HTTP API: GET /api/groups?object_type=<str>&page=<int>&page_size=<int> — objects of a type grouped by primary label, paginated; named groups alphabetically then Unlabeled last",
+      "HTTP API: GET /health — liveness check, returns {status: ok}"
+    ],
+    "invariants": [
+      "Label names are matched case-insensitively for search and attach operations; 'Tag' and 'tag' resolve to the same label",
+      "Label name must be non-empty after stripping whitespace; enforced at API layer and by DB CHECK constraint",
+      "object_type must be lowercase; enforced by DB CHECK constraint (object_labels_object_type_lowercase)",
+      "Attachment is idempotent: POST /api/objects/{object_id}/labels returns the canonical ObjectLabelRecord whether the attachment is new or pre-existing",
+      "Primary label for an object is the label with the earliest attached_at; ties broken by label_id ASC",
+      "GET /api/objects/{object_id}/labels returns labels ordered by attached_at ASC, label_id ASC — consistent with primary-label ordering",
+      "Batch read zero-fills: every requested object_id appears as a key in the response dict even if it has no labels",
+      "GET /api/groups pagination is over the flat object list before grouping; meta.total = unpaginated distinct object count; meta.page_count = ceil(total / page_size)",
+      "Named groups are returned alphabetically; the Unlabeled group (objects with no labels in this type scope) is always appended last",
+      "GET /api/labels and GET /api/labels/used both order results by lower(name) ascending",
+      "GET /api/labels/used returns an empty list (not 404) when no labels are attached to any object of the given type",
+      "Schema is initialised idempotently at startup via CREATE SCHEMA IF NOT EXISTS / CREATE TABLE IF NOT EXISTS"
+    ],
+    "failure_modes": [
+      "OBJECT_TYPE_REQUIRED (422): object_type query param is absent or blank after strip — GET /api/labels/used, POST /api/objects/{object_id}/labels, GET /api/groups",
+      "LABEL_NAME_EMPTY (422): label name is blank after strip — POST /api/labels, POST /api/objects/{object_id}/labels",
+      "OBJECT_TYPE_INVALID (422): object_type contains uppercase characters — triggers DB CHECK constraint violation on insert",
+      "LABEL_NOT_FOUND (404): label_id supplied to DELETE does not exist in labels.labels",
+      "ATTACHMENT_NOT_FOUND (404): (object_id, label_id) pair does not exist in labels.object_labels on DELETE",
+      "BATCH_TOO_LARGE (422): object_ids list in batch request exceeds 200 items",
+      "Database connectivity failure propagates as unhandled 500 (platform_errorhandling exception handler will format it as ApiError if installed)"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": [
+      "LabelRecord: {id: str, name: str}",
+      "ObjectLabelRecord: {object_id: str, label_id: str, label_name: str, attached_at: str (ISO-8601)}",
+      "BatchLabelRecord: {id: str, name: str, attached_at: str (ISO-8601)}",
+      "GroupItem: {id: str, primary_label: str | None, labels: list[str]}",
+      "LabelGroup: {label: str, items: list[GroupItem]}",
+      "GroupedMeta: {total: int, page: int, page_size: int, page_count: int}",
+      "LabelSearchResponse: {labels: list[LabelRecord]}",
+      "ObjectLabelsResponse: {labels: list[ObjectLabelRecord]}",
+      "GroupedObjectsResponse: {meta: GroupedMeta, groups: list[LabelGroup]}",
+      "BatchLabelsRequest: {object_ids: list[str], object_type: str}",
+      "BatchLabelsResponse: {labels: dict[str, list[BatchLabelRecord]]}"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2 SimpleConnectionPool with RealDictCursor — connection acquired via get_db() context manager",
+      "platform_errorhandling.logging.setup_logging — optional, structured log initialisation",
+      "platform_errorhandling.logFastapi.install_exception_handlers — optional, FastAPI exception formatting",
+      "platform_errorhandling.performance.install_request_timing — optional, per-request timing middleware"
+    ],
+    "provides": [
+      "GET /api/labels?q=<str> — prefix label search; q defaults to empty (returns all)",
+      "GET /api/labels/used?object_type=<str> — reverse lookup of labels by object type; object_type required",
+      "POST /api/labels — body: {name: str}; returns 201 LabelRecord",
+      "GET /api/objects/{object_id}/labels — returns ObjectLabelsResponse",
+      "POST /api/objects/{object_id}/labels — body: {label_name: str, object_type: str}; returns 201 ObjectLabelRecord",
+      "DELETE /api/objects/{object_id}/labels/{label_id} — returns 204",
+      "POST /api/objects/labels/batch — body: {object_ids: list[str], object_type: str}; max 200 ids; returns BatchLabelsResponse",
+      "GET /api/groups?object_type=<str>&page=<int>&page_size=<int> — returns GroupedObjectsResponse; page defaults 1, page_size defaults 50",
+      "GET /health — returns {status: ok}"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/labels",
+        "purpose": "Case-insensitive prefix search over all labels. Empty q returns all labels ordered by name ASC."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/labels/used",
+        "purpose": "Return all distinct labels attached to at least one object of the given object_type, ordered by name ASC. Empty list if none; 422 if object_type absent."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/labels",
+        "purpose": "Create a new label by name. Returns 201 LabelRecord. 422 if name is blank."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/objects/{object_id}/labels",
+        "purpose": "Return all labels attached to object_id ordered by attached_at ASC, label_id ASC."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/objects/{object_id}/labels",
+        "purpose": "Attach a label to an object by name. Resolves or creates the label (case-insensitive). Idempotent. Requires object_type (lowercase). Returns 201 ObjectLabelRecord."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/objects/{object_id}/labels/{label_id}",
+        "purpose": "Detach a label from an object. Returns 204. 404 if label or attachment not found."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/objects/labels/batch",
+        "purpose": "Return labels for up to 200 objects in one query, scoped by object_type. Zero-fills missing entries. 422 if object_type absent or object_ids exceeds 200."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/groups",
+        "purpose": "Return objects of object_type grouped by primary label with pagination. Named groups alphabetically, Unlabeled last. 422 if object_type absent."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /health",
+        "purpose": "Liveness check. Returns {status: ok}."
+      },
+      {
+        "type": "python_api",
+        "name": "LabelService",
+        "purpose": "Internal service class encapsulating all label business logic and SQL. Not exposed externally — consumed only by routers within LabelEngine."
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "request_validation",
+      "description": "Router validates required parameters (object_type, label_name, object_ids). Blank or absent required params return 422 ApiError via _api_error helper before any DB interaction.",
+      "inputs": ["HTTP request parameters and body"],
+      "outputs": ["validated parameter values or 422 ApiError response"]
+    },
+    {
+      "step": 2,
+      "name": "connection_acquisition",
+      "description": "get_db() context manager acquires a psycopg2 connection from the SimpleConnectionPool. On exception, rolls back and returns the connection to the pool.",
+      "inputs": ["connection pool"],
+      "outputs": ["psycopg2 connection"]
+    },
+    {
+      "step": 3,
+      "name": "service_dispatch",
+      "description": "Router calls the appropriate LabelService method. LabelService executes parameterized SQL queries against the labels schema. LabelEngineError is raised for known failure conditions (LABEL_NOT_FOUND, ATTACHMENT_NOT_FOUND). psycopg2 CheckViolation from the object_type lowercase constraint surfaces as OBJECT_TYPE_INVALID.",
+      "inputs": ["connection", "validated parameters"],
+      "outputs": ["Pydantic model or raised LabelEngineError"]
+    },
+    {
+      "step": 4,
+      "name": "response_construction",
+      "description": "Router returns the Pydantic response model (FastAPI serialises to JSON) or converts a LabelEngineError into an ApiError JSON response via _api_error. Mutation endpoints commit the connection inside the service method before returning.",
+      "inputs": ["service result or LabelEngineError"],
+      "outputs": ["HTTP response with appropriate status code and JSON body"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — LabelEngine owns the 'labels' schema within it"},
+      {"component": "02_Platform/LabelEngine/app/database.py", "role": "Connection pool initialisation, schema init, get_db() context manager"},
+      {"component": "02_Platform/LabelEngine/app/models.py", "role": "All Pydantic request/response models"},
+      {"component": "02_Platform/LabelEngine/app/service.py", "role": "LabelService — all business logic and SQL"}
+    ],
+    "internal_optional": [
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "Structured logging, FastAPI exception handlers, request timing — imported conditionally; service runs without it"}
+    ],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework and APIRouter"},
+      {"name": "uvicorn", "role": "ASGI server"},
+      {"name": "psycopg2-binary", "role": "Postgres driver with SimpleConnectionPool and RealDictCursor"},
+      {"name": "pydantic", "role": "Request and response model validation"}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Application-layer imports (03_Application/**)",
+      "Domain-specific interpretation of object_type or label semantics",
+      "Authentication or user-identity mechanisms"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "Spint01- First labels/20_Data/schema.sql",
+    "persistence_type": "postgresql",
+    "schema_name": "labels",
+    "tables": [
+      {
+        "name": "labels.labels",
+        "columns": ["id text PK (gen_random_uuid)", "name text NOT NULL", "created_at timestamptz DEFAULT now()"],
+        "constraints": ["labels_name_nonempty: length(trim(name)) > 0"],
+        "indexes": ["ix_labels_name_lower on lower(name)"]
+      },
+      {
+        "name": "labels.object_labels",
+        "columns": ["object_id text NOT NULL", "label_id text NOT NULL FK labels.labels(id)", "object_type text NOT NULL", "attached_at timestamptz DEFAULT now()"],
+        "constraints": ["object_labels_pkey: PRIMARY KEY (object_id, label_id)", "object_labels_object_type_lowercase: object_type = lower(object_type)"],
+        "indexes": [
+          "ix_object_labels_object_id on (object_id)",
+          "ix_object_labels_label_id on (label_id)",
+          "ix_object_labels_object_type on (object_type)",
+          "ix_object_labels_type_obj_time on (object_type, object_id, attached_at, label_id)"
+        ]
+      }
+    ],
+    "notes": "Schema is initialised idempotently at startup. Inline DDL fallback in database.py is kept in sync with the schema.sql artifact for deployments where the sprint folder is absent."
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Schema collision",
+      "impact": "If another component creates a 'labels' schema, the idempotent CREATE TABLE IF NOT EXISTS will silently mask conflicts. Schema ownership must be tracked at the infrastructure level."
+    },
+    {
+      "risk": "Unbounded label and attachment growth",
+      "impact": "No cleanup or archival API exists. Stale labels and orphaned attachments (for deleted application objects) accumulate indefinitely and require direct DB maintenance."
+    },
+    {
+      "risk": "Batch endpoint object_ids ordering dependency",
+      "impact": "GET /api/groups pagination uses ORDER BY object_id for the flat slice. If consuming applications depend on a different stable order, results may appear inconsistent across pages when objects are inserted between page fetches."
+    }
+  ],
+  "open_questions": []
+}

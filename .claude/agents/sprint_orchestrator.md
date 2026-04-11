@@ -31,9 +31,10 @@ Exactly one sprint folder at a time. Detect the layer from the path:
 | `sprint_design_platform` | `DRAFT_READY`, layer = `02_Platform` |
 | `sprint_design_reviewer` | `DESIGN_CREATED` |
 | `sprint_design_corrector` | `DESIGN_REVIEWED_CHANGES_REQUIRED` |
-| `sprint_implement` | `DESIGN_APPROVED` |
+| `sprint_implement` | `DESIGN_APPROVED` or `TESTS_FAILED_FIXABLE` (fix loop) |
+| `sprint_test_runner` | `IMPLEMENTATION_IN_PROGRESS` when `10_test_spec.md` is present |
 
-There is no specs stage and no implementation reviewer. `DRAFT_READY` routes directly to the designer. After implementation completes, the human invokes `/sprint-close` to close the sprint.
+There is no specs stage and no implementation reviewer. `DRAFT_READY` routes directly to the designer. After tests pass (or if no test spec exists), the human invokes `/sprint-close` to close the sprint.
 
 ---
 
@@ -71,7 +72,30 @@ DESIGN_REVIEWED_CHANGES_REQUIRED
 DESIGN_APPROVED
   → launch sprint_implement
   → IMPLEMENTATION_IN_PROGRESS
-  → STOP — tell user to invoke /sprint-close when satisfied with the implementation
+
+IMPLEMENTATION_IN_PROGRESS
+  → if 10_test_spec.md is present:
+      launch sprint_test_runner
+      → verdict TESTS_PASSING          → TESTS_PASSING
+      → verdict TESTS_FAILED_FIXABLE   → TESTS_FAILED_FIXABLE
+      → verdict TESTS_FAILED_DESIGN_ISSUE → TESTS_FAILED_DESIGN_ISSUE
+  → if 10_test_spec.md is absent:
+      → STOP — tell user to invoke /sprint-close (no test spec, stage skipped)
+
+TESTS_PASSING
+  → STOP — tell user to invoke /sprint-close
+
+TESTS_FAILED_FIXABLE
+  → check fix_iterations in 99_sprint_log.md
+  → if fix_iterations >= 3: → BLOCKED (loop depth exceeded, human intervention required)
+  → if fix_iterations < 3:
+      increment fix_iterations
+      launch sprint_implement (pass 50_test_report.md as context)
+      → IMPLEMENTATION_IN_PROGRESS
+
+TESTS_FAILED_DESIGN_ISSUE
+  → launch sprint_design_corrector (50_test_report.md serves as corrector input)
+  → DESIGN_CREATED  (loop back through full design phase)
 ```
 
 Mark `BLOCKED` if:
@@ -80,6 +104,7 @@ Mark `BLOCKED` if:
 - A reviewer file has no explicit valid verdict
 - A design review requires changes but implementation is requested next
 - Agent selection conflicts with the detected layer
+- `fix_iterations` has reached 3 and tests are still failing
 
 ---
 
@@ -101,7 +126,8 @@ Format is defined in R-PRO-BP-01 §8: a JSON state block at the top, followed by
   "last_agent": "...",
   "next_agent": "... | null",
   "blocking": false,
-  "block_reason": null
+  "block_reason": null,
+  "fix_iterations": 0
 }
 ```
 

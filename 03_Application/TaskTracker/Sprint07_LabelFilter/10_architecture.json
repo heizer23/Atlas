@@ -1,0 +1,237 @@
+{
+  "sprint": "Sprint07_LabelFilter",
+  "component": "TaskTracker",
+  "layer": "03_Application",
+  "description": "Adds a label-filter bar to the TaskTracker task list view. Users can select or deselect labels to narrow the task list. Filter state is shared across Active, Pending, and Done tabs and is in-memory only.",
+
+  "assumptions": [
+    "Active-label population: the frontend derives the set of 'labels in use' from the union of labels embedded in task rows returned by the current tab's fetch. This avoids adding a dedicated backend endpoint and avoids requiring a new LabelEngine capability (LabelEngine GET /api/labels returns all labels globally with no attachment filter). The label set shown in the filter bar may vary by tab; filter selection is preserved when switching tabs.",
+    "label_ids filter on backend: label associations live in LabelEngine (object_labels table). To filter tasks by label, TaskTracker backend calls LabelEngine GET /api/labels/by-ids (not currently available) — see open_questions. Interim: use the batch API in reverse, or add a new LabelEngine endpoint. Chosen approach: call LabelEngine POST /api/objects/labels/batch is not applicable here. Instead, add a new thin helper in tasks.py that queries LabelEngine GET /api/labels and intersects with provided label_ids to get object_ids. Since LabelEngine does not yet expose 'get task IDs for these label IDs', the backend endpoint for label_ids filtering must use an alternative: query LabelEngine GET /api/objects?object_type=task for each label_id (no such endpoint exists). Final resolution: add a new helper in tasks.py that calls a new LabelEngine endpoint — OR use the existing batch API differently. See open_questions.",
+    "Route ordering: GET /tasks/labels/active is declared before GET /tasks/{task_id} in tasks.py, following the existing precedent of GET /tasks/labels/search. This prevents 'labels' being captured as a task_id path segment.",
+    "No LabelEngine schema or code changes are required in this sprint; the label_ids backend filter is designed but its feasibility depends on an open question resolved below.",
+    "Page size: TaskTracker does not paginate aggressively. For a personal single-user app, the current page is expected to contain all or nearly all tasks, making frontend-derived active labels functionally equivalent to a global label set."
+  ],
+
+  "non_scope": [
+    "Persisting filter state to localStorage or backend",
+    "Filtering by label in any view other than the main task list tabs",
+    "Creating, editing, or deleting labels",
+    "Adding a new LabelEngine endpoint (label_ids reverse lookup)",
+    "Pagination — no changes to page size or pagination behavior"
+  ],
+
+  "data_layer": {
+    "migration_required": false,
+    "rationale": "Label associations live in LabelEngine (02_Platform/LabelEngine), not in TaskTracker's own schema. No TaskTracker DB migration is needed."
+  },
+
+  "backend_layer": {
+    "file": "backend/routers/tasks.py",
+
+    "new_endpoints": [
+      {
+        "route": "GET /tasks/labels/active",
+        "declaration_position": "BEFORE GET /tasks/{task_id} — follows the existing precedent of GET /tasks/labels/search at line 340 of tasks.py",
+        "query_parameters": [],
+        "returns": "Dataset",
+        "dataset_schema": [
+          { "key": "id",   "label": "ID",   "type": "string" },
+          { "key": "name", "label": "Name", "type": "string" }
+        ],
+        "implementation": {
+          "step_1": "Call LabelEngine GET /api/labels (empty q) via _label_client(). Returns LabelSearchResponse { labels: [{ id, name }] }.",
+          "step_2": "If LabelEngine call fails (non-200), return empty Dataset (total=0, rows=[]).",
+          "step_3": "Filter: from all labels returned, keep only those that have at least one object_labels row with object_type='task'. This requires a second call: use the existing batch capability. However, LabelEngine has no reverse lookup (label_id → object_ids). Resolution: call LabelEngine GET /api/labels (all labels) and accept that this returns ALL labels, not just those with tasks. This is a known limitation documented as a risk. OR: derive from the batch API by loading a sample of task IDs. This is too expensive.",
+          "resolution": "Return ALL labels from LabelEngine (GET /api/labels, q=''), wrapped in Dataset. The frontend will further filter to only show labels that appear on loaded task rows. The endpoint name 'active' is aspirational; in practice it returns all globally known labels. Document this discrepancy.",
+          "empty_result": "If LabelEngine returns no labels or fails, return Dataset with total=0, rows=[].",
+          "error_propagation": "LabelEngine HTTP errors result in an empty Dataset (graceful degradation), not a propagated error."
+        },
+        "contract": "Dataset | ApiError (Dataset on success, empty Dataset on LabelEngine failure)"
+      }
+    ],
+
+    "modified_endpoints": [
+      {
+        "route": "GET /tasks",
+        "function": "list_tasks",
+        "new_parameter": {
+          "name": "label_ids",
+          "type": "list[str]",
+          "fastapi_declaration": "label_ids: list[str] = Query(default=[])",
+          "description": "Accepted for forward-compatibility; in this sprint, the backend behavior is unchanged regardless of this parameter. Filtering by label is applied client-side by the frontend using labels already embedded in each task row. When a future LabelEngine reverse-lookup endpoint exists, this parameter will be wired to server-side SQL filtering."
+        },
+        "label_filter_implementation": {
+          "step_1": "If label_ids is non-empty: resolve label_ids to task_ids by calling the LabelEngine. The LabelEngine has no direct 'reverse lookup' endpoint. Implementation: call LabelEngine GET /api/labels (to validate label existence) is insufficient. Resolution: use the LabelEngine's object_labels table indirectly. Since there is no LabelEngine endpoint to query 'which object_ids have these label_ids', TaskTracker must query LabelEngine's internal batch endpoint in reverse — which is also not supported.",
+          "resolution_chosen": "Add a new helper function `fetch_task_ids_for_labels(label_ids: list[str]) -> list[str]` that calls a new LabelEngine endpoint POST /api/objects/ids-by-labels (to be added to LabelEngine in a future sprint). For this sprint, implement a local fallback: since the frontend already has the task IDs loaded with labels embedded, the backend filter is the 'correct' path but requires LabelEngine support. SPRINT DECISION: implement the backend parameter and filter logic now, using a LabelEngine call that returns object_ids filtered by label_id via a new thin query. If LabelEngine does not yet have this endpoint, the backend returns unfiltered results when label_ids is provided (documented as a known gap — see open_questions).",
+          "pragmatic_implementation": "Given LabelEngine constraints, implement the filter as follows: call LabelEngine POST /api/objects/labels/batch with a set of known task IDs is not applicable (requires task IDs first). Alternative: query the LabelEngine directly via psycopg2 (cross-service DB access) — not permitted by architecture. Final decision: implement `fetch_task_ids_for_labels` using the LabelEngine HTTP API by fetching all tasks first then cross-referencing in Python. This is O(n) but acceptable for personal scale. See implementation note in open_questions.",
+          "actual_implementation_design": {
+            "description": "Since label-to-task reverse lookup does not exist in LabelEngine's API, implement as a two-step frontend-only filter (label_ids parameter is a future-proofing hook). The backend parameter is accepted and validated but the actual filtering is done on the frontend using the labels already embedded in each task row. label_ids query parameter is declared but when provided, the backend ignores it gracefully (returns all matching tasks for the view; frontend applies the label filter client-side). This avoids a cross-service design gap.",
+            "rationale": "TaskTracker embeds labels in every task row via fetch_labels_for_tasks. The frontend already has all data needed to filter. Adding a backend filter would require a new LabelEngine endpoint or cross-service DB access, both out of scope. The frontend short-circuits on empty selection (no API call) and filters on subset selection (receives all tasks, filters by labels client-side).",
+            "behavior_per_state": {
+              "all_selected": "Frontend passes no label_ids; backend returns all tasks for the view (unchanged behavior)",
+              "subset_selected": "Frontend passes label_ids; backend returns all tasks for the view (unchanged behavior for now); frontend filters rows client-side using task.labels",
+              "none_selected": "Frontend short-circuits: does not call the backend; renders empty list"
+            },
+            "future_upgrade_path": "When LabelEngine adds POST /api/objects/ids-by-labels, backend can use label_ids to pre-filter at the SQL level, and the frontend can remove client-side filtering. The parameter contract is stable."
+          },
+          "parameter_validation": "No validation of label_ids values (invalid UUIDs silently ignored because filtering is client-side in this sprint)",
+          "backward_compatible": true,
+          "view_branches_affected": "All — but filtering is client-side, so no SQL changes needed"
+        },
+        "query_parameters_complete": {
+          "status": "string | null, default null — existing parameter, unchanged",
+          "view": "string | null, default null — existing parameter, unchanged; valid values: 'active', 'pending_board'",
+          "page": "int, default 1, must be >= 1",
+          "page_size": "int, default 25",
+          "label_ids": "list[str], default [] — new parameter; accepted but filtering is client-side in this sprint"
+        },
+        "empty_result_behavior": "When label_ids is non-empty and frontend client-side filter results in zero matches: render empty list with 'No tasks in this view.' message (existing empty-state message reused)"
+      }
+    ]
+  },
+
+  "frontend_layer": {
+    "file": "src/ShellEntry.tsx",
+
+    "new_components": [
+      {
+        "name": "LabelFilterBar",
+        "location": "src/ShellEntry.tsx (local component, defined before TasksPage)",
+        "props": {
+          "labels": "TaskLabel[] — all active labels derived from loaded tasks",
+          "selectedIds": "Set<string> — currently selected label IDs",
+          "onChange": "(ids: Set<string>) => void — callback when selection changes"
+        },
+        "behavior": {
+          "all_selected_state": "When selectedIds.size === labels.length (or labels is empty), 'All' button is highlighted. Clicking it deselects all (calls onChange with empty Set).",
+          "none_selected_state": "When selectedIds.size === 0, 'All' button is not highlighted. Clicking it selects all (calls onChange with Set of all label IDs).",
+          "partial_state": "'All' button not highlighted. Each label button shows selected or deselected styling. Clicking a label button toggles that label in the Set.",
+          "empty_labels": "When labels array is empty (no labels in use), LabelFilterBar renders nothing (null — not visible).",
+          "individual_toggle": "Each label renders as a button. Selected: background var(--md-sys-color-secondary-container), color var(--md-sys-color-on-secondary-container). Deselected: outlined / dimmed style."
+        },
+        "layout": "Horizontal scrollable flex row above the task list. Contains: 'All' toggle button, then one button per label."
+      }
+    ],
+
+    "state_changes": [
+      {
+        "component": "TasksPage",
+        "new_state": "activeLabels: TaskLabel[]",
+        "initial_value": "[] (populated from loaded task rows on each fetch)",
+        "description": "Derived from the union of task.labels across all tasks in the current tab's fetch result. Updated whenever tasks reload."
+      },
+      {
+        "component": "TasksPage",
+        "new_state": "selectedLabelIds: Set<string>",
+        "initial_value": "new Set() — treated as 'all selected' when activeLabels is also empty; initialized to all label IDs when first non-empty activeLabels set arrives",
+        "description": "The set of currently selected label IDs. Persists across tab switches. When activeLabels updates and new labels appear not in selectedLabelIds, they are added to selectedLabelIds (new labels default to selected)."
+      }
+    ],
+
+    "data_flow": {
+      "active_labels_source": "After each fetchTasks completes, TasksPage derives activeLabels from the union of task.labels across all returned rows. New labels are added to selectedLabelIds by default.",
+      "filter_application": "After tasks are fetched and activeLabels is derived, apply client-side filter: displayedTasks = tasks.filter(t => isAllSelected || selectedLabelIds.size === 0 ? show_based_on_state : t.labels?.some(l => selectedLabelIds.has(l.id))). See filter_state_matrix.",
+      "tab_switch": "selectedLabelIds is preserved when view tab changes. fetchTasks is called, new tasks arrive, activeLabels is re-derived (may differ by tab), selectedLabelIds is updated to include any new labels seen.",
+      "create_or_update": "After handleAddLabel or handleCreated, fetchTasks is called, which re-derives activeLabels."
+    },
+
+    "filter_state_matrix": [
+      {
+        "state": "activeLabels is empty (no labels in use on this tab)",
+        "selectedLabelIds": "Set<string> (empty or irrelevant)",
+        "label_filter_bar": "hidden (null render)",
+        "backend_call": "normal (no label_ids param)",
+        "displayed_tasks": "all tasks returned by backend"
+      },
+      {
+        "state": "all labels selected (selectedLabelIds.size === activeLabels.length, activeLabels.length > 0)",
+        "selectedLabelIds": "Set containing all label IDs from activeLabels",
+        "label_filter_bar": "visible, 'All' button highlighted",
+        "backend_call": "normal (no label_ids param — optimization)",
+        "displayed_tasks": "all tasks returned by backend"
+      },
+      {
+        "state": "subset of labels selected (0 < selectedLabelIds.size < activeLabels.length)",
+        "selectedLabelIds": "Set containing a subset of label IDs",
+        "label_filter_bar": "visible, 'All' button not highlighted, selected labels highlighted",
+        "backend_call": "normal (label_ids param present but backend returns all tasks); client-side filter applied",
+        "displayed_tasks": "tasks where task.labels.some(l => selectedLabelIds.has(l.id))"
+      },
+      {
+        "state": "no labels selected (selectedLabelIds.size === 0, activeLabels.length > 0)",
+        "selectedLabelIds": "empty Set",
+        "label_filter_bar": "visible, 'All' button not highlighted, all label buttons dimmed",
+        "backend_call": "short-circuit: do not call backend",
+        "displayed_tasks": "empty ([] rendered as 'No tasks in this view.')"
+      }
+    ],
+
+    "fetchTasks_changes": {
+      "description": "fetchTasks currently takes currentView as argument. No signature change needed since filtering is client-side. After fetch completes, derive activeLabels from task rows and apply client-side filter to produce displayedTasks.",
+      "activeLabels_derivation": "const seen = new Map<string, TaskLabel>(); for task of tasks: for label of (task.labels ?? []): seen.set(label.id, label). activeLabels = Array.from(seen.values()) sorted by label.name.",
+      "selectedLabelIds_update": "for label of activeLabels: if not in selectedLabelIds, add it (new labels default to selected). Do not remove any existing selectedLabelIds entry (user's existing deselection is preserved)."
+    },
+
+    "insertion_point": {
+      "LabelFilterBar_rendered": "In TasksPage's main list render section, above the isLoading / error / task list conditional block. Only rendered when not in selected or creating state.",
+      "displayedTasks_computation": "Computed from tasks state after filter is applied; passed to TaskGroupedList and renderPendingTab."
+    }
+  },
+
+  "platform_contracts": {
+    "dataset_contract": "Compliant. GET /tasks/labels/active returns Dataset. GET /tasks continues to return Dataset. No contract version change.",
+    "ui_contract_version": "v0.3 (unchanged)",
+    "new_endpoint_contract": "GET /tasks/labels/active → Dataset | ApiError"
+  },
+
+  "dependencies": [
+    {
+      "name": "LabelEngine HTTP API",
+      "path": "02_Platform/LabelEngine",
+      "usage": "GET /api/labels — used by GET /tasks/labels/active to fetch all labels"
+    },
+    {
+      "name": "platform_contracts (Python)",
+      "path": "02_Platform/packages/platform_contracts/contracts.py",
+      "usage": "ColumnSchema, Dataset, DatasetMeta — unchanged"
+    },
+    {
+      "name": "platform-ui",
+      "path": "02_Platform/Atlas_Shell/platform-ui",
+      "usage": "apiFetch, isApiError, ErrorCard, Skeleton — unchanged"
+    },
+    {
+      "name": "platform_errorhandling",
+      "path": "02_Platform/03_ErrorHandling",
+      "usage": "api_error helper — unchanged"
+    }
+  ],
+
+  "open_questions": [
+    {
+      "question": "GET /tasks/labels/active returns ALL labels (not just those with task attachments) because LabelEngine has no reverse-lookup endpoint. Should a future sprint add POST /api/objects/ids-by-labels to LabelEngine to enable true server-side label filtering?",
+      "owner": "product",
+      "impact": "Minor: for a personal single-user app, all labels are likely task-labels anyway. The filter bar may show labels not attached to any task."
+    },
+    {
+      "question": "Should the label_ids backend parameter do real server-side SQL filtering once LabelEngine exposes a reverse-lookup? Or should client-side filtering remain permanent?",
+      "owner": "architecture",
+      "impact": "Performance: negligible at personal scale. Correctness: client-side filter only sees the current page; if page_size < total tasks, filtered count may be incorrect. Acceptable assumption: page_size=25 covers all tasks for a personal tool."
+    }
+  ],
+
+  "risks": [
+    {
+      "risk": "Label filter bar shows labels not attached to any task (because GET /api/labels returns all global labels, not just those with task attachments)",
+      "impact": "Minor UX issue — filtering by an unused label shows 'No tasks in this view.' which is not misleading but is unexpected. Acceptable for personal-scale tool."
+    },
+    {
+      "risk": "Client-side label filter only sees tasks on the current page. If total tasks > page_size (25) and user is paginated, some tasks with the selected labels may be on a different page and appear invisible.",
+      "impact": "Minimal: TaskTracker is a personal tool; it is unlikely to have >25 tasks in any single view. Document as known limitation."
+    },
+    {
+      "risk": "When switching tabs, activeLabels may change (different tabs may have different labels in use). selectedLabelIds is preserved, which means a label selected on the Active tab may not appear in the Pending tab's activeLabels — the filter bar will show fewer labels but the selectedLabelIds Set still holds the absent label IDs (harmless but potentially confusing).",
+      "impact": "Minor: the filter bar correctly shows only labels seen in the current tab. The filter result is accurate."
+    }
+  ]
+}

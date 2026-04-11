@@ -1,0 +1,207 @@
+{
+  "component_name": "preference_store",
+  "layer": "02_Platform",
+  "source_definition": "00_draft.md",
+  "summary": "Generic key-value store keyed by (scope, key) that any Atlas application can use to persist user-facing UI state across page reloads and sessions.",
+  "classification": {
+    "why_platform": "PreferenceStore provides a reusable, domain-agnostic persistence primitive. It stores opaque JSON values without interpreting their meaning. Domain semantics and lifecycle rules belong to consuming applications. The component is technically generic: it uses a typed (scope, key) addressing scheme that any component can use without coupling.",
+    "non_goals": [
+      "Per-user isolation or authentication",
+      "Preference schema validation or type enforcement",
+      "TTL or expiry of preferences",
+      "Audit logging of preference changes",
+      "Interpretation or transformation of stored values"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via ATLAS_PG_* environment variables",
+      "platform_contracts.contracts.Dataset — for all read endpoint responses (R-CON-BP-04)",
+      "platform_errorhandling — ApiError shape for error responses"
+    ],
+    "provides": [
+      "HTTP API: GET /preferences/{scope}/{key} — retrieve one preference or 404",
+      "HTTP API: PUT /preferences/{scope}/{key} — upsert a preference, returns 200",
+      "HTTP API: DELETE /preferences/{scope}/{key} — remove a preference, returns 204",
+      "HTTP API: GET /preferences/{scope} — retrieve all preferences for a scope as Dataset",
+      "HTTP API: GET /health — liveness check, returns {status: ok}"
+    ],
+    "invariants": [
+      "scope and key are always non-empty and contain no leading or trailing whitespace after validation",
+      "value_json is always valid JSON (enforced by JSONB column type)",
+      "PUT is always an upsert — no separate create/update distinction",
+      "updated_at is always set by the server (Postgres default now()) on every upsert",
+      "A GET on a (scope, key) that does not exist always returns 404 with ApiError",
+      "A DELETE on a (scope, key) that does not exist returns 204 (idempotent)",
+      "All read endpoints return Dataset per R-CON-BP-04"
+    ],
+    "failure_modes": [
+      "PREFERENCE_NOT_FOUND — GET on missing (scope, key) — 404 ApiError",
+      "INVALID_SCOPE — scope is empty or contains only whitespace — 422 ApiError",
+      "INVALID_KEY — key is empty or contains only whitespace — 422 ApiError",
+      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during request — 503 ApiError",
+      "INVALID_VALUE — PUT body missing 'value' field or malformed JSON — 422 ApiError"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.contracts.Dataset",
+      "platform_contracts.contracts.DatasetMeta",
+      "platform_contracts.contracts.ColumnSchema"
+    ],
+    "provides": [
+      "PreferenceItem: {scope: str, key: str, value: Any, updated_at: datetime} — internal read model exposed via Dataset rows"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2 connection pool — via 02_Platform/LabelEngine pattern (SimpleConnectionPool, RealDictCursor)",
+      "platform_contracts.Dataset — imported from 02_Platform/packages/platform_contracts/contracts.py"
+    ],
+    "provides": [
+      "GET /preferences/{scope}/{key} — returns Dataset with one row, or 404 ApiError",
+      "PUT /preferences/{scope}/{key} — body: {value: <any JSON>}, returns 200 with {scope, key, value, updated_at}",
+      "DELETE /preferences/{scope}/{key} — returns 204 No Content",
+      "GET /preferences/{scope} — returns Dataset with all rows for scope; empty Dataset (rows=[]) if no preferences exist for scope",
+      "GET /health — returns {status: ok}"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /preferences/{scope}/{key}",
+        "purpose": "Retrieve a single preference by scope and key. Returns Dataset (one row). Returns 404 ApiError if not found."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /preferences/{scope}/{key}",
+        "purpose": "Create or overwrite a preference. Body: {value: <any JSON>}. Returns 200 with the stored record."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /preferences/{scope}/{key}",
+        "purpose": "Remove a preference. Idempotent — returns 204 whether or not the preference existed."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /preferences/{scope}",
+        "purpose": "Retrieve all preferences for a scope. Returns Dataset. Empty rows list if no preferences exist for scope."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /health",
+        "purpose": "Liveness check. Returns {status: ok}."
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "request_validation",
+      "description": "FastAPI path parameter extraction. scope and key are validated: non-empty, no leading/trailing whitespace. If invalid, return 422 ApiError immediately.",
+      "inputs": ["scope: str (path param)", "key: str (path param)"],
+      "outputs": ["validated scope: str", "validated key: str", "422 ApiError on failure"]
+    },
+    {
+      "step": 2,
+      "name": "connection_acquisition",
+      "description": "Acquire a psycopg2 connection from the pool via context manager get_db(). If pool unavailable, raise causing 503.",
+      "inputs": ["connection pool"],
+      "outputs": ["psycopg2 connection"]
+    },
+    {
+      "step": 3,
+      "name": "database_operation",
+      "description": "Execute the appropriate SQL: SELECT for GET, INSERT ... ON CONFLICT DO UPDATE for PUT, DELETE for DELETE. All queries use parameterized statements.",
+      "inputs": ["connection", "scope", "key", "value (PUT only)"],
+      "outputs": ["row dict or None (GET)", "row dict (PUT)", "rowcount (DELETE)"]
+    },
+    {
+      "step": 4,
+      "name": "response_construction",
+      "description": "For GET endpoints: wrap result(s) in Dataset. For PUT: return stored record as typed response. For DELETE: return 204. For 404: return ApiError.",
+      "inputs": ["database result"],
+      "outputs": ["Dataset (GET)", "stored record (PUT)", "204 (DELETE)", "ApiError (error cases)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — PreferenceStore owns the 'preferences' schema within it"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema types for read endpoint responses"}
+    ],
+    "internal_optional": [
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "Structured logging, exception handlers, request timing — same optional import pattern as LabelEngine"}
+    ],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request/response validation", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Application-layer imports (03_Application/**)",
+      "Domain-specific logic or validation of stored values",
+      "Any authentication or user-identity mechanism"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgresql",
+    "schema_name": "preferences",
+    "table_name": "preferences.preferences",
+    "notes": "PreferenceStore owns the 'preferences' schema in the shared Atlas Postgres instance. Schema is initialized idempotently at startup (CREATE SCHEMA IF NOT EXISTS, CREATE TABLE IF NOT EXISTS)."
+  },
+  "deferrals": {
+    "platform_implementer": [
+      "Implement app/database.py: connection pool init, schema init (inline DDL matching 10_schema.sql), get_db context manager — mirror LabelEngine pattern",
+      "Implement app/main.py: FastAPI app, CORS middleware (localhost only), optional platform_errorhandling import, on_startup hook calling init_pool and init_schema, health endpoint",
+      "Implement app/routers/preferences.py: all four endpoints with scope/key validation, Dataset construction, ApiError responses",
+      "Implement app/models.py: PutPreferenceRequest (body model), PreferenceRecord (response model for PUT)",
+      "Produce Dockerfile mirroring LabelEngine pattern (python:3.12-slim, /platform_packages, uvicorn CMD)",
+      "Produce compose.yml: service name 'preference-store', container name 'atlas-preference-store', port 127.0.0.1:8060:8000, ATLAS_PG_* env vars, atlas-net network",
+      "Produce pyproject.toml with project name 'preference_store' and same dependency set as LabelEngine"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "GET /preferences/{scope}/{key} — existing key returns Dataset with one row containing correct value and updated_at",
+      "GET /preferences/{scope}/{key} — missing key returns 404 ApiError with code PREFERENCE_NOT_FOUND",
+      "PUT /preferences/{scope}/{key} — new key creates preference, returns 200 with stored record",
+      "PUT /preferences/{scope}/{key} — existing key overwrites value, updated_at advances",
+      "PUT /preferences/{scope}/{key} — value is null (valid JSON null) — stores successfully",
+      "PUT /preferences/{scope}/{key} — missing 'value' field in body — returns 422",
+      "DELETE /preferences/{scope}/{key} — existing key removes it, returns 204",
+      "DELETE /preferences/{scope}/{key} — missing key returns 204 (idempotent)",
+      "GET /preferences/{scope} — scope with multiple preferences returns Dataset with all rows",
+      "GET /preferences/{scope} — scope with no preferences returns Dataset with empty rows list",
+      "scope validation — empty scope returns 422 with code INVALID_SCOPE",
+      "key validation — whitespace-only key returns 422 with code INVALID_KEY",
+      "GET /health — returns 200 {status: ok}"
+    ],
+    "reviewer": [
+      "Verify Dataset is returned for both GET endpoints per R-CON-BP-04",
+      "Verify ApiError shape matches platform_errorhandling contract for all error responses",
+      "Verify DELETE is idempotent (204 on missing key)",
+      "Verify scope/key validation covers leading/trailing whitespace per definition"
+    ]
+  },
+  "deferred_decisions": [
+    "Port assignment for compose.yml — 8060 assumed; confirm no conflict with other platform services"
+  ],
+  "risks": [
+    {
+      "risk": "Schema collision",
+      "impact": "If another component or future migration creates a 'preferences' schema, the idempotent CREATE TABLE IF NOT EXISTS will silently mask conflicts. The DBA or migration tooling must be aware of schema ownership."
+    },
+    {
+      "risk": "Unbounded scope growth",
+      "impact": "With no TTL or cleanup API, stale preferences from deprecated application features accumulate indefinitely. Operational cleanup requires direct DB access."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Port 8060 for compose.yml — is this available or does it conflict with another Atlas platform service?",
+      "owner": "architecture"
+    }
+  ]
+}

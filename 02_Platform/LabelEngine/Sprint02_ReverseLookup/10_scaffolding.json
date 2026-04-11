@@ -1,0 +1,52 @@
+{
+  "component_name": "label_engine",
+  "target_root": "02_Platform/LabelEngine",
+  "note": "This sprint adds to existing files only. No new files or directories are created.",
+  "directories": [],
+  "files": [
+    {
+      "path": "02_Platform/LabelEngine/app/service.py",
+      "stub_kind": "python_module_addition",
+      "role": "Add get_labels_used_by_type method to existing LabelService class",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "LabelService",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "get_labels_used_by_type",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "object_type: str"],
+              "returns": "list[LabelRecord]",
+              "purpose": "Return all distinct labels attached to at least one object of the given object_type, ordered by name ascending. Returns empty list if none found."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/LabelEngine/app/routers/labels.py",
+      "stub_kind": "python_module_addition",
+      "role": "Add GET /api/labels/used route to existing router",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "get_labels_used",
+          "pattern": "route_handler",
+          "methods": [
+            {
+              "name": "get_labels_used",
+              "visibility": "public",
+              "args": ["object_type: str | None = Query(default=None)"],
+              "returns": "LabelSearchResponse",
+              "purpose": "Handle GET /api/labels/used. Validate object_type (422 OBJECT_TYPE_REQUIRED if absent or blank), call LabelService.get_labels_used_by_type, return LabelSearchResponse."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}

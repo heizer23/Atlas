@@ -1,0 +1,136 @@
+{
+  "component_name": "tasktracker",
+  "target_root": "03_Application/TaskTracker",
+  "directories": [],
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "stub_kind": "python_module",
+      "role": "TaskTracker task router — modified in-place; no new files created",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "PREFERENCE_STORE_URL",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_preference_client",
+          "pattern": "factory",
+          "methods": [],
+          "visibility": "private",
+          "args": [],
+          "returns": "httpx.Client",
+          "purpose": "Returns a configured httpx.Client targeting PREFERENCE_STORE_URL"
+        },
+        {
+          "kind": "class",
+          "name": "LabelFilterPutBody",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "label_ids", "type": "list[str]", "purpose": "Ordered list of label IDs to persist as the active filter selection"}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "list_used_labels",
+          "pattern": "router",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "JSONResponse",
+          "purpose": "GET /labels/used — proxies LabelEngine GET /api/labels/used?object_type=task; returns Dataset or empty Dataset on failure"
+        },
+        {
+          "kind": "function",
+          "name": "get_label_filter_preference",
+          "pattern": "router",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "JSONResponse",
+          "purpose": "GET /preferences/label_filter — proxies PreferenceStore GET /api/preferences/tasktracker.task-list/label_filter; passes through Dataset or 404 ApiError"
+        },
+        {
+          "kind": "function",
+          "name": "put_label_filter_preference",
+          "pattern": "router",
+          "methods": [],
+          "visibility": "public",
+          "args": ["body: LabelFilterPutBody"],
+          "returns": "JSONResponse",
+          "purpose": "PUT /preferences/label_filter — proxies PreferenceStore PUT /api/preferences/tasktracker.task-list/label_filter with { value: body.label_ids }; returns 200 or ApiError"
+        }
+      ],
+      "private_objects": [],
+      "removals": [
+        {
+          "name": "list_active_labels",
+          "kind": "function",
+          "route": "GET /labels/active",
+          "reason": "Sprint07 workaround; replaced by list_used_labels proxying LabelEngine /api/labels/used"
+        },
+        {
+          "name": "label_ids",
+          "kind": "parameter",
+          "location": "list_tasks handler signature",
+          "reason": "Was never implemented server-side; client-side filtering is sufficient and declared as the canonical approach"
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_module",
+      "role": "TaskTracker frontend — modified in-place; label filter wiring extracted from fetchTasks and moved to mount-time effects",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "TasksPage",
+          "pattern": "react_component",
+          "methods": [],
+          "state_changes": [
+            {
+              "variable": "activeLabels → availableLabels",
+              "type": "TaskLabel[]",
+              "init": "[]",
+              "loaded_by": "useEffect on mount: apiFetch('/tasks/labels/used'); rows mapped to TaskLabel[]"
+            },
+            {
+              "variable": "selectedLabelIds",
+              "type": "Set<string>",
+              "init": "new Set() — replaced by mount effect",
+              "loaded_by": "useEffect (after availableLabels known): apiFetch('/tasks/preferences/label_filter'); on 200 parse value field as JSON string[], intersect with availableLabels IDs; on 404/error use all availableLabels IDs"
+            }
+          ],
+          "effect_changes": [
+            {
+              "name": "loadAvailableLabels",
+              "trigger": "mount ([])",
+              "action": "apiFetch('/tasks/labels/used'); setAvailableLabels(dataset.rows)"
+            },
+            {
+              "name": "loadFilterPreference",
+              "trigger": "availableLabels changes (first non-empty load)",
+              "action": "apiFetch('/tasks/preferences/label_filter'); parse and intersect; setSelectedLabelIds"
+            },
+            {
+              "name": "saveFilterPreference",
+              "trigger": "selectedLabelIds changes (skip initial mount)",
+              "action": "apiFetch('/tasks/preferences/label_filter', { method: 'PUT', body: JSON.stringify({ label_ids: Array.from(selectedLabelIds) }) }); fire-and-forget"
+            }
+          ],
+          "removals_from_fetchTasks": [
+            "const seen = new Map<string, TaskLabel>()",
+            "for (const task of rows) { for (const label of task.labels ?? []) { seen.set(label.id, label); } }",
+            "const derived = Array.from(seen.values()).sort(...)",
+            "setActiveLabels(derived)",
+            "setSelectedLabelIds(prev => { ... }) — the label-merging block"
+          ]
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}

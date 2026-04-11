@@ -427,6 +427,37 @@ label-schema:
 # endregion
 
 
+# region --- Platform: PreferenceStore
+PREF_DIR=../02_Platform/PreferenceStore
+
+PREF_COMPOSE=docker compose \
+	-f $(PREF_DIR)/compose.yml \
+	$(ENV_FILES)
+
+pref-build:
+	$(PREF_COMPOSE) build
+
+pref-up:
+	$(PREF_COMPOSE) up -d
+
+pref-down:
+	$(PREF_COMPOSE) down
+
+pref-logs:
+	$(PREF_COMPOSE) logs -f
+
+pref-reboot:
+	$(PREF_COMPOSE) down
+	$(PREF_COMPOSE) up -d
+
+pref-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(PREF_DIR)/00_architecture/schema.sql
+
+# endregion
+
+
 # region --- Application: NumericSeries
 NUMERIC_DIR=../03_Application/NumericSeries
 
@@ -557,6 +588,7 @@ net-connect:
 	@docker network connect atlas-net atlas-calendar-connector 2>/dev/null || true
 	@docker network connect atlas-net atlas-label-engine      2>/dev/null || true
 	@docker network connect atlas-net atlas-linking-engine    2>/dev/null || true
+	@docker network connect atlas-net atlas-preference-store  2>/dev/null || true
 	@docker network connect atlas-net atlas-numeric-series    2>/dev/null || true
 
 up:
@@ -579,6 +611,8 @@ up:
 	$(MAKE) calendar-build   calendar-up
 	$(MAKE) label-schema
 	$(MAKE) label-build      label-up
+	$(MAKE) pref-schema
+	$(MAKE) pref-build       pref-up
 	$(MAKE) linking-build    linking-up
 	$(MAKE) numeric-schema
 	$(MAKE) numeric-build    numeric-up
@@ -593,6 +627,7 @@ down:
 	-$(MAKE) cloudflared-down
 	-$(MAKE) numeric-down
 	-$(MAKE) linking-down
+	-$(MAKE) pref-down
 	-$(MAKE) label-down
 	-$(MAKE) calendar-down
 	-$(MAKE) notif-down

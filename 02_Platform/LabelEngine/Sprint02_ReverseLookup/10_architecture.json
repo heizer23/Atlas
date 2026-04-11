@@ -1,0 +1,135 @@
+{
+  "component_name": "label_engine",
+  "layer": "02_Platform",
+  "source_definition": "00_draft.md",
+  "summary": "Adds GET /api/labels/used?object_type=<str> to LabelEngine, returning all distinct labels currently attached to at least one object of the given type.",
+  "classification": {
+    "why_platform": "Reverse-lookup of labels by object_type is a generic, reusable capability over the labels.object_labels join table — it encodes no application-specific business logic or domain meaning.",
+    "non_goals": [
+      "Pagination of results",
+      "Filtering by label name within results",
+      "Any schema changes"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "labels.labels table (id, name)",
+      "labels.object_labels table (label_id, object_type) — ix_object_labels_object_type index already exists"
+    ],
+    "provides": [
+      "GET /api/labels/used?object_type=<str> — returns LabelSearchResponse: { labels: [{ id, name }] } ordered by name ASC",
+      "Returns 422 with code OBJECT_TYPE_REQUIRED when object_type is absent or blank",
+      "Returns empty list (not 404) when no labels are attached to any object of the given type"
+    ],
+    "invariants": [
+      "Only labels with at least one row in object_labels for the given object_type are returned",
+      "Results are ordered by lower(name) ascending",
+      "object_type comparison is case-sensitive (stored lowercase per DB CHECK constraint)"
+    ],
+    "failure_modes": [
+      "OBJECT_TYPE_REQUIRED (422): object_type query param is absent or blank after strip",
+      "Database connectivity failure propagates as 500 (unhandled — consistent with existing routes)"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "LabelRecord (app.models) — { id: str, name: str }",
+      "LabelSearchResponse (app.models) — { labels: list[LabelRecord] }"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [],
+    "provides": [
+      "GET /api/labels/used — query param: object_type (str, required)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/labels/used",
+        "purpose": "Return all distinct labels attached to at least one object of the given object_type, ordered by name ASC"
+      },
+      {
+        "type": "python_api",
+        "name": "LabelService.get_labels_used_by_type",
+        "purpose": "Execute the distinct join query and return list[LabelRecord] ordered by name"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "validate_object_type",
+      "description": "Router receives GET /api/labels/used. Strip object_type query param. If absent or blank after strip, return 422 ApiError with code OBJECT_TYPE_REQUIRED.",
+      "inputs": ["object_type query param (str | None)"],
+      "outputs": ["validated object_type string, or 422 response"]
+    },
+    {
+      "step": 2,
+      "name": "execute_reverse_lookup",
+      "description": "Call LabelService.get_labels_used_by_type(conn, object_type). Execute: SELECT DISTINCT l.id, l.name FROM labels.labels l JOIN labels.object_labels ol ON ol.label_id = l.id WHERE ol.object_type = %s ORDER BY lower(l.name). Uses ix_object_labels_object_type index.",
+      "inputs": ["db connection", "validated object_type"],
+      "outputs": ["list[LabelRecord] (may be empty)"]
+    },
+    {
+      "step": 3,
+      "name": "return_response",
+      "description": "Wrap result in LabelSearchResponse and return 200. Empty list returns normally — no 404.",
+      "inputs": ["list[LabelRecord]"],
+      "outputs": ["LabelSearchResponse { labels: [...] }"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/LabelEngine/app/database.py", "role": "get_db context manager for psycopg2 connection"},
+      {"component": "02_Platform/LabelEngine/app/models.py", "role": "LabelRecord, LabelSearchResponse — already defined, no changes needed"},
+      {"component": "02_Platform/LabelEngine/app/service.py", "role": "LabelService — new method get_labels_used_by_type added here"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "APIRouter, Query parameter handling", "reuse_existing": true},
+      {"name": "psycopg2", "role": "database access", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "No new Python package dependencies",
+      "No schema migrations",
+      "No new files — all changes are additions to existing files"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "none"
+  },
+  "deferrals": {
+    "platform_implementer": [
+      "Add LabelService.get_labels_used_by_type(conn, object_type) to app/service.py — executes the DISTINCT join query, returns list[LabelRecord] ordered by name",
+      "Add GET /api/labels/used route to app/routers/labels.py — validates object_type, calls service method, returns LabelSearchResponse",
+      "Validation: strip object_type; if blank or absent return _api_error('OBJECT_TYPE_REQUIRED', ..., status=422)"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "GET /api/labels/used with valid object_type that has attached labels — returns correct label list ordered by name",
+      "GET /api/labels/used with valid object_type that has no attached labels — returns empty list, not 404",
+      "GET /api/labels/used with object_type absent — returns 422 OBJECT_TYPE_REQUIRED",
+      "GET /api/labels/used with object_type blank string — returns 422 OBJECT_TYPE_REQUIRED",
+      "GET /api/labels/used — labels from different object_types not included in result (isolation check)",
+      "GET /api/labels/used — result ordering is name ASC"
+    ],
+    "reviewer": [
+      "Verify route is added to labels.py (not a new router file) — consistent with existing route placement",
+      "Verify DISTINCT join uses ix_object_labels_object_type index (query plan check optional but noted)",
+      "Verify 422 error code is OBJECT_TYPE_REQUIRED and uses existing _api_error helper",
+      "Verify response uses LabelSearchResponse — not a new ad-hoc type"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Route registration hygiene",
+      "impact": "Implementer should confirm that /api/labels/used is registered in the router before any catch-all or wildcard route. No actual path conflict exists between /api/labels and /api/labels/used — these are distinct path strings and FastAPI resolves them correctly."
+    }
+  ],
+  "open_questions": []
+}

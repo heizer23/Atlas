@@ -1426,6 +1426,94 @@ function TaskGroupedList({
   );
 }
 
+// ── LabelFilterBar ────────────────────────────────────────────────────────────
+// Horizontal filter bar rendered above the task list.
+// When labels is empty, renders nothing.
+
+function LabelFilterBar({
+  labels,
+  selectedIds,
+  onChange,
+}: {
+  labels:      TaskLabel[];
+  selectedIds: Set<string>;
+  onChange:    (ids: Set<string>) => void;
+}) {
+  if (labels.length === 0) return null;
+
+  const allSelected = selectedIds.size === labels.length;
+
+  function handleAllToggle() {
+    if (allSelected) {
+      onChange(new Set());
+    } else {
+      onChange(new Set(labels.map(l => l.id)));
+    }
+  }
+
+  function handleLabelToggle(id: string) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    onChange(next);
+  }
+
+  const barStyle: React.CSSProperties = {
+    display:    'flex',
+    flexWrap:   'wrap',
+    gap:        '6px',
+    padding:    'var(--space-sm) 0',
+    marginBottom: 'var(--space-sm)',
+  };
+
+  const btnBase: React.CSSProperties = {
+    padding:      '3px 10px',
+    borderRadius: '12px',
+    fontSize:     '0.8rem',
+    fontWeight:   500,
+    cursor:       'pointer',
+    border:       '1px solid var(--md-sys-color-outline-variant)',
+  };
+
+  const btnSelected: React.CSSProperties = {
+    ...btnBase,
+    background: 'var(--md-sys-color-secondary-container)',
+    color:      'var(--md-sys-color-on-secondary-container)',
+    borderColor: 'var(--md-sys-color-secondary-container)',
+  };
+
+  const btnDeselected: React.CSSProperties = {
+    ...btnBase,
+    background: 'none',
+    color:      'var(--md-sys-color-on-surface-variant)',
+  };
+
+  return (
+    <div style={barStyle}>
+      <button
+        style={allSelected ? btnSelected : btnDeselected}
+        onClick={handleAllToggle}
+        title={allSelected ? 'Deselect all labels' : 'Select all labels'}
+      >
+        All
+      </button>
+      {labels.map(label => (
+        <button
+          key={label.id}
+          style={selectedIds.has(label.id) ? btnSelected : btnDeselected}
+          onClick={() => handleLabelToggle(label.id)}
+          title={selectedIds.has(label.id) ? `Deselect "${label.name}"` : `Select "${label.name}"`}
+        >
+          {label.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── View types ────────────────────────────────────────────────────────────────
 
 type ViewTab = 'active' | 'pending' | 'done';
@@ -1444,13 +1532,19 @@ function TasksPage() {
     location.pathname === '/tasks/pending' ? 'pending' :
     location.pathname === '/tasks/done'    ? 'done'    : 'active';
 
-  const [tasks,       setTasks]       = useState<TaskRow[] | null>(null);
-  const [isLoading,   setIsLoading]   = useState(true);
-  const [error,       setError]       = useState<ApiError | null>(null);
-  const [selected,    setSelected]    = useState<TaskRow | null>(null);
-  const [creating,    setCreating]    = useState(false);
-  const [actionError, setActionError] = useState<ApiError | null>(null);
-  const [linkingTask, setLinkingTask] = useState<TaskRow | null>(null);
+  const [tasks,            setTasks]            = useState<TaskRow[] | null>(null);
+  const [isLoading,        setIsLoading]        = useState(true);
+  const [error,            setError]            = useState<ApiError | null>(null);
+  const [selected,         setSelected]         = useState<TaskRow | null>(null);
+  const [creating,         setCreating]         = useState(false);
+  const [actionError,      setActionError]      = useState<ApiError | null>(null);
+  const [linkingTask,      setLinkingTask]      = useState<TaskRow | null>(null);
+  const [availableLabels,  setAvailableLabels]  = useState<TaskLabel[]>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<Set<string>>(new Set());
+
+  // Track whether selectedLabelIds has been initialised from PreferenceStore.
+  // We use a ref so that the save effect can skip the first render.
+  const labelIdsInitialised = useRef(false);
 
   const fetchTasks = useCallback(async (currentView: ViewTab) => {
     setIsLoading(true);
@@ -1467,6 +1561,66 @@ function TasksPage() {
   useEffect(() => {
     fetchTasks(view);
   }, [fetchTasks, view]);
+
+  // ── Load available labels once on mount ──────────────────────────────────────
+  useEffect(() => {
+    async function loadAvailableLabels() {
+      const res = await apiFetch<{ rows: TaskLabel[] }>('/tasks/labels/used');
+      if (!isApiError(res)) {
+        const dataset = res as { rows: TaskLabel[] };
+        setAvailableLabels(dataset.rows ?? []);
+      }
+      // On error: leave availableLabels as [] — filter bar will not be shown
+    }
+    loadAvailableLabels();
+  }, []);
+
+  // ── Load filter preference once availableLabels are known ────────────────────
+  // Runs when availableLabels first becomes non-empty (or stays empty — handled by no-op).
+  useEffect(() => {
+    if (availableLabels.length === 0) return;
+
+    async function loadFilterPreference() {
+      const res = await apiFetch<{ rows: Array<{ value: string }> }>('/tasks/preferences/label_filter');
+      const availableIds = new Set(availableLabels.map(l => l.id));
+
+      if (!isApiError(res)) {
+        const dataset = res as { rows: Array<{ value: string }> };
+        const row = dataset.rows?.[0];
+        if (row) {
+          try {
+            // PreferenceStore returns value as JSON.dumps(value_json) — must parse
+            const stored: unknown = JSON.parse(row.value);
+            if (Array.isArray(stored)) {
+              // Intersect stored IDs with currently available labels to drop stale IDs
+              const valid = (stored as string[]).filter(id => availableIds.has(id));
+              labelIdsInitialised.current = true;
+              setSelectedLabelIds(new Set(valid));
+              return;
+            }
+          } catch {
+            // Fall through to default
+          }
+        }
+      }
+      // 404, parse error, or unexpected shape — default to all labels selected
+      labelIdsInitialised.current = true;
+      setSelectedLabelIds(new Set(availableIds));
+    }
+
+    loadFilterPreference();
+  }, [availableLabels]);
+
+  // ── Save filter preference whenever selectedLabelIds changes ─────────────────
+  // Skips the initial render and the mount-load; only fires after user changes.
+  useEffect(() => {
+    if (!labelIdsInitialised.current) return;
+    apiFetch('/tasks/preferences/label_filter', {
+      method: 'PUT',
+      body: JSON.stringify({ label_ids: Array.from(selectedLabelIds) }),
+    });
+    // Fire-and-forget; errors are not surfaced to the user
+  }, [selectedLabelIds]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -1515,14 +1669,12 @@ function TasksPage() {
 
   // ── Render pending tab (two sections: Open, then Pending) ────────────────────
 
-  function renderPendingTab() {
-    if (!tasks) return null;
+  function renderPendingTab(filteredTasks: TaskRow[]) {
+    const openTasks    = filteredTasks.filter(t => t.status === 'open');
+    const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
 
-    const openTasks    = tasks.filter(t => t.status === 'open');
-    const pendingTasks = tasks.filter(t => t.status === 'pending');
-
-    const openEffort  = openTasks.reduce((sum, t)  => sum + (t.effort_hours ?? 0), 0);
-    const totalEffort = tasks.reduce((sum, t) => sum + (t.effort_hours ?? 0), 0);
+    const openEffort  = openTasks.reduce((sum, t)    => sum + (t.effort_hours ?? 0), 0);
+    const totalEffort = filteredTasks.reduce((sum, t) => sum + (t.effort_hours ?? 0), 0);
 
     const cardHandlers = {
       onOpen:         setSelected,
@@ -1598,6 +1750,22 @@ function TasksPage() {
 
   // ── Main list render ─────────────────────────────────────────────────────────
 
+  // Compute client-side label filter.
+  // States:
+  //   availableLabels empty       → show all tasks (no filter bar)
+  //   all selected                → show all tasks
+  //   none selected               → show empty list
+  //   subset selected             → show tasks that have at least one selected label
+  const allLabelsSelected = availableLabels.length === 0 || selectedLabelIds.size === availableLabels.length;
+  const noLabelsSelected  = availableLabels.length > 0 && selectedLabelIds.size === 0;
+
+  const displayedTasks: TaskRow[] = (() => {
+    if (!tasks) return [];
+    if (noLabelsSelected)  return [];
+    if (allLabelsSelected) return tasks;
+    return tasks.filter(t => t.labels?.some(l => selectedLabelIds.has(l.id)));
+  })();
+
   return (
     <div className="page">
       {/* Page header */}
@@ -1613,19 +1781,28 @@ function TasksPage() {
         </div>
       )}
 
+      {/* Label filter bar — only shown when not loading and labels exist */}
+      {!isLoading && !error && (
+        <LabelFilterBar
+          labels={availableLabels}
+          selectedIds={selectedLabelIds}
+          onChange={setSelectedLabelIds}
+        />
+      )}
+
       {isLoading ? (
         <Skeleton />
       ) : error ? (
         <ErrorCard error={error} />
       ) : view === 'pending' ? (
-        renderPendingTab()
-      ) : tasks === null || tasks.length === 0 ? (
+        renderPendingTab(displayedTasks)
+      ) : displayedTasks.length === 0 ? (
         <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
           No tasks in this view.
         </p>
       ) : (
         <TaskGroupedList
-          tasks={tasks}
+          tasks={displayedTasks}
           onOpen={setSelected}
           onStatusToggle={handleStatusToggle}
           onDelete={handleDelete}

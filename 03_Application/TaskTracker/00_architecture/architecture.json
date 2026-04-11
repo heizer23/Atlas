@@ -1,0 +1,258 @@
+{
+  "component_name": "tasktracker",
+  "layer": "03_Application",
+  "summary": "Lightweight single-user task management application that creates, tracks, and labels tasks with status, priority, due date, and effort fields, persisting tasks in Postgres and delegating label management to LabelEngine and user preferences to PreferenceStore.",
+  "classification": {
+    "why_application": "Owns task domain state (tasktracker.tasks table), enforces task-specific business rules (status transitions, priority validation, effort constraints), and wires platform services (LabelEngine, PreferenceStore) to TaskTracker-scoped behavior. Contains no reusable infrastructure.",
+    "non_goals": [
+      "Multi-user or authentication — single-user only",
+      "Server-side label filtering on GET /tasks",
+      "Label storage — delegated to LabelEngine",
+      "Preference storage — delegated to PreferenceStore",
+      "Any email, notification, or scheduling behavior"
+    ],
+    "not_platform": "Task domain rules, the tasktracker.tasks schema, and the wiring of LabelEngine and PreferenceStore for this domain are TaskTracker-specific application behavior, not reusable platform infrastructure."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL (env var, default http://localhost:8050) — POST /api/objects/labels/batch (batch label fetch), GET /api/labels (label search by prefix), GET /api/labels/used?object_type=task (all labels used on tasks), GET /api/objects/{task_id}/labels (labels on one task), POST /api/objects/{task_id}/labels (attach label), DELETE /api/objects/{task_id}/labels/{label_id} (detach label)",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL (env var, default http://localhost:8060) — GET /api/preferences/tasktracker.task-list/label_filter (retrieve stored filter selection), PUT /api/preferences/tasktracker.task-list/label_filter (persist filter selection)",
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via DATABASE_URL or ATLAS_PG_* environment variables",
+      "platform_contracts — ColumnSchema, Dataset, DatasetMeta from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling — api_error helper, exception handlers, request timing, structured logging"
+    ],
+    "provides": [
+      "GET /api/tasks — list tasks; params: status (open|in_progress|pending|done), view (active|pending_board), page (default 1), page_size (default 25); returns Dataset with labels embedded per row",
+      "POST /api/tasks — create a task; body: {title, description?, status? (open|pending, default open), priority? (low|medium|high, default medium), due_date?, effort_hours?}; returns Dataset (single row)",
+      "PATCH /api/tasks/{task_id} — partial update; body: any subset of {title, description, status, priority, due_date, effort_hours}; field omission means no change; explicit null clears nullable fields; returns Dataset (single row)",
+      "DELETE /api/tasks/{task_id} — delete task; returns empty Dataset on success, 404 ApiError if not found",
+      "GET /api/tasks/labels/search — search labels by prefix via LabelEngine; param: q (default empty string); returns Dataset {object_type: label, rows: [{id, name}]}",
+      "GET /api/tasks/labels/used — all labels attached to at least one task via LabelEngine; returns Dataset {object_type: label, rows: [{id, name}]}; empty Dataset on LabelEngine failure",
+      "GET /api/tasks/{task_id}/labels — labels on one task via LabelEngine; returns Dataset {object_type: task_label, rows: [{id, name, attached_at}]}",
+      "POST /api/tasks/{task_id}/labels — attach a label by name; body: {label_name: str}; proxies LabelEngine; returns LabelEngine response",
+      "DELETE /api/tasks/{task_id}/labels/{label_id} — detach a label from a task; proxies LabelEngine; returns 204 or ApiError",
+      "PUT /api/tasks/{task_id}/labels — atomically replace all labels on a task with the provided list; body: {labels: list[str]}; fetches current, detaches all, attaches new set; returns updated label list",
+      "GET /api/tasks/preferences/label_filter — retrieve stored label filter selection from PreferenceStore; returns Dataset (one row) or 404 ApiError if not yet saved",
+      "PUT /api/tasks/preferences/label_filter — persist label filter selection; body: {label_ids: list[str]}; stores to PreferenceStore; returns 200 PreferenceRecord or ApiError"
+    ],
+    "invariants": [
+      "All read endpoints (GET) return Dataset per R-CON-BP-04",
+      "task.id is a UUID generated at insert time; never caller-supplied",
+      "task.status must be one of: open, in_progress, pending, done (enforced at API and DB constraint level)",
+      "task.priority must be one of: low, medium, high (enforced at API and DB constraint level)",
+      "task.effort_hours must be >= 0 if provided (enforced at API and DB constraint level)",
+      "task.title must not be empty or blank (enforced at API level)",
+      "On POST, status is restricted to open or pending; in_progress and done are not valid creation states",
+      "PATCH distinguishes field omitted (no change) from field explicitly null (clear column) for all nullable fields; effort_hours uses model_fields_set to detect explicit null",
+      "task.updated_at is always set server-side to now() on every PATCH",
+      "GET /tasks with view=active returns: tasks with status open or in_progress, plus tasks with status done updated today (server date)",
+      "GET /tasks with view=pending_board returns: tasks with status open or pending",
+      "GET /tasks with status=done orders results by updated_at DESC; all other status and view filters order by created_at DESC",
+      "Labels are embedded in GET /tasks rows via a single LabelEngine batch call; LabelEngine failure returns empty labels array per row without failing the request",
+      "Label proxy endpoints pass object_type=task to all LabelEngine calls; this parameter is never omitted",
+      "PreferenceStore scope for all TaskTracker preferences is tasktracker.task-list",
+      "Schema is initialized idempotently at startup via schema.sql (CREATE SCHEMA IF NOT EXISTS, CREATE TABLE IF NOT EXISTS)"
+    ],
+    "failure_modes": [
+      "INVALID_FILTER — GET /tasks with unknown status or view value — 400 ApiError",
+      "INVALID_PARAM — GET /tasks with page < 1 — 400 ApiError",
+      "VALIDATION_ERROR — POST or PATCH with invalid field values (empty title, invalid status, invalid priority, negative effort_hours, no fields provided) — 400 ApiError",
+      "NOT_FOUND — PATCH or DELETE on unknown task_id — 404 ApiError",
+      "LabelEngine unreachable on GET /tasks — labels field in each row defaults to empty list; request succeeds",
+      "LabelEngine unreachable on GET /tasks/labels/used — returns empty Dataset (graceful degradation)",
+      "LabelEngine unreachable on label proxy endpoints — passes through LabelEngine HTTP status and body",
+      "PreferenceStore unreachable on GET /tasks/preferences/label_filter — passes through HTTP status and body",
+      "PreferenceStore unreachable on PUT /tasks/preferences/label_filter — passes through HTTP status and body",
+      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during request — startup logs error and continues; requests fail until DB is reachable"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": [
+      "TaskRow: {id: str (UUID), title: str, description: str|null, status: str, priority: str, due_date: str|null (ISO date), effort_hours: float|null, created_at: str (ISO date), updated_at: str (ISO date), labels: [{id, name, attached_at}]} — emitted in Dataset rows by GET /tasks and single-row responses"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL (env var, default http://localhost:8050) — httpx.Client with 5s timeout",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL (env var, default http://localhost:8060) — httpx.Client with 5s timeout",
+      "psycopg2.pool.SimpleConnectionPool (minconn=1, maxconn=5) via get_db() context manager — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/03_ErrorHandling/"
+    ],
+    "provides": [
+      "HTTP API mounted at /api (FastAPI, uvicorn)",
+      "CORS: allow_origin_regex=http://localhost:\\d+ — all localhost ports during development",
+      "Allowed methods: GET, POST, PATCH, DELETE"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks",
+        "purpose": "List tasks with optional status or view filter and pagination. Embeds labels per row from LabelEngine batch call.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "status": "one of open|in_progress|pending|done — optional",
+          "view": "one of active|pending_board — optional; mutually exclusive with status",
+          "page": "integer >= 1, default 1",
+          "page_size": "integer, default 25"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/tasks",
+        "purpose": "Create a new task. Returns created task as Dataset (single row).",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/tasks/{task_id}",
+        "purpose": "Partially update a task. Field omission means no change; explicit null clears nullable fields. Returns updated task as Dataset (single row).",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/tasks/{task_id}",
+        "purpose": "Delete a task. Returns empty Dataset on success.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/search",
+        "purpose": "Search labels by name prefix via LabelEngine. Used for label autocomplete in the UI.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "q": "search prefix string, default empty"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/used",
+        "purpose": "Return all labels attached to at least one task. Used to populate the label filter bar on mount. Gracefully degrades to empty Dataset on LabelEngine failure.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/{task_id}/labels",
+        "purpose": "Return all labels attached to one task via LabelEngine.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/tasks/{task_id}/labels",
+        "purpose": "Attach a label by name to a task via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/tasks/{task_id}/labels/{label_id}",
+        "purpose": "Detach a label from a task via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/{task_id}/labels",
+        "purpose": "Atomically replace all labels on a task. Fetches current labels, detaches each, attaches new set from body.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/preferences/label_filter",
+        "purpose": "Retrieve stored label filter selection for tasktracker.task-list from PreferenceStore. Returns Dataset (one row) or 404 ApiError if not yet saved.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/preferences/label_filter",
+        "purpose": "Persist label filter selection to PreferenceStore. Body: {label_ids: list[str]}. Returns 200 PreferenceRecord or ApiError.",
+        "ui_contract": "ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() creates psycopg2 SimpleConnectionPool. init_schema() reads schema.sql and executes DDL idempotently. Errors are logged; application continues running.",
+      "inputs": ["ATLAS_PG_* or DATABASE_URL env vars", "schema.sql"],
+      "outputs": ["live connection pool", "tasktracker schema and tasks table present in Postgres"]
+    },
+    {
+      "step": 2,
+      "name": "task_list",
+      "description": "GET /tasks validates params. Selects one of four query branches: view=active (open+in_progress+done-today), view=pending_board (open+pending), status=done (ordered by updated_at DESC), status=<other> (filtered by status), or no filter (all tasks). Embeds labels via LabelEngine batch POST. Returns Dataset.",
+      "inputs": ["status param", "view param", "page", "page_size"],
+      "outputs": ["Dataset with task rows and embedded labels"]
+    },
+    {
+      "step": 3,
+      "name": "task_create",
+      "description": "POST /tasks validates title, status (open|pending only), priority, effort_hours. Inserts row with UUID. Returns Dataset (single row).",
+      "inputs": ["TaskCreate body"],
+      "outputs": ["Dataset (inserted task row)"]
+    },
+    {
+      "step": 4,
+      "name": "task_update",
+      "description": "PATCH /tasks/{task_id} validates status and priority if provided. Builds SET clause from only the fields present in body (using model_fields_set for effort_hours to support explicit null). Executes UPDATE RETURNING *. Returns Dataset (single row) or 404 ApiError.",
+      "inputs": ["task_id path param", "TaskUpdate body"],
+      "outputs": ["Dataset (updated task row) | 404 ApiError"]
+    },
+    {
+      "step": 5,
+      "name": "task_delete",
+      "description": "DELETE /tasks/{task_id} executes DELETE RETURNING id. Returns empty Dataset or 404 ApiError if no row was deleted.",
+      "inputs": ["task_id path param"],
+      "outputs": ["empty Dataset | 404 ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "label_proxy",
+      "description": "Label endpoints (search, used, get/attach/detach/set per task) are thin proxies to LabelEngine. TaskTracker always passes object_type=task. Results are mapped to Dataset for read endpoints. set_task_labels orchestrates fetch-detach-attach in a single LabelEngine client session.",
+      "inputs": ["task_id, label_name, or label_id as applicable"],
+      "outputs": ["Dataset (read endpoints) | LabelEngine response pass-through (mutations)"]
+    },
+    {
+      "step": 7,
+      "name": "preference_proxy",
+      "description": "Preference endpoints are thin proxies to PreferenceStore under scope=tasktracker.task-list. GET passes through the Dataset or 404 ApiError. PUT wraps label_ids in {value: label_ids} and forwards; passes through result.",
+      "inputs": ["label_ids list (PUT)"],
+      "outputs": ["Dataset or 404 ApiError (GET) | PreferenceRecord or ApiError (PUT)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — TaskTracker owns the tasktracker schema within it"},
+      {"component": "02_Platform/LabelEngine", "role": "Source of all label data; TaskTracker proxies all label operations to LabelEngine with object_type=task"},
+      {"component": "02_Platform/PreferenceStore", "role": "Persists user label filter selections; TaskTracker proxies reads and writes under scope tasktracker.task-list"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema — used in all read endpoint responses"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error helper, exception handlers, request timing, structured logging"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework"},
+      {"name": "uvicorn", "role": "ASGI server"},
+      {"name": "psycopg2-binary", "role": "Postgres driver"},
+      {"name": "pydantic", "role": "Request body validation"},
+      {"name": "httpx", "role": "Synchronous HTTP client for LabelEngine and PreferenceStore proxy calls"}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling LabelEngine or PreferenceStore directly — all calls must route through TaskTracker backend",
+      "Server-side label_ids filtering in GET /tasks — label filtering is client-side",
+      "Re-implementing label storage or preference storage in TaskTracker — consume platform services, do not duplicate"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "schema.sql",
+    "persistence_type": "postgresql",
+    "schema_name": "tasktracker",
+    "table_name": "tasktracker.tasks",
+    "notes": "TaskTracker owns the tasktracker schema in the shared Atlas Postgres instance. Schema initialized idempotently at startup from schema.sql. Indexes on status and created_at DESC."
+  }
+}

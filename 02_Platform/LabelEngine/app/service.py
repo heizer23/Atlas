@@ -400,6 +400,37 @@ class LabelService:
 
         return result
 
+    # ── Reverse lookup ───────────────────────────────────────────────────────
+
+    def get_labels_used_by_type(
+        self,
+        conn: psycopg2.extensions.connection,
+        object_type: str,
+    ) -> list[LabelRecord]:
+        """
+        Return all distinct labels attached to at least one object of
+        the given object_type, ordered by lower(name) ascending.
+        Returns an empty list if no labels are attached to any such object.
+
+        Uses ix_object_labels_object_type index for the WHERE clause.
+        """
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, name from (
+                    select distinct l.id, l.name, lower(l.name) as sort_key
+                    from labels.labels l
+                    join labels.object_labels ol on ol.label_id = l.id
+                    where ol.object_type = %s
+                ) sub
+                order by sort_key
+                """,
+                (object_type,),
+            )
+            rows = cur.fetchall()
+
+        return [LabelRecord(id=r["id"], name=r["name"]) for r in rows]
+
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _resolve_or_create_label(

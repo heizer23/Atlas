@@ -260,6 +260,18 @@ If the architecture declares no persistence, do not add durable storage.
 
 ---
 
+# Test Implementation
+
+If `10_test_spec.md` is present in the sprint folder, you must write test functions for every scenario in it.
+
+Rules:
+- Use the component's existing test framework (check `pyproject.toml`, `package.json`, or equivalent).
+- Name each test function after its scenario (snake_case). The name is the traceability link the test runner uses.
+- Tests must be runnable directly (`pytest`, `npm test`, etc.) without additional setup beyond what the component already requires.
+- If this is a fix-loop run (invoked from `TESTS_FAILED_FIXABLE`): read `50_test_report.md` to identify exactly which tests are failing and why. Fix only those. Do not rewrite passing tests.
+
+---
+
 # Quality Checks Before Finishing
 
 Verify:
@@ -273,6 +285,7 @@ Verify:
 7. No unnecessary abstractions were added
 8. Implementation is minimal and readable
 9. UI is functional but intentionally simple
+10. If `10_test_spec.md` is present: test functions exist for every scenario and are runnable
 
 ---
 

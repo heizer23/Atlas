@@ -26,11 +26,13 @@ Sprint<N>_<Title>/
   10_architecture.json
   10_scaffolding.json
   [10_schema.sql]              ← only if the component owns persistent state
+  [10_test_spec.md]            ← required if component exposes an API; omitted otherwise
   11_design_review.md
   [12_design_corrections.md]   ← only if first review required changes
   [13_design_review.md]        ← only if re-review needed
   [14_design_corrections.md]   ← only if second re-review needed
   ...
+  [50_test_report.md]          ← produced by test-runner; present after first test run
   99_sprint_log.md
 ```
 
@@ -41,6 +43,8 @@ Sprint<N>_<Title>/
 - Design artifacts: always `10_architecture.json` and `10_scaffolding.json` — no component-prefixed variants, no subfolders
 - Schema: `10_schema.sql` if and only if `persistence.owns_persistent_state == true` in architecture.json
 - Design review iterations: first review is always `11_design_review.md`. Each correction round increments by one: `12_design_corrections.md`, `13_design_review.md`, `14_design_corrections.md`, etc. The orchestrator determines the next number by counting existing review/correction files.
+- Test spec: `10_test_spec.md` — written by the designer; required when the component exposes an API, optional otherwise. If absent, the test-runner stage is skipped entirely.
+- Test report: always `50_test_report.md` — produced by the test-runner on each run; overwritten on re-runs within the same sprint.
 - Sprint log: always `99_sprint_log.md` — single file combining machine-readable state and the transition log
 
 ### What is explicitly not present
@@ -54,7 +58,7 @@ Sprint<N>_<Title>/
 
 ## 2. Canonical Sprint States
 
-Use exactly these seven states. No other labels are valid.
+Use exactly these ten states. No other labels are valid.
 
 | State | Meaning |
 |-------|---------|
@@ -62,7 +66,10 @@ Use exactly these seven states. No other labels are valid.
 | `DESIGN_CREATED` | `10_*.json` produced; not yet reviewed |
 | `DESIGN_REVIEWED_CHANGES_REQUIRED` | Reviewer returned changes; corrector must run |
 | `DESIGN_APPROVED` | Design approved; ready for implementation |
-| `IMPLEMENTATION_IN_PROGRESS` | Implementer running or complete; awaiting `/sprint-close` |
+| `IMPLEMENTATION_IN_PROGRESS` | Implementer running or complete; awaiting test run or `/sprint-close` |
+| `TESTS_PASSING` | Test-runner ran; all tests passed; ready for `/sprint-close` |
+| `TESTS_FAILED_FIXABLE` | Tests failed with fixable implementation issues; implementer fix loop |
+| `TESTS_FAILED_DESIGN_ISSUE` | Tests failed due to a design flaw; design corrector required |
 | `SPRINT_COMPLETE` | `/sprint-close` skill invoked; sprint closed |
 | `BLOCKED` | Required artifact missing, invalid verdict, or illegal transition |
 
@@ -89,8 +96,25 @@ DESIGN_APPROVED
   → IMPLEMENTATION_IN_PROGRESS
 
 IMPLEMENTATION_IN_PROGRESS
+  → [test-runner]              if 10_test_spec.md is present
+  → TESTS_PASSING
+  → TESTS_FAILED_FIXABLE
+  → TESTS_FAILED_DESIGN_ISSUE
+
+  → [/sprint-close]            if 10_test_spec.md is absent (test stage skipped)
+  → SPRINT_COMPLETE
+
+TESTS_PASSING
   → [/sprint-close skill invoked by human]
   → SPRINT_COMPLETE
+
+TESTS_FAILED_FIXABLE
+  → [sprint_implement]         fix_iterations must be < 3; otherwise → BLOCKED
+  → IMPLEMENTATION_IN_PROGRESS
+
+TESTS_FAILED_DESIGN_ISSUE
+  → [sprint_design_corrector]  50_test_report.md serves as corrector input
+  → DESIGN_CREATED
 
 Any missing required artifact, invalid verdict, or illegal stage skip
   → BLOCKED
@@ -108,6 +132,9 @@ Do not skip stages. Do not infer transitions from prose. Use explicit artifact e
 | `DESIGN_CREATED` | `00_draft.md`, `10_architecture.json`, `10_scaffolding.json` |
 | `DESIGN_REVIEWED_*` or `DESIGN_APPROVED` | All DESIGN_CREATED artifacts plus the latest `1N_design_review.md` |
 | `IMPLEMENTATION_IN_PROGRESS` | All DESIGN_APPROVED artifacts; implementation code present in the component |
+| `TESTS_PASSING` | All IMPLEMENTATION_IN_PROGRESS artifacts plus `50_test_report.md` (verdict: `TESTS_PASSING`) |
+| `TESTS_FAILED_FIXABLE` | All IMPLEMENTATION_IN_PROGRESS artifacts plus `50_test_report.md` (verdict: `TESTS_FAILED_FIXABLE`) |
+| `TESTS_FAILED_DESIGN_ISSUE` | All IMPLEMENTATION_IN_PROGRESS artifacts plus `50_test_report.md` (verdict: `TESTS_FAILED_DESIGN_ISSUE`) |
 | `SPRINT_COMPLETE` | All prior artifacts; `99_sprint_log.md` records `/sprint-close` invocation |
 
 ---
@@ -121,6 +148,9 @@ All reviewer agents must use exactly these verdict labels. No other labels are v
 | `APPROVED` | design-reviewer | `DESIGN_APPROVED` |
 | `APPROVED_WITH_CHANGES` | design-reviewer | `DESIGN_REVIEWED_CHANGES_REQUIRED` |
 | `CHANGES_REQUIRED` | design-reviewer | `DESIGN_REVIEWED_CHANGES_REQUIRED` |
+| `TESTS_PASSING` | test-runner | `TESTS_PASSING` |
+| `TESTS_FAILED_FIXABLE` | test-runner | `TESTS_FAILED_FIXABLE` |
+| `TESTS_FAILED_DESIGN_ISSUE` | test-runner | `TESTS_FAILED_DESIGN_ISSUE` |
 | `BLOCKED` | any reviewer | `BLOCKED` |
 | `REJECTED` | any reviewer | `BLOCKED` |
 
@@ -128,6 +158,7 @@ Rules:
 - If a reviewer file does not contain an explicit verdict from this list, the orchestrator must mark the sprint `BLOCKED`.
 - Do not infer a verdict from prose. The verdict must be explicitly stated.
 - `APPROVED_WITH_CHANGES` and `CHANGES_REQUIRED` are equivalent from the design-reviewer — both route to the corrector.
+- The test-runner must err toward `TESTS_FAILED_FIXABLE`. Only emit `TESTS_FAILED_DESIGN_ISSUE` when the report can name the specific design artifact that is wrong.
 
 ---
 
@@ -184,10 +215,11 @@ Single file. State block at the top, transition log below. Keep the log to one l
 
 Field rules:
 - `layer` must be exactly `02_Platform` or `03_Application`
-- `current_state` must be one of the seven canonical states
+- `current_state` must be one of the ten canonical states
 - `blocking` must be `true` or `false`
 - `block_reason` must be `null` unless `blocking` is `true`
 - `next_agent` must be `null` when `current_state` is `SPRINT_COMPLETE` or `BLOCKED`
+- `fix_iterations` must be present when `current_state` is any `TESTS_FAILED_*` or `IMPLEMENTATION_IN_PROGRESS` after a test failure; records how many fix loops have been run; starts at 0
 
 ---
 
@@ -202,8 +234,72 @@ Mark a sprint `BLOCKED` if any of the following apply:
 - Agent selection conflicts with the detected layer
 - Artifact names or paths are ambiguous enough to prevent deterministic routing
 - Two state-bearing artifacts contradict each other and no newer authoritative verdict resolves it
+- `fix_iterations` has reached 3 and tests are still failing — human intervention required
 
 When blocking, state: the exact missing artifact or contradiction, the local consequence, and the required human or agent action.
+
+---
+
+## 10. Test Artifact Formats
+
+### `10_test_spec.md`
+
+Written by the designer. Required when the component exposes an API; optional otherwise.
+
+```markdown
+# Test Spec — <ComponentName> — <SprintName>
+
+## Scope
+<one sentence: what is being tested and what is explicitly out of scope>
+
+## Scenarios
+
+### <Scenario Name>
+- **Given:** <precondition>
+- **When:** <action>
+- **Then:** <expected outcome>
+
+### <Scenario Name>
+...
+```
+
+Rules:
+- Each scenario must be independently testable.
+- Do not include implementation detail (function names, SQL). Scenarios describe observable behavior.
+- The implementer maps each scenario to concrete test functions; the scenario names are the traceability link.
+
+---
+
+### `50_test_report.md`
+
+Produced by the test-runner. Overwrites any prior version in the same sprint.
+
+```markdown
+# Test Report — <ComponentName> — <SprintName>
+
+**Verdict:** TESTS_PASSING | TESTS_FAILED_FIXABLE | TESTS_FAILED_DESIGN_ISSUE
+**Date:** YYYY-MM-DD
+**Fix iteration:** <N> (0 on first run)
+
+## Results
+
+| Scenario | Test | Status | Failure reason |
+|----------|------|--------|----------------|
+
+## Failure Analysis
+
+<If verdict is TESTS_PASSING: "All scenarios passed.">
+<If TESTS_FAILED_FIXABLE: describe the implementation errors; do not name design artifacts.>
+<If TESTS_FAILED_DESIGN_ISSUE: name the exact design artifact and field that is wrong.>
+
+## Required Action
+
+<one sentence: what must happen next>
+```
+
+Rules:
+- Verdict `TESTS_FAILED_DESIGN_ISSUE` requires the failure analysis to explicitly name the design artifact (e.g., `10_architecture.json §interfaces.outputs`) that is wrong. If that specificity cannot be reached, use `TESTS_FAILED_FIXABLE`.
+- The test-runner calls test commands directly (e.g., `pytest`, `npm test`). No intermediate wrapper required.
 
 ---
 

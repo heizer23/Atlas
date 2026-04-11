@@ -1,0 +1,48 @@
+{
+  "sprint": "Sprint07_LabelFilter",
+  "component": "TaskTracker",
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "action": "modify",
+      "what": "Add GET /tasks/labels/active endpoint (declared before GET /tasks/{task_id}); add label_ids: list[str] = Query(default=[]) parameter to list_tasks (accepted, no backend SQL filtering — client-side only in this sprint).",
+      "changes": [
+        {
+          "location": "After the existing GET /tasks/labels/search endpoint, before GET /tasks/{task_id}",
+          "what": "New route: @router.get('/labels/active') returning Dataset of all labels from LabelEngine (GET /api/labels, q=''). On LabelEngine failure, returns empty Dataset."
+        },
+        {
+          "location": "list_tasks function signature",
+          "what": "Add `label_ids: list[str] = Query(default=[])` parameter. Accepted without validation; no SQL change (filtering is client-side this sprint). Add `from fastapi import Query` import if not already present."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "action": "modify",
+      "what": "Add LabelFilterBar local component; add activeLabels and selectedLabelIds state to TasksPage; derive activeLabels from loaded task rows after each fetch; apply client-side label filter to produce displayedTasks; render LabelFilterBar above the task list.",
+      "changes": [
+        {
+          "location": "Before TasksPage function definition",
+          "what": "New LabelFilterBar component: props labels/selectedIds/onChange; renders 'All' toggle + per-label toggle buttons; returns null when labels is empty."
+        },
+        {
+          "location": "TasksPage state declarations",
+          "what": "Add: const [activeLabels, setActiveLabels] = useState<TaskLabel[]>([]); const [selectedLabelIds, setSelectedLabelIds] = useState<Set<string>>(new Set());"
+        },
+        {
+          "location": "After fetchTasks resolves (in the useEffect or the fetchTasks callback, after setTasks)",
+          "what": "Derive activeLabels from union of task.labels; update selectedLabelIds to include any newly seen label IDs (default selected)."
+        },
+        {
+          "location": "TasksPage main list render section, before isLoading conditional",
+          "what": "Compute displayedTasks from tasks state by applying the label filter (client-side). Render <LabelFilterBar> above the task list."
+        },
+        {
+          "location": "TaskGroupedList and renderPendingTab call sites",
+          "what": "Pass displayedTasks instead of tasks to TaskGroupedList and renderPendingTab."
+        }
+      ]
+    }
+  ]
+}

@@ -147,6 +147,32 @@ E. Reachability / Residue
   unused migrations or schemas
   dead config
 
+H. Architecture File Currency
+
+  For every component with a `00_architecture/` folder, verify that `architecture.json` and `scaffolding.json` reflect current implementation reality.
+
+  Check `architecture.json` for drift:
+  - Are all endpoints in `contracts.provides` still present in the actual router code?
+  - Are any router endpoints missing from `contracts.provides`?
+  - Do invariants still hold (check validation logic, constraints, ordering rules)?
+  - Are all failure modes / error codes still emitted?
+  - Is `persistence.owns_persistent_state` correct given the current schema?
+
+  Check `scaffolding.json` for drift:
+  - Are all files listed still present on disk?
+  - Are there files on disk not listed (new files added without updating scaffolding)?
+  - Do `public_objects` still match actual exported classes and functions?
+  - Are `role` descriptions still accurate?
+
+  Classify drift findings as:
+  - `architecture_file_drift` (new category) — severity based on how misleading the stale information is:
+    - critical: missing or phantom endpoints, wrong persistence declaration
+    - high: missing invariants, missing failure modes, missing files
+    - medium: stale role descriptions, minor public_objects drift
+    - low: cosmetic inaccuracies
+
+  Note: components without `00_architecture/` are known stubs — do not flag their absence as drift.
+
 F. Exception Hygiene
   deviations without formal exception record
   → classify as exception_missing_record
@@ -176,6 +202,7 @@ Use exactly one:
   exception_missing_record
   stale_exception_record
   missing_rule_signal
+  architecture_file_drift
   verification_required
 
 Severity Levels

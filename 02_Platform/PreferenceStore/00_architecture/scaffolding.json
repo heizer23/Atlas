@@ -1,0 +1,208 @@
+{
+  "component_name": "preference_store",
+  "target_root": "02_Platform/PreferenceStore",
+  "directories": [
+    "02_Platform/PreferenceStore",
+    "02_Platform/PreferenceStore/app",
+    "02_Platform/PreferenceStore/app/routers",
+    "02_Platform/PreferenceStore/tests"
+  ],
+  "files": [
+    {
+      "path": "02_Platform/PreferenceStore/pyproject.toml",
+      "stub_kind": "toml",
+      "role": "Package metadata and dependency declarations",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "Container image definition — mirrors LabelEngine pattern: python:3.12-slim, /platform_packages mount, uvicorn CMD",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/compose.yml",
+      "stub_kind": "yaml",
+      "role": "Docker Compose service definition for preference-store: port 127.0.0.1:8060:8000, ATLAS_PG_* env vars, atlas-net network",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/app/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/app/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management and schema initialization for the preferences schema",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "None",
+          "purpose": "Initialize the psycopg2 SimpleConnectionPool using ATLAS_PG_* environment variables."
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "None",
+          "purpose": "Create the preferences schema and preferences.preferences table idempotently using inline DDL."
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "Generator[psycopg2.extensions.connection, None, None]",
+          "purpose": "Context manager that yields a connection from the pool and returns it on exit, rolling back on exception."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_build_url",
+          "purpose": "Construct Postgres DSN from ATLAS_PG_* environment variables or DATABASE_URL override."
+        },
+        {
+          "kind": "constant",
+          "name": "_pool",
+          "purpose": "Module-level pool instance, None until init_pool() is called."
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/PreferenceStore/app/models.py",
+      "stub_kind": "python_module",
+      "role": "Pydantic request and response models for the preferences API",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "PutPreferenceRequest",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "value", "type": "Any", "description": "Any valid JSON value to store. Required. May be null."}
+          ],
+          "purpose": "Request body for PUT /preferences/{scope}/{key}."
+        },
+        {
+          "kind": "class",
+          "name": "PreferenceRecord",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "scope", "type": "str"},
+            {"name": "key", "type": "str"},
+            {"name": "value", "type": "Any"},
+            {"name": "updated_at", "type": "datetime"}
+          ],
+          "purpose": "Response model for PUT and as the row shape within Dataset rows for GET endpoints."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/app/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entrypoint: app construction, middleware, router mounting, startup hook, health endpoint",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "singleton",
+          "purpose": "FastAPI application instance. Mounts preferences router under /api prefix."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "health",
+          "purpose": "GET /health — returns {status: ok}."
+        },
+        {
+          "kind": "function",
+          "name": "on_startup",
+          "purpose": "FastAPI startup event handler — calls init_pool() then init_schema()."
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/PreferenceStore/app/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/app/routers/preferences.py",
+      "stub_kind": "python_module",
+      "role": "All four preference HTTP endpoints: GET single, PUT upsert, DELETE, GET by scope",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "purpose": "APIRouter instance mounted by main.py under /api prefix."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_validate_scope_key",
+          "purpose": "Raise 422 ApiError if scope or key is empty or whitespace-only."
+        },
+        {
+          "kind": "function",
+          "name": "_api_error",
+          "purpose": "Construct JSONResponse with ApiError shape: {error: {code, message, detail, request_id}}."
+        },
+        {
+          "kind": "function",
+          "name": "get_preference",
+          "purpose": "GET /api/preferences/{scope}/{key} — return Dataset (one row) or 404 ApiError."
+        },
+        {
+          "kind": "function",
+          "name": "put_preference",
+          "purpose": "PUT /api/preferences/{scope}/{key} — upsert and return PreferenceRecord (200)."
+        },
+        {
+          "kind": "function",
+          "name": "delete_preference",
+          "purpose": "DELETE /api/preferences/{scope}/{key} — remove preference, return 204. Idempotent."
+        },
+        {
+          "kind": "function",
+          "name": "get_preferences_by_scope",
+          "purpose": "GET /api/preferences/{scope} — return Dataset with all rows for scope; empty rows list if none."
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/PreferenceStore/tests/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/PreferenceStore/tests/test_preferences.py",
+      "stub_kind": "python_module",
+      "role": "Integration tests for all preference endpoints — test scenarios defined in architecture.json deferrals.test_writer",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

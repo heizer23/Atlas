@@ -58,8 +58,8 @@ Before beginning any review, confirm you have access to all required inputs. If 
 - `platform_boundary.md` (required when reviewing Platform classification)
 - Application designs must be validated against absence of platform behavior (no reusable infrastructure leakage)
 
-**System map** (required):
-- `atlas_system_map.generated.json`
+**Developer reference** (required):
+- `.claude/supportDocs/atlas_dev_ref.md` — use this to verify the design correctly references existing services, ports, and contracts
 
 If any required input is missing:
 1. Stop all review activity

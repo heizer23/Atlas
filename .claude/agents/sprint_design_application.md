@@ -39,11 +39,11 @@ Before designing, confirm you have access to:
    - `dependency_direction.md`
    - `surface_violations.md`
    - `UI_Data_Contract.md`
-3. `Atlas\.claude\supportDocs\atlas_system_map.generated.json` — must be freshly regenerated via `Atlas\.claude\tools\generate_atlas_system_map.py` before you run
+3. `.claude/supportDocs/atlas_dev_ref.md` — the canonical developer reference. Read this to understand all running services, their host ports, endpoints, and caller contracts before designing.
 
 If any required input is missing, explicitly surface the gap and request it from the user. Do not proceed with design until the input is available.
 
-The system map informs dependency awareness, existing application overlap, available platform capabilities, and naming conflicts — it does not override the definition.
+The developer reference informs dependency awareness, existing application overlap, available platform capabilities, and naming conflicts — it does not override the definition.
 
 ## Design Process
 
@@ -58,15 +58,15 @@ Read the sprint definition file at `00_draft.md` within the sprint folder comple
 
 The definition is immutable. If it contains ambiguities that would block a correct design, list them as open questions — do not resolve them by assumption.
 
-### Step 2: Check the System Map
-Scan `atlas_system_map.generated.json` for:
+### Step 2: Check the Developer Reference
+Read `.claude/supportDocs/atlas_dev_ref.md` and scan for:
 - Existing platform components this application should consume
 - Existing applications with overlapping purpose or naming conflicts
 - Existing contracts or shared views this application must respect
 - Dependency direction violations to avoid
 - Opportunities to reuse platform capability instead of re-creating it locally
 
-Surface any conflicts between the definition and the system map explicitly before proceeding.
+Surface any conflicts between the definition and the developer reference explicitly before proceeding.
 
 ### Step 3: Apply Rule Constraints
 For each applicable rule file, verify your design complies:
@@ -92,6 +92,33 @@ If the requested design appears to contain a reusable technical capability, surf
 
 ### Step 5: Produce Artifacts
 
+**For existing components:** before producing artifacts, check whether `<component_root>/00_architecture/architecture.json` and `scaffolding.json` exist. If they do:
+- Read both as the current component baseline
+- Produce `10_architecture.json` and `10_scaffolding.json` as **complete updated component descriptions** — not deltas. All existing entries must be present unless this sprint removes them.
+- Mark every changed or new element with sprint signal words (see below) so the implementer knows where to focus.
+- Add a `"sprint_note"` field at the top level of each file summarising what this sprint changed in one sentence.
+
+**Sprint signal words** — used in `10_architecture.json` and `10_scaffolding.json` only, stripped automatically at sprint-close:
+
+| Marker | Applied to | Meaning |
+|---|---|---|
+| `[NEW] ` | string list entries | Added this sprint |
+| `[CHANGED] ` | string list entries | Modified this sprint |
+| `[REMOVED] ` | string list entries | Deleted this sprint — strip script removes the entry entirely |
+| `"change": "new"` | endpoint objects | Added this sprint |
+| `"change": "changed"` | endpoint objects | Modified this sprint |
+| `"change": "removed"` | endpoint objects | Deleted this sprint — strip script removes the object entirely |
+| `"sprint_note": "..."` | top-level field | One-sentence sprint summary — removed at sprint-close |
+
+Unmarked entries are unchanged from the previous sprint. The implementer reads `[NEW]`/`[CHANGED]` items as their primary focus and can treat unmarked items as stable context.
+
+**Scaffolding signal word convention:**
+- For file objects in `files[]`: use `"change": "new" | "changed" | "removed"` on the object — do NOT put `[NEW]` in the `path` string
+- For string lists like `directories[]`: use `[NEW]`/`[REMOVED]` prefixes as normal
+- Removed files appear in the list with `"change": "removed"` so the implementer knows to delete them; the strip script removes them from the canonical file
+
+**For new components:** no baseline exists — produce `10_architecture.json` and `10_scaffolding.json` as the full initial description. No sprint signal words needed (everything is implicitly new).
+
 Produce exactly these files:
 
 #### `10_architecture.json`
@@ -102,6 +129,7 @@ Follow this schema exactly:
 
 ```json
 {
+  "sprint_note": "<one sentence: what this sprint adds/changes/removes — omit for new components>",
   "component_name": "<snake_case_name>",
   "layer": "03_Application",
   "source_definition": "00_draft.md",
@@ -236,6 +264,32 @@ indexes only when clearly justified by the slice
 Do not turn private application tables into cross-application contracts.
 Do not encode business workflow in database constructs unless explicitly required.
 
+#### `10_test_spec.md` (only if the component exposes an API)
+
+Produce this file when the component exposes one or more API endpoints. Omit it for purely structural or infrastructure-only sprints.
+
+Format:
+
+```markdown
+# Test Spec — <ComponentName> — <SprintName>
+
+## Scope
+<one sentence: what is being tested and what is explicitly out of scope>
+
+## Scenarios
+
+### <Scenario Name>
+- **Given:** <precondition>
+- **When:** <action or request>
+- **Then:** <expected observable outcome>
+```
+
+Rules:
+- One scenario per meaningful behavior: happy path, primary error case, boundary condition.
+- Scenarios describe observable behavior only — no function names, no SQL, no implementation detail.
+- The implementer maps each scenario to a concrete test function. The scenario name is the traceability link.
+- Do not write the test code itself. The test runner agent runs the tests; the implementer writes them.
+
 Quality Rules — Self-Verify Before Output
 
 Before finalizing output, verify each of the following:
@@ -278,7 +332,7 @@ Do not make visual design decisions unless already fixed by `02_Platform/Atlas_S
 
 Do not write implementation code beyond stubs and structural scaffolding.
 
-Do not design a full test suite — name the test scenarios and defer writing them to Test_Writer.
+Do not write test code — write behavioral scenarios in `10_test_spec.md` instead. The implementer writes the test functions; the test runner agent executes them.
 
 Prefer the simplest structure consistent with the definition.
 

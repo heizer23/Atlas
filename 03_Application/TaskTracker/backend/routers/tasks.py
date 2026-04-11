@@ -11,12 +11,16 @@ from backend.database import get_db
 from platform_errorhandling import api_error
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 
-# ── LabelEngine client ────────────────────────────────────────────────────────
+# ── Platform service clients ──────────────────────────────────────────────────
 
-LABEL_ENGINE_URL = os.environ.get("LABEL_ENGINE_URL", "http://localhost:8050")
+LABEL_ENGINE_URL      = os.environ.get("LABEL_ENGINE_URL",      "http://localhost:8050")
+PREFERENCE_STORE_URL  = os.environ.get("PREFERENCE_STORE_URL",  "http://localhost:8060")
 
 def _label_client() -> httpx.Client:
     return httpx.Client(base_url=LABEL_ENGINE_URL, timeout=5.0)
+
+def _preference_client() -> httpx.Client:
+    return httpx.Client(base_url=PREFERENCE_STORE_URL, timeout=5.0)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -360,6 +364,71 @@ def search_labels(q: str = "") -> JSONResponse:
         ]},
         rows=[{"id": item["id"], "name": item["name"]} for item in items],
     ))
+
+
+@router.get("/labels/used", response_model=None)
+def list_used_labels() -> JSONResponse:
+    """Return all labels attached to at least one task via LabelEngine.
+
+    Proxies LabelEngine GET /api/labels/used?object_type=task.
+    On LabelEngine failure, returns an empty Dataset (graceful degradation).
+    """
+    _LABEL_SCHEMA = [
+        ColumnSchema(key="id",   label="ID",   type="string"),
+        ColumnSchema(key="name", label="Name", type="string"),
+    ]
+    try:
+        with _label_client() as client:
+            resp = client.get("/api/labels/used", params={"object_type": "task"})
+        if resp.status_code != 200:
+            items: list = []
+        else:
+            items = resp.json().get("labels", [])
+    except Exception:
+        items = []
+
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="label",
+            label="Used Labels",
+            total=len(items),
+            page=1,
+            page_size=max(len(items), 1),
+            row_actions=[],
+        ),
+        **{"schema": _LABEL_SCHEMA},
+        rows=[{"id": item["id"], "name": item["name"]} for item in items],
+    ))
+
+
+class LabelFilterPutBody(BaseModel):
+    label_ids: list[str]
+
+
+@router.get("/preferences/label_filter", response_model=None)
+def get_label_filter_preference() -> JSONResponse:
+    """Return the stored label filter selection from PreferenceStore.
+
+    Returns Dataset (one row) on 200, or 404 ApiError if not yet saved.
+    """
+    with _preference_client() as client:
+        resp = client.get("/api/preferences/tasktracker.task-list/label_filter")
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
+@router.put("/preferences/label_filter", response_model=None)
+def put_label_filter_preference(body: LabelFilterPutBody) -> JSONResponse:
+    """Persist the label filter selection to PreferenceStore.
+
+    Stores body.label_ids as a JSON array under scope=tasktracker.task-list key=label_filter.
+    Returns 200 PreferenceRecord on success, or ApiError on failure.
+    """
+    with _preference_client() as client:
+        resp = client.put(
+            "/api/preferences/tasktracker.task-list/label_filter",
+            json={"value": body.label_ids},
+        )
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 
 @router.get("/{task_id}/labels", response_model=None)

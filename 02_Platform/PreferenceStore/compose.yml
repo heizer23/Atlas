@@ -1,0 +1,21 @@
+services:
+  preference-store:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/PreferenceStore/Dockerfile
+    container_name: atlas-preference-store
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8060:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

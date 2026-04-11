@@ -1,0 +1,203 @@
+{
+  "component_name": "tasktracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Replaces Sprint07 label-filter workaround by loading available labels from LabelEngine and persisting filter selections in PreferenceStore, eliminating per-tab label drift and filter resets on tab switch.",
+  "classification": {
+    "why_application": "Wires TaskTracker-specific domain state (task label filter preference) to platform services; contains no reusable infrastructure — only TaskTracker-scoped behavior.",
+    "non_goals": [
+      "Server-side filtering of GET /tasks by label_ids",
+      "New backend endpoints beyond thin proxy additions",
+      "Label management UI changes",
+      "Any new persistent state owned by TaskTracker"
+    ],
+    "not_platform": "The label filter preference key 'tasktracker.task-list/label_filter' and the wiring of LabelEngine + PreferenceStore for this domain view are TaskTracker-specific application behavior, not reusable platform infrastructure."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine GET /api/labels/used?object_type=task — returns { labels: [{ id, name }] } ordered by name ASC; 422 if object_type absent",
+      "PreferenceStore GET /api/preferences/{scope}/{key} — returns Dataset (one row) with value field as JSON string, or 404 ApiError",
+      "PreferenceStore PUT /api/preferences/{scope}/{key} — body: { value: <any JSON> }; returns PreferenceRecord on 200",
+      "Platform contracts: ColumnSchema, Dataset, DatasetMeta from platform_contracts"
+    ],
+    "provides": [
+      "GET /api/tasks/labels/used — proxies LabelEngine used-labels for object_type=task; returns Dataset",
+      "GET /api/tasks/preferences/label_filter — proxies PreferenceStore GET for scope=tasktracker.task-list key=label_filter; returns Dataset or 404 ApiError",
+      "PUT /api/tasks/preferences/label_filter — proxies PreferenceStore PUT for scope=tasktracker.task-list key=label_filter; body { label_ids: list[str] }; returns 200 or ApiError",
+      "GET /api/tasks/labels/search — unchanged (existing)",
+      "GET /api/tasks/{task_id}/labels — unchanged (existing)",
+      "POST /api/tasks/{task_id}/labels — unchanged (existing)",
+      "DELETE /api/tasks/{task_id}/labels/{label_id} — unchanged (existing)",
+      "PUT /api/tasks/{task_id}/labels — unchanged (existing)"
+    ],
+    "invariants": [
+      "availableLabels state in frontend is loaded exactly once on TasksPage mount and is never modified by fetchTasks",
+      "selectedLabelIds state in frontend is owned exclusively at TasksPage level; fetchTasks does not read or write it",
+      "filter selection saved to PreferenceStore is intersected with currently available labels on load to handle stale IDs",
+      "When PreferenceStore returns 404 for the filter key, selectedLabelIds defaults to all available label IDs (all selected)",
+      "GET /tasks/labels/active endpoint is removed; GET /tasks must not declare label_ids query parameter"
+    ],
+    "failure_modes": [
+      "LabelEngine unreachable: GET /tasks/labels/used returns empty Dataset (graceful degradation); frontend shows no filter bar",
+      "PreferenceStore unreachable on GET: frontend defaults to all labels selected (no error shown)",
+      "PreferenceStore unreachable on PUT: save is best-effort; frontend does not surface a save error to the user",
+      "LabelEngine 422 (missing object_type): backend must always pass object_type=task; this is a backend programming error, not a user error"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL (env var, default http://localhost:8050): GET /api/labels/used?object_type=task",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL (env var, default http://localhost:8060): GET /api/preferences/{scope}/{key} and PUT /api/preferences/{scope}/{key}",
+      "apiFetch from @platform-ui/api/client — all frontend HTTP calls go through this; prepends /api, routes to TaskTracker backend"
+    ],
+    "provides": [
+      "GET /api/tasks/labels/used — thin proxy to LabelEngine; returns Dataset { object_type: label, rows: [{id, name}] }",
+      "GET /api/tasks/preferences/label_filter — thin proxy to PreferenceStore; returns Dataset (one row: scope, key, value, updated_at) or 404 ApiError",
+      "PUT /api/tasks/preferences/label_filter — thin proxy to PreferenceStore; request body { label_ids: list[str] }; returns 200 PreferenceRecord or ApiError"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/used",
+        "purpose": "Returns all labels currently attached to any task, sourced from LabelEngine. Used by frontend to populate the stable label filter bar.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/preferences/label_filter",
+        "purpose": "Returns the stored label filter selection for tasktracker.task-list. Used by frontend on mount to restore prior filter state.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/preferences/label_filter",
+        "purpose": "Saves the current label filter selection. Called by frontend whenever selectedLabelIds changes.",
+        "ui_contract": "ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "mount_load_available_labels",
+      "description": "On TasksPage mount, frontend calls GET /api/tasks/labels/used. Backend proxies to LabelEngine GET /api/labels/used?object_type=task and maps the response into a Dataset. Frontend stores rows as availableLabels: TaskLabel[]. On failure or empty result, availableLabels is [] and the filter bar is hidden.",
+      "inputs": ["TasksPage mount event"],
+      "outputs": ["availableLabels: TaskLabel[] (stable for page lifetime)"]
+    },
+    {
+      "step": 2,
+      "name": "mount_load_filter_preference",
+      "description": "On mount (after available labels are known), frontend calls GET /api/tasks/preferences/label_filter. Backend proxies to PreferenceStore GET /api/preferences/tasktracker.task-list/label_filter. If 200: parse the Dataset row's value field (a JSON string) as string[], intersect with availableLabels IDs, use result as initial selectedLabelIds. If 404: default all availableLabels IDs selected. On other errors: default all selected.",
+      "inputs": ["availableLabels (from step 1)", "PreferenceStore GET response"],
+      "outputs": ["selectedLabelIds: Set<string> (initial value)"]
+    },
+    {
+      "step": 3,
+      "name": "fetch_tasks",
+      "description": "fetchTasks(currentView) fetches task rows for the current tab. It does not touch availableLabels or selectedLabelIds. After fetch, rows are stored in tasks state. Client-side filtering against selectedLabelIds is computed as a derived value (displayedTasks) in the render path.",
+      "inputs": ["currentView: ViewTab"],
+      "outputs": ["tasks: TaskRow[]"]
+    },
+    {
+      "step": 4,
+      "name": "filter_change_persist",
+      "description": "Whenever selectedLabelIds changes (user toggles a label), frontend calls PUT /api/tasks/preferences/label_filter with { label_ids: Array.from(selectedLabelIds) }. Backend proxies to PreferenceStore PUT /api/preferences/tasktracker.task-list/label_filter with { value: label_ids_array }. Save is best-effort; errors are not surfaced to the user.",
+      "inputs": ["selectedLabelIds: Set<string>"],
+      "outputs": ["PreferenceStore updated (best-effort)"]
+    },
+    {
+      "step": 5,
+      "name": "client_side_filter",
+      "description": "displayedTasks is derived from tasks and selectedLabelIds in the render path. If availableLabels is empty: show all tasks. If all selected: show all tasks. If none selected: show empty list. Otherwise: show tasks that have at least one label whose id is in selectedLabelIds. This logic is unchanged from Sprint07 except it no longer depends on per-tab label derivation.",
+      "inputs": ["tasks: TaskRow[]", "availableLabels: TaskLabel[]", "selectedLabelIds: Set<string>"],
+      "outputs": ["displayedTasks: TaskRow[]"]
+    },
+    {
+      "step": 6,
+      "name": "remove_workaround_artifacts",
+      "description": "Remove GET /tasks/labels/active endpoint from tasks.py. Remove label_ids Query parameter from GET /tasks handler. Remove label-derivation logic (seen Map loop, setActiveLabels, setSelectedLabelIds calls) from inside fetchTasks in ShellEntry.tsx. Remove activeLabels state variable and replace with availableLabels.",
+      "inputs": ["tasks.py current implementation", "ShellEntry.tsx current implementation"],
+      "outputs": ["Cleaned backend and frontend free of Sprint07 workaround code"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/LabelEngine", "role": "Source of all labels attached to tasks; GET /api/labels/used?object_type=task"},
+      {"component": "02_Platform/PreferenceStore", "role": "Persists user label filter selection; GET and PUT /api/preferences/tasktracker.task-list/label_filter"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema — used in new proxy endpoints"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "httpx", "role": "HTTP client for backend proxy calls to LabelEngine and PreferenceStore", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling LabelEngine or PreferenceStore directly (apiFetch prepends /api and routes to TaskTracker backend only)",
+      "Server-side label_ids filtering in GET /tasks",
+      "Re-implementing label lookup logic in TaskTracker backend (consume LabelEngine, do not duplicate)"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "none",
+    "ownership": "none"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "In tasks.py: remove @router.get('/labels/active') endpoint and its list_active_labels function",
+      "In tasks.py: remove label_ids: list[str] = Query(default=[]) parameter from list_tasks handler",
+      "In tasks.py: add PREFERENCE_STORE_URL env var (default http://localhost:8060) and _preference_client() helper following the same pattern as _label_client()",
+      "In tasks.py: add GET /labels/used endpoint proxying to LabelEngine GET /api/labels/used?object_type=task; return Dataset {object_type: label, label: Used Labels, rows: [{id, name}]}; on LabelEngine failure return empty Dataset (graceful degradation)",
+      "In tasks.py: add GET /preferences/label_filter endpoint proxying to PreferenceStore GET /api/preferences/tasktracker.task-list/label_filter; pass through the Dataset response or the 404 ApiError",
+      "In tasks.py: add PUT /preferences/label_filter endpoint; request body LabelFilterPutBody(label_ids: list[str]); proxy to PreferenceStore PUT /api/preferences/tasktracker.task-list/label_filter with body { value: label_ids }; return 200 PreferenceRecord or pass through ApiError",
+      "In ShellEntry.tsx: rename activeLabels → availableLabels state variable and its setter",
+      "In ShellEntry.tsx: remove label-derivation block from fetchTasks (the seen Map, setActiveLabels, setSelectedLabelIds calls inside fetchTasks)",
+      "In ShellEntry.tsx: add useEffect on mount to call apiFetch('/tasks/labels/used') and set availableLabels from dataset.rows",
+      "In ShellEntry.tsx: add useEffect on mount (after availableLabels loads) to call apiFetch('/tasks/preferences/label_filter'); on 200 parse value field as JSON string[], intersect with availableLabels IDs, setSelectedLabelIds; on 404 or error setSelectedLabelIds to all available IDs",
+      "In ShellEntry.tsx: add useEffect watching selectedLabelIds (skip on initial mount sentinel) to call apiFetch('/tasks/preferences/label_filter', { method: 'PUT', body: JSON.stringify({ label_ids: Array.from(selectedLabelIds) }) }); fire-and-forget (do not await for error display)",
+      "Update LabelFilterBar props reference from activeLabels to availableLabels"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "Backend: GET /tasks/labels/used returns empty Dataset when LabelEngine is down",
+      "Backend: GET /tasks/labels/used returns Dataset with rows when LabelEngine returns labels",
+      "Backend: GET /tasks/preferences/label_filter passes through 404 from PreferenceStore",
+      "Backend: PUT /tasks/preferences/label_filter proxies correctly with label_ids array as value",
+      "Backend: GET /tasks no longer accepts label_ids query param (or silently ignores it post-removal)",
+      "Frontend: availableLabels loaded once on mount, not re-derived on tab switch",
+      "Frontend: selectedLabelIds initialized from PreferenceStore on mount, defaulting to all when 404",
+      "Frontend: stale label IDs in stored preference are dropped (intersection with availableLabels)"
+    ],
+    "reviewer": [
+      "Verify GET /tasks/labels/active is fully removed with no remaining references",
+      "Verify label_ids param is fully removed from GET /tasks handler",
+      "Verify fetchTasks has no label state mutations",
+      "Verify PreferenceStore save is fire-and-forget with no blocking await on error",
+      "Verify stale-ID intersection logic is correct (stored IDs not in availableLabels are dropped)",
+      "Verify mount ordering: availableLabels must be known before initializing selectedLabelIds from PreferenceStore"
+    ]
+  },
+  "deferred_decisions": [
+    "Whether to surface a non-blocking toast on PreferenceStore save failure — deferred to product; current design is best-effort silent save"
+  ],
+  "risks": [
+    {
+      "risk": "Mount ordering: if availableLabels fetch is async and selectedLabelIds initialisation runs before it completes, intersection produces empty selection",
+      "impact": "Filter defaults to all selected (safe fallback) but does not restore the user's prior selection. Must be handled by chaining the preference load after availableLabels resolves."
+    },
+    {
+      "risk": "PreferenceStore value field encoding: GET returns value as JSON.dumps(value_json) — a JSON string of the array. Frontend must JSON.parse this string before treating it as string[].",
+      "impact": "If frontend reads value without parsing, it gets a string instead of an array and intersection logic silently fails."
+    },
+    {
+      "risk": "LabelEngine Sprint02_ReverseLookup must be deployed before this sprint is activated",
+      "impact": "GET /tasks/labels/used will return empty Dataset (graceful degradation) if LabelEngine does not have the /api/labels/used endpoint. Filter bar will not appear."
+    }
+  ],
+  "open_questions": []
+}
