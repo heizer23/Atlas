@@ -1,4 +1,17 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c '{ts: now | todate, tool: .tool_name, sprint: ([.tool_input | to_entries[] | .value | select(type==\"string\") | capture(\"(?P<s>Sprint[^/\\\\s]+)\").s] | first), input: .tool_input}' >> /home/linse/Prod/Atlas/.claude/tool_usage.log"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
@@ -224,7 +237,11 @@
       "Bash(npm --version)",
       "Bash(npm update:*)",
       "Bash(rm /home/linse/Prod/Atlas/.claude/tools/generate_atlas_system_map.py)",
-      "Bash(rm /home/linse/Prod/Atlas/.claude/supportDocs/atlas_system_map.generated.json)"
+      "Bash(rm /home/linse/Prod/Atlas/.claude/supportDocs/atlas_system_map.generated.json)",
+      "Bash(cp /tmp/fixtures_fixed.sql 03_Application/StorageTracker/tests/fixtures.sql)",
+      "Bash(mkdir -p /mnt/data/storagetracker/logs)",
+      "Bash(sudo mkdir:*)",
+      "Bash(claude doctor:*)"
     ]
   }
 }
