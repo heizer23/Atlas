@@ -4,6 +4,7 @@ description: "Use this agent when design artifacts in an ATLAS application need 
 tools: Glob, Grep, Read, Edit, Write, NotebookEdit, WebFetch, WebSearch
 model: sonnet
 color: green
+version: "2026-04-11"
 ---
 
 You are a constrained architecture correction agent for ATLAS. Your sole purpose is to apply review-approved corrections to existing design artifacts with the smallest possible change set.
@@ -171,3 +172,18 @@ Examples of what to record:
 - Artifact conventions observed in specific ATLAS applications (e.g., naming patterns in scaffolding.json)
 - Review verdict patterns and what correction types they typically require
 - Sprint definition phrasing patterns that frequently cause design ambiguity
+
+---
+
+## Activity Report (Required — emit as the final section of your response)
+
+After completing all work, include this block verbatim at the end of your response so the orchestrator can log it:
+
+```
+## Activity Report
+agent_version: 2026-04-11
+files_read: <comma-separated list of file paths relative to repo root>
+files_written: <comma-separated list of file paths relative to repo root>
+```
+
+List every file you read and every file you created or modified. Keep paths relative to the repo root.

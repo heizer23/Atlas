@@ -185,7 +185,7 @@ The orchestrator may recommend creation or correction of other sprint files but 
 
 ## 8. `99_sprint_log.md` Format
 
-Single file. State block at the top, transition log below. Keep the log to one line per transition.
+Single file. State block at the top, transition log below. Each transition entry is 1–3 lines: a summary line followed by optional `read:` and `wrote:` detail lines.
 
 ```markdown
 # Sprint Log — <sprint_name>
@@ -195,6 +195,7 @@ Single file. State block at the top, transition log below. Keep the log to one l
   "sprint_name": "Sprint06_Label_Contract_Fix",
   "component_name": "TaskTracker",
   "layer": "03_Application",
+  "log_format": "v2",
   "current_state": "DESIGN_APPROVED",
   "last_agent": "sprint_design_reviewer",
   "next_agent": "sprint_implement",
@@ -205,15 +206,35 @@ Single file. State block at the top, transition log below. Keep the log to one l
 
 ## Log
 
-- YYYY-MM-DD `DRAFT_READY` → `DESIGN_CREATED` [sprint_design_application]
-- YYYY-MM-DD `DESIGN_CREATED` → `DESIGN_REVIEWED_CHANGES_REQUIRED` [sprint_design_reviewer] <one-line reason>
-- YYYY-MM-DD `DESIGN_REVIEWED_CHANGES_REQUIRED` → `DESIGN_CREATED` [sprint_design_corrector]
-- YYYY-MM-DD `DESIGN_CREATED` → `DESIGN_APPROVED` [sprint_design_reviewer]
-- YYYY-MM-DD `DESIGN_APPROVED` → `IMPLEMENTATION_IN_PROGRESS` [sprint_implement]
-- YYYY-MM-DD `IMPLEMENTATION_IN_PROGRESS` → `SPRINT_COMPLETE` [/sprint-close]
+- 2026-04-11T14:05:12Z `DRAFT_READY` → `DESIGN_CREATED` [sprint_design_application@2026-04-11] 138s
+  read: Sprint01_Foo/00_draft.md, 00_Blueprint/Atlas_Manifest.md, 02_Platform/packages/platform_contracts/contracts.py
+  wrote: Sprint01_Foo/10_architecture.json, Sprint01_Foo/10_scaffolding.json, Sprint01_Foo/10_schema.sql
+- 2026-04-11T14:07:44Z `DESIGN_CREATED` → `DESIGN_REVIEWED_CHANGES_REQUIRED` [sprint_design_reviewer@2026-04-11] 96s — missing null semantics on PATCH
+  read: Sprint01_Foo/10_architecture.json, Sprint01_Foo/10_scaffolding.json, Sprint01_Foo/00_draft.md
+  wrote: Sprint01_Foo/11_design_review.md
+- 2026-04-11T14:09:18Z `DESIGN_REVIEWED_CHANGES_REQUIRED` → `DESIGN_CREATED` [sprint_design_corrector@2026-04-11] 74s
+  read: Sprint01_Foo/10_architecture.json, Sprint01_Foo/11_design_review.md
+  wrote: Sprint01_Foo/10_architecture.json, Sprint01_Foo/12_design_corrections.md
+- 2026-04-11T14:10:55Z `DESIGN_CREATED` → `DESIGN_APPROVED` [sprint_design_reviewer@2026-04-11] 61s
+  read: Sprint01_Foo/10_architecture.json, Sprint01_Foo/10_scaffolding.json, Sprint01_Foo/12_design_corrections.md
+  wrote: Sprint01_Foo/13_design_review.md
+- 2026-04-11T14:13:02Z `DESIGN_APPROVED` → `IMPLEMENTATION_IN_PROGRESS` [sprint_implement@2026-04-11] 312s
+  read: Sprint01_Foo/10_architecture.json, Sprint01_Foo/10_scaffolding.json, Sprint01_Foo/10_schema.sql
+  wrote: backend/routers/foo.py, src/FooEntry.tsx, tests/test_foo.py
+- 2026-04-11T14:18:30Z `IMPLEMENTATION_IN_PROGRESS` → `SPRINT_COMPLETE` [/sprint-close]
 ```
 
+### Log format rules
+
+- Summary line: `- <ISO-8601 timestamp> \`PREV_STATE\` → \`NEXT_STATE\` [agent_name@agent_version] <duration_seconds>s <optional one-line reason>`
+- `agent_version` is the `version` field from the agent's frontmatter (format: `YYYY-MM-DD`). Extracted from the Activity Report.
+- `read:` line: comma-separated list of files the agent read, relative to the repo root. Omit if the agent reported none.
+- `wrote:` line: comma-separated list of files the agent created or modified. Omit if the agent reported none.
+- `/sprint-close` entries omit duration, read, wrote, and version — they are human gate events.
+- Timestamps are ISO-8601 in UTC (e.g. `2026-04-11T14:05:12Z`). The orchestrator records start time before launching the agent and end time after it returns.
+
 Field rules:
+- `log_format` must be `"v2"` for all sprints initiated after 2026-04-11. Older sprint logs without this field are `v1` and are excluded from file-read analysis.
 - `layer` must be exactly `02_Platform` or `03_Application`
 - `current_state` must be one of the ten canonical states
 - `blocking` must be `true` or `false`

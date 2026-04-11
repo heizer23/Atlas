@@ -4,6 +4,7 @@ description: "Use this agent after implementation completes and a `10_test_spec.
 tools: Bash, Glob, Grep, Read, Write
 model: sonnet
 color: yellow
+version: "2026-04-11"
 ---
 
 You are the Atlas test runner.
@@ -170,3 +171,20 @@ After writing `50_test_report.md`, return a one-sentence summary to the orchestr
 - number of scenarios tested
 - number passing / failing
 - recommended next action
+
+Then emit the Activity Report block below.
+
+---
+
+## Activity Report (Required — emit as the final section of your response)
+
+After completing all work, include this block verbatim at the end of your response so the orchestrator can log it:
+
+```
+## Activity Report
+agent_version: 2026-04-11
+files_read: <comma-separated list of file paths relative to repo root>
+files_written: <comma-separated list of file paths relative to repo root>
+```
+
+List every file you read and every file you created or modified. Keep paths relative to the repo root.

@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-04-11 18:50 UTC
+> Last updated: 2026-04-11 21:10 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -247,7 +247,7 @@ GET /health — liveness check, returns {status: ok}
 
 ### StorageTracker
 
-**Summary:** Household item tracking application. Users create and maintain items categorised as consumable, object, or pending_action. Items have a lifecycle state (stored, low_stock, out_of_stock, marked_for_recycling, missing, lent_out), a free-text location, and optional quantity tracking for consumables. State changes and location changes are recorded in an append-only history table.
+**Summary:** Household item tracking application. Users create and maintain items categorised as consumable, object, or pending_action. Items have a lifecycle state and optional quantity tracking. Shopping tasks are derived from item state (low_stock/out_of_stock) and close the action loop back to the item on completion.
 
 | | |
 |---|---|
@@ -259,15 +259,20 @@ GET /health — liveness check, returns {status: ok}
 **Endpoints:**
 ```
 GET /api/items — list all items; params: state (stored|low_stock|out_of_stock|marked_for_recycling|missing|lent_out), item_type (consumable|object|pending_action), location (exact match string), source_tag (string — matches any element of source_tags array); default ordering: created_at DESC; returns Dataset
-POST /api/items — create item; body: {name, item_type, location?, notes?, source_tags?: list[str], quantity?: int, min_quantity?: int, state? (default stored)}; auto-transitions state to low_stock if quantity and min_quantity are both set and quantity <= min_quantity; records history entry with change_type=created; returns Dataset (single row)
+POST /api/items — create item; body: {name, item_type, location?, notes?, source_tags?: list[str], quantity?: int, min_quantity?: int, restock_quantity?: int, state? (default stored)}; auto-transitions state to low_stock if quantity and min_quantity are both set and quantity <= min_quantity; records history entry with change_type=created; returns Dataset (single row)
 GET /api/items/{id} — get single item with last 20 history entries; returns Dataset (single row with embedded history)
-PATCH /api/items/{id} — partial update; body: any subset of {name, state, location, quantity, min_quantity, notes, source_tags}; field omission means no change; explicit null clears nullable fields; after any quantity or min_quantity change, auto-recomputes state to low_stock if both are set and quantity <= min_quantity (unless caller explicitly set state); records history entries for each changed field; returns Dataset (single row)
-DELETE /api/items/{id} — delete item and its history; returns empty Dataset on success, 404 ApiError if not found
+PATCH /api/items/{id} — partial update; body: any subset of {name, state, location, quantity, min_quantity, restock_quantity, notes, source_tags}; field omission means no change; explicit null clears nullable fields; after any quantity or min_quantity change, auto-recomputes state; if state becomes low_stock or out_of_stock, auto-creates open shopping task if none exists; returns Dataset (single row)
+DELETE /api/items/{id} — delete item, its history, and its shopping tasks; returns empty Dataset on success, 404 ApiError if not found
 GET /api/items/{id}/history — full history for item ordered by timestamp DESC; returns Dataset
 GET /api/items/views/low_stock — items where state is low_stock or out_of_stock; ordered by name ASC; returns Dataset
 GET /api/items/views/recycling — items where state is marked_for_recycling; ordered by name ASC; returns Dataset
 GET /api/items/views/important — items where item_type is object; ordered by name ASC; returns Dataset
 GET /api/items/views/search?q=<text> — case-insensitive substring search across name, location, notes; returns Dataset ordered by name ASC; empty q returns empty Dataset
+GET /api/shopping-tasks — list tasks; params: status (default: open), source_tag (exact match of any element in task.source_tags); ordered by created_at ASC; returns Dataset
+POST /api/shopping-tasks — manually create a task; body: {item_id, notes?: str}; item must exist; creates with status=open; copies source_tags from item at creation time; fails 409 if an open task already exists for this item; returns Dataset (single row)
+PATCH /api/shopping-tasks/{id} — update task; body: {status: done|dismissed, notes?: str}; on status=done, resets item state (see invariants); on status=dismissed, no item change; returns Dataset (single row)
+DELETE /api/shopping-tasks/{id} — delete task; returns empty Dataset on success, 404 ApiError if not found
+GET /api/shopping-tasks/views/by_source — open tasks expanded by source_tag; one flat row per (task, source_tag); tasks with no source tags produce one row with source_tag='Other'; tasks with multiple source tags appear in each group; rows are ShoppingTaskRow columns plus source_tag; returns Dataset
 ```
 
 ### TaskTracker

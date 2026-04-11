@@ -44,11 +44,36 @@ There is no specs stage and no implementation reviewer. `DRAFT_READY` routes dir
 2. Read `99_sprint_log.md` if present — parse the JSON state block at the top.
 3. Check for any review verdict files that may supersede the recorded state. Determine the current review iteration number by counting existing `1N_design_review.md` files.
 4. Determine current state. If contradictions exist, prefer the most recent explicit verdict.
-5. Launch the appropriate agent via the Agent tool.
-6. After the agent completes, read its output/verdict.
-7. Determine the next state from the verdict.
-8. Update `99_sprint_log.md` — update the JSON block and append one line to the log section.
-9. If the sprint reaches `IMPLEMENTATION_IN_PROGRESS`, stop and tell the user to invoke `/sprint-close` when ready.
+5. Record the current UTC time as `start_time` (ISO-8601, e.g. `2026-04-11T14:05:12Z`).
+6. Launch the appropriate agent via the Agent tool.
+7. After the agent completes, record `end_time` and compute `duration_seconds = end_time - start_time`.
+8. Extract the `## Activity Report` block from the agent's return message (see format below).
+9. Determine the next state from the verdict.
+10. Update `99_sprint_log.md` — update the JSON block and append the transition entry to the log section.
+11. If the sprint reaches `IMPLEMENTATION_IN_PROGRESS`, stop and tell the user to invoke `/sprint-close` when ready.
+
+### Activity Report extraction
+
+Each agent emits this block at the end of its response:
+
+```
+## Activity Report
+agent_version: YYYY-MM-DD
+files_read: path/a, path/b, path/c
+files_written: path/x, path/y
+```
+
+Extract `agent_version`, `files_read`, and `files_written` from this block. If the block is absent or a field is missing, log `(unreported)` for that field.
+
+### Log entry format
+
+```
+- <start_time> `PREV` → `NEXT` [agent_name@agent_version] <duration>s <optional one-line reason>
+  read: <files_read>
+  wrote: <files_written>
+```
+
+Omit `read:` or `wrote:` lines if the value is `(unreported)` or empty.
 
 ---
 
@@ -122,6 +147,7 @@ Format is defined in R-PRO-BP-01 §8: a JSON state block at the top, followed by
   "sprint_name": "...",
   "component_name": "...",
   "layer": "02_Platform | 03_Application",
+  "log_format": "v2",
   "current_state": "...",
   "last_agent": "...",
   "next_agent": "... | null",
@@ -133,7 +159,9 @@ Format is defined in R-PRO-BP-01 §8: a JSON state block at the top, followed by
 
 ## Log
 
-- YYYY-MM-DD `PREV_STATE` → `NEXT_STATE` [agent_name] <one-line reason if notable>
+- 2026-04-11T14:05:12Z `PREV_STATE` → `NEXT_STATE` [agent_name] 138s <one-line reason if notable>
+  read: path/to/file1, path/to/file2
+  wrote: path/to/artifact1
 ```
 
 ---

@@ -3,6 +3,7 @@ name: sprint_implement
 description: "Use this agent when an application scaffold has been generated and needs to be filled with implementation code based on approved design artifacts. This agent should be invoked after the scaffold generator has run and the design artifacts (`00_draft.md`, `10_architecture.json`, `10_scaffolding.json`) are present inside the sprint folder."
 model: sonnet
 color: green
+version: "2026-04-11"
 ---
 
 You are an expert application engineer responsible for implementing domain behavior inside the ATLAS repository.
@@ -302,6 +303,49 @@ If invoked from `TESTS_FAILED_FIXABLE`: read `50_test_report.md`, fix only the f
 
 ---
 
+# Shell Wiring
+
+If the sprint introduces a new shell-registered application or adds new API routes, four files outside the component must be updated. All four are required — a missing entry in any one will silently break the app.
+
+| File | What to add |
+|------|-------------|
+| `02_Platform/Atlas_Shell/src/shell/main.tsx` | Side-effect import of the app's `shellConfig.ts` |
+| `02_Platform/Atlas_Shell/Dockerfile` | `COPY 03_Application/<Component>/src/ 03_Application/<Component>/src/` |
+| `02_Platform/Atlas_Shell/nginx.conf` | `location /api/<prefix>` block proxying to the backend container |
+| `02_Platform/Atlas_Shell/vite.config.ts` | `'/api/<prefix>'` proxy entry (for local dev server only) |
+
+After updating these files, rebuild and restart the shell container to verify.
+
+## `apiFetch` URL convention
+
+`apiFetch` in `platform-ui/api/client.ts` prepends `/api` to the path automatically. Paths passed to `apiFetch` must **not** include an `/api/` prefix. Always pass `/items/...`, `/shopping-tasks/...` — never `/api/items/...`.
+
+## Shell proxy smoke tests
+
+When the sprint adds new API routes through the shell, write `tests/test_shell_proxy.py`. These tests run in the existing pytest step (the test container is on `atlas-net` and can reach `http://atlas-shell`). They catch missing nginx entries, wrong container names, and missing `main.tsx` imports.
+
+Pattern:
+
+```python
+import httpx
+
+SHELL = "http://atlas-shell"
+
+def test_<prefix>_proxy_returns_json():
+    r = httpx.get(f"{SHELL}/api/<prefix>", timeout=5)
+    assert r.status_code == 200
+    assert "application/json" in r.headers.get("content-type", "")
+
+def test_shell_serves_app_at_basepath():
+    r = httpx.get(f"{SHELL}/<basePath>", timeout=5)
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+```
+
+One test per API prefix the component exposes through the shell. If the component is the first sprint for a new app, also include `test_shell_serves_app_at_basepath`.
+
+---
+
 # Quality Checks Before Finishing
 
 Verify:
@@ -316,6 +360,7 @@ Verify:
 8. Implementation is minimal and readable
 9. UI is functional but intentionally simple
 10. If `10_test_spec.md` is present: test functions exist for every scenario and are runnable
+11. If sprint touches shell wiring: `test_shell_proxy.py` exists; `main.tsx`, `Dockerfile`, `nginx.conf` all updated
 
 ---
 
@@ -347,3 +392,18 @@ Keep notes concise and factual.
 The human invokes `/sprint-close` when satisfied. There is no implementation reviewer.
 
 Success criteria: the code matches the architecture artifacts — clear, minimal, faithful, no unnecessary complexity. The human can verify this directly.
+
+---
+
+## Activity Report (Required — emit as the final section of your response)
+
+After completing all work, include this block verbatim at the end of your response so the orchestrator can log it:
+
+```
+## Activity Report
+agent_version: 2026-04-11
+files_read: <comma-separated list of file paths relative to repo root>
+files_written: <comma-separated list of file paths relative to repo root>
+```
+
+List every file you read and every file you created or modified. Keep paths relative to the repo root.
