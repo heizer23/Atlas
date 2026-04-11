@@ -256,6 +256,37 @@ chronicle-reboot:
 # endregion
 
 
+# region --- Application: StorageTracker
+STORAGE_DIR=../03_Application/StorageTracker
+
+STORAGE_COMPOSE=docker compose \
+	-f $(STORAGE_DIR)/compose.yml \
+	$(ENV_FILES)
+
+storage-build:
+	$(STORAGE_COMPOSE) build
+
+storage-up:
+	$(STORAGE_COMPOSE) up -d
+
+storage-down:
+	$(STORAGE_COMPOSE) down
+
+storage-logs:
+	$(STORAGE_COMPOSE) logs -f
+
+storage-reboot:
+	$(STORAGE_COMPOSE) down
+	$(STORAGE_COMPOSE) up -d
+
+storage-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(STORAGE_DIR)/00_architecture/schema.sql
+
+# endregion
+
+
 # region --- Application: WorkoutTracker
 APP_DIR=../03_Application/WorkoutTracker
 
@@ -590,6 +621,7 @@ net-connect:
 	@docker network connect atlas-net atlas-linking-engine    2>/dev/null || true
 	@docker network connect atlas-net atlas-preference-store  2>/dev/null || true
 	@docker network connect atlas-net atlas-numeric-series    2>/dev/null || true
+	@docker network connect atlas-net atlas-storagetracker    2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -616,6 +648,8 @@ up:
 	$(MAKE) linking-build    linking-up
 	$(MAKE) numeric-schema
 	$(MAKE) numeric-build    numeric-up
+	$(MAKE) storage-schema
+	$(MAKE) storage-build    storage-up
 	$(MAKE) cloudflared-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
@@ -635,6 +669,7 @@ down:
 	-$(MAKE) food-down
 	-$(MAKE) app-down
 	-$(MAKE) task-down
+	-$(MAKE) storage-down
 	-$(MAKE) pg-down
 	@echo "Atlas stack is down."
 

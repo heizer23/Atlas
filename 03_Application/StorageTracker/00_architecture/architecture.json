@@ -1,0 +1,374 @@
+{
+  "component_name": "storagetracker",
+  "layer": "03_Application",
+  "summary": "Household item tracking application. Users create and maintain items categorised as consumable, object, or pending_action. Items have a lifecycle state (stored, low_stock, out_of_stock, marked_for_recycling, missing, lent_out), a free-text location, and optional quantity tracking for consumables. State changes and location changes are recorded in an append-only history table.",
+  "classification": {
+    "why_application": "Owns the storagetracker schema in Postgres (items + item_history tables), enforces item-domain business rules (state auto-transition on quantity change, history recording, quantity constraints), and exposes domain-specific read views (low_stock, recycling, important, search). Contains no reusable infrastructure.",
+    "non_goals": [
+      "Shopping tasks — Sprint 2",
+      "Notifications or geofencing — Sprint 3",
+      "Location hierarchies — free-text only in this sprint",
+      "Barcode scanning",
+      "Multi-user or authentication — single-user only",
+      "Label or preference integration — not in Sprint 1"
+    ],
+    "not_platform": "Item domain rules, the storagetracker schema, quantity-driven state transitions, and history recording are StorageTracker-specific application behavior, not reusable platform infrastructure."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via DATABASE_URL or ATLAS_PG_* environment variables",
+      "platform_contracts — ColumnSchema, Dataset, DatasetMeta from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling — api_error helper, exception handlers, request timing, structured logging"
+    ],
+    "provides": [
+      "GET /api/items — list all items; params: state (stored|low_stock|out_of_stock|marked_for_recycling|missing|lent_out), item_type (consumable|object|pending_action), location (exact match string), source_tag (string — matches any element of source_tags array); default ordering: created_at DESC; returns Dataset",
+      "POST /api/items — create item; body: {name, item_type, location?, notes?, source_tags?: list[str], quantity?: int, min_quantity?: int, state? (default stored)}; auto-transitions state to low_stock if quantity and min_quantity are both set and quantity <= min_quantity; records history entry with change_type=created; returns Dataset (single row)",
+      "GET /api/items/{id} — get single item with last 20 history entries; returns Dataset (single row with embedded history)",
+      "PATCH /api/items/{id} — partial update; body: any subset of {name, state, location, quantity, min_quantity, notes, source_tags}; field omission means no change; explicit null clears nullable fields; after any quantity or min_quantity change, auto-recomputes state to low_stock if both are set and quantity <= min_quantity (unless caller explicitly set state); records history entries for each changed field; returns Dataset (single row)",
+      "DELETE /api/items/{id} — delete item and its history; returns empty Dataset on success, 404 ApiError if not found",
+      "GET /api/items/{id}/history — full history for item ordered by timestamp DESC; returns Dataset",
+      "GET /api/items/views/low_stock — items where state is low_stock or out_of_stock; ordered by name ASC; returns Dataset",
+      "GET /api/items/views/recycling — items where state is marked_for_recycling; ordered by name ASC; returns Dataset",
+      "GET /api/items/views/important — items where item_type is object; ordered by name ASC; returns Dataset",
+      "GET /api/items/views/search?q=<text> — case-insensitive substring search across name, location, notes; returns Dataset ordered by name ASC; empty q returns empty Dataset"
+    ],
+    "invariants": [
+      "All read endpoints (GET) return Dataset per R-CON-BP-04",
+      "item.id is a UUID generated at insert time; never caller-supplied",
+      "item.name must not be empty or blank (enforced at API level)",
+      "item.item_type must be one of: consumable, object, pending_action (enforced at API and DB constraint level)",
+      "item.state must be one of: stored, low_stock, out_of_stock, marked_for_recycling, missing, lent_out (enforced at API and DB constraint level)",
+      "item.quantity must be null or a non-negative integer; only meaningful for consumables but not DB-enforced by item_type (enforced at API level: reject negative values)",
+      "item.min_quantity must be null or a non-negative integer; enforced at API level",
+      "item.source_tags is a JSON array of strings stored as jsonb; default empty array []",
+      "Auto-transition rule: after any write that sets quantity or min_quantity, if both quantity and min_quantity are non-null and quantity <= min_quantity, state is set to low_stock — UNLESS the caller explicitly provided state in the same request body (caller-supplied state wins)",
+      "History is recorded for every state_change, location_change, quantity_change; creation is recorded as change_type=created; old_value and new_value are stored as strings",
+      "GET /api/items/{id} returns last 20 history entries embedded in the row; full history is available via GET /api/items/{id}/history",
+      "DELETE /api/items/{id} cascades to item_history (FK with ON DELETE CASCADE)",
+      "Schema is initialized idempotently at startup via schema.sql (CREATE SCHEMA IF NOT EXISTS, CREATE TABLE IF NOT EXISTS)",
+      "PATCH distinguishes field omitted (no change) from field provided as explicit null (clear column) for all nullable fields; source_tags provided as explicit null is rejected (use empty list [] to clear)",
+      "GET /api/items/views/search with empty or blank q returns empty Dataset (no full-table scan on blank query)",
+      "Route ordering: static view paths (/api/items/views/*) must be registered BEFORE the parameterised path /api/items/{id} to prevent FastAPI routing conflicts"
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — POST or PATCH with invalid field values (empty name, invalid item_type, invalid state, negative quantity, negative min_quantity, null source_tags on PATCH) — 400 ApiError",
+      "NOT_FOUND — GET, PATCH, or DELETE on unknown item id — 404 ApiError",
+      "INVALID_FILTER — GET /api/items with unknown state or item_type value — 400 ApiError",
+      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during request — startup logs error and continues; requests fail until DB is reachable"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": [
+      "ItemRow: {id: str (UUID), name: str, item_type: str, state: str, location: str|null, notes: str|null, source_tags: list[str], quantity: int|null, min_quantity: int|null, created_at: str (ISO datetime), updated_at: str (ISO datetime)} — emitted in Dataset rows by list and single-item endpoints",
+      "HistoryRow: {id: str (UUID), item_id: str (UUID), timestamp: str (ISO datetime), change_type: str, old_value: str|null, new_value: str|null, notes: str|null} — emitted in Dataset rows by history endpoint and embedded in single-item response"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool (minconn=1, maxconn=5) via get_db() context manager — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/03_ErrorHandling/"
+    ],
+    "provides": [
+      "HTTP API mounted at /api (FastAPI, uvicorn)",
+      "CORS: allow_origin_regex=http://localhost:\\d+ — all localhost ports during development",
+      "Allowed methods: GET, POST, PATCH, DELETE"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items",
+        "purpose": "List all items with optional filters. Supports state, item_type, location (exact match), source_tag (array-contains match). Ordered by created_at DESC.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "state": "one of stored|low_stock|out_of_stock|marked_for_recycling|missing|lent_out — optional",
+          "item_type": "one of consumable|object|pending_action — optional",
+          "location": "exact string match — optional",
+          "source_tag": "string — matches items whose source_tags array contains this value — optional"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/items",
+        "purpose": "Create a new item. Applies auto-transition rule for low_stock. Records created history entry. Returns created item as Dataset (single row).",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items/views/low_stock",
+        "purpose": "Return items where state is low_stock or out_of_stock, ordered by name ASC.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items/views/recycling",
+        "purpose": "Return items where state is marked_for_recycling, ordered by name ASC.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items/views/important",
+        "purpose": "Return items where item_type is object, ordered by name ASC.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items/views/search",
+        "purpose": "Case-insensitive substring search across name, location, notes. Returns empty Dataset for blank q.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "q": "search text — optional, default empty string; blank returns empty Dataset"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items/{id}",
+        "purpose": "Return single item with last 20 history entries embedded. Returns 404 ApiError if not found.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/items/{id}",
+        "purpose": "Partial update. Field omission means no change; explicit null clears nullable fields. Auto-recomputes state on quantity/min_quantity change. Records history entries for each changed field. Returns updated item as Dataset (single row).",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/items/{id}",
+        "purpose": "Delete item and cascade to item_history. Returns empty Dataset on success, 404 ApiError if not found.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/items/{id}/history",
+        "purpose": "Return full history for item ordered by timestamp DESC. Returns 404 ApiError if item not found.",
+        "ui_contract": "Dataset | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() creates psycopg2 SimpleConnectionPool. init_schema() reads schema.sql and executes DDL idempotently. Errors are logged; application continues running.",
+      "inputs": [
+        "ATLAS_PG_* or DATABASE_URL env vars",
+        "schema.sql"
+      ],
+      "outputs": [
+        "live connection pool",
+        "storagetracker schema with items and item_history tables present in Postgres"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "item_list",
+      "description": "GET /api/items validates filter params against enum allowlists. Builds WHERE clause from provided filters; source_tag filter uses jsonb array containment operator (@>). Executes SELECT ordered by created_at DESC. Returns Dataset.",
+      "inputs": [
+        "state param",
+        "item_type param",
+        "location param",
+        "source_tag param"
+      ],
+      "outputs": [
+        "Dataset with item rows"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "item_create",
+      "description": "POST /api/items validates name (non-blank), item_type, state (if provided), quantity (>= 0), min_quantity (>= 0). Applies auto-transition: if quantity and min_quantity are both non-null and quantity <= min_quantity, overrides state to low_stock (unless caller explicitly set state). Inserts item row with UUID. Inserts history row with change_type=created, new_value=state. Returns Dataset (single row).",
+      "inputs": [
+        "ItemCreate body"
+      ],
+      "outputs": [
+        "Dataset (inserted item row)"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "item_get",
+      "description": "GET /api/items/{id} fetches item row. Fetches last 20 history entries for item ordered by timestamp DESC. Embeds history list in row under key 'history'. Returns Dataset (single row). Returns 404 ApiError if item not found.",
+      "inputs": [
+        "id path param"
+      ],
+      "outputs": [
+        "Dataset (item row with embedded history list) | 404 ApiError"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "item_update",
+      "description": "PATCH /api/items/{id} uses model_fields_set to identify explicitly provided fields. Validates state, item_type (if provided), quantity >= 0, min_quantity >= 0. Builds SET clause from provided fields only. After update: if quantity or min_quantity was in model_fields_set and caller did NOT provide state, re-fetches updated row and applies auto-transition (if both quantity and min_quantity non-null and quantity <= min_quantity, sets state=low_stock via second UPDATE). Records history entries: one row per changed field (state_change, location_change, quantity_change). updated_at is always set to now(). Executes UPDATE RETURNING *. Returns Dataset (single row) or 404 ApiError.",
+      "inputs": [
+        "id path param",
+        "ItemUpdate body"
+      ],
+      "outputs": [
+        "Dataset (updated item row) | 404 ApiError"
+      ]
+    },
+    {
+      "step": 6,
+      "name": "item_delete",
+      "description": "DELETE /api/items/{id} executes DELETE RETURNING id. item_history rows are removed by ON DELETE CASCADE. Returns empty Dataset or 404 ApiError if no row deleted.",
+      "inputs": [
+        "id path param"
+      ],
+      "outputs": [
+        "empty Dataset | 404 ApiError"
+      ]
+    },
+    {
+      "step": 7,
+      "name": "history_get",
+      "description": "GET /api/items/{id}/history fetches item to confirm existence (404 if missing). Fetches all history rows for item ordered by timestamp DESC. Returns Dataset.",
+      "inputs": [
+        "id path param"
+      ],
+      "outputs": [
+        "Dataset with history rows | 404 ApiError"
+      ]
+    },
+    {
+      "step": 8,
+      "name": "view_low_stock",
+      "description": "GET /api/items/views/low_stock selects items WHERE state IN ('low_stock', 'out_of_stock') ORDER BY name ASC. Returns Dataset.",
+      "inputs": [],
+      "outputs": [
+        "Dataset with item rows"
+      ]
+    },
+    {
+      "step": 9,
+      "name": "view_recycling",
+      "description": "GET /api/items/views/recycling selects items WHERE state = 'marked_for_recycling' ORDER BY name ASC. Returns Dataset.",
+      "inputs": [],
+      "outputs": [
+        "Dataset with item rows"
+      ]
+    },
+    {
+      "step": 10,
+      "name": "view_important",
+      "description": "GET /api/items/views/important selects items WHERE item_type = 'object' ORDER BY name ASC. Returns Dataset.",
+      "inputs": [],
+      "outputs": [
+        "Dataset with item rows"
+      ]
+    },
+    {
+      "step": 11,
+      "name": "view_search",
+      "description": "GET /api/items/views/search validates q param. Empty or blank q returns empty Dataset immediately (no DB query). Non-blank q executes SELECT WHERE lower(name) LIKE lower('%q%') OR lower(location) LIKE lower('%q%') OR lower(notes) LIKE lower('%q%') ORDER BY name ASC. Returns Dataset.",
+      "inputs": [
+        "q query param"
+      ],
+      "outputs": [
+        "Dataset with matching item rows"
+      ]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "02_Platform/Postgres",
+        "role": "Shared Postgres instance — StorageTracker owns the storagetracker schema within it"
+      },
+      {
+        "component": "02_Platform/packages/platform_contracts",
+        "role": "Dataset, DatasetMeta, ColumnSchema — used in all read endpoint responses"
+      },
+      {
+        "component": "02_Platform/packages/platform_errorhandling",
+        "role": "api_error helper, exception handlers, request timing, structured logging"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "fastapi",
+        "role": "HTTP framework"
+      },
+      {
+        "name": "uvicorn",
+        "role": "ASGI server"
+      },
+      {
+        "name": "psycopg2-binary",
+        "role": "Postgres driver"
+      },
+      {
+        "name": "pydantic",
+        "role": "Request body validation"
+      },
+      {
+        "name": "pytest",
+        "role": "Backend test runner"
+      },
+      {
+        "name": "httpx",
+        "role": "Test client (via pytest + ASGI transport)"
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling Postgres directly",
+      "Re-implementing platform_contracts or platform_errorhandling locally",
+      "Label or preference integration in Sprint 1 — out of scope"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "schema.sql",
+    "persistence_type": "postgresql",
+    "schema_name": "storagetracker",
+    "tables": [
+      {
+        "name": "storagetracker.items",
+        "description": "One row per tracked household item. source_tags stored as jsonb array."
+      },
+      {
+        "name": "storagetracker.item_history",
+        "description": "Append-only log of state, location, and quantity changes. FK to items with ON DELETE CASCADE."
+      }
+    ],
+    "notes": "StorageTracker owns the storagetracker schema in the shared Atlas Postgres instance. Schema initialized idempotently at startup from schema.sql. Indexes on state, item_type, and created_at DESC on items; index on item_id + timestamp DESC on item_history."
+  },
+  "ui": {
+    "shell_registration": "StorageTracker",
+    "views": [
+      {
+        "name": "All Items",
+        "route": "/items",
+        "description": "Filterable list of all items. State/type chips for filtering. Inline create and edit via modal or inline form."
+      },
+      {
+        "name": "Low Stock",
+        "route": "/items/low-stock",
+        "description": "Consumables that are low_stock or out_of_stock. Backed by GET /api/items/views/low_stock."
+      },
+      {
+        "name": "Important Items",
+        "route": "/items/important",
+        "description": "Items where item_type is object. Focus on location column. Backed by GET /api/items/views/important."
+      },
+      {
+        "name": "Recycling",
+        "route": "/items/recycling",
+        "description": "Items marked for recycling. Backed by GET /api/items/views/recycling."
+      },
+      {
+        "name": "Item Detail",
+        "route": "/items/:id",
+        "description": "Name, state badge, location, quantity and min_quantity (if consumable), source tags, history timeline. Backed by GET /api/items/{id}."
+      }
+    ],
+    "create_edit": "Modal or inline form. Create and edit share the same field set. State field is a select. item_type determines which optional fields appear (quantity, min_quantity, source_tags for consumables)."
+  }
+}

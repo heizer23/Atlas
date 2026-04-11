@@ -79,7 +79,8 @@ sudo mkdir -p \
   "${DATA_ROOT}/chronos/workspace" \
   "${DATA_ROOT}/chronos/agents" \
   "${DATA_ROOT}/chronos/config" \
-  "${DATA_ROOT}/calendar_connector/logs"
+  "${DATA_ROOT}/calendar_connector/logs" \
+  "${DATA_ROOT}/storagetracker/logs"
 
 echo "==> Setting ownership and permissions"
 # Postgres container runs as uid/gid 999 by default
@@ -92,7 +93,8 @@ sudo chown -R root:root \
   "${DATA_ROOT}/files" \
   "${DATA_ROOT}/workout-tracker" \
   "${DATA_ROOT}/tasktracker" \
-  "${DATA_ROOT}/calendar_connector"
+  "${DATA_ROOT}/calendar_connector" \
+  "${DATA_ROOT}/storagetracker"
 
 # Chronos container runs as uid/gid 1000
 sudo chown -R 1000:1000 "${DATA_ROOT}/chronos"

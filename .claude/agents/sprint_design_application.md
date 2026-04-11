@@ -93,10 +93,12 @@ If the requested design appears to contain a reusable technical capability, surf
 ### Step 5: Produce Artifacts
 
 **For existing components:** before producing artifacts, check whether `<component_root>/00_architecture/architecture.json` and `scaffolding.json` exist. If they do:
-- Read both as the current component baseline
-- Produce `10_architecture.json` and `10_scaffolding.json` as **complete updated component descriptions** — not deltas. All existing entries must be present unless this sprint removes them.
+- **Copy those files into the sprint folder first** — `architecture.json` → `10_architecture.json`, `scaffolding.json` → `10_scaffolding.json`, and `schema.sql` → `10_schema.sql` if present. This seeds the sprint artifacts from the prior clean snapshot.
+- Then **modify the copies in-place** to reflect this sprint's changes. Do not rewrite from scratch.
 - Mark every changed or new element with sprint signal words (see below) so the implementer knows where to focus.
+- Mark removed elements with `[REMOVED]` / `"change": "removed"` — do not delete them; the strip script handles deletion at sprint-close.
 - Add a `"sprint_note"` field at the top level of each file summarising what this sprint changed in one sentence.
+- Unmarked entries are unchanged from the previous sprint — leave them exactly as copied.
 
 **Sprint signal words** — used in `10_architecture.json` and `10_scaffolding.json` only, stripped automatically at sprint-close:
 
