@@ -1,0 +1,133 @@
+{
+  "component_name": "storagetracker",
+  "sprint": "Sprint01_Core",
+  "layout": {
+    "root": "03_Application/StorageTracker/",
+    "backend_root": "03_Application/StorageTracker/backend/",
+    "frontend_root": "03_Application/StorageTracker/src/",
+    "schema_file": "03_Application/StorageTracker/schema.sql",
+    "migrations_dir": "03_Application/StorageTracker/migrations/"
+  },
+  "files": [
+    {
+      "path": "03_Application/StorageTracker/schema.sql",
+      "purpose": "Canonical schema DDL — copy of Sprint01_Core/10_schema.sql promoted to component root. Idempotent. Executed at startup by backend/database.py.",
+      "action": "create"
+    },
+    {
+      "path": "03_Application/StorageTracker/pyproject.toml",
+      "purpose": "Python project manifest. Declares fastapi, uvicorn, psycopg2-binary, pydantic, httpx, pytest dependencies.",
+      "action": "create",
+      "note": "Mirror TaskTracker's pyproject.toml structure. Add pytest and httpx as dev dependencies."
+    },
+    {
+      "path": "03_Application/StorageTracker/Dockerfile",
+      "purpose": "Container image. Build context is repo root. Copies 02_Platform/packages to /platform_packages and sets PYTHONPATH. Copies backend/ and schema.sql. CMD: uvicorn backend.main:app.",
+      "action": "create",
+      "note": "Identical structure to TaskTracker Dockerfile."
+    },
+    {
+      "path": "03_Application/StorageTracker/compose.yml",
+      "purpose": "Docker Compose service definition. Port 127.0.0.1:8022:8000. Environment: ATLAS_PG_* vars. Logs volume at ${DATA_ROOT}/storagetracker/logs. Joins atlas-net.",
+      "action": "create",
+      "note": "Port 8022 chosen to avoid collision with TaskTracker (8010), Notifications (8020), CalendarConnector (8021), and other Atlas services."
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/__init__.py",
+      "purpose": "Empty package marker.",
+      "action": "create"
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/main.py",
+      "purpose": "FastAPI app entry point. Installs CORS (allow_origin_regex localhost), exception handlers, request timing. Includes items router at prefix /api. On startup: init_pool(), init_schema().",
+      "action": "create",
+      "key_details": [
+        "app = FastAPI(title='StorageTracker', version='0.1.0')",
+        "CORS allow_origin_regex=r'http://localhost:\\d+'",
+        "Allowed methods: GET, POST, PATCH, DELETE",
+        "setup_logging(app_name='storagetracker', log_dir=...)",
+        "install_exception_handlers(app)",
+        "install_request_timing(app)",
+        "app.include_router(items.router, prefix='/api')"
+      ]
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/database.py",
+      "purpose": "Connection pool management. Identical pattern to TaskTracker: _build_url() from ATLAS_PG_* or DATABASE_URL, SimpleConnectionPool(minconn=1, maxconn=5, RealDictCursor), get_db() context manager, init_schema() reads schema.sql relative to module path.",
+      "action": "create"
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/routers/__init__.py",
+      "purpose": "Empty package marker.",
+      "action": "create"
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/routers/items.py",
+      "purpose": "All item and history endpoints. Single router file.",
+      "action": "create",
+      "key_details": [
+        "router = APIRouter()",
+        "Pydantic models: ItemCreate, ItemUpdate (all optional fields, uses model_fields_set), ItemState enum, ItemType enum",
+        "IMPORTANT: Register view routes BEFORE parameterised routes to avoid FastAPI routing conflict:",
+        "  @router.get('/items/views/low_stock')",
+        "  @router.get('/items/views/recycling')",
+        "  @router.get('/items/views/important')",
+        "  @router.get('/items/views/search')",
+        "  @router.get('/items/{id}')",
+        "  @router.get('/items/{id}/history')",
+        "Auto-transition helper: _apply_auto_transition(quantity, min_quantity, caller_set_state) -> state | None",
+        "History helper: _record_history(conn, item_id, change_type, old_value, new_value, notes=None)",
+        "GET /items: filter validation, jsonb containment for source_tag (@> operator), returns Dataset",
+        "POST /items: validation, auto-transition, insert item, insert history (created), return Dataset",
+        "GET /items/views/*: direct SELECT queries, return Dataset",
+        "GET /items/{id}: fetch item + last 20 history, embed history list in row, return Dataset",
+        "PATCH /items/{id}: model_fields_set determines which fields to SET; auto-transition after quantity/min_quantity change if state not explicitly provided; record history per changed field; return Dataset",
+        "DELETE /items/{id}: DELETE RETURNING id; empty Dataset or 404",
+        "GET /items/{id}/history: confirm item exists, fetch all history DESC, return Dataset"
+      ]
+    },
+    {
+      "path": "03_Application/StorageTracker/src/ShellEntry.tsx",
+      "purpose": "React entry point registered with Atlas Shell. Provides routing and all UI views.",
+      "action": "create",
+      "key_details": [
+        "Registers as 'StorageTracker' with Atlas Shell",
+        "Routes:",
+        "  /items          → AllItemsView",
+        "  /items/low-stock → LowStockView",
+        "  /items/important → ImportantItemsView",
+        "  /items/recycling → RecyclingView",
+        "  /items/:id      → ItemDetailView",
+        "Components: AllItemsView, LowStockView, ImportantItemsView, RecyclingView, ItemDetailView, ItemFormModal",
+        "State/type filter chips on AllItemsView",
+        "ItemFormModal used for both create and edit",
+        "item_type determines which optional fields render in form (quantity, min_quantity, source_tags for consumable)",
+        "State badge uses colour coding: stored=neutral, low_stock=warning, out_of_stock=error, marked_for_recycling=secondary, missing=error, lent_out=secondary",
+        "History timeline rendered in ItemDetailView as a simple ordered list",
+        "Uses apiFetch from @platform-ui/api/client",
+        "Uses Dataset/Row/ApiError types from @platform-ui/api/types",
+        "Uses ErrorCard, Skeleton from @platform-ui/components"
+      ]
+    },
+    {
+      "path": "03_Application/StorageTracker/src/shellConfig.ts",
+      "purpose": "Shell registration config. Exports app name, icon, and route prefix for Atlas Shell discovery.",
+      "action": "create",
+      "note": "Mirror TaskTracker's shellConfig.ts. App name: 'StorageTracker', route prefix: '/items'."
+    },
+    {
+      "path": "03_Application/StorageTracker/CLAUDE.md",
+      "purpose": "App-local guidance for Claude Code.",
+      "action": "create",
+      "content_summary": "StorageTracker is a household item tracking application. Scope: Sprint 1 is core CRUD + history. Sprint 2 adds shopping tasks. Sprint 3 adds notifications. Follow TaskTracker patterns. Global rules in root CLAUDE.md."
+    }
+  ],
+  "migration_strategy": "schema.sql executed idempotently at startup (CREATE IF NOT EXISTS). No Alembic in Sprint 1 — migrations/ directory reserved for Sprint 2+.",
+  "route_registration_warning": "FastAPI evaluates routes in registration order. The four /api/items/views/* routes MUST be registered before /api/items/{id} and /api/items/{id}/history in items.py. Failure to do so causes FastAPI to match 'views' as the {id} path parameter.",
+  "env_vars": {
+    "required": ["ATLAS_PG_HOST", "ATLAS_PG_PORT", "ATLAS_PG_DB", "ATLAS_PG_USER", "ATLAS_PG_PASSWORD"],
+    "optional": ["DATABASE_URL (overrides ATLAS_PG_* if set)"],
+    "not_required": ["LABEL_ENGINE_URL", "PREFERENCE_STORE_URL — not used in Sprint 1"]
+  },
+  "test_notes": "Backend tests use pytest + httpx ASGI transport against a test Postgres DB (or in-memory fixture). Minimum coverage: create item, list items, patch item (state auto-transition), delete item, history recording, view endpoints. See 10_test_spec.md for full spec."
+}

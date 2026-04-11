@@ -639,3 +639,42 @@ down:
 	@echo "Atlas stack is down."
 
 # endregion
+
+
+# region --- Test Stack
+#
+# Mirrors prod against atlas_test database (+1000 port offset).
+# Shares the same atlas-postgres container and atlas-net network as prod.
+# Tests use SQL fixtures — do not rely on prod data being present.
+#
+# test-up          start all test containers
+# test-down        stop all test containers
+# test-ps          show test container status
+# test-sync-db     copy prod → atlas_test (for manual exploratory testing only)
+# test-run         run pytest inside a component's test container
+#                  Usage: make test-run COMPONENT=storagetracker
+#                  Container: atlas-<COMPONENT>-test must be running
+
+TEST_COMPOSE=docker compose \
+	-f test/compose.test.yml \
+	$(ENV_FILES)
+
+test-up:
+	$(TEST_COMPOSE) up -d
+
+test-down:
+	$(TEST_COMPOSE) down
+
+test-ps:
+	$(TEST_COMPOSE) ps
+
+test-sync-db:
+	@python3 test/sync_db.py
+
+test-run:
+	@test -n "$(COMPONENT)" || (echo "Usage: make test-run COMPONENT=storagetracker" && exit 1)
+	@docker ps --filter name=atlas-$(COMPONENT)-test --format '{{.Names}}' | grep -q . \
+	  || (echo "Container atlas-$(COMPONENT)-test is not running. Run: make test-up" && exit 1)
+	docker exec atlas-$(COMPONENT)-test pytest tests/ -v
+
+# endregion

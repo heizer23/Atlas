@@ -23,32 +23,47 @@ Before running, confirm:
 
 ---
 
-# Step 1 — Identify the test command
+# Step 1 — Identify the test container
 
-Read `10_architecture.json`. Look for:
-- `tech_stack`, `runtime`, `test_framework`, or equivalent fields
-- any `Makefile` targets named `test`, `check`, or similar
+Atlas runs a persistent test stack that mirrors prod. Every component has a `-test` container running against the `atlas_test` database.
 
-Determine the correct command to run the tests. Common cases:
-- Python/FastAPI → `pytest` from the component root
-- Node/React → `npm test` or `npx vitest run`
-- If a `Makefile` has a `test` target, prefer that
+1. Read `compose.yml` in the component root. Find the `container_name` field (e.g. `atlas-storagetracker`). The test container name is that value with `-test` appended (e.g. `atlas-storagetracker-test`).
 
-If the test framework is ambiguous, inspect the component folder for `pytest.ini`, `pyproject.toml`, `package.json`, or `vitest.config.*`.
+2. Verify the test container is running:
+   ```bash
+   docker ps --filter name=<container_name>-test --format '{{.Names}}'
+   ```
 
-Do not invent a test command. If none can be determined, write `50_test_report.md` with `TESTS_FAILED_FIXABLE` and state: "Could not determine test command — no test framework configuration found."
+3. If not running, start the test stack:
+   ```bash
+   make -C /home/linse/Prod/Atlas/01_System test-up
+   sleep 5
+   ```
+   Then re-check. If the container still does not start, write `50_test_report.md` with `TESTS_FAILED_FIXABLE` and state the exact docker error.
+
+4. Verify `atlas_test` database exists:
+   ```bash
+   docker exec atlas-postgres psql -U atlas -lqt | grep atlas_test
+   ```
+   If absent, create it:
+   ```bash
+   docker exec atlas-postgres psql -U atlas -c "CREATE DATABASE atlas_test;"
+   ```
 
 ---
 
 # Step 2 — Run the tests
 
-Run the identified test command from the correct working directory using Bash.
+The test command for all Python/FastAPI components is:
 
-Capture:
-- exit code
-- full stdout/stderr output
+```bash
+docker exec <container_name>-test pytest tests/ -v
+```
 
-Do not suppress output. Do not truncate results in your internal notes.
+The container already has `ATLAS_PG_DB=atlas_test` set — no override needed.
+The conftest truncates tables and reloads `tests/fixtures.sql` before each test automatically.
+
+Capture the full stdout/stderr output. Do not truncate.
 
 ---
 

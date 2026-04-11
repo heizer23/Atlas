@@ -262,13 +262,43 @@ If the architecture declares no persistence, do not add durable storage.
 
 # Test Implementation
 
-If `10_test_spec.md` is present in the sprint folder, you must write test functions for every scenario in it.
+If `10_test_spec.md` is present in the sprint folder, write two test artifacts: `tests/fixtures.sql` and `tests/test_<feature>.py`.
 
-Rules:
-- Use the component's existing test framework (check `pyproject.toml`, `package.json`, or equivalent).
-- Name each test function after its scenario (snake_case). The name is the traceability link the test runner uses.
-- Tests must be runnable directly (`pytest`, `npm test`, etc.) without additional setup beyond what the component already requires.
-- If this is a fix-loop run (invoked from `TESTS_FAILED_FIXABLE`): read `50_test_report.md` to identify exactly which tests are failing and why. Fix only those. Do not rewrite passing tests.
+## Execution model
+
+Tests run inside the `-test` Docker container (e.g. `atlas-storagetracker-test`) against `atlas_test` database. The test runner calls `docker exec <container>-test pytest tests/ -v`. The conftest truncates tables and reloads `fixtures.sql` before each test automatically — you do not manage teardown.
+
+## fixtures.sql
+
+Write `tests/fixtures.sql` with INSERT statements that define the test world for this sprint's scenarios. Rules:
+- Use readable string IDs prefixed with `fix-` (e.g. `'fix-milk'`) so test assertions are self-documenting
+- Cover: the happy-path objects, at least one boundary case (e.g. a low-stock item, a missing item), and any cross-object relationships the scenarios require
+- Do not try to cover every edge case — fixtures define the world, individual tests create additional data on top if needed
+- If the component has existing fixtures from a prior sprint, extend them — do not replace items other sprints depend on
+
+## test_<feature>.py
+
+- Use the `client` fixture from `conftest.py` (TestClient, no real server needed)
+- Name each test function after its scenario using snake_case — this is the traceability link to `10_test_spec.md`
+- Test at the HTTP level: assert on status codes, response body shape, and Dataset structure
+- Fixture data is available at test start — reference fixture IDs directly (e.g. `r = client.get("/api/items/fix-milk")`)
+- Do not truncate or delete in the test body — the conftest handles reset
+
+## Coverage philosophy
+
+Cover: critical paths, primary error cases (404, validation, state conflicts), business logic that could break silently (auto-transitions, derived views, cascade behaviors). Skip: trivial CRUD that's obviously correct once creation and update work.
+
+## New component setup
+
+If the component has no test infrastructure yet:
+- Add `pytest>=8.0` to `[project.optional-dependencies] dev` in `pyproject.toml`
+- Update Dockerfile: `pip install -e ".[dev]"` and `COPY <component>/tests/ ./tests/`
+- Create `tests/conftest.py` following the pattern in `03_Application/StorageTracker/tests/conftest.py`
+- Default `ATLAS_PG_DB` in conftest to `atlas_test` — never `atlas`
+
+## Fix-loop mode
+
+If invoked from `TESTS_FAILED_FIXABLE`: read `50_test_report.md`, fix only the failing tests and their underlying implementation. Do not rewrite passing tests or regenerate fixtures unless the failure analysis explicitly says the fixture is wrong.
 
 ---
 

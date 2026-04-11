@@ -246,6 +246,8 @@ When blocking, state: the exact missing artifact or contradiction, the local con
 
 Written by the designer. Required when the component exposes an API; optional otherwise.
 
+Scenarios should reference fixture objects by name where relevant (e.g. *"Given the fixture item 'milk' which is in low_stock state…"*). This makes the traceability between spec, fixture, and test function explicit.
+
 ```markdown
 # Test Spec — <ComponentName> — <SprintName>
 
@@ -299,7 +301,19 @@ Produced by the test-runner. Overwrites any prior version in the same sprint.
 
 Rules:
 - Verdict `TESTS_FAILED_DESIGN_ISSUE` requires the failure analysis to explicitly name the design artifact (e.g., `10_architecture.json §interfaces.outputs`) that is wrong. If that specificity cannot be reached, use `TESTS_FAILED_FIXABLE`.
-- The test-runner calls test commands directly (e.g., `pytest`, `npm test`). No intermediate wrapper required.
+- The test-runner runs tests inside the `-test` container: `docker exec atlas-<component>-test pytest tests/ -v`. The test container has `ATLAS_PG_DB=atlas_test` set — no override needed.
+- Fixtures are loaded by the conftest before each test. The test runner does not manage fixture loading.
+
+---
+
+### `tests/fixtures.sql`
+
+Written by the implementer alongside the test functions. Not a sprint artifact (lives in the component, not the sprint folder) but governs test behavior.
+
+Contains INSERT statements that define the test world. Loaded by `conftest.py` before each test after truncating the component's tables. Rules:
+- IDs prefixed with `fix-` for readability
+- Covers the happy path, boundary cases, and cross-object relationships needed by the spec scenarios
+- Extended by each sprint — do not remove fixtures that prior sprint tests depend on
 
 ---
 

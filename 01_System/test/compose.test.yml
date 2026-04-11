@@ -1,0 +1,223 @@
+# Atlas Test Stack
+#
+# Mirrors the prod stack against atlas_test database.
+# All service URLs point to *-test containers.
+# No log volumes — tests don't need persistence.
+#
+# Start:  make -C 01_System test-up
+# Stop:   make -C 01_System test-down
+# Status: make -C 01_System test-ps
+# Sync:   make -C 01_System test-sync-db   (prod → atlas_test, for exploratory testing)
+# Run:    make -C 01_System test-run COMPONENT=storagetracker
+
+networks:
+  atlas-net:
+    external: true
+
+services:
+
+  # ── Platform ──────────────────────────────────────────────────────────────────
+
+  label-engine-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/LabelEngine/Dockerfile
+    container_name: atlas-label-engine-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9050:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  preference-store-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/PreferenceStore/Dockerfile
+    container_name: atlas-preference-store-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9060:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  linking-engine-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/LinkingEngine/Dockerfile
+    container_name: atlas-linking-engine-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9040:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  notifications-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/Notifications/Dockerfile
+    container_name: atlas-notifications-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9020:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+      NOTIFICATIONS_DISPATCH_INTERVAL_SECONDS: ${NOTIFICATIONS_DISPATCH_INTERVAL_SECONDS:-30}
+    networks:
+      - atlas-net
+
+  calendar-connector-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/CalendarConnector/Dockerfile
+    container_name: atlas-calendar-connector-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9021:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  atlas-shell-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/Atlas_Shell/Dockerfile
+    container_name: atlas-shell-test
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:9080:80"
+    networks:
+      - atlas-net
+
+  # ── Application ───────────────────────────────────────────────────────────────
+
+  tasktracker-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/TaskTracker/Dockerfile
+    container_name: atlas-tasktracker-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9010:8000"
+    environment:
+      ATLAS_PG_DB:           atlas_test
+      ATLAS_PG_USER:         ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD:     ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:         ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:         atlas-postgres
+      LABEL_ENGINE_URL:      http://atlas-label-engine-test:8000
+      PREFERENCE_STORE_URL:  http://atlas-preference-store-test:8000
+    networks:
+      - atlas-net
+
+  storagetracker-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/StorageTracker/Dockerfile
+    container_name: atlas-storagetracker-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9022:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  chronicle-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/Chronicle/Dockerfile
+    container_name: atlas-chronicle-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9013:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  food-tracker-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/FoodTracker/Dockerfile
+    container_name: atlas-food-tracker-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9012:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  numeric-series-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/NumericSeries/Dockerfile
+    container_name: atlas-numeric-series-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9014:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+      LABEL_ENGINE_URL:  http://atlas-label-engine-test:8000
+    networks:
+      - atlas-net
+
+  workout-tracker-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/WorkoutTracker/Dockerfile
+    container_name: atlas-workout-tracker-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9011:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
