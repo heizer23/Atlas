@@ -1,18 +1,20 @@
 {
   "component_name": "storagetracker",
   "layer": "03_Application",
-  "summary": "Household item tracking application. Users create and maintain items categorised as consumable, object, or pending_action. Items have a lifecycle state (stored, low_stock, out_of_stock, marked_for_recycling, missing, lent_out), a free-text location, and optional quantity tracking for consumables. State changes and location changes are recorded in an append-only history table.",
+  "source_definition": "00_draft.md",
+  "summary": "Household item tracking application. Users create and maintain items categorised as consumable, object, or pending_action. Items have a lifecycle state and optional quantity tracking. Shopping tasks are derived from item state (low_stock/out_of_stock) and close the action loop back to the item on completion.",
   "classification": {
-    "why_application": "Owns the storagetracker schema in Postgres (items + item_history tables), enforces item-domain business rules (state auto-transition on quantity change, history recording, quantity constraints), and exposes domain-specific read views (low_stock, recycling, important, search). Contains no reusable infrastructure.",
+    "why_application": "Owns the storagetracker schema in Postgres (items + item_history + shopping_tasks tables), enforces item-domain business rules (state auto-transition, history recording, quantity constraints, shopping task auto-creation), and exposes domain-specific read views. Contains no reusable infrastructure.",
     "non_goals": [
-      "Shopping tasks — Sprint 2",
       "Notifications or geofencing — Sprint 3",
-      "Location hierarchies — free-text only in this sprint",
+      "Location hierarchies — free-text only",
       "Barcode scanning",
       "Multi-user or authentication — single-user only",
-      "Label or preference integration — not in Sprint 1"
+      "Recurring tasks or auto-reorder schedules",
+      "Multi-store route optimization",
+      "Budget tracking"
     ],
-    "not_platform": "Item domain rules, the storagetracker schema, quantity-driven state transitions, and history recording are StorageTracker-specific application behavior, not reusable platform infrastructure."
+    "not_platform": "Item domain rules, the storagetracker schema, quantity-driven state transitions, history recording, and shopping task lifecycle are StorageTracker-specific application behavior, not reusable platform infrastructure."
   },
   "contracts": {
     "consumes": [
@@ -22,15 +24,20 @@
     ],
     "provides": [
       "GET /api/items — list all items; params: state (stored|low_stock|out_of_stock|marked_for_recycling|missing|lent_out), item_type (consumable|object|pending_action), location (exact match string), source_tag (string — matches any element of source_tags array); default ordering: created_at DESC; returns Dataset",
-      "POST /api/items — create item; body: {name, item_type, location?, notes?, source_tags?: list[str], quantity?: int, min_quantity?: int, state? (default stored)}; auto-transitions state to low_stock if quantity and min_quantity are both set and quantity <= min_quantity; records history entry with change_type=created; returns Dataset (single row)",
+      "POST /api/items — create item; body: {name, item_type, location?, notes?, source_tags?: list[str], quantity?: int, min_quantity?: int, restock_quantity?: int, state? (default stored)}; auto-transitions state to low_stock if quantity and min_quantity are both set and quantity <= min_quantity; records history entry with change_type=created; returns Dataset (single row)",
       "GET /api/items/{id} — get single item with last 20 history entries; returns Dataset (single row with embedded history)",
-      "PATCH /api/items/{id} — partial update; body: any subset of {name, state, location, quantity, min_quantity, notes, source_tags}; field omission means no change; explicit null clears nullable fields; after any quantity or min_quantity change, auto-recomputes state to low_stock if both are set and quantity <= min_quantity (unless caller explicitly set state); records history entries for each changed field; returns Dataset (single row)",
-      "DELETE /api/items/{id} — delete item and its history; returns empty Dataset on success, 404 ApiError if not found",
+      "PATCH /api/items/{id} — partial update; body: any subset of {name, state, location, quantity, min_quantity, restock_quantity, notes, source_tags}; field omission means no change; explicit null clears nullable fields; after any quantity or min_quantity change, auto-recomputes state; if state becomes low_stock or out_of_stock, auto-creates open shopping task if none exists; returns Dataset (single row)",
+      "DELETE /api/items/{id} — delete item, its history, and its shopping tasks; returns empty Dataset on success, 404 ApiError if not found",
       "GET /api/items/{id}/history — full history for item ordered by timestamp DESC; returns Dataset",
       "GET /api/items/views/low_stock — items where state is low_stock or out_of_stock; ordered by name ASC; returns Dataset",
       "GET /api/items/views/recycling — items where state is marked_for_recycling; ordered by name ASC; returns Dataset",
       "GET /api/items/views/important — items where item_type is object; ordered by name ASC; returns Dataset",
-      "GET /api/items/views/search?q=<text> — case-insensitive substring search across name, location, notes; returns Dataset ordered by name ASC; empty q returns empty Dataset"
+      "GET /api/items/views/search?q=<text> — case-insensitive substring search across name, location, notes; returns Dataset ordered by name ASC; empty q returns empty Dataset",
+      "GET /api/shopping-tasks — list tasks; params: status (default: open), source_tag (exact match of any element in task.source_tags); ordered by created_at ASC; returns Dataset",
+      "POST /api/shopping-tasks — manually create a task; body: {item_id, notes?: str}; item must exist; creates with status=open; copies source_tags from item at creation time; fails 409 if an open task already exists for this item; returns Dataset (single row)",
+      "PATCH /api/shopping-tasks/{id} — update task; body: {status: done|dismissed, notes?: str}; on status=done, resets item state (see invariants); on status=dismissed, no item change; returns Dataset (single row)",
+      "DELETE /api/shopping-tasks/{id} — delete task; returns empty Dataset on success, 404 ApiError if not found",
+      "GET /api/shopping-tasks/views/by_source — open tasks expanded by source_tag; one flat row per (task, source_tag); tasks with no source tags produce one row with source_tag='Other'; tasks with multiple source tags appear in each group; rows are ShoppingTaskRow columns plus source_tag; returns Dataset"
     ],
     "invariants": [
       "All read endpoints (GET) return Dataset per R-CON-BP-04",
@@ -38,23 +45,31 @@
       "item.name must not be empty or blank (enforced at API level)",
       "item.item_type must be one of: consumable, object, pending_action (enforced at API and DB constraint level)",
       "item.state must be one of: stored, low_stock, out_of_stock, marked_for_recycling, missing, lent_out (enforced at API and DB constraint level)",
-      "item.quantity must be null or a non-negative integer; only meaningful for consumables but not DB-enforced by item_type (enforced at API level: reject negative values)",
+      "item.quantity must be null or a non-negative integer; enforced at API level",
       "item.min_quantity must be null or a non-negative integer; enforced at API level",
+      "item.restock_quantity must be null or a non-negative integer; enforced at API level",
       "item.source_tags is a JSON array of strings stored as jsonb; default empty array []",
       "Auto-transition rule: after any write that sets quantity or min_quantity, if both quantity and min_quantity are non-null and quantity <= min_quantity, state is set to low_stock — UNLESS the caller explicitly provided state in the same request body (caller-supplied state wins)",
-      "History is recorded for every state_change, location_change, quantity_change; creation is recorded as change_type=created; old_value and new_value are stored as strings",
-      "GET /api/items/{id} returns last 20 history entries embedded in the row; full history is available via GET /api/items/{id}/history",
-      "DELETE /api/items/{id} cascades to item_history (FK with ON DELETE CASCADE)",
-      "Schema is initialized idempotently at startup via schema.sql (CREATE SCHEMA IF NOT EXISTS, CREATE TABLE IF NOT EXISTS)",
-      "PATCH distinguishes field omitted (no change) from field provided as explicit null (clear column) for all nullable fields; source_tags provided as explicit null is rejected (use empty list [] to clear)",
-      "GET /api/items/views/search with empty or blank q returns empty Dataset (no full-table scan on blank query)",
-      "Route ordering: static view paths (/api/items/views/*) must be registered BEFORE the parameterised path /api/items/{id} to prevent FastAPI routing conflicts"
+      "Auto-task creation rule: after any PATCH or POST to items that results in state becoming low_stock or out_of_stock (whether by auto-transition or explicit caller state), check if an open shopping task exists for this item; if not, create one synchronously with source_tags copied from item at that moment",
+      "At most one open shopping task per item at any time (enforced by unique index on (item_id) WHERE status = 'open' and validated at the API level with 409 on conflict)",
+      "shopping_task.status must be one of: open, done, dismissed (enforced at API and DB constraint level)",
+      "shopping_task.source_tags is a JSON array of strings stored as jsonb; snapshot of item.source_tags at task creation time; not updated when item.source_tags changes",
+      "On PATCH /shopping-tasks/{id} with status=done: if item has restock_quantity set, update item.quantity = restock_quantity and re-evaluate state (auto-transition may set state back to stored or keep low_stock if restock_quantity still <= min_quantity); if item has no restock_quantity, set item.state = stored and do not change quantity; in both cases, set task.completed_at = now()",
+      "On PATCH /shopping-tasks/{id} with status=dismissed: set task.completed_at = now(); no change to item state or quantity",
+      "History is recorded for every state_change, location_change, quantity_change; creation is recorded as change_type=created",
+      "GET /api/items/{id} returns last 20 history entries embedded in the row",
+      "DELETE /api/items/{id} cascades to item_history and shopping_tasks (FK with ON DELETE CASCADE)",
+      "Schema is initialized idempotently at startup via schema.sql",
+      "PATCH /api/items/{id} distinguishes field omitted (no change) from field provided as explicit null (clear column) for all nullable fields",
+      "GET /api/items/views/search with empty or blank q returns empty Dataset",
+      "Route ordering: static paths (/api/items/views/*, /api/shopping-tasks/views/*) must be registered BEFORE parameterised paths (/api/items/{id}, /api/shopping-tasks/{id})"
     ],
     "failure_modes": [
-      "VALIDATION_ERROR — POST or PATCH with invalid field values (empty name, invalid item_type, invalid state, negative quantity, negative min_quantity, null source_tags on PATCH) — 400 ApiError",
-      "NOT_FOUND — GET, PATCH, or DELETE on unknown item id — 404 ApiError",
-      "INVALID_FILTER — GET /api/items with unknown state or item_type value — 400 ApiError",
-      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during request — startup logs error and continues; requests fail until DB is reachable"
+      "VALIDATION_ERROR — POST or PATCH with invalid field values — 400 ApiError",
+      "NOT_FOUND — GET, PATCH, or DELETE on unknown item or task id — 404 ApiError",
+      "INVALID_FILTER — GET /api/items or GET /api/shopping-tasks with unknown enum value — 400 ApiError",
+      "CONFLICT — POST /api/shopping-tasks when an open task already exists for the item — 409 ApiError",
+      "DATABASE_UNAVAILABLE — Postgres unreachable — startup logs error and continues; requests fail until DB is reachable"
     ]
   },
   "shared_views": {
@@ -64,8 +79,9 @@
       "platform_contracts.ColumnSchema"
     ],
     "provides": [
-      "ItemRow: {id: str (UUID), name: str, item_type: str, state: str, location: str|null, notes: str|null, source_tags: list[str], quantity: int|null, min_quantity: int|null, created_at: str (ISO datetime), updated_at: str (ISO datetime)} — emitted in Dataset rows by list and single-item endpoints",
-      "HistoryRow: {id: str (UUID), item_id: str (UUID), timestamp: str (ISO datetime), change_type: str, old_value: str|null, new_value: str|null, notes: str|null} — emitted in Dataset rows by history endpoint and embedded in single-item response"
+      "ItemRow: {id: str (UUID), name: str, item_type: str, state: str, location: str|null, notes: str|null, source_tags: list[str], quantity: int|null, min_quantity: int|null, restock_quantity: int|null, created_at: str (ISO datetime), updated_at: str (ISO datetime)} — emitted in Dataset rows by list and single-item endpoints",
+      "HistoryRow: {id: str (UUID), item_id: str (UUID), timestamp: str (ISO datetime), change_type: str, old_value: str|null, new_value: str|null, notes: str|null} — emitted in Dataset rows by history endpoint and embedded in single-item response",
+      "ShoppingTaskRow: {id: str (UUID), item_id: str (UUID), item_name: str, status: str, source_tags: list[str], notes: str|null, created_at: str (ISO datetime), completed_at: str|null (ISO datetime)} — emitted in Dataset rows by all shopping task list and PATCH endpoints; source_tags is the snapshot from the item at task creation time"
     ]
   },
   "interfaces": {
@@ -83,7 +99,7 @@
       {
         "type": "http_endpoint",
         "name": "GET /api/items",
-        "purpose": "List all items with optional filters. Supports state, item_type, location (exact match), source_tag (array-contains match). Ordered by created_at DESC.",
+        "purpose": "List all items with optional filters. Ordered by created_at DESC.",
         "ui_contract": "Dataset | ApiError",
         "params": {
           "state": "one of stored|low_stock|out_of_stock|marked_for_recycling|missing|lent_out — optional",
@@ -95,7 +111,7 @@
       {
         "type": "http_endpoint",
         "name": "POST /api/items",
-        "purpose": "Create a new item. Applies auto-transition rule for low_stock. Records created history entry. Returns created item as Dataset (single row).",
+        "purpose": "Create a new item. Applies auto-transition rule for low_stock. Records created history entry. If state becomes low_stock, auto-creates shopping task. Returns created item as Dataset.",
         "ui_contract": "Dataset | ApiError"
       },
       {
@@ -134,19 +150,53 @@
       {
         "type": "http_endpoint",
         "name": "PATCH /api/items/{id}",
-        "purpose": "Partial update. Field omission means no change; explicit null clears nullable fields. Auto-recomputes state on quantity/min_quantity change. Records history entries for each changed field. Returns updated item as Dataset (single row).",
+        "purpose": "Partial update including new restock_quantity field. Auto-recomputes state on quantity/min_quantity change. If state becomes low_stock or out_of_stock, auto-creates shopping task if none open exists. Returns updated item as Dataset.",
         "ui_contract": "Dataset | ApiError"
       },
       {
         "type": "http_endpoint",
         "name": "DELETE /api/items/{id}",
-        "purpose": "Delete item and cascade to item_history. Returns empty Dataset on success, 404 ApiError if not found.",
+        "purpose": "Delete item, cascade to item_history and shopping_tasks. Returns empty Dataset on success.",
         "ui_contract": "Dataset | ApiError"
       },
       {
         "type": "http_endpoint",
         "name": "GET /api/items/{id}/history",
-        "purpose": "Return full history for item ordered by timestamp DESC. Returns 404 ApiError if item not found.",
+        "purpose": "Return full history for item ordered by timestamp DESC.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/shopping-tasks",
+        "purpose": "List shopping tasks. Default status=open. Optional source_tag filter (array-contains). Ordered by created_at ASC. Returns Dataset of ShoppingTaskRow.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "status": "one of open|done|dismissed — optional, default open",
+          "source_tag": "string — matches tasks whose source_tags array contains this value — optional"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/shopping-tasks",
+        "purpose": "Manually create a shopping task for an item. item_id must reference an existing item. Status=open. Copies source_tags from item. Fails 409 if open task already exists for item. Returns Dataset (single row).",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/shopping-tasks/{id}",
+        "purpose": "Update task status (done or dismissed). On done: resets item state or quantity per restock_quantity invariant. Sets completed_at. Returns updated task as Dataset.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/shopping-tasks/{id}",
+        "purpose": "Delete a shopping task. Returns empty Dataset on success, 404 ApiError if not found.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/shopping-tasks/views/by_source",
+        "purpose": "Open tasks expanded by source_tag — one row per (task, source_tag) combination. Tasks with no source tags produce one row with source_tag='Other'. Tasks with multiple source tags appear in each corresponding group. Rows are ShoppingTaskRow plus a source_tag column. Ordered: source_tags alphabetically, 'Other' last; within each group by created_at ASC.",
         "ui_contract": "Dataset | ApiError"
       }
     ]
@@ -162,7 +212,7 @@
       ],
       "outputs": [
         "live connection pool",
-        "storagetracker schema with items and item_history tables present in Postgres"
+        "storagetracker schema with items, item_history, and shopping_tasks tables present in Postgres"
       ]
     },
     {
@@ -182,7 +232,7 @@
     {
       "step": 3,
       "name": "item_create",
-      "description": "POST /api/items validates name (non-blank), item_type, state (if provided), quantity (>= 0), min_quantity (>= 0). Applies auto-transition: if quantity and min_quantity are both non-null and quantity <= min_quantity, overrides state to low_stock (unless caller explicitly set state). Inserts item row with UUID. Inserts history row with change_type=created, new_value=state. Returns Dataset (single row).",
+      "description": "POST /api/items validates name (non-blank), item_type, state (if provided), quantity (>= 0), min_quantity (>= 0), restock_quantity (>= 0 if provided). Applies auto-transition: if quantity and min_quantity are both non-null and quantity <= min_quantity, overrides state to low_stock (unless caller explicitly set state). Inserts item row with UUID. Inserts history row with change_type=created. If final state is low_stock or out_of_stock, calls _ensure_open_shopping_task(conn, item) to create task if needed. Returns Dataset (single row).",
       "inputs": [
         "ItemCreate body"
       ],
@@ -193,7 +243,7 @@
     {
       "step": 4,
       "name": "item_get",
-      "description": "GET /api/items/{id} fetches item row. Fetches last 20 history entries for item ordered by timestamp DESC. Embeds history list in row under key 'history'. Returns Dataset (single row). Returns 404 ApiError if item not found.",
+      "description": "GET /api/items/{id} fetches item row. Fetches last 20 history entries ordered by timestamp DESC. Embeds history list in row under key 'history'. Returns Dataset (single row) or 404 ApiError.",
       "inputs": [
         "id path param"
       ],
@@ -204,7 +254,7 @@
     {
       "step": 5,
       "name": "item_update",
-      "description": "PATCH /api/items/{id} uses model_fields_set to identify explicitly provided fields. Validates state, item_type (if provided), quantity >= 0, min_quantity >= 0. Builds SET clause from provided fields only. After update: if quantity or min_quantity was in model_fields_set and caller did NOT provide state, re-fetches updated row and applies auto-transition (if both quantity and min_quantity non-null and quantity <= min_quantity, sets state=low_stock via second UPDATE). Records history entries: one row per changed field (state_change, location_change, quantity_change). updated_at is always set to now(). Executes UPDATE RETURNING *. Returns Dataset (single row) or 404 ApiError.",
+      "description": "PATCH /api/items/{id} uses model_fields_set to identify explicitly provided fields. Validates restock_quantity (>= 0 if provided), state, quantity, min_quantity. Builds SET clause from provided fields only. After update: applies auto-transition if quantity or min_quantity changed and state not explicitly provided. If final state is low_stock or out_of_stock, calls _ensure_open_shopping_task(conn, item). Records history entries per changed field. Returns Dataset (single row) or 404 ApiError.",
       "inputs": [
         "id path param",
         "ItemUpdate body"
@@ -216,7 +266,7 @@
     {
       "step": 6,
       "name": "item_delete",
-      "description": "DELETE /api/items/{id} executes DELETE RETURNING id. item_history rows are removed by ON DELETE CASCADE. Returns empty Dataset or 404 ApiError if no row deleted.",
+      "description": "DELETE /api/items/{id} executes DELETE RETURNING id. item_history and shopping_tasks rows are removed by ON DELETE CASCADE. Returns empty Dataset or 404 ApiError if no row deleted.",
       "inputs": [
         "id path param"
       ],
@@ -227,7 +277,7 @@
     {
       "step": 7,
       "name": "history_get",
-      "description": "GET /api/items/{id}/history fetches item to confirm existence (404 if missing). Fetches all history rows for item ordered by timestamp DESC. Returns Dataset.",
+      "description": "GET /api/items/{id}/history fetches item to confirm existence (404 if missing). Fetches all history rows ordered by timestamp DESC. Returns Dataset.",
       "inputs": [
         "id path param"
       ],
@@ -265,12 +315,80 @@
     {
       "step": 11,
       "name": "view_search",
-      "description": "GET /api/items/views/search validates q param. Empty or blank q returns empty Dataset immediately (no DB query). Non-blank q executes SELECT WHERE lower(name) LIKE lower('%q%') OR lower(location) LIKE lower('%q%') OR lower(notes) LIKE lower('%q%') ORDER BY name ASC. Returns Dataset.",
+      "description": "GET /api/items/views/search validates q param. Empty or blank q returns empty Dataset immediately. Non-blank q executes SELECT WHERE lower(name) LIKE lower('%q%') OR lower(location) LIKE lower('%q%') OR lower(notes) LIKE lower('%q%') ORDER BY name ASC. Returns Dataset.",
       "inputs": [
         "q query param"
       ],
       "outputs": [
         "Dataset with matching item rows"
+      ]
+    },
+    {
+      "step": 12,
+      "name": "ensure_open_shopping_task",
+      "description": "[NEW] Helper _ensure_open_shopping_task(conn, item_id, source_tags): checks if an open shopping task already exists for item_id (SELECT id FROM shopping_tasks WHERE item_id=? AND status='open'). If none found, inserts a new shopping_tasks row with status=open, source_tags=item.source_tags snapshot, created_at=now(). Called synchronously from item_create and item_update when final state is low_stock or out_of_stock. No return value; errors propagate to the caller transaction.",
+      "inputs": [
+        "conn (active transaction)",
+        "item_id: UUID",
+        "source_tags: list[str]"
+      ],
+      "outputs": [
+        "shopping task row inserted if not already present"
+      ]
+    },
+    {
+      "step": 13,
+      "name": "shopping_task_list",
+      "description": "[NEW] GET /api/shopping-tasks validates status param against enum allowlist. Builds WHERE clause: status filter (default open), optional source_tag filter using jsonb @> operator. Joins to items table to include item_name in result. Executes SELECT ordered by created_at ASC. Returns Dataset of ShoppingTaskRow.",
+      "inputs": [
+        "status param (default: open)",
+        "source_tag param"
+      ],
+      "outputs": [
+        "Dataset with shopping task rows"
+      ]
+    },
+    {
+      "step": 14,
+      "name": "shopping_task_create",
+      "description": "[NEW] POST /api/shopping-tasks validates item_id exists (404 if not). Checks for existing open task (409 CONFLICT if found). Copies source_tags from item row. Inserts shopping_tasks row with status=open, created_at=now(), completed_at=null. Returns Dataset (single row including item_name).",
+      "inputs": [
+        "ShoppingTaskCreate body: {item_id, notes?}"
+      ],
+      "outputs": [
+        "Dataset (inserted shopping task row) | 404 ApiError | 409 ApiError"
+      ]
+    },
+    {
+      "step": 15,
+      "name": "shopping_task_update",
+      "description": "[NEW] PATCH /api/shopping-tasks/{id} fetches task (404 if not found). Validates status is done or dismissed (400 if invalid or already closed). Sets task.status and completed_at=now(). If status=done: fetches item; if item.restock_quantity is non-null, sets item.quantity=restock_quantity and re-evaluates auto-transition rule (updates item.state accordingly); if item.restock_quantity is null, sets item.state=stored without touching quantity. Records state_change history entry on item if state changed. If status=dismissed: no item update. Returns Dataset (updated task row).",
+      "inputs": [
+        "id path param",
+        "ShoppingTaskUpdate body: {status: done|dismissed, notes?}"
+      ],
+      "outputs": [
+        "Dataset (updated task row) | 400 ApiError | 404 ApiError"
+      ]
+    },
+    {
+      "step": 16,
+      "name": "shopping_task_delete",
+      "description": "[NEW] DELETE /api/shopping-tasks/{id} executes DELETE RETURNING id. Returns empty Dataset or 404 ApiError.",
+      "inputs": [
+        "id path param"
+      ],
+      "outputs": [
+        "empty Dataset | 404 ApiError"
+      ]
+    },
+    {
+      "step": 17,
+      "name": "view_by_source",
+      "description": "[NEW] GET /api/shopping-tasks/views/by_source fetches all open shopping tasks joined to items (for item_name). Produces a flat Dataset: for each task, emit one row per element in task.source_tags, adding source_tag as a column. Tasks with empty source_tags produce one row with source_tag='Other'. Rows ordered by: source_tag ASC ('Other' sorted last via CASE), then created_at ASC within each group. Row shape: ShoppingTaskRow columns plus source_tag: str.",
+      "inputs": [],
+      "outputs": [
+        "Dataset with one row per (task, source_tag) combination"
       ]
     }
   ],
@@ -320,25 +438,29 @@
     "forbidden": [
       "Frontend calling Postgres directly",
       "Re-implementing platform_contracts or platform_errorhandling locally",
-      "Label or preference integration in Sprint 1 — out of scope"
+      "Asynchronous task creation — auto-task creation is synchronous within the same request transaction"
     ]
   },
   "persistence": {
     "owns_persistent_state": true,
-    "schema_artifact": "schema.sql",
+    "schema_artifact": "10_schema.sql",
     "persistence_type": "postgresql",
     "schema_name": "storagetracker",
     "tables": [
       {
         "name": "storagetracker.items",
-        "description": "One row per tracked household item. source_tags stored as jsonb array."
+        "description": "One row per tracked household item. source_tags stored as jsonb array. Sprint02 adds restock_quantity column."
       },
       {
         "name": "storagetracker.item_history",
         "description": "Append-only log of state, location, and quantity changes. FK to items with ON DELETE CASCADE."
+      },
+      {
+        "name": "[NEW] storagetracker.shopping_tasks",
+        "description": "One row per shopping task. Linked to an item. Status: open|done|dismissed. source_tags is a jsonb snapshot from item at task creation time. completed_at is null until task is closed."
       }
     ],
-    "notes": "StorageTracker owns the storagetracker schema in the shared Atlas Postgres instance. Schema initialized idempotently at startup from schema.sql. Indexes on state, item_type, and created_at DESC on items; index on item_id + timestamp DESC on item_history."
+    "notes": "Sprint02 adds restock_quantity to items and the shopping_tasks table. Schema is additive — ALTER TABLE adds restock_quantity column; shopping_tasks uses CREATE TABLE IF NOT EXISTS. The schema.sql at component root is updated by the implementer to include all Sprint02 DDL."
   },
   "ui": {
     "shell_registration": "StorageTracker",
@@ -346,7 +468,7 @@
       {
         "name": "All Items",
         "route": "/items",
-        "description": "Filterable list of all items. State/type chips for filtering. Inline create and edit via modal or inline form."
+        "description": "Filterable list of all items. State/type chips for filtering. Items in low_stock or out_of_stock show a shopping-task indicator badge. Inline create and edit via modal."
       },
       {
         "name": "Low Stock",
@@ -366,9 +488,61 @@
       {
         "name": "Item Detail",
         "route": "/items/:id",
-        "description": "Name, state badge, location, quantity and min_quantity (if consumable), source tags, history timeline. Backed by GET /api/items/{id}."
+        "description": "Name, state badge, location, quantity and min_quantity (if consumable), restock_quantity (if set), source tags, history timeline. Button to manually create shopping task. Backed by GET /api/items/{id}."
+      },
+      {
+        "name": "[NEW] Shopping List",
+        "route": "/shopping",
+        "description": "Open shopping tasks. Default view shows all open tasks. Optional grouping by source_tag (backed by GET /api/shopping-tasks/views/by_source). Each task row has one-tap done/dismiss actions. Backed by GET /api/shopping-tasks and GET /api/shopping-tasks/views/by_source."
       }
     ],
-    "create_edit": "Modal or inline form. Create and edit share the same field set. State field is a select. item_type determines which optional fields appear (quantity, min_quantity, source_tags for consumables)."
-  }
+    "create_edit": "ItemFormModal updated to include restock_quantity field for consumables. ShoppingTaskFormModal for manual task creation (just item selection + optional notes — source_tags are auto-populated from item)."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Add restock_quantity column to storagetracker.items via ALTER TABLE ADD COLUMN IF NOT EXISTS in schema.sql",
+      "Create storagetracker.shopping_tasks table with CREATE TABLE IF NOT EXISTS in schema.sql",
+      "Add unique partial index: CREATE UNIQUE INDEX IF NOT EXISTS uq_shopping_tasks_item_open ON storagetracker.shopping_tasks (item_id) WHERE status = 'open'",
+      "Update ItemCreate and ItemUpdate Pydantic models to include restock_quantity: Optional[int]",
+      "Implement _ensure_open_shopping_task(conn, item_id, source_tags) helper in routers/items.py",
+      "Call _ensure_open_shopping_task after item_create and item_update when final state is low_stock or out_of_stock",
+      "Create backend/routers/shopping_tasks.py with all shopping task endpoints",
+      "Register shopping_tasks router in main.py at prefix /api; static views path BEFORE parameterised path",
+      "On PATCH /shopping-tasks/{id} status=done: fetch item, apply restock logic, record history entry if state changes",
+      "Update tests/fixtures.sql to include shopping task fixture rows",
+      "Write tests/test_shopping_tasks.py covering all test spec scenarios"
+    ],
+    "ui_implementer": [
+      "Add Shopping List route /shopping to ShellEntry.tsx with ShoppingListView component",
+      "Add shopping task indicator badge to items in low_stock or out_of_stock state in AllItemsView",
+      "Add 'Create shopping task' button in ItemDetailView — calls POST /api/shopping-tasks",
+      "Build ShoppingListView with toggle between flat list (GET /api/shopping-tasks) and grouped-by-source view (GET /api/shopping-tasks/views/by_source)",
+      "Add done/dismiss one-tap actions on each task row in ShoppingListView",
+      "Update ItemFormModal to include restock_quantity field for item_type=consumable",
+      "Update ShellEntry.tsx routes to add /shopping"
+    ],
+    "test_writer": [
+      "See 10_test_spec.md for all required test scenarios",
+      "Write test_shopping_tasks.py mapping each scenario to a pytest function",
+      "Extend fixtures.sql with shopping task rows for test scenarios",
+      "Ensure auto-task creation scenarios use item PATCH to trigger low_stock state"
+    ],
+    "reviewer": [
+      "Verify unique partial index ensures at-most-one-open-task invariant and is consistent with 409 conflict behavior",
+      "Verify by_source view grouping logic handles multi-tag and no-tag cases correctly",
+      "Verify restock logic on task completion handles all four combinations: {restock_quantity set/null} x {auto-transition fires/does not fire}"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Schema migration: restock_quantity added to live items table",
+      "impact": "ALTER TABLE ADD COLUMN IF NOT EXISTS is safe in Postgres; existing rows will have restock_quantity = null which is correct default behavior"
+    },
+    {
+      "risk": "Auto-task creation and item update in same transaction",
+      "impact": "If task insert fails (e.g. duplicate open task due to race condition), the whole item update is rolled back. Acceptable for single-user use case."
+    }
+  ],
+  "open_questions": []
 }

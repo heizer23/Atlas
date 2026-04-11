@@ -42,6 +42,7 @@ import '../../../../03_Application/TaskTracker/src/shellConfig';
 import '../../../../03_Application/FoodTracker/src/shellConfig';
 import '../../../../03_Application/Chronicle/src/shellConfig';
 import '../../../../03_Application/NumericSeries/src/shellConfig';
+import '../../../../03_Application/StorageTracker/src/shellConfig';
 
 // ─────────────────────────────────────────────────────────────────────────────
 

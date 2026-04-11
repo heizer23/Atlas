@@ -15,16 +15,18 @@ AppRegistry.register({
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [
-    { id: 'storage-all',       label: 'All Items',  path: '/items',            order: 1 },
-    { id: 'storage-lowstock',  label: 'Low Stock',  path: '/items/low-stock',  order: 2 },
-    { id: 'storage-important', label: 'Important',  path: '/items/important',  order: 3 },
-    { id: 'storage-recycling', label: 'Recycling',  path: '/items/recycling',  order: 4 },
+    { id: 'storage-all',       label: 'All Items',     path: '/items',           order: 1 },
+    { id: 'storage-lowstock',  label: 'Low Stock',     path: '/items/low-stock', order: 2 },
+    { id: 'storage-shopping',  label: 'Shopping',      path: '/items/shopping',  order: 3 },
+    { id: 'storage-important', label: 'Important',     path: '/items/important', order: 4 },
+    { id: 'storage-recycling', label: 'Recycling',     path: '/items/recycling', order: 5 },
   ],
 
   desktopNav: [
-    { id: 'storage-all',       label: 'All Items',  path: '/items',            order: 1 },
-    { id: 'storage-lowstock',  label: 'Low Stock',  path: '/items/low-stock',  order: 2 },
-    { id: 'storage-important', label: 'Important',  path: '/items/important',  order: 3 },
-    { id: 'storage-recycling', label: 'Recycling',  path: '/items/recycling',  order: 4 },
+    { id: 'storage-all',       label: 'All Items',     path: '/items',           order: 1 },
+    { id: 'storage-lowstock',  label: 'Low Stock',     path: '/items/low-stock', order: 2 },
+    { id: 'storage-shopping',  label: 'Shopping',      path: '/items/shopping',  order: 3 },
+    { id: 'storage-important', label: 'Important',     path: '/items/important', order: 4 },
+    { id: 'storage-recycling', label: 'Recycling',     path: '/items/recycling', order: 5 },
   ],
 });

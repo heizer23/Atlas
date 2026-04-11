@@ -1,3 +1,4 @@
+import json as _json
 from typing import Any
 
 from fastapi import APIRouter
@@ -18,50 +19,56 @@ VALID_STATES = {
 }
 VALID_ITEM_TYPES = {"consumable", "object", "pending_action"}
 
+# States that trigger auto shopping task creation
+SHOPPING_TRIGGER_STATES = {"low_stock", "out_of_stock"}
+
 # ── Column schemas ────────────────────────────────────────────────────────────
 
 ITEM_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="name",         label="Name",         type="string", sortable=True,  filterable=True),
-    ColumnSchema(key="item_type",    label="Type",         type="enum",   sortable=True,  filterable=True),
-    ColumnSchema(key="state",        label="State",        type="enum",   sortable=True,  filterable=True),
-    ColumnSchema(key="location",     label="Location",     type="string", sortable=True,  filterable=False),
-    ColumnSchema(key="quantity",     label="Qty",          type="number", sortable=True,  filterable=False),
-    ColumnSchema(key="min_quantity", label="Min Qty",      type="number", sortable=False, filterable=False),
-    ColumnSchema(key="source_tags",  label="Source Tags",  type="string", sortable=False, filterable=False),
-    ColumnSchema(key="notes",        label="Notes",        type="string", sortable=False, filterable=False, detail_visible=True),
-    ColumnSchema(key="created_at",   label="Created",      type="date",   sortable=True,  filterable=False),
-    ColumnSchema(key="updated_at",   label="Updated",      type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="name",             label="Name",            type="string", sortable=True,  filterable=True),
+    ColumnSchema(key="item_type",        label="Type",            type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="state",            label="State",           type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="location",         label="Location",        type="string", sortable=True,  filterable=False),
+    ColumnSchema(key="quantity",         label="Qty",             type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="min_quantity",     label="Min Qty",         type="number", sortable=False, filterable=False),
+    ColumnSchema(key="restock_quantity", label="Restock Qty",     type="number", sortable=False, filterable=False),
+    ColumnSchema(key="source_tags",      label="Source Tags",     type="string", sortable=False, filterable=False),
+    ColumnSchema(key="notes",            label="Notes",           type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="created_at",       label="Created",         type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="updated_at",       label="Updated",         type="date",   sortable=True,  filterable=False),
 ]
 
 HISTORY_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="timestamp",   label="When",        type="date",   sortable=True,  filterable=False),
-    ColumnSchema(key="change_type", label="Change",      type="enum",   sortable=False, filterable=False),
-    ColumnSchema(key="old_value",   label="Old Value",   type="string", sortable=False, filterable=False),
-    ColumnSchema(key="new_value",   label="New Value",   type="string", sortable=False, filterable=False),
-    ColumnSchema(key="notes",       label="Notes",       type="string", sortable=False, filterable=False),
+    ColumnSchema(key="timestamp",   label="When",      type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="change_type", label="Change",    type="enum",   sortable=False, filterable=False),
+    ColumnSchema(key="old_value",   label="Old Value", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="new_value",   label="New Value", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="notes",       label="Notes",     type="string", sortable=False, filterable=False),
 ]
 
 # ── Request models ────────────────────────────────────────────────────────────
 
 class ItemCreate(BaseModel):
-    name:         str
-    item_type:    str
-    state:        str = "stored"
-    location:     str | None = None
-    notes:        str | None = None
-    source_tags:  list[str] = []
-    quantity:     int | None = None
-    min_quantity: int | None = None
+    name:             str
+    item_type:        str
+    state:            str = "stored"
+    location:         str | None = None
+    notes:            str | None = None
+    source_tags:      list[str] = []
+    quantity:         int | None = None
+    min_quantity:     int | None = None
+    restock_quantity: int | None = None
 
 
 class ItemUpdate(BaseModel):
-    name:         str | None = None
-    state:        str | None = None
-    location:     str | None = None
-    quantity:     int | None = None
-    min_quantity: int | None = None
-    notes:        str | None = None
-    source_tags:  list[str] | None = None
+    name:             str | None = None
+    state:            str | None = None
+    location:         str | None = None
+    quantity:         int | None = None
+    min_quantity:     int | None = None
+    restock_quantity: int | None = None
+    notes:            str | None = None
+    source_tags:      list[str] | None = None
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +121,30 @@ def _record_history(
             """,
             (item_id, change_type, old_value, new_value, notes),
         )
+
+
+def _ensure_open_shopping_task(
+    conn: Any,
+    item_id: str,
+    source_tags: list[str],
+) -> None:
+    """
+    Create an open shopping task for item_id if none exists.
+    Called synchronously within the item write transaction.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "select id from storagetracker.shopping_tasks where item_id = %s and status = 'open'",
+            (item_id,),
+        )
+        if cur.fetchone() is None:
+            cur.execute(
+                """
+                insert into storagetracker.shopping_tasks (item_id, source_tags)
+                values (%s, %s::jsonb)
+                """,
+                (item_id, _json.dumps(source_tags)),
+            )
 
 
 def _dataset_response(dataset: Dataset) -> JSONResponse:
@@ -191,7 +222,7 @@ def view_low_stock() -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items
                 where state in ('low_stock', 'out_of_stock')
                 order by name asc
@@ -208,7 +239,7 @@ def view_recycling() -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items
                 where state = 'marked_for_recycling'
                 order by name asc
@@ -225,7 +256,7 @@ def view_important() -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items
                 where item_type = 'object'
                 order by name asc
@@ -245,7 +276,7 @@ def view_search(q: str = "") -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items
                 where lower(name)     like %s
                    or lower(location) like %s
@@ -297,7 +328,7 @@ def list_items(
             cur.execute(
                 f"""
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items {where}
                 order by created_at desc
                 """,
@@ -321,26 +352,25 @@ def create_item(body: ItemCreate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", "quantity must be >= 0")
     if body.min_quantity is not None and body.min_quantity < 0:
         return api_error("VALIDATION_ERROR", "min_quantity must be >= 0")
+    if body.restock_quantity is not None and body.restock_quantity < 0:
+        return api_error("VALIDATION_ERROR", "restock_quantity must be >= 0")
 
-    # Auto-transition: caller did not explicitly set a non-stored state — apply rule
-    # (For create, if caller set a specific state other than 'stored', caller wins.
-    #  But if state is still the default 'stored', check auto-transition.)
+    # Auto-transition: only apply if caller left state at default 'stored'
     state = body.state
     auto = _apply_auto_transition(body.quantity, body.min_quantity)
-    # Only apply auto-transition if caller left state at default 'stored'
     if auto and state == "stored":
         state = auto
 
-    import json as _json
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 insert into storagetracker.items
-                    (name, item_type, state, location, notes, source_tags, quantity, min_quantity)
-                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                    (name, item_type, state, location, notes, source_tags,
+                     quantity, min_quantity, restock_quantity)
+                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                 returning id, name, item_type, state, location, notes, source_tags,
-                          quantity, min_quantity, created_at, updated_at
+                          quantity, min_quantity, restock_quantity, created_at, updated_at
                 """,
                 (
                     body.name.strip(),
@@ -351,11 +381,17 @@ def create_item(body: ItemCreate) -> JSONResponse:
                     _json.dumps(body.source_tags),
                     body.quantity,
                     body.min_quantity,
+                    body.restock_quantity,
                 ),
             )
             row = _row_to_dict(cur.fetchone())
             item_id = row["id"]
             _record_history(conn, item_id, "created", None, state)
+
+        # Auto-create shopping task if item is low/out of stock
+        if state in SHOPPING_TRIGGER_STATES:
+            _ensure_open_shopping_task(conn, item_id, row["source_tags"])
+
         conn.commit()
 
     return _dataset_response(_single_item_dataset(row))
@@ -368,7 +404,7 @@ def get_item(item_id: str) -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -411,10 +447,10 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", "quantity must be >= 0")
     if "min_quantity" in set_fields and body.min_quantity is not None and body.min_quantity < 0:
         return api_error("VALIDATION_ERROR", "min_quantity must be >= 0")
+    if "restock_quantity" in set_fields and body.restock_quantity is not None and body.restock_quantity < 0:
+        return api_error("VALIDATION_ERROR", "restock_quantity must be >= 0")
     if "source_tags" in set_fields and body.source_tags is None:
         return api_error("VALIDATION_ERROR", "source_tags cannot be null — use empty list [] to clear")
-
-    import json as _json
 
     with get_db() as conn:
         # Fetch current row for history comparisons
@@ -422,7 +458,7 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -458,7 +494,7 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
                 set {set_clause}
                 where id = %s
                 returning id, name, item_type, state, location, notes, source_tags,
-                          quantity, min_quantity, created_at, updated_at
+                          quantity, min_quantity, restock_quantity, created_at, updated_at
                 """,
                 params,
             )
@@ -479,10 +515,13 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
                     )
                     updated["state"] = cur.fetchone()["state"]
 
+        # Determine final state for shopping task logic
+        final_state = updated["state"]
+
         # Record history entries
-        if "state" in set_fields or (not caller_set_state and updated["state"] != current["state"]):
+        if "state" in set_fields or (not caller_set_state and final_state != current["state"]):
             old_s = str(current["state"]) if current["state"] is not None else None
-            new_s = str(updated["state"]) if updated["state"] is not None else None
+            new_s = str(final_state) if final_state is not None else None
             if old_s != new_s:
                 _record_history(conn, item_id, "state_change", old_s, new_s)
 
@@ -497,6 +536,14 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
             new_q = str(body.quantity) if body.quantity is not None else None
             if old_q != new_q:
                 _record_history(conn, item_id, "quantity_change", old_q, new_q)
+
+        # Auto-create shopping task if final state is low/out of stock
+        if final_state in SHOPPING_TRIGGER_STATES:
+            source_tags = updated.get("source_tags") or []
+            if isinstance(source_tags, str):
+                import json as _json2
+                source_tags = _json2.loads(source_tags)
+            _ensure_open_shopping_task(conn, item_id, source_tags)
 
         conn.commit()
 

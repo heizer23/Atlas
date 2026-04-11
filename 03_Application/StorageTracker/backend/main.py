@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
-from backend.routers import items
+from backend.routers import items, shopping_tasks
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.performance import install_request_timing
@@ -26,6 +26,7 @@ app.add_middleware(
 install_exception_handlers(app)
 install_request_timing(app)
 app.include_router(items.router, prefix="/api")
+app.include_router(shopping_tasks.router, prefix="/api")
 
 
 @app.on_event("startup")

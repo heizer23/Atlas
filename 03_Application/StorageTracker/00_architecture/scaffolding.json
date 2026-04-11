@@ -1,6 +1,6 @@
 {
   "component_name": "storagetracker",
-  "sprint": "Sprint01_Core",
+  "sprint": "Sprint02_ShoppingTasks",
   "layout": {
     "root": "03_Application/StorageTracker/",
     "backend_root": "03_Application/StorageTracker/backend/",
@@ -11,119 +11,308 @@
   "files": [
     {
       "path": "03_Application/StorageTracker/schema.sql",
-      "purpose": "Canonical schema DDL — copy of Sprint01_Core/10_schema.sql promoted to component root. Idempotent. Executed at startup by backend/database.py.",
-      "action": "create"
-    },
-    {
-      "path": "03_Application/StorageTracker/pyproject.toml",
-      "purpose": "Python project manifest. Declares fastapi, uvicorn, psycopg2-binary, pydantic, httpx, pytest dependencies.",
-      "action": "create",
-      "note": "Mirror TaskTracker's pyproject.toml structure. Add pytest and httpx as dev dependencies."
-    },
-    {
-      "path": "03_Application/StorageTracker/Dockerfile",
-      "purpose": "Container image. Build context is repo root. Copies 02_Platform/packages to /platform_packages and sets PYTHONPATH. Copies backend/ and schema.sql. CMD: uvicorn backend.main:app.",
-      "action": "create",
-      "note": "Identical structure to TaskTracker Dockerfile."
-    },
-    {
-      "path": "03_Application/StorageTracker/compose.yml",
-      "purpose": "Docker Compose service definition. Port 127.0.0.1:8022:8000. Environment: ATLAS_PG_* vars. Logs volume at ${DATA_ROOT}/storagetracker/logs. Joins atlas-net.",
-      "action": "create",
-      "note": "Port 8022 chosen to avoid collision with TaskTracker (8010), Notifications (8020), CalendarConnector (8021), and other Atlas services."
-    },
-    {
-      "path": "03_Application/StorageTracker/backend/__init__.py",
-      "purpose": "Empty package marker.",
-      "action": "create"
-    },
-    {
-      "path": "03_Application/StorageTracker/backend/main.py",
-      "purpose": "FastAPI app entry point. Installs CORS (allow_origin_regex localhost), exception handlers, request timing. Includes items router at prefix /api. On startup: init_pool(), init_schema().",
-      "action": "create",
+      "purpose": "Canonical schema DDL — updated for Sprint02. Adds restock_quantity column to items table and creates shopping_tasks table. All changes use ALTER TABLE ... ADD COLUMN IF NOT EXISTS and CREATE TABLE IF NOT EXISTS for idempotency.",
       "key_details": [
-        "app = FastAPI(title='StorageTracker', version='0.1.0')",
-        "CORS allow_origin_regex=r'http://localhost:\\d+'",
-        "Allowed methods: GET, POST, PATCH, DELETE",
-        "setup_logging(app_name='storagetracker', log_dir=...)",
-        "install_exception_handlers(app)",
-        "install_request_timing(app)",
-        "app.include_router(items.router, prefix='/api')"
+        "ALTER TABLE storagetracker.items ADD COLUMN IF NOT EXISTS restock_quantity integer CHECK (restock_quantity IS NULL OR restock_quantity >= 0)",
+        "CREATE TABLE IF NOT EXISTS storagetracker.shopping_tasks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), item_id uuid NOT NULL REFERENCES storagetracker.items(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','done','dismissed')), source_tags jsonb NOT NULL DEFAULT '[]'::jsonb, notes text, created_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_shopping_tasks_item_open ON storagetracker.shopping_tasks (item_id) WHERE status = 'open'",
+        "CREATE INDEX IF NOT EXISTS ix_shopping_tasks_status ON storagetracker.shopping_tasks(status)",
+        "CREATE INDEX IF NOT EXISTS ix_shopping_tasks_item_id ON storagetracker.shopping_tasks(item_id)"
       ]
     },
     {
-      "path": "03_Application/StorageTracker/backend/database.py",
-      "purpose": "Connection pool management. Identical pattern to TaskTracker: _build_url() from ATLAS_PG_* or DATABASE_URL, SimpleConnectionPool(minconn=1, maxconn=5, RealDictCursor), get_db() context manager, init_schema() reads schema.sql relative to module path.",
-      "action": "create"
-    },
-    {
-      "path": "03_Application/StorageTracker/backend/routers/__init__.py",
-      "purpose": "Empty package marker.",
-      "action": "create"
-    },
-    {
       "path": "03_Application/StorageTracker/backend/routers/items.py",
-      "purpose": "All item and history endpoints. Single router file.",
-      "action": "create",
+      "purpose": "All item and history endpoints. Extended in Sprint02 to include restock_quantity field handling and auto-task creation.",
       "key_details": [
-        "router = APIRouter()",
-        "Pydantic models: ItemCreate, ItemUpdate (all optional fields, uses model_fields_set), ItemState enum, ItemType enum",
-        "IMPORTANT: Register view routes BEFORE parameterised routes to avoid FastAPI routing conflict:",
-        "  @router.get('/items/views/low_stock')",
-        "  @router.get('/items/views/recycling')",
-        "  @router.get('/items/views/important')",
-        "  @router.get('/items/views/search')",
-        "  @router.get('/items/{id}')",
-        "  @router.get('/items/{id}/history')",
-        "Auto-transition helper: _apply_auto_transition(quantity, min_quantity, caller_set_state) -> state | None",
-        "History helper: _record_history(conn, item_id, change_type, old_value, new_value, notes=None)",
-        "GET /items: filter validation, jsonb containment for source_tag (@> operator), returns Dataset",
-        "POST /items: validation, auto-transition, insert item, insert history (created), return Dataset",
-        "GET /items/views/*: direct SELECT queries, return Dataset",
-        "GET /items/{id}: fetch item + last 20 history, embed history list in row, return Dataset",
-        "PATCH /items/{id}: model_fields_set determines which fields to SET; auto-transition after quantity/min_quantity change if state not explicitly provided; record history per changed field; return Dataset",
-        "DELETE /items/{id}: DELETE RETURNING id; empty Dataset or 404",
-        "GET /items/{id}/history: confirm item exists, fetch all history DESC, return Dataset"
+        "ItemCreate: add restock_quantity: Optional[int] = None",
+        "ItemUpdate: add restock_quantity: Optional[int] = None",
+        "Validate restock_quantity >= 0 if provided in both POST and PATCH handlers",
+        "Add _ensure_open_shopping_task(conn, item_id: str, source_tags: list) helper — checks for open task, inserts if absent",
+        "In item_create: after insert, if final_state in ('low_stock', 'out_of_stock'), call _ensure_open_shopping_task(conn, item_id, source_tags)",
+        "In item_update: after update and auto-transition, if final_state in ('low_stock', 'out_of_stock'), call _ensure_open_shopping_task(conn, item_id, item.source_tags)",
+        "IMPORTANT: _ensure_open_shopping_task must run within the same connection/transaction as the item write",
+        "Route ordering unchanged: view routes before parameterised routes"
+      ]
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/routers/shopping_tasks.py",
+      "purpose": "All shopping task endpoints. New file in Sprint02.",
+      "stub_kind": "python_module",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ShoppingTaskCreate",
+          "pattern": "data_model",
+          "methods": [
+            {
+              "name": "__init__",
+              "visibility": "public",
+              "args": [
+                "item_id: str",
+                "notes: Optional[str] = None"
+              ],
+              "returns": "ShoppingTaskCreate",
+              "purpose": "Pydantic model for POST /api/shopping-tasks body"
+            }
+          ]
+        },
+        {
+          "kind": "class",
+          "name": "ShoppingTaskUpdate",
+          "pattern": "data_model",
+          "methods": [
+            {
+              "name": "__init__",
+              "visibility": "public",
+              "args": [
+                "status: str",
+                "notes: Optional[str] = None"
+              ],
+              "returns": "ShoppingTaskUpdate",
+              "purpose": "Pydantic model for PATCH /api/shopping-tasks/{id} body. status must be done or dismissed."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "list_shopping_tasks",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "list_shopping_tasks",
+              "visibility": "public",
+              "args": [
+                "status: str = 'open'",
+                "source_tag: Optional[str] = None"
+              ],
+              "returns": "dict (Dataset)",
+              "purpose": "GET /api/shopping-tasks — list tasks with optional status and source_tag filters. JOIN to items for item_name. Returns Dataset."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "create_shopping_task",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "create_shopping_task",
+              "visibility": "public",
+              "args": [
+                "body: ShoppingTaskCreate"
+              ],
+              "returns": "dict (Dataset)",
+              "purpose": "POST /api/shopping-tasks — validate item exists, check for open task (409), copy source_tags, insert task row. Returns Dataset."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "view_by_source",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "view_by_source",
+              "visibility": "public",
+              "args": [],
+              "returns": "dict (Dataset)",
+              "purpose": "GET /api/shopping-tasks/views/by_source — fetch open tasks joined to items, expand to one flat row per (task, source_tag), use 'Other' for tasks with no source tags. Returns Dataset with ShoppingTaskRow columns plus source_tag."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "update_shopping_task",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "update_shopping_task",
+              "visibility": "public",
+              "args": [
+                "task_id: str",
+                "body: ShoppingTaskUpdate"
+              ],
+              "returns": "dict (Dataset)",
+              "purpose": "PATCH /api/shopping-tasks/{id} — close task (done/dismissed), apply restock logic on done, record history if item state changes. Returns Dataset."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "delete_shopping_task",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "delete_shopping_task",
+              "visibility": "public",
+              "args": [
+                "task_id: str"
+              ],
+              "returns": "dict (Dataset)",
+              "purpose": "DELETE /api/shopping-tasks/{id} — delete task, return empty Dataset or 404."
+            }
+          ]
+        }
+      ],
+      "private_objects": [],
+      "route_registration_note": "IMPORTANT: Register view route GET /shopping-tasks/views/by_source BEFORE parameterised route GET /shopping-tasks/{id} in this file."
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/main.py",
+      "purpose": "FastAPI app entry point. Updated to include shopping_tasks router.",
+      "key_details": [
+        "from backend.routers import items, shopping_tasks",
+        "app.include_router(items.router, prefix='/api')",
+        "app.include_router(shopping_tasks.router, prefix='/api')"
       ]
     },
     {
       "path": "03_Application/StorageTracker/src/ShellEntry.tsx",
-      "purpose": "React entry point registered with Atlas Shell. Provides routing and all UI views.",
-      "action": "create",
+      "purpose": "React entry point. Updated to add Shopping List route.",
       "key_details": [
-        "Registers as 'StorageTracker' with Atlas Shell",
-        "Routes:",
-        "  /items          → AllItemsView",
-        "  /items/low-stock → LowStockView",
-        "  /items/important → ImportantItemsView",
-        "  /items/recycling → RecyclingView",
-        "  /items/:id      → ItemDetailView",
-        "Components: AllItemsView, LowStockView, ImportantItemsView, RecyclingView, ItemDetailView, ItemFormModal",
-        "State/type filter chips on AllItemsView",
-        "ItemFormModal used for both create and edit",
-        "item_type determines which optional fields render in form (quantity, min_quantity, source_tags for consumable)",
-        "State badge uses colour coding: stored=neutral, low_stock=warning, out_of_stock=error, marked_for_recycling=secondary, missing=error, lent_out=secondary",
-        "History timeline rendered in ItemDetailView as a simple ordered list",
-        "Uses apiFetch from @platform-ui/api/client",
-        "Uses Dataset/Row/ApiError types from @platform-ui/api/types",
-        "Uses ErrorCard, Skeleton from @platform-ui/components"
+        "Add route: /shopping → ShoppingListView",
+        "Import ShoppingListView from './views/ShoppingListView'",
+        "ShoppingListView: fetches GET /api/shopping-tasks (flat) and GET /api/shopping-tasks/views/by_source (grouped); toggle between views; done/dismiss one-tap actions",
+        "AllItemsView: show shopping-task indicator badge on rows where item.state is 'low_stock' or 'out_of_stock'",
+        "ItemDetailView: add 'Create shopping task' button that calls POST /api/shopping-tasks with item.id; hide if open task already exists",
+        "ItemFormModal: add restock_quantity integer field for item_type=consumable"
       ]
     },
     {
-      "path": "03_Application/StorageTracker/src/shellConfig.ts",
-      "purpose": "Shell registration config. Exports app name, icon, and route prefix for Atlas Shell discovery.",
-      "action": "create",
-      "note": "Mirror TaskTracker's shellConfig.ts. App name: 'StorageTracker', route prefix: '/items'."
+      "path": "03_Application/StorageTracker/tests/test_shopping_tasks.py",
+      "purpose": "Pytest test file for all shopping task scenarios defined in 10_test_spec.md.",
+      "stub_kind": "python_module",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_manual_task_creation",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "Given a stored item, POST /shopping-tasks creates an open task. Task source_tags match item source_tags."
+        },
+        {
+          "kind": "function",
+          "name": "test_duplicate_open_task_rejected",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "POST /shopping-tasks for an item that already has an open task returns 409."
+        },
+        {
+          "kind": "function",
+          "name": "test_auto_task_creation_on_low_stock",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "PATCH item to low_stock state creates a shopping task automatically."
+        },
+        {
+          "kind": "function",
+          "name": "test_auto_task_not_duplicated",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "PATCH item to low_stock when open task already exists does not create a second task."
+        },
+        {
+          "kind": "function",
+          "name": "test_task_done_with_restock_quantity",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "PATCH task to done when item has restock_quantity: item.quantity updated, state re-evaluated."
+        },
+        {
+          "kind": "function",
+          "name": "test_task_done_without_restock_quantity",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "PATCH task to done when item has no restock_quantity: item.state set to stored."
+        },
+        {
+          "kind": "function",
+          "name": "test_task_dismissed",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "PATCH task to dismissed: item state unchanged, task.completed_at set."
+        },
+        {
+          "kind": "function",
+          "name": "test_list_tasks_default_open",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "GET /shopping-tasks returns only open tasks by default."
+        },
+        {
+          "kind": "function",
+          "name": "test_list_tasks_by_status",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "GET /shopping-tasks?status=done returns only done tasks."
+        },
+        {
+          "kind": "function",
+          "name": "test_by_source_grouping",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "GET /shopping-tasks/views/by_source returns rows grouped by source_tag; tasks with no tags appear in Other group."
+        },
+        {
+          "kind": "function",
+          "name": "test_by_source_multi_tag_duplication",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "A task with multiple source_tags appears in each corresponding group in by_source view."
+        },
+        {
+          "kind": "function",
+          "name": "test_delete_task",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "DELETE /shopping-tasks/{id} removes the task; subsequent GET returns 404."
+        },
+        {
+          "kind": "function",
+          "name": "test_item_delete_cascades_to_tasks",
+          "pattern": "test",
+          "methods": [],
+          "purpose": "DELETE /items/{id} removes the item and its open shopping task."
+        }
+      ],
+      "private_objects": []
     },
     {
-      "path": "03_Application/StorageTracker/CLAUDE.md",
-      "purpose": "App-local guidance for Claude Code.",
-      "action": "create",
-      "content_summary": "StorageTracker is a household item tracking application. Scope: Sprint 1 is core CRUD + history. Sprint 2 adds shopping tasks. Sprint 3 adds notifications. Follow TaskTracker patterns. Global rules in root CLAUDE.md."
+      "path": "03_Application/StorageTracker/tests/fixtures.sql",
+      "purpose": "Test fixtures extended for Sprint02. Adds shopping task rows and items with restock_quantity.",
+      "key_details": [
+        "Add item with restock_quantity set (e.g. 'milk' with restock_quantity=6)",
+        "Add item with no restock_quantity for task-done-without-restock scenario",
+        "Add pre-existing open shopping task for duplicate-rejection scenario",
+        "Add done/dismissed task rows for status filter test",
+        "Add item with multiple source_tags for by_source multi-group test"
+      ]
+    },
+    {
+      "path": "03_Application/StorageTracker/pyproject.toml",
+      "purpose": "Python project manifest. No changes needed — all Sprint02 dependencies already present."
+    },
+    {
+      "path": "03_Application/StorageTracker/Dockerfile",
+      "purpose": "Container image. No changes needed."
+    },
+    {
+      "path": "03_Application/StorageTracker/compose.yml",
+      "purpose": "Docker Compose service definition. No changes needed."
+    },
+    {
+      "path": "03_Application/StorageTracker/backend/database.py",
+      "purpose": "Connection pool management. No changes needed."
     }
   ],
-  "migration_strategy": "schema.sql executed idempotently at startup (CREATE IF NOT EXISTS). No Alembic in Sprint 1 — migrations/ directory reserved for Sprint 2+.",
-  "route_registration_warning": "FastAPI evaluates routes in registration order. The four /api/items/views/* routes MUST be registered before /api/items/{id} and /api/items/{id}/history in items.py. Failure to do so causes FastAPI to match 'views' as the {id} path parameter.",
+  "migration_strategy": "Schema changes are additive. schema.sql updated with: (1) ALTER TABLE storagetracker.items ADD COLUMN IF NOT EXISTS restock_quantity; (2) CREATE TABLE IF NOT EXISTS storagetracker.shopping_tasks; (3) CREATE UNIQUE INDEX IF NOT EXISTS uq_shopping_tasks_item_open. All idempotent — safe to re-execute on existing database.",
+  "route_registration_warning": "FastAPI evaluates routes in registration order. In shopping_tasks.py: register GET /shopping-tasks/views/by_source BEFORE GET /shopping-tasks/{id}. In items.py: existing ordering unchanged.",
   "env_vars": {
     "required": [
       "ATLAS_PG_HOST",
@@ -134,11 +323,6 @@
     ],
     "optional": [
       "DATABASE_URL (overrides ATLAS_PG_* if set)"
-    ],
-    "not_required": [
-      "LABEL_ENGINE_URL",
-      "PREFERENCE_STORE_URL — not used in Sprint 1"
     ]
-  },
-  "test_notes": "Backend tests use pytest + httpx ASGI transport against a test Postgres DB (or in-memory fixture). Minimum coverage: create item, list items, patch item (state auto-transition), delete item, history recording, view endpoints. See 10_test_spec.md for full spec."
+  }
 }

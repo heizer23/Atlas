@@ -1,5 +1,5 @@
 /**
- * StorageTracker ShellEntry — Sprint 01
+ * StorageTracker ShellEntry — Sprint 02
  *
  * Views:
  *   /items              → AllItemsView
@@ -7,6 +7,7 @@
  *   /items/important    → ImportantItemsView
  *   /items/recycling    → RecyclingView
  *   /items/:id          → ItemDetailView
+ *   /shopping           → ShoppingListView
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -48,26 +49,45 @@ interface ItemsDataset {
   rows: ItemRow[];
 }
 
+interface ShoppingTaskRow extends Row {
+  id:           string;
+  item_id:      string;
+  item_name:    string;
+  status:       string;
+  source_tags:  string[];
+  notes:        string | null;
+  created_at:   string;
+  completed_at: string | null;
+  source_tag?:  string;  // only present in by_source view
+}
+
+interface ShoppingTasksDataset {
+  meta: { object_type: string; total: number };
+  rows: ShoppingTaskRow[];
+}
+
 interface FormState {
-  name:         string;
-  item_type:    string;
-  state:        string;
-  location:     string;
-  notes:        string;
-  source_tags:  string;   // comma-separated input
-  quantity:     string;
-  min_quantity: string;
+  name:             string;
+  item_type:        string;
+  state:            string;
+  location:         string;
+  notes:            string;
+  source_tags:      string;   // comma-separated input
+  quantity:         string;
+  min_quantity:     string;
+  restock_quantity: string;
 }
 
 const EMPTY_FORM: FormState = {
-  name:         '',
-  item_type:    'object',
-  state:        'stored',
-  location:     '',
-  notes:        '',
-  source_tags:  '',
-  quantity:     '',
-  min_quantity: '',
+  name:             '',
+  item_type:        'object',
+  state:            'stored',
+  location:         '',
+  notes:            '',
+  source_tags:      '',
+  quantity:         '',
+  min_quantity:     '',
+  restock_quantity: '',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -150,6 +170,8 @@ function Chip({
 
 // ── Item row card ─────────────────────────────────────────────────────────────
 
+const SHOPPING_STATES = new Set(['low_stock', 'out_of_stock']);
+
 function ItemCard({
   item,
   onEdit,
@@ -183,6 +205,14 @@ function ItemCard({
           </span>
           <StateBadge state={item.state} />
           <span style={{ fontSize: 12, color: '#888' }}>{TYPE_LABEL[item.item_type] ?? item.item_type}</span>
+          {SHOPPING_STATES.has(item.state) && (
+            <span style={{
+              fontSize: 11, padding: '1px 6px', borderRadius: 10,
+              background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d',
+            }} title="Shopping task pending">
+              cart
+            </span>
+          )}
         </div>
         {item.location && (
           <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
@@ -231,14 +261,17 @@ function ItemFormModal({
   const [form, setForm] = useState<FormState>(
     initial
       ? {
-          name:         initial.name,
-          item_type:    initial.item_type,
-          state:        initial.state,
-          location:     initial.location ?? '',
-          notes:        initial.notes ?? '',
-          source_tags:  (initial.source_tags ?? []).join(', '),
-          quantity:     initial.quantity !== null ? String(initial.quantity) : '',
-          min_quantity: initial.min_quantity !== null ? String(initial.min_quantity) : '',
+          name:             initial.name,
+          item_type:        initial.item_type,
+          state:            initial.state,
+          location:         initial.location ?? '',
+          notes:            initial.notes ?? '',
+          source_tags:      (initial.source_tags ?? []).join(', '),
+          quantity:         initial.quantity !== null ? String(initial.quantity) : '',
+          min_quantity:     initial.min_quantity !== null ? String(initial.min_quantity) : '',
+          restock_quantity: (initial as any).restock_quantity !== null && (initial as any).restock_quantity !== undefined
+            ? String((initial as any).restock_quantity)
+            : '',
         }
       : { ...EMPTY_FORM },
   );
@@ -265,11 +298,12 @@ function ItemFormModal({
     };
 
     if (form.item_type === 'consumable') {
-      body.quantity     = form.quantity !== '' ? parseInt(form.quantity, 10) : null;
-      body.min_quantity = form.min_quantity !== '' ? parseInt(form.min_quantity, 10) : null;
+      body.quantity         = form.quantity !== '' ? parseInt(form.quantity, 10) : null;
+      body.min_quantity     = form.min_quantity !== '' ? parseInt(form.min_quantity, 10) : null;
+      body.restock_quantity = form.restock_quantity !== '' ? parseInt(form.restock_quantity, 10) : null;
     }
 
-    const url    = initial ? `/api/items/${initial.id}` : '/api/items';
+    const url    = initial ? `/items/${initial.id}` : '/items';
     const method = initial ? 'PATCH' : 'POST';
 
     const res = await apiFetch(url, { method, body: JSON.stringify(body) });
@@ -323,6 +357,10 @@ function ItemFormModal({
               <label style={labelStyle}>
                 Min Quantity
                 <input type="number" min={0} value={form.min_quantity} onChange={set('min_quantity')} style={inputStyle} />
+              </label>
+              <label style={labelStyle}>
+                Restock Quantity
+                <input type="number" min={0} value={form.restock_quantity} onChange={set('restock_quantity')} style={inputStyle} placeholder="quantity to set when restocked" />
               </label>
               <label style={labelStyle}>
                 Buy at (comma-separated)
@@ -397,7 +435,7 @@ function ItemListView({
 
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this item?')) return;
-    await apiFetch(`/api/items/${id}`, { method: 'DELETE' });
+    await apiFetch(`/items/${id}`, { method: 'DELETE' });
     reload();
   };
 
@@ -447,7 +485,7 @@ function AllItemsView() {
   const params = new URLSearchParams();
   if (stateFilter) params.set('state', stateFilter);
   if (typeFilter)  params.set('item_type', typeFilter);
-  const url = `/api/items?${params.toString()}`;
+  const url = `/items?${params.toString()}`;
 
   const { items, loading, error, reload } = useItems(url, [stateFilter, typeFilter]);
 
@@ -477,21 +515,21 @@ function AllItemsView() {
 // ── Low Stock View ────────────────────────────────────────────────────────────
 
 function LowStockView() {
-  const { items, loading, error, reload } = useItems('/api/items/views/low_stock', []);
+  const { items, loading, error, reload } = useItems('/items/views/low_stock', []);
   return <ItemListView title="Low Stock" items={items} loading={loading} error={error} reload={reload} />;
 }
 
 // ── Important Items View ──────────────────────────────────────────────────────
 
 function ImportantItemsView() {
-  const { items, loading, error, reload } = useItems('/api/items/views/important', []);
+  const { items, loading, error, reload } = useItems('/items/views/important', []);
   return <ItemListView title="Important Items" items={items} loading={loading} error={error} reload={reload} />;
 }
 
 // ── Recycling View ────────────────────────────────────────────────────────────
 
 function RecyclingView() {
-  const { items, loading, error, reload } = useItems('/api/items/views/recycling', []);
+  const { items, loading, error, reload } = useItems('/items/views/recycling', []);
   return <ItemListView title="Recycling" items={items} loading={loading} error={error} reload={reload} />;
 }
 
@@ -500,23 +538,35 @@ function RecyclingView() {
 function ItemDetailView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [item, setItem]       = useState<ItemRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [item, setItem]             = useState<ItemRow | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [editing, setEditing]       = useState(false);
+  const [hasOpenTask, setHasOpenTask] = useState(false);
+  const [taskMsg, setTaskMsg]       = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
-    const res = await apiFetch(`/api/items/${id}`);
+    const res = await apiFetch(`/items/${id}`);
     setLoading(false);
     if (isApiError(res)) {
       setError((res as ApiError).error.message);
       return;
     }
     const rows = (res as ItemsDataset).rows;
-    setItem(rows?.[0] ?? null);
+    const loaded = rows?.[0] ?? null;
+    setItem(loaded);
+
+    // Check if there is an open shopping task for this item
+    if (loaded) {
+      const tasksRes = await apiFetch(`/shopping-tasks?status=open`);
+      if (!isApiError(tasksRes)) {
+        const taskRows = (tasksRes as ShoppingTasksDataset).rows ?? [];
+        setHasOpenTask(taskRows.some(t => t.item_id === loaded.id));
+      }
+    }
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -526,11 +576,26 @@ function ItemDetailView() {
   if (!item)   return <div style={{ padding: 16 }}>Item not found.</div>;
 
   const history: HistoryRow[] = (item as any).history ?? [];
+  const itemAny = item as any;
 
   const handleDelete = async () => {
     if (!confirm('Delete this item?')) return;
-    await apiFetch(`/api/items/${item.id}`, { method: 'DELETE' });
+    await apiFetch(`/items/${item.id}`, { method: 'DELETE' });
     navigate('/items');
+  };
+
+  const handleCreateTask = async () => {
+    setTaskMsg(null);
+    const res = await apiFetch('/shopping-tasks', {
+      method: 'POST',
+      body: JSON.stringify({ item_id: item.id }),
+    });
+    if (isApiError(res)) {
+      setTaskMsg((res as ApiError).error.message);
+    } else {
+      setHasOpenTask(true);
+      setTaskMsg('Shopping task created.');
+    }
   };
 
   return (
@@ -549,6 +614,7 @@ function ItemDetailView() {
         <div style={{ marginBottom: 6 }}>
           Quantity: <strong>{item.quantity ?? '—'}</strong>
           {item.min_quantity !== null && <> / Min: <strong>{item.min_quantity}</strong></>}
+          {itemAny.restock_quantity != null && <> / Restock: <strong>{itemAny.restock_quantity}</strong></>}
         </div>
       )}
 
@@ -562,10 +628,21 @@ function ItemDetailView() {
         Created: {item.created_at} · Updated: {item.updated_at}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <button onClick={() => setEditing(true)} style={btnStyle}>Edit</button>
         <button onClick={handleDelete} style={{ ...btnStyle, color: 'var(--md-sys-color-error)' }}>Delete</button>
+        {!hasOpenTask && (
+          <button onClick={handleCreateTask} style={{ ...btnStyle, background: '#fef3c7', borderColor: '#fcd34d' }}>
+            + Shopping Task
+          </button>
+        )}
+        {hasOpenTask && (
+          <span style={{ fontSize: 12, color: '#92400e', padding: '4px 8px', background: '#fef3c7', borderRadius: 6 }}>
+            Task open — see Shopping List
+          </span>
+        )}
       </div>
+      {taskMsg && <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>{taskMsg}</div>}
 
       {history.length > 0 && (
         <div>
@@ -606,6 +683,146 @@ function ItemDetailView() {
   );
 }
 
+// ── Shopping List View ────────────────────────────────────────────────────────
+
+function ShoppingListView() {
+  const [grouped, setGrouped]   = useState(false);
+  const [tasks, setTasks]       = useState<ShoppingTaskRow[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const url = grouped
+      ? '/shopping-tasks/views/by_source'
+      : '/shopping-tasks?status=open';
+    const res = await apiFetch(url);
+    setLoading(false);
+    if (isApiError(res)) {
+      setError((res as ApiError).error.message);
+      return;
+    }
+    setTasks((res as ShoppingTasksDataset).rows ?? []);
+  }, [grouped]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAction = async (taskId: string, action: 'done' | 'dismissed') => {
+    setActionMsg(null);
+    const res = await apiFetch(`/shopping-tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: action }),
+    });
+    if (isApiError(res)) {
+      setActionMsg((res as ApiError).error.message);
+    } else {
+      load();
+    }
+  };
+
+  // When grouped, render rows grouped by source_tag
+  const renderGrouped = () => {
+    const groups: Record<string, ShoppingTaskRow[]> = {};
+    for (const row of tasks) {
+      const key = row.source_tag ?? 'Other';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    }
+    // 'Other' last
+    const keys = Object.keys(groups).sort((a, b) => {
+      if (a === 'Other') return 1;
+      if (b === 'Other') return -1;
+      return a.localeCompare(b);
+    });
+
+    return keys.map(tag => (
+      <div key={tag} style={{ marginBottom: 20 }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: 15, color: '#555', borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>
+          {tag}
+        </h3>
+        {groups[tag].map(t => (
+          <TaskCard key={`${t.id}-${tag}`} task={t} onAction={handleAction} />
+        ))}
+      </div>
+    ));
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <h2 style={{ margin: 0 }}>Shopping List</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Chip label="Flat" active={!grouped} onClick={() => setGrouped(false)} />
+          <Chip label="By Store" active={grouped} onClick={() => setGrouped(true)} />
+        </div>
+      </div>
+
+      {loading && <Skeleton />}
+      {error && <ErrorCard message={error} />}
+      {actionMsg && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{actionMsg}</div>}
+
+      {!loading && !error && tasks.length === 0 && (
+        <div style={{ color: '#888', fontSize: 14 }}>No open shopping tasks.</div>
+      )}
+
+      {!loading && !error && tasks.length > 0 && (
+        grouped
+          ? renderGrouped()
+          : tasks.map(t => <TaskCard key={t.id} task={t} onAction={handleAction} />)
+      )}
+    </div>
+  );
+}
+
+function TaskCard({
+  task,
+  onAction,
+}: {
+  task: ShoppingTaskRow;
+  onAction: (id: string, action: 'done' | 'dismissed') => void;
+}) {
+  return (
+    <div style={{
+      padding:      10,
+      borderRadius: 8,
+      border:       '1px solid #e0e0e0',
+      marginBottom: 8,
+      background:   '#fff',
+      display:      'flex',
+      justifyContent: 'space-between',
+      alignItems:   'center',
+      gap:          12,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>{task.item_name}</div>
+        {task.source_tags && task.source_tags.length > 0 && (
+          <div style={{ fontSize: 12, color: '#777' }}>
+            Buy at: {task.source_tags.join(', ')}
+          </div>
+        )}
+        {task.notes && <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>{task.notes}</div>}
+        <div style={{ fontSize: 11, color: '#aaa' }}>{task.created_at}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button
+          onClick={() => onAction(task.id, 'done')}
+          style={{ ...btnStyle, background: '#d1fae5', borderColor: '#6ee7b7' }}
+        >
+          Done
+        </button>
+        <button
+          onClick={() => onAction(task.id, 'dismissed')}
+          style={{ ...btnStyle, color: '#888' }}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function StorageTrackerApp() {
@@ -615,6 +832,7 @@ export default function StorageTrackerApp() {
       <Route path="/low-stock"  element={<LowStockView />} />
       <Route path="/important"  element={<ImportantItemsView />} />
       <Route path="/recycling"  element={<RecyclingView />} />
+      <Route path="/shopping"   element={<ShoppingListView />} />
       <Route path="/:id"        element={<ItemDetailView />} />
     </Routes>
   );
