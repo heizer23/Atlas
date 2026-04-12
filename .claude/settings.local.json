@@ -1,17 +1,4 @@
 {
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "jq -c '{ts: now | todate, tool: .tool_name, sprint: ([.tool_input | to_entries[] | .value | select(type==\"string\") | capture(\"(?P<s>Sprint[^/\\\\s]+)\").s] | first), input: .tool_input}' >> /home/linse/Prod/Atlas/.claude/tool_usage.log"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
@@ -241,7 +228,23 @@
       "Bash(cp /tmp/fixtures_fixed.sql 03_Application/StorageTracker/tests/fixtures.sql)",
       "Bash(mkdir -p /mnt/data/storagetracker/logs)",
       "Bash(sudo mkdir:*)",
-      "Bash(claude doctor:*)"
+      "Bash(claude doctor:*)",
+      "Bash(crontab -)",
+      "Bash(xargs -I{} echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"Sprint02_ChronosAndUX/foo.py\",\"content\":\"{}\"}}')",
+      "Bash(echo \"exit: $?\")"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c '{ts: now | todate, tool: .tool_name, sprint: ([.tool_input | to_entries[] | .value | select(type==\"string\") | select(test(\"Sprint[0-9]+_[A-Za-z0-9]+\")) | match(\"Sprint[0-9]+_[A-Za-z0-9]+\").string] | first), input: (.tool_input | with_entries(.value |= if type == \"string\" and length > 300 then .[:300] + \"...\" else . end))}' >> /home/linse/Prod/Atlas/.claude/tool_usage.log"
+          }
+        ]
+      }
     ]
   }
 }

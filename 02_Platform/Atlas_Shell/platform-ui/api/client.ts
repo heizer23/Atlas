@@ -18,7 +18,11 @@ export async function apiFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T | ApiError> {
-  const request_id = crypto.randomUUID().slice(0, 8);
+  // crypto.randomUUID requires a secure context (HTTPS/localhost); fall back for plain HTTP
+  const request_id = (typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6)
+  ).slice(0, 8);
   const url    = `/api${path}`;
   const method = options?.method ?? "GET";
   const start  = Date.now();

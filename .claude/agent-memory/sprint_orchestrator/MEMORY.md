@@ -11,6 +11,8 @@
 - [LabelEngine Sprint02 Pattern](project_labelengine_sprint02.md) — Batch read endpoint (POST /api/objects/labels/batch); AWAITING_HUMAN_REVIEW; route ordering risk mitigated; fixes F-001 TaskTracker boundary violation
 - [LabelEngine Sprint02_ReverseLookup Pattern](project_labelengine_sprint02_reverselookup.md) — GET /api/labels/used surgical addition; IMPLEMENTATION_IN_PROGRESS; one review cycle; ORDER BY lower() fix
 - [NumericSeries Sprint01 Pattern](project_numericseries_sprint01.md) — Time-series measurement tracker; recharts sparkline; AWAITING_HUMAN_REVIEW; open question resolved as 404 on unknown label external write
+- [NumericSeries Sprint02 Pattern](project_numericseries_sprint02.md) — Chronos by-name write + UX polish; SPRINT_COMPLETE (tests passed)
+- [NumericSeries Sprint03 Pattern](project_numericseries_sprint03.md) — Catalog + batch ingestion + SVG sparkline + Chronos skill; IMPLEMENTATION_IN_PROGRESS; test-runner blocked on Bash; container rebuild required
 - [StorageTracker Sprint01 Pattern](project_storagetracker_sprint01.md) — Household item tracker; SPRINT_COMPLETE; full automated loop; port 8022 (8020 taken by Notifications); tests written but run inside Docker
 
 ## Feedback

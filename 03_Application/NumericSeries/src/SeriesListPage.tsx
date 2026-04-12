@@ -1,59 +1,101 @@
 /**
- * SeriesListPage — list all numeric series with sparkline and latest value.
+ * SeriesListPage — list all numeric series with time-proportional SVG sparkline,
+ * min/max values, and current (latest) value.
  *
  * Custom list component — NOT standard platform TableView.
- * sparkline_values is a JSON-encoded float array; parsed here.
+ * sparkline_points is a JSON-encoded [{v: number, ts: number}] array; parsed here.
+ * ts is Unix epoch milliseconds — used for time-proportional x-axis positioning.
  * Row click navigates to /series/:label_id (detail page).
+ * '+' button navigates to /series/new (creation mode in SeriesDetailPage).
  *
- * Source of truth: Sprint01/20_design/architecture.json internal_flow[2] (list_read)
+ * Sprint03 changes:
+ *   - Replaced recharts InlineSparkline with custom SVG component
+ *   - sparkline_values → sparkline_points (time-proportional coordinates)
+ *   - 4-column row layout: label | sparkline | min/max | current value
+ *   - min_value and max_value columns added
+ *
+ * Source of truth: Sprint03_Chronos&UXpt2/10_architecture.json §internal_flow[7,8]
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-} from 'recharts';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
-import CreateForm from '@platform-ui/components/CreateForm';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
-import type { Dataset, FormField, ApiError } from '@platform-ui/api/types';
+import type { Dataset } from '@platform-ui/api/types';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+
+interface SparkPoint {
+  v: number;
+  ts: number; // Unix epoch milliseconds
+}
 
 interface SeriesRow {
   id: string;
   label_name: string;
   latest_value: number | null;
-  sparkline_values: string; // JSON-encoded float array
+  sparkline_points: string; // JSON-encoded SparkPoint[]
+  min_value: number | null;
+  max_value: number | null;
 }
 
-// ── Form fields ────────────────────────────────────────────────────────────────
+// ── Time-proportional SVG sparkline ───────────────────────────────────────────
+// Architecture: Sprint03/10_architecture.json §internal_flow[7] (list_row_layout)
+// Edge cases: 0 points → null; 1 point → centered dot; identical values → midline;
+//             identical timestamps → centered x.
 
-const CREATE_FIELDS: FormField[] = [
-  { key: 'label_name', label: 'Series name', type: 'string', required: true, placeholder: 'e.g. Weight' },
-];
+const SPARK_W = 100;
+const SPARK_H = 28;
 
-// ── Inline sparkline ───────────────────────────────────────────────────────────
+function InlineSparkline({
+  points,
+  minVal,
+  maxVal,
+}: {
+  points: SparkPoint[];
+  minVal: number | null;
+  maxVal: number | null;
+}) {
+  if (points.length === 0) {
+    return (
+      <span style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.8rem' }}>
+        —
+      </span>
+    );
+  }
 
-function InlineSparkline({ values }: { values: number[] }) {
-  if (values.length === 0) return <span style={{ color: '#555', fontSize: '0.8rem' }}>—</span>;
-  const data = values.map((v, i) => ({ i, v }));
+  // Single point — render a centered dot
+  if (points.length === 1) {
+    return (
+      <svg width="100%" height={SPARK_H} viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none">
+        <circle cx={SPARK_W / 2} cy={SPARK_H / 2} r={2} style={{ fill: 'var(--md-sys-color-primary)' }} />
+      </svg>
+    );
+  }
+
+  const tsMin = Math.min(...points.map(p => p.ts));
+  const tsMax = Math.max(...points.map(p => p.ts));
+  const tsRange = tsMax - tsMin;
+
+  const effectiveMin = minVal ?? Math.min(...points.map(p => p.v));
+  const effectiveMax = maxVal ?? Math.max(...points.map(p => p.v));
+  const valRange = effectiveMax - effectiveMin;
+
+  const toX = (ts: number): number =>
+    tsRange === 0 ? SPARK_W / 2 : (ts - tsMin) / tsRange * SPARK_W;
+
+  const toY = (v: number): number =>
+    valRange === 0 ? SPARK_H / 2 : (1 - (v - effectiveMin) / valRange) * SPARK_H;
+
+  const pathD = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${toX(p.ts).toFixed(2)} ${toY(p.v).toFixed(2)}`)
+    .join(' ');
+
   return (
-    <ResponsiveContainer width="100%" height={28}>
-      <LineChart data={data}>
-        <Line
-          type="monotone"
-          dataKey="v"
-          dot={false}
-          stroke="#7c6af5"
-          strokeWidth={1.5}
-          isAnimationActive={false}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <svg width="100%" height={SPARK_H} viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none">
+      <path d={pathD} style={{ fill: 'none', stroke: 'var(--md-sys-color-primary)' }} strokeWidth="1.5" />
+    </svg>
   );
 }
 
@@ -80,34 +122,37 @@ export default function SeriesListPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleCreate(values: Record<string, unknown>): Promise<ApiError | void> {
-    const result = await apiFetch<{ label_id: string; label_name: string }>(
-      '/series',
-      { method: 'POST', body: JSON.stringify({ label_name: values['label_name'] }) },
-    );
-    if (isApiError(result)) {
-      return result;
-    }
-    load();
-  }
-
-  function parseSparkline(raw: string): number[] {
-    try { return JSON.parse(raw) as number[]; }
+  function parseSparkPoints(raw: string): SparkPoint[] {
+    try { return JSON.parse(raw) as SparkPoint[]; }
     catch { return []; }
   }
 
-  return (
-    <div style={{ padding: '1rem', maxWidth: '800px' }}>
-      <h2>Numeric Series</h2>
+  function fmtValue(v: number | null): string {
+    if (v === null || v === undefined) return '—';
+    return v.toLocaleString();
+  }
 
-      {/* Create form */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <CreateForm
-          title="Add Series"
-          fields={CREATE_FIELDS}
-          onSubmit={handleCreate}
-          submitLabel="Add Series"
-        />
+  return (
+    <div style={{ padding: '1rem', maxWidth: '900px' }}>
+      {/* Page header with + button */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+        <h2 style={{ margin: 0 }}>Numeric Series</h2>
+        <button
+          onClick={() => navigate('/series/new')}
+          style={{
+            fontSize: '1.4rem',
+            lineHeight: 1,
+            padding: '0.2rem 0.6rem',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            background: 'var(--md-sys-color-primary, #7c6af5)',
+            color: 'var(--md-sys-color-on-primary, #fff)',
+            border: 'none',
+          }}
+          title="Add series"
+        >
+          +
+        </button>
       </div>
 
       {/* List */}
@@ -117,40 +162,55 @@ export default function SeriesListPage() {
       )}
 
       {!loading && !error && rows.length === 0 && (
-        <p style={{ color: '#888' }}>No series yet. Add one above.</p>
+        <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>No series yet. Use + to add one.</p>
       )}
 
       {!loading && !error && rows.map((row) => {
-        const sparkData = parseSparkline(row.sparkline_values);
+        const sparkPoints = parseSparkPoints(row.sparkline_points);
         return (
           <div
             key={row.id}
             onClick={() => navigate(`/series/${row.id}`)}
             style={{
               display: 'grid',
-              gridTemplateColumns: '160px 1fr 80px',
+              gridTemplateColumns: '140px 1fr 70px 80px',
               alignItems: 'center',
               gap: '0.75rem',
               padding: '0.6rem 1rem',
               marginBottom: '0.4rem',
-              background: '#1e1e2e',
-              borderRadius: '6px',
+              background: 'var(--md-sys-color-surface)',
+              borderRadius: '8px',
               cursor: 'pointer',
-              border: '1px solid #2e2e3e',
+              border: '1px solid var(--md-sys-color-outline-variant)',
             }}
           >
-            <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {/* Column 1: label */}
+            <span style={{ fontWeight: 500, color: 'var(--md-sys-color-on-surface)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {row.label_name}
             </span>
 
+            {/* Column 2: sparkline */}
             <div style={{ width: '100%', height: '28px' }}>
-              <InlineSparkline values={sparkData} />
+              <InlineSparkline
+                points={sparkPoints}
+                minVal={row.min_value}
+                maxVal={row.max_value}
+              />
             </div>
 
-            <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: '#a0a0b0' }}>
-              {row.latest_value !== null && row.latest_value !== undefined
-                ? row.latest_value.toLocaleString()
-                : '—'}
+            {/* Column 3: min / max stacked */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.2 }}>
+                {fmtValue(row.max_value)}
+              </span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.2 }}>
+                {fmtValue(row.min_value)}
+              </span>
+            </div>
+
+            {/* Column 4: current value */}
+            <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--md-sys-color-on-surface-variant)' }}>
+              {fmtValue(row.latest_value)}
             </span>
           </div>
         );

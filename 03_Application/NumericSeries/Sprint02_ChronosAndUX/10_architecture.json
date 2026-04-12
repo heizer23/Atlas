@@ -1,0 +1,111 @@
+{
+  "component_name": "numeric_series",
+  "layer": "03_Application",
+  "sprint": "Sprint02_ChronosAndUX",
+  "source_definition": "Sprint02_ChronosAndUX/00_draft.md",
+  "summary": "Three targeted changes: (1) replace inline CreateForm with a '+' button that routes to /series/new, handled by SeriesDetailPage in creation mode; (2) fix list row CSS to use theme tokens; (3) add POST /api/series/by-name/{label_name}/values for Chronos name-based external writes.",
+
+  "classification": {
+    "why_application": "All three changes are application-specific: the UX creation flow, the list row styling matching the app's design system, and the Chronos endpoint which resolves a series by its human-readable domain name.",
+    "non_goals": [
+      "Changes to measurement edit/delete UI",
+      "Changes to the batch read endpoint",
+      "Schema changes",
+      "Duplicate-name resolution for the by-name endpoint (returns 404 if not found)"
+    ]
+  },
+
+  "contracts": {
+    "consumes": [
+      "LabelEngine Postgres shared schema: labels.labels table (case-insensitive name lookup for by-name endpoint)",
+      "02_Platform/packages: platform_contracts (Dataset, DatasetMeta, ColumnSchema), platform_errorhandling (api_error)",
+      "02_Platform/Postgres: shared Postgres instance"
+    ],
+    "provides": [
+      "Existing Sprint01 contract — unchanged",
+      "POST /api/series/by-name/{label_name}/values — write measurements by human-readable series name (Chronos integration)"
+    ],
+    "invariants": [
+      "All Sprint01 invariants remain in force",
+      "Name lookup for by-name endpoint is case-insensitive exact match against labels.labels.name",
+      "If label_name matches no series in numeric_series.series, endpoint returns 404 SERIES_NOT_FOUND",
+      "by-name endpoint reuses ExternalWriteRequest model and identical insert logic as the existing /values endpoint"
+    ],
+    "failure_modes": [
+      "SERIES_NOT_FOUND: label_name does not match any series (404)",
+      "INVALID_VALUE: measurement value is not a finite number (422)",
+      "INVALID_TIMESTAMP: recorded_at cannot be parsed as ISO-8601 (422)"
+    ]
+  },
+
+  "interfaces": {
+    "provides": [
+      "All Sprint01 endpoints — unchanged",
+      "POST /api/series/by-name/{label_name}/values — Chronos name-based write"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/series/by-name/{label_name}/values",
+        "purpose": "Allows Chronos to append measurements using the human-readable series name. Resolves the name to a label_id via a case-insensitive exact match on labels.labels.name joined with numeric_series.series. On match: validates and inserts entries, returns {inserted: N}. On no match: 404 SERIES_NOT_FOUND.",
+        "request_body": "ExternalWriteRequest: {entries: [{value: float, recorded_at: ISO-8601}]}",
+        "response_success": "{inserted: int}",
+        "response_error": "ApiError",
+        "ui_contract": "none — external Chronos integration"
+      }
+    ]
+  },
+
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "by_name_write",
+      "description": "Path param label_name is URL-decoded. Backend executes: SELECT s.label_id FROM numeric_series.series s JOIN labels.labels l ON l.id = s.label_id WHERE lower(l.name) = lower(:label_name). If no row returned, 404 SERIES_NOT_FOUND. If found, validate each entry (value finite, recorded_at ISO-8601). Insert all entries into numeric_series.measurements using the resolved label_id. Return {inserted: N}.",
+      "inputs": ["label_name (path, string)", "entries: [{value, recorded_at}]"],
+      "outputs": ["{inserted: int} | ApiError"]
+    },
+    {
+      "step": 2,
+      "name": "ux_creation_flow",
+      "description": "SeriesListPage: remove CreateForm and its import. Add a '+' button in the page header (top-right). Button click: navigate('/series/new'). SeriesDetailPage: on mount, if label_id === 'new', render creation mode (text input for series name, 'Create' button, 'Back' button, no measurements table, no delete button). On submit: POST /api/series with {label_name}. On success: navigate('/series/' + response.label_id). On error: show inline error.",
+      "inputs": ["label_id param from route"],
+      "outputs": ["creation form rendered | redirect to /series/:label_id"]
+    },
+    {
+      "step": 3,
+      "name": "list_row_styling",
+      "description": "In SeriesListPage, replace hardcoded dark colors with CSS theme tokens: background → var(--md-sys-color-surface), border → 1px solid var(--md-sys-color-outline-variant), border-radius → 8px, label name → color: var(--md-sys-color-on-surface) + fontWeight 500, latest value → color: var(--md-sys-color-on-surface-variant), empty sparkline dash → color: var(--md-sys-color-on-surface-variant). Sparkline stroke keeps #7c6af5.",
+      "inputs": ["existing row render logic"],
+      "outputs": ["updated inline styles on list row divs"]
+    }
+  ],
+
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/LabelEngine", "role": "labels.labels schema read for name resolution"},
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance"},
+      {"component": "02_Platform/packages", "role": "platform_contracts, platform_errorhandling"}
+    ],
+    "internal_optional": [],
+    "external_required": [],
+    "external_optional": [],
+    "forbidden": [
+      "Any Sprint01 forbidden items remain in force",
+      "Do not call LabelEngine HTTP API for the by-name lookup — resolve directly via the shared Postgres schema labels.labels"
+    ]
+  },
+
+  "persistence": {
+    "owns_persistent_state": false,
+    "note": "No schema changes in this sprint. All persistence is unchanged from Sprint01."
+  },
+
+  "deferred_decisions": [],
+
+  "risks": [
+    {
+      "risk": "Route conflict: /api/series/by-name/{label_name}/values and /api/series/{label_id}/values share the /api/series/ prefix. FastAPI evaluates routes in registration order.",
+      "impact": "If by-name route is registered after the label_id route, a literal label_name value of 'by-name' could shadow. Mitigation: register POST /api/series/by-name/{label_name}/values before POST /api/series/{label_id}/values in batch.py, or rely on the distinct path segment 'by-name' being a fixed string that FastAPI will prefer over a dynamic segment when declared first."
+    }
+  ]
+}

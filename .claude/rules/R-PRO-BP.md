@@ -43,7 +43,7 @@ Sprint<N>_<Title>/
 - Design artifacts: always `10_architecture.json` and `10_scaffolding.json` — no component-prefixed variants, no subfolders
 - Schema: `10_schema.sql` if and only if `persistence.owns_persistent_state == true` in architecture.json
 - Design review iterations: first review is always `11_design_review.md`. Each correction round increments by one: `12_design_corrections.md`, `13_design_review.md`, `14_design_corrections.md`, etc. The orchestrator determines the next number by counting existing review/correction files.
-- Test spec: `10_test_spec.md` — written by the designer; required when the component exposes an API, optional otherwise. If absent, the test-runner stage is skipped entirely.
+- Test spec: `10_test_spec.md` — written by the designer; required when the component exposes an API, optional otherwise. If absent, the test-runner stage is skipped entirely. If `10_scaffolding.json` lists any `.tsx` files under `files_changed`, the test spec must include at least one UI scenario (even if execution infrastructure is not yet in place — the scenario documents the expected behavior and serves as the acceptance criterion).
 - Test report: always `50_test_report.md` — produced by the test-runner on each run; overwritten on re-runs within the same sprint.
 - Sprint log: always `99_sprint_log.md` — single file combining machine-readable state and the transition log
 
@@ -290,6 +290,7 @@ Rules:
 - Each scenario must be independently testable.
 - Do not include implementation detail (function names, SQL). Scenarios describe observable behavior.
 - The implementer maps each scenario to concrete test functions; the scenario names are the traceability link.
+- If `10_scaffolding.json` lists any `.tsx` files under `files_changed`, the spec must include at least one UI scenario. Label it with `[UI]` in the scenario name (e.g. `### [UI] List row shows sparkline`). UI scenarios describe what a user sees or does — not React internals. If UI test execution infrastructure is not yet available, mark the scenario `[UI — manual]` and the test report must note it as untested rather than passing.
 
 ---
 
@@ -324,6 +325,18 @@ Rules:
 - Verdict `TESTS_FAILED_DESIGN_ISSUE` requires the failure analysis to explicitly name the design artifact (e.g., `10_architecture.json §interfaces.outputs`) that is wrong. If that specificity cannot be reached, use `TESTS_FAILED_FIXABLE`.
 - The test-runner runs tests inside the `-test` container: `docker exec atlas-<component>-test pytest tests/ -v`. The test container has `ATLAS_PG_DB=atlas_test` set — no override needed.
 - Fixtures are loaded by the conftest before each test. The test runner does not manage fixture loading.
+
+---
+
+### `tests/ui/*.spec.ts`
+
+Written by the implementer for `[UI]` scenarios. Not a sprint artifact (lives in the component, not the sprint folder).
+
+- Lives at `<component_root>/tests/ui/`
+- Each file covers one or more `[UI]` scenarios from `10_test_spec.md`
+- Tests run against `http://atlas-shell` via the shared `atlas-playwright` container
+- Playwright config: `02_Platform/Atlas_Shell/playwright.config.ts`
+- `[UI — manual]` scenarios have no `.spec.ts` file — absence is expected and not treated as `MISSING`
 
 ---
 
@@ -391,6 +404,7 @@ The evidence store is observational. Entries do not block the current run and do
 Who may append:
 - Any reviewer or auditor agent — after producing the immediate artifact (Major/Critical findings only)
 - Implementers — when they compensated for a design gap or made a non-trivial deviation (run_type: `implementer_note`)
+- Sprint orchestrators — when an agent execution fails or requires human intervention due to tooling or environment constraints (run_type: `execution_issue`)
 
 Schema for each entry — append as a YAML block:
 
@@ -399,7 +413,7 @@ Schema for each entry — append as a YAML block:
 entry_id: EVD-YYYY-MM-DD-NNN
 date: YYYY-MM-DD
 source_agent: <agent name>
-run_type: design_review | audit | implementer_note
+run_type: design_review | audit | implementer_note | execution_issue
 component: <component name>
 sprint: <sprint name or "n/a">
 pattern_name: <short label — reuse across entries for the same pattern>

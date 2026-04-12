@@ -37,6 +37,58 @@ def batch_read(body: BatchReadRequest):
     return {"series": series}
 
 
+# ── Chronos write by name ──────────────────────────────────────────────────────
+
+@router.post("/series/by-name/{label_name}/values")
+def chronos_write_by_name(label_name: str, body: ExternalWriteRequest):
+    """
+    Chronos name-based write endpoint: append measurements using the
+    human-readable series name. Resolves label_name to label_id via a
+    case-insensitive exact match on labels.labels.name joined with
+    numeric_series.series.
+
+    Registered before /{label_id}/values to prevent FastAPI path shadowing.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.label_id
+                FROM numeric_series.series s
+                JOIN labels.labels l ON l.id = s.label_id
+                WHERE lower(l.name) = lower(%s)
+                """,
+                (label_name,),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            return api_error("SERIES_NOT_FOUND", f"Series '{label_name}' not found.", status=404)
+
+        label_id = row["label_id"]
+
+        inserted = 0
+        for entry in body.entries:
+            try:
+                _svc.validate_measurement(entry.value, entry.recorded_at)
+            except NumericSeriesError as exc:
+                return api_error(exc.code, exc.message, status=exc.status)
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO numeric_series.measurements (label_id, value, recorded_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (label_id, entry.value, entry.recorded_at),
+                )
+            inserted += 1
+
+        conn.commit()
+
+    return JSONResponse(content={"inserted": inserted})
+
+
 # ── External write ─────────────────────────────────────────────────────────────
 
 @router.post("/series/{label_id}/values")

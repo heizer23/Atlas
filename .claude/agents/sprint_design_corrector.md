@@ -187,3 +187,5 @@ files_written: <comma-separated list of file paths relative to repo root>
 ```
 
 List every file you read and every file you created or modified. Keep paths relative to the repo root.
+
+**Do not write this block into any artifact file.** It belongs in your response text only — the orchestrator reads it from there and records it in `99_sprint_log.md`.

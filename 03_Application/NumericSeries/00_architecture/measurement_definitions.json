@@ -1,0 +1,82 @@
+[
+  {
+    "key": "weight",
+    "label": "Weight",
+    "unit": "kg",
+    "value_type": "decimal",
+    "description": "Body weight in kilograms.",
+    "aliases": ["body weight", "mass"]
+  },
+  {
+    "key": "body_fat_pct",
+    "label": "Body Fat",
+    "unit": "%",
+    "value_type": "decimal",
+    "description": "Body fat percentage.",
+    "aliases": ["body fat", "fat percentage", "fat %"]
+  },
+  {
+    "key": "body_water_pct",
+    "label": "Body Water",
+    "unit": "%",
+    "value_type": "decimal",
+    "description": "Body water percentage.",
+    "aliases": ["body water", "water percentage", "hydration"]
+  },
+  {
+    "key": "bmi",
+    "label": "BMI",
+    "unit": null,
+    "value_type": "decimal",
+    "description": "Body mass index.",
+    "aliases": ["body mass index"]
+  },
+  {
+    "key": "steps",
+    "label": "Steps",
+    "unit": "steps",
+    "value_type": "integer",
+    "description": "Daily step count.",
+    "aliases": ["daily steps", "step count", "steps per day"]
+  },
+  {
+    "key": "sleep_hours",
+    "label": "Sleep",
+    "unit": "h",
+    "value_type": "decimal",
+    "description": "Sleep duration in hours.",
+    "aliases": ["sleep hours", "sleep duration", "hours slept"]
+  },
+  {
+    "key": "systolic_bp",
+    "label": "Systolic BP",
+    "unit": "mmHg",
+    "value_type": "integer",
+    "description": "Systolic blood pressure.",
+    "aliases": ["systolic", "systolic blood pressure", "bp systolic"]
+  },
+  {
+    "key": "diastolic_bp",
+    "label": "Diastolic BP",
+    "unit": "mmHg",
+    "value_type": "integer",
+    "description": "Diastolic blood pressure.",
+    "aliases": ["diastolic", "diastolic blood pressure", "bp diastolic"]
+  },
+  {
+    "key": "heart_rate",
+    "label": "Heart Rate",
+    "unit": "bpm",
+    "value_type": "integer",
+    "description": "Heart rate in beats per minute.",
+    "aliases": ["heart rate", "pulse", "bpm"]
+  },
+  {
+    "key": "calories_kcal",
+    "label": "Calories",
+    "unit": "kcal",
+    "value_type": "integer",
+    "description": "Caloric intake in kilocalories.",
+    "aliases": ["calories", "kcal", "caloric intake", "energy intake"]
+  }
+]

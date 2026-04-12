@@ -54,20 +54,26 @@ class NumericSeriesService:
 
     # ── Individual series helpers ─────────────────────────────────────────────
 
-    def get_sparkline_values(
+    def get_sparkline_points(
         self,
         conn: psycopg2.extensions.connection,
         label_id: str,
         limit: int = SPARKLINE_LIMIT,
-    ) -> list[float]:
+    ) -> list[dict]:
         """
-        Return the N most recent measurement values ordered by recorded_at ASC
-        (for sparkline left-to-right rendering).
+        Return the N most recent measurements as [{v: float, ts: int}] ordered by
+        recorded_at ASC. ts is Unix epoch milliseconds — enables time-proportional
+        x-axis rendering on the frontend.
+
+        Sprint03: replaces get_sparkline_values().
+        Architecture: Sprint03/10_architecture.json §internal_flow[3] (sparkline_data)
         """
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT value FROM (
+                SELECT value,
+                       EXTRACT(EPOCH FROM recorded_at)::bigint * 1000 AS ts_ms
+                FROM (
                     SELECT value, recorded_at
                     FROM numeric_series.measurements
                     WHERE label_id = %s
@@ -79,7 +85,33 @@ class NumericSeriesService:
                 (label_id, limit),
             )
             rows = cur.fetchall()
-        return [float(r["value"]) for r in rows]
+        return [{"v": float(r["value"]), "ts": int(r["ts_ms"])} for r in rows]
+
+    def get_series_stats(
+        self,
+        conn: psycopg2.extensions.connection,
+        label_id: str,
+    ) -> dict:
+        """
+        Return min and max values over ALL measurements for label_id.
+        Returns {min_value: float|None, max_value: float|None}.
+
+        Sprint03: supports 4-column list row layout.
+        Architecture: Sprint03/10_architecture.json §internal_flow[3] (sparkline_data)
+        """
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT MIN(value) AS min_val, MAX(value) AS max_val
+                FROM numeric_series.measurements
+                WHERE label_id = %s
+                """,
+                (label_id,),
+            )
+            row = cur.fetchone()
+        if not row or row["min_val"] is None:
+            return {"min_value": None, "max_value": None}
+        return {"min_value": float(row["min_val"]), "max_value": float(row["max_val"])}
 
     def get_latest_value(
         self,
@@ -138,13 +170,16 @@ class NumericSeriesService:
 
         result = []
         for row in rows:
-            sparkline = self.get_sparkline_values(conn, row["id"])
+            sparkline_points = self.get_sparkline_points(conn, row["id"])
+            stats = self.get_series_stats(conn, row["id"])
             result.append(
                 {
                     "id": row["id"],
                     "label_name": row["label_name"],
                     "latest_value": float(row["latest_value"]) if row["latest_value"] is not None else None,
-                    "sparkline_values": json.dumps(sparkline),
+                    "sparkline_points": json.dumps(sparkline_points),
+                    "min_value": stats["min_value"],
+                    "max_value": stats["max_value"],
                 }
             )
         return result

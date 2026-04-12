@@ -42,10 +42,12 @@ def _dataset_response(ds: Dataset) -> JSONResponse:
 # ── Column schemas ─────────────────────────────────────────────────────────────
 
 LIST_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="id",               label="ID",              type="string",  sortable=False, filterable=False, detail_visible=False),
-    ColumnSchema(key="label_name",       label="Label",           type="string",  sortable=True,  filterable=False),
-    ColumnSchema(key="latest_value",     label="Latest Value",    type="number",  sortable=True,  filterable=False),
-    ColumnSchema(key="sparkline_values", label="Sparkline",       type="string",  sortable=False, filterable=False),
+    ColumnSchema(key="id",               label="ID",           type="string", sortable=False, filterable=False, detail_visible=False),
+    ColumnSchema(key="label_name",       label="Label",        type="string", sortable=True,  filterable=False),
+    ColumnSchema(key="sparkline_points", label="Sparkline",    type="string", sortable=False, filterable=False),
+    ColumnSchema(key="min_value",        label="Min",          type="number", sortable=False, filterable=False),
+    ColumnSchema(key="max_value",        label="Max",          type="number", sortable=False, filterable=False),
+    ColumnSchema(key="latest_value",     label="Current",      type="number", sortable=True,  filterable=False),
 ]
 
 DETAIL_SCHEMA: list[ColumnSchema] = [

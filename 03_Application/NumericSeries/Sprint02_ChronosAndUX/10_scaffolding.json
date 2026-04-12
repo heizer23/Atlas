@@ -1,0 +1,83 @@
+{
+  "component_name": "numeric_series",
+  "sprint": "Sprint02_ChronosAndUX",
+  "note": "All Sprint01 files are already implemented. This sprint makes targeted modifications to three existing files and produces one new test file.",
+
+  "files_modified": [
+    {
+      "path": "03_Application/NumericSeries/backend/routers/batch.py",
+      "change": "Add POST /api/series/by-name/{label_name}/values endpoint. Register it before the existing POST /api/series/{label_id}/values route to avoid path shadowing. Reuses ExternalWriteRequest model and _svc.validate_measurement / direct INSERT pattern from existing external_write function.",
+      "new_function": "chronos_write_by_name(label_name: str, body: ExternalWriteRequest)",
+      "logic_summary": [
+        "SELECT s.label_id FROM numeric_series.series s JOIN labels.labels l ON l.id = s.label_id WHERE lower(l.name) = lower(%s)",
+        "If no row: return api_error('SERIES_NOT_FOUND', ..., status=404)",
+        "Validate each entry via _svc.validate_measurement",
+        "INSERT each entry INTO numeric_series.measurements",
+        "conn.commit()",
+        "Return JSONResponse({'inserted': N})"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/src/SeriesListPage.tsx",
+      "changes": [
+        "Remove CreateForm import and CREATE_FIELDS constant",
+        "Remove handleCreate function",
+        "Replace <div style={{marginBottom:'1.5rem'}}><CreateForm .../></div> block with a '+' button in the page header",
+        "'+' button: positioned top-right of the header row, onClick={() => navigate('/series/new')}",
+        "Fix row div styles: replace hardcoded dark values with CSS tokens as specified in architecture.json step 3",
+        "Update InlineSparkline empty dash: replace color:'#555' with color:'var(--md-sys-color-on-surface-variant)'"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/src/SeriesDetailPage.tsx",
+      "changes": [
+        "Import CreateSeriesRequest is not needed — use apiFetch directly",
+        "After const { label_id } = useParams: add const isNew = label_id === 'new'",
+        "Add creation mode state: seriesName (string), creating (bool), createError (string|null)",
+        "In useEffect load: guard with if (isNew) return; — skip fetching for creation mode",
+        "Add handleCreate async function: POST /api/series with {label_name: seriesName}, on success navigate('/series/' + result.label_id), on error set createError",
+        "In render: if (isNew) return creation mode JSX (back button to /series, h2 'New Series', single text input for series name, Create button, inline error display). Else render existing measurement view unchanged."
+      ]
+    }
+  ],
+
+  "files_created": [
+    {
+      "path": "03_Application/NumericSeries/tests/test_chronos_write.py",
+      "purpose": "Tests for the new POST /api/series/by-name/{label_name}/values endpoint",
+      "note": "Uses the existing test infrastructure pattern. conftest.py must be created alongside with fixture loading. See 10_test_spec.md for scenarios."
+    },
+    {
+      "path": "03_Application/NumericSeries/tests/conftest.py",
+      "purpose": "pytest fixtures: TestClient setup, DB fixture loading/teardown",
+      "note": "Follow StorageTracker/NumericSeries pattern: load fixtures.sql before each test, truncate after."
+    },
+    {
+      "path": "03_Application/NumericSeries/tests/fixtures.sql",
+      "purpose": "Seed data for test scenarios",
+      "content_outline": [
+        "INSERT a label into labels.labels with id='fix-label-weight', name='Weight'",
+        "INSERT a series record into numeric_series.series with label_id='fix-label-weight'",
+        "INSERT a label into labels.labels with id='fix-label-steps', name='Daily Steps' (no series record — for 404 test)"
+      ]
+    }
+  ],
+
+  "files_unchanged": [
+    "03_Application/NumericSeries/backend/models.py — ExternalWriteRequest already exists",
+    "03_Application/NumericSeries/backend/service.py — validate_measurement already exists",
+    "03_Application/NumericSeries/backend/routers/series.py — no changes",
+    "03_Application/NumericSeries/backend/main.py — router already registered",
+    "03_Application/NumericSeries/backend/database.py — unchanged",
+    "03_Application/NumericSeries/backend/label_client.py — unchanged",
+    "03_Application/NumericSeries/src/ShellEntry.tsx — routes unchanged (/series/:label_id already covers /series/new)",
+    "03_Application/NumericSeries/src/shellConfig.ts — unchanged",
+    "03_Application/NumericSeries/compose.yml — unchanged",
+    "03_Application/NumericSeries/Dockerfile — unchanged",
+    "03_Application/NumericSeries/pyproject.toml — unchanged"
+  ],
+
+  "route_ordering_note": "In batch.py, the new route POST /api/series/by-name/{label_name}/values must be declared BEFORE POST /api/series/{label_id}/values. This ensures FastAPI matches the literal 'by-name' segment first, preventing ambiguity.",
+
+  "frontend_routing_note": "ShellEntry.tsx route <Route path=':label_id' element={<SeriesDetailPage />} /> already matches 'new' as a label_id value. No route changes needed. SeriesDetailPage detects isNew by checking label_id === 'new' at runtime."
+}

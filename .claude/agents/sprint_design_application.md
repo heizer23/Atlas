@@ -292,6 +292,7 @@ Rules:
 - Scenarios describe observable behavior only — no function names, no SQL, no implementation detail.
 - The implementer maps each scenario to a concrete test function. The scenario name is the traceability link.
 - Do not write the test code itself. The test runner agent runs the tests; the implementer writes them.
+- If `10_scaffolding.json` lists any `.tsx` files under `files_changed`, include at least one UI scenario. Prefix its name with `[UI]` if automated UI testing is in place, or `[UI — manual]` if not. UI scenarios describe what a user sees or interacts with — not React component internals.
 
 Quality Rules — Self-Verify Before Output
 
@@ -367,3 +368,5 @@ files_written: <comma-separated list of file paths relative to repo root>
 ```
 
 List every file you read and every file you created or modified. Keep paths relative to the repo root (e.g. `03_Application/StorageTracker/Sprint02_ShoppingTasks/00_draft.md`).
+
+**Do not write this block into any artifact file.** It belongs in your response text only — the orchestrator reads it from there and records it in `99_sprint_log.md`.

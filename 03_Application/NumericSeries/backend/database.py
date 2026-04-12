@@ -44,7 +44,7 @@ def init_pool() -> None:
 
 def init_schema() -> None:
     """Execute schema.sql — idempotent (all statements use IF NOT EXISTS)."""
-    schema_path = Path(__file__).resolve().parents[2] / "Sprint01" / "20_Data" / "schema.sql"
+    schema_path = Path(__file__).resolve().parents[1] / "Sprint01" / "20_Data" / "schema.sql"
     sql = schema_path.read_text()
     with get_db() as conn:
         with conn.cursor() as cur:

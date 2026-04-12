@@ -1,0 +1,225 @@
+{
+  "component_name": "numeric_series",
+  "sprint_note": "Adds catalog router, batch ingestion, Chronos skill, sparkline SVG redesign, list row layout, and UI token fixes.",
+  "target_root": "03_Application/NumericSeries",
+  "directories": [
+    "03_Application/NumericSeries",
+    "03_Application/NumericSeries/backend",
+    "03_Application/NumericSeries/backend/routers",
+    "03_Application/NumericSeries/src",
+    "03_Application/NumericSeries/tests",
+    "[NEW] 01_System/Chronos/skills"
+  ],
+  "files": [
+    {
+      "path": "03_Application/NumericSeries/00_architecture/measurement_definitions.json",
+      "change": "new",
+      "stub_kind": "json_data",
+      "role": "Static catalog of valid measurement types. Source of truth for batch key validation and Chronos label mapping. Loaded at app startup.",
+      "content_outline": [
+        "Array of definition objects: [{key, label, unit, value_type, description, aliases}]",
+        "Initial entries: weight (kg, decimal), body_fat_pct (%, decimal), body_water_pct (%, decimal), bmi (null unit, decimal), steps (steps, integer), sleep_hours (h, decimal), systolic_bp (mmHg, integer), diastolic_bp (mmHg, integer), heart_rate (bpm, integer), calories_kcal (kcal, integer)",
+        "key: snake_case canonical identifier — used as label_name in LabelEngine and as API key",
+        "aliases: list of alternative labels Chronos may receive (e.g. 'Weight' for key 'weight')"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/routers/catalog.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Catalog and batch ingestion router. Hosts GET /api/measurement-definitions and POST /api/measurements/batch.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "CATALOG_PATH",
+          "pattern": "constant",
+          "purpose": "Absolute path to measurement_definitions.json resolved relative to this file's location."
+        },
+        {
+          "kind": "constant",
+          "name": "CATALOG",
+          "pattern": "constant",
+          "purpose": "In-memory dict keyed by measurement key, loaded once at module import time from CATALOG_PATH."
+        },
+        {
+          "kind": "function",
+          "name": "list_measurement_definitions",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "list_measurement_definitions",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSONResponse",
+              "purpose": "GET /api/measurement-definitions — return all catalog entries as a Dataset ordered by label ASC."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "batch_ingest",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "batch_ingest",
+              "visibility": "public",
+              "args": ["body: BatchMeasurementRequest"],
+              "returns": "JSONResponse",
+              "purpose": "POST /api/measurements/batch — validate all keys and values, resolve keys to label_ids via SQL join, insert all measurements in a single transaction, return 201 {inserted: N}."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/models.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Pydantic request and response models. Adds BatchMeasurementEntry and BatchMeasurementRequest.",
+      "changes": [
+        "[NEW] BatchMeasurementEntry(BaseModel): key: str, value: float",
+        "[NEW] BatchMeasurementRequest(BaseModel): recorded_at: str (ISO-8601, required), measurements: list[BatchMeasurementEntry]"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/service.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Business logic service. Extends list_series_rows to return sparkline_points, min_value, max_value.",
+      "changes": [
+        "[CHANGED] list_series_rows(): add sparkline_points (JSON array of {v: float, ts: int} — Unix epoch ms), min_value (float|null), max_value (float|null) per row. sparkline_points uses 20 most recent measurements ordered by recorded_at ASC. min/max computed over ALL measurements for the series.",
+        "[CHANGED] get_sparkline_values() is replaced by get_sparkline_points() returning list[dict] with keys v and ts. ts is extracted as: int(recorded_at.timestamp() * 1000) where recorded_at is a datetime object.",
+        "[NEW] get_series_stats(conn, label_id) -> dict: returns {min_value: float|null, max_value: float|null} from SELECT MIN(value), MAX(value) FROM numeric_series.measurements WHERE label_id = %s"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/routers/series.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Series and measurement CRUD router. LIST_SCHEMA updated to replace sparkline_values with sparkline_points and add min_value, max_value.",
+      "changes": [
+        "[CHANGED] LIST_SCHEMA: remove ColumnSchema(key='sparkline_values', ...); add ColumnSchema(key='sparkline_points', label='Sparkline', type='string', sortable=False, filterable=False); add ColumnSchema(key='min_value', label='Min', type='number', sortable=False, filterable=False); add ColumnSchema(key='max_value', label='Max', type='number', sortable=False, filterable=False)",
+        "All endpoint handlers in series.py are unchanged. Only the LIST_SCHEMA constant changes."
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/backend/main.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "FastAPI app entry point. Register catalog router.",
+      "changes": [
+        "[NEW] from backend.routers.catalog import router as catalog_router",
+        "[NEW] app.include_router(catalog_router, prefix='/api') — registered before existing series and batch routers"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/src/SeriesListPage.tsx",
+      "change": "changed",
+      "stub_kind": "tsx_module",
+      "role": "Series list page. Redesigned sparkline and 4-column row layout.",
+      "changes": [
+        "[REMOVED] recharts import (LineChart, Line, ResponsiveContainer)",
+        "[CHANGED] SeriesRow interface: replace sparkline_values: string with sparkline_points: string (JSON of [{v,ts}]); add min_value: number|null, max_value: number|null",
+        "[CHANGED] InlineSparkline: rewrite as plain SVG component. Props: {points: {v:number,ts:number}[], minVal: number|null, maxVal: number|null}. SVG dimensions: width 100%, height 28px. Time-proportional x: x = (ts - tsMin)/(tsMax - tsMin) * width. Normalized y: y = (1 - (v - minVal)/(maxVal - minVal)) * height. Edge cases: 0 points → render null; 1 point → render single circle cx=50% cy=14; identical values (min==max) → y = 14 (midline); identical timestamps (tsMax==tsMin) → x = 50%.",
+        "[CHANGED] Row div grid from '160px 1fr 80px' to '140px 1fr 70px 80px'. Columns: label | sparkline | min/max | latest_value.",
+        "[NEW] Min/max column: two spans stacked vertically (display:flex, flexDirection:column, alignItems:flex-end). Top span: max_value or '—'. Bottom span: min_value or '—'. Both use color:var(--md-sys-color-on-surface-variant) fontSize:0.75rem.",
+        "[CHANGED] InlineSparkline call: pass points={sparkData} minVal={row.min_value} maxVal={row.max_value} where sparkData = JSON.parse(row.sparkline_points)."
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/src/SeriesDetailPage.tsx",
+      "change": "changed",
+      "stub_kind": "tsx_module",
+      "role": "Series detail page. Fixes input styling, timestamp display, and date/time input split.",
+      "changes": [
+        "[CHANGED] Add measurement form: replace single datetime-local input with two inputs: type=date (addDate state) + type=time (addTime state). On submit: combine as localStr=addDate+'T'+addTime+':00'; compute browser UTC offset string (e.g. '+02:00') using getTimezoneOffset(); send recorded_at = localStr + offsetStr. Both inputs use theme token styles.",
+        "[CHANGED] Edit measurement form: replace single datetime-local input with two inputs (editDate, editTime). On startEdit: editDate = row.recorded_at.slice(0,10), editTime = row.recorded_at.slice(11,16). On submit: same timezone-aware combination as add form.",
+        "[CHANGED] All input inline styles: remove hardcoded hex (#121220, #444, #fff). Replace with: background:'var(--md-sys-color-surface)', border:'1px solid var(--md-sys-color-outline-variant)', color:'var(--md-sys-color-on-surface)', borderRadius:'4px', padding:'0.4rem'.",
+        "[CHANGED] Timestamp display: format recorded_at with new function formatTimestamp(raw: string): string. Uses new Date(raw).toLocaleString(undefined, {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}). Apply in table td for recorded_at column.",
+        "[CHANGED] Table borders: replace hardcoded #2e2e3e / #1e1e2e with var(--md-sys-color-outline-variant).",
+        "[CHANGED] Empty state text color: replace hardcoded #888 with var(--md-sys-color-on-surface-variant).",
+        "[CHANGED] Measurements heading subtitle: change 'Series ID: {label_id}' paragraph to use var(--md-sys-color-on-surface-variant) for color (was hardcoded #888)."
+      ]
+    },
+    {
+      "path": "01_System/Chronos/skills/numeric_series.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Chronos skill adapter for NumericSeries. Thin mapper from label/alias to catalog key; calls POST /api/measurements/batch.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "submit_measurements",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "submit_measurements",
+              "visibility": "public",
+              "args": [
+                "measurements: list[dict]",
+                "recorded_at: str | None = None"
+              ],
+              "returns": "dict",
+              "purpose": "Map each {label, value} entry to a catalog key via case-insensitive match on key, label, and aliases. Fail with CHRONOS_UNMAPPED if not found. Fail with CHRONOS_AMBIGUOUS if multiple matches. Use current UTC ISO-8601 if recorded_at is None. Call POST /api/measurements/batch. Return response or raise on error."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "load_catalog",
+          "pattern": "factory",
+          "methods": [
+            {
+              "name": "load_catalog",
+              "visibility": "public",
+              "args": [],
+              "returns": "list[dict]",
+              "purpose": "Fetch GET /api/measurement-definitions from NUMERIC_SERIES_URL env var and return the rows list. Called once per skill invocation or cached."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_resolve_key",
+          "visibility": "private",
+          "args": ["label: str", "catalog: list[dict]"],
+          "returns": "str",
+          "purpose": "Case-insensitive exact match of label against each catalog entry's key, label, and aliases fields. Returns matched key. Raises ChronosUnmappedError if no match. Raises ChronosAmbiguousError if multiple matches."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/tests/test_catalog.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Tests for GET /api/measurement-definitions and POST /api/measurements/batch endpoints.",
+      "test_scenarios": [
+        "test_catalog_returns_all_definitions — GET /api/measurement-definitions returns Dataset with all catalog entries",
+        "test_batch_single_measurement — POST /api/measurements/batch with one entry; 201 {inserted:1}",
+        "test_batch_multiple_measurements — POST /api/measurements/batch with two entries; 201 {inserted:2}; both rows in DB",
+        "test_batch_unknown_key — POST /api/measurements/batch with unknown key; 422 UNKNOWN_KEY",
+        "test_batch_missing_recorded_at — POST /api/measurements/batch body without recorded_at; 422",
+        "test_batch_invalid_value — POST /api/measurements/batch with NaN/infinite value; 422 INVALID_VALUE",
+        "test_batch_atomicity — POST /api/measurements/batch; first entry valid, second has unknown key; 422; no rows inserted",
+        "test_batch_series_not_found — POST with valid catalog key but no series row for that key; 422 SERIES_NOT_FOUND",
+        "test_sparkline_points_format — GET /api/series returns sparkline_points as JSON array of {v,ts} with ts as integer"
+      ]
+    },
+    {
+      "path": "03_Application/NumericSeries/tests/fixtures.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Test fixtures. Extended to support catalog endpoint and batch tests.",
+      "changes": [
+        "Retain existing fixtures: fix-label-weight (labels.labels), fix-label-steps (labels.labels, no series), fix-label-weight series (numeric_series.series)",
+        "[NEW] Ensure fix-label-weight label_name = 'weight' (must match catalog key for batch tests)",
+        "[NEW] INSERT measurement for fix-label-weight to support sparkline_points test: value=80.5, recorded_at='2026-04-01T08:00:00Z'",
+        "[NEW] INSERT second measurement for fix-label-weight: value=79.8, recorded_at='2026-04-05T08:00:00Z'",
+        "[CHANGED] fix-label-steps name must remain 'Daily Steps' (does not match any catalog key — used for 404/not-found tests; rename if needed for SERIES_NOT_FOUND test to a valid catalog key like 'steps' but no series row)"
+      ]
+    }
+  ]
+}

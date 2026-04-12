@@ -53,7 +53,7 @@ Atlas runs a persistent test stack that mirrors prod. Every component has a `-te
 
 ---
 
-# Step 2 — Run the tests
+# Step 2 — Run backend tests
 
 The test command for all Python/FastAPI components is:
 
@@ -68,15 +68,52 @@ Capture the full stdout/stderr output. Do not truncate.
 
 ---
 
+# Step 2b — Run UI tests (if present)
+
+After backend tests, check whether the component has a `tests/ui/` directory:
+
+```bash
+ls <component_root>/tests/ui/ 2>/dev/null
+```
+
+If the directory exists and contains `.spec.ts` files, run Playwright:
+
+1. Verify `atlas-playwright` is running:
+   ```bash
+   docker ps --filter name=atlas-playwright --format '{{.Names}}'
+   ```
+   If not running, start it:
+   ```bash
+   docker compose -f 02_Platform/Atlas_Shell/compose.yml up -d playwright
+   ```
+
+2. Run the UI tests (path is relative to `/repo` which is the repo root mounted in the container):
+   ```bash
+   docker exec atlas-playwright npx playwright test <component_path>/tests/ui/ --config=02_Platform/Atlas_Shell/playwright.config.ts --reporter=list
+   ```
+   Where `<component_path>` is the component's path relative to the repo root (e.g. `03_Application/NumericSeries`).
+
+3. Capture full stdout/stderr. Do not truncate.
+
+If `tests/ui/` does not exist, skip this step entirely. Do not treat absence as a failure.
+
+---
+
 # Step 3 — Map results to spec scenarios
 
-Read `10_test_spec.md`. For each scenario, determine:
-- whether a test function in the suite covers it (match by scenario name or obvious semantic correspondence)
-- whether that test passed or failed
+Read `10_test_spec.md`. For each scenario, determine its type and status:
 
-If a scenario has no corresponding test:
-- mark it as `MISSING` in the results table
-- treat it as a failure for verdict purposes (the implementer did not write the test)
+**Backend scenarios** (no `[UI]` prefix):
+- Find the corresponding pytest function (match by scenario name or semantic correspondence)
+- Status: `PASS`, `FAIL`, or `MISSING` (no test written — treat as failure)
+
+**`[UI]` scenarios** (automated):
+- Find the corresponding `.spec.ts` test in `tests/ui/`
+- Status: `PASS`, `FAIL`, or `MISSING` (no `.spec.ts` — treat as failure)
+
+**`[UI — manual]` scenarios**:
+- Status: always `MANUAL` — do not treat as a failure
+- Note in the report that these require human verification
 
 ---
 
@@ -124,21 +161,21 @@ Use exactly this format:
 
 ## Results
 
-| Scenario | Test function | Status | Failure reason |
-|----------|--------------|--------|----------------|
-| <scenario name> | <test_name or MISSING> | PASS / FAIL / MISSING | <reason or —> |
+| Scenario | Test | Type | Status | Failure reason |
+|----------|------|------|--------|----------------|
+| <scenario name> | <test name or MISSING> | backend / UI / manual | PASS / FAIL / MISSING / MANUAL | <reason or —> |
 
 ## Test output
 
 ```
-<relevant excerpt from test runner stdout/stderr — trim noise, keep failures>
+<relevant excerpt — backend pytest output first, then Playwright output if run; trim noise, keep failures>
 ```
 
 ## Failure Analysis
 
-<If TESTS_PASSING: "All scenarios passed.">
+<If TESTS_PASSING: "All scenarios passed." Add a note for any MANUAL scenarios listing them explicitly.>
 <If TESTS_FAILED_FIXABLE: describe each implementation error concisely. Do not reference design artifacts.>
-<If TESTS_FAILED_DESIGN_ISSUE: for each design-issue failure, name the exact artifact and field. Example: "10_architecture.json §interfaces.outputs is missing the `label_ids` field required by the filter scenario.">
+<If TESTS_FAILED_DESIGN_ISSUE: name the exact artifact and field. Example: "10_architecture.json §interfaces.outputs is missing the `label_ids` field required by the filter scenario.">
 
 ## Required Action
 
@@ -188,3 +225,5 @@ files_written: <comma-separated list of file paths relative to repo root>
 ```
 
 List every file you read and every file you created or modified. Keep paths relative to the repo root.
+
+**Do not write this block into any artifact file.** It belongs in your response text only — the orchestrator reads it from there and records it in `99_sprint_log.md`.

@@ -10,6 +10,19 @@ services:
     networks:
       - atlas-net
 
+  playwright:
+    container_name: atlas-playwright
+    image: mcr.microsoft.com/playwright:v1.44.0-jammy
+    restart: unless-stopped
+    command: sleep infinity
+    volumes:
+      - /home/linse/Prod/Atlas:/repo:ro
+    working_dir: /repo
+    environment:
+      - BASE_URL=http://atlas-shell
+    networks:
+      - atlas-net
+
 networks:
   atlas-net:
     external: true

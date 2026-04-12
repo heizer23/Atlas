@@ -1,0 +1,304 @@
+{
+  "sprint_note": "Introduces measurement catalog (static JSON + GET endpoint), atomic batch ingestion endpoint, Chronos skill adapter, sparkline redesign with time-proportional x-axis and full vertical range, series list row 4-column layout with min/max, and UI fixes for input styling and timestamp display.",
+  "component_name": "numeric_series",
+  "layer": "03_Application",
+  "source_definition": "Sprint03_Chronos&UXpt2/00_draft.md",
+  "summary": "NumericSeries tracks typed numeric measurements. This sprint adds a measurement catalog as the semantic foundation, a batch ingestion endpoint, a Chronos skill adapter, a redesigned sparkline and list row layout, and fixes UI styling and timestamp display.",
+  "classification": {
+    "why_application": "All behavior is domain-specific: measurement types are defined for this app, batch logic uses app-owned series, Chronos mapping is application-specific, and UX changes are app-local.",
+    "non_goals": [
+      "OCR / image parsing",
+      "Advanced analytics",
+      "Cross-series aggregation",
+      "Platform-level changes",
+      "Changes to edit/delete measurement UI beyond what is needed for styling consistency"
+    ],
+    "not_platform": "The measurement catalog and batch logic are meaningful only within NumericSeries. The Chronos adapter is a thin consumer of this app's own API — not a reusable platform service."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine Postgres shared schema: labels.labels table (case-insensitive name lookup, create label on series creation)",
+      "02_Platform/packages: platform_contracts (Dataset, DatasetMeta, ColumnSchema), platform_errorhandling (api_error)",
+      "02_Platform/Postgres: shared Postgres instance",
+      "measurement_definitions.json: static catalog artifact (owned by this component at 03_Application/NumericSeries/00_architecture/measurement_definitions.json)"
+    ],
+    "provides": [
+      "GET /api/measurement-definitions — Dataset of all catalog entries",
+      "POST /api/measurements/batch — atomic multi-measurement ingestion keyed by catalog key",
+      "All Sprint01 and Sprint02 endpoints — unchanged",
+      "Chronos skill adapter — thin mapping layer from label/alias to catalog key, calling /api/measurements/batch"
+    ],
+    "invariants": [
+      "Every batch request is atomic: all measurements succeed or none are inserted",
+      "Unknown measurement key in batch → entire request rejected 422 UNKNOWN_KEY",
+      "missing recorded_at in batch → rejected 422 MISSING_TIMESTAMP",
+      "Invalid value (non-finite) in batch → rejected 422 INVALID_VALUE",
+      "Invalid recorded_at format in batch → rejected 422 INVALID_TIMESTAMP",
+      "measurement_definitions.json is the single source of truth for valid keys; backend validates against it",
+      "Series creation from catalog: a series is linked to a catalog key via label_name = catalog.key; label is created in LabelEngine with name = catalog.key",
+      "Sparkline data returned from backend includes {value, recorded_at_ms} pairs ordered by recorded_at ASC",
+      "List endpoint returns min_value and max_value per series (from all measurements, not just sparkline window)",
+      "All Sprint01/02 invariants remain in force",
+      "Chronos skill must not silently remap ambiguous labels; must fail on any unmapped input"
+    ],
+    "failure_modes": [
+      "UNKNOWN_KEY: batch contains a key not in measurement_definitions.json (422)",
+      "MISSING_TIMESTAMP: batch entry is missing recorded_at (422)",
+      "INVALID_VALUE: measurement value is not a finite number (422)",
+      "INVALID_TIMESTAMP: recorded_at cannot be parsed as ISO-8601 (422)",
+      "SERIES_NOT_FOUND: batch key maps to no series in numeric_series.series (422 — distinct from 404 since key is catalog-valid but no series row exists)",
+      "CHRONOS_UNMAPPED: label/alias does not resolve to a catalog key (Chronos skill returns error, does not call API)",
+      "CHRONOS_AMBIGUOUS: label matches multiple aliases (Chronos skill returns error)"
+    ]
+  },
+  "shared_views": {
+    "consumes": ["labels.labels (LabelEngine Postgres schema) — for name resolution and label creation"],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine POST /api/labels — create label when series is created (existing pattern)",
+      "LabelEngine labels.labels table — direct SQL read for name resolution (existing pattern)"
+    ],
+    "provides": [
+      "GET /api/measurement-definitions — catalog endpoint",
+      "POST /api/measurements/batch — batch ingestion",
+      "All Sprint01/02 endpoints unchanged"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/measurement-definitions",
+        "purpose": "Return all measurement definitions from the static catalog as a Dataset. Used by UI for series creation picker and by Chronos skill for key resolution.",
+        "request_params": "none",
+        "response_success": "Dataset: object_type=measurement_definition, rows=[{id, key, label, unit, value_type, description}]",
+        "response_error": "ApiError",
+        "ui_contract": "Dataset | ApiError",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/measurements/batch",
+        "purpose": "Atomically insert multiple measurements in one request. Each entry references a catalog key (not a label_id). Resolves key → series via label_name=key lookup. All entries succeed or none are inserted.",
+        "request_body": "{recorded_at: ISO-8601 string, measurements: [{key: string, value: float}]}",
+        "response_success": "201 {inserted: int}",
+        "response_error": "ApiError (422 for validation/unknown key, 422 for no series found)",
+        "ui_contract": "none — external Chronos integration and internal batch form",
+        "change": "new"
+      },
+      {
+        "type": "static_artifact",
+        "name": "00_architecture/measurement_definitions.json",
+        "purpose": "Source of truth for all valid measurement types. Backend loads this at startup. Keys are canonical identifiers used in the batch API and series label names.",
+        "change": "new"
+      },
+      {
+        "type": "chronos_skill",
+        "name": "Chronos NumericSeries adapter",
+        "purpose": "Thin Chronos skill that maps human label/alias input to catalog keys, constructs a batch request, and calls POST /api/measurements/batch. Does not contain business logic. Fails on unmapped or ambiguous input.",
+        "change": "new"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "catalog_load",
+      "description": "At service startup, measurement_definitions.json is loaded from 03_Application/NumericSeries/00_architecture/measurement_definitions.json into memory as a dict keyed by catalog key. This dict is used for key validation in batch ingestion and served as-is via GET /api/measurement-definitions. No database table is needed — the catalog is a versioned static artifact.",
+      "inputs": ["measurement_definitions.json file path"],
+      "outputs": ["in-memory catalog dict: {key → {label, unit, value_type, description, aliases}}"]
+    },
+    {
+      "step": 2,
+      "name": "catalog_endpoint",
+      "description": "GET /api/measurement-definitions reads the in-memory catalog dict and returns all entries as a Dataset. Each entry is a row with id=key. Schema: id, key, label, unit, value_type, description. Rows ordered by label ASC.",
+      "inputs": ["in-memory catalog dict"],
+      "outputs": ["Dataset (object_type=measurement_definition, rows sorted by label ASC)"]
+    },
+    {
+      "step": 3,
+      "name": "batch_ingestion",
+      "description": "POST /api/measurements/batch receives {recorded_at, measurements: [{key, value}]}. Steps: (1) validate recorded_at is valid ISO-8601 (reject 422 INVALID_TIMESTAMP if not). (2) For each entry: validate key is in catalog (reject 422 UNKNOWN_KEY if not); validate value is finite (reject 422 INVALID_VALUE if not). (3) Resolve each key to a label_id via: SELECT s.label_id FROM numeric_series.series s JOIN labels.labels l ON l.id = s.label_id WHERE lower(l.name) = lower(key). If any key has no series row, reject entire request 422 SERIES_NOT_FOUND. (4) Open a single transaction. Insert all measurements. Commit. Return 201 {inserted: N}. On any exception: rollback.",
+      "inputs": [
+        "recorded_at (string, ISO-8601)",
+        "measurements: [{key: string, value: float}]",
+        "in-memory catalog dict (for key validation)",
+        "Postgres connection"
+      ],
+      "outputs": [
+        "{inserted: int} on success",
+        "ApiError on any validation or lookup failure"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "sparkline_data",
+      "description": "The list endpoint (GET /api/series) is extended to return, per series: sparkline_points (JSON-encoded array of {v: float, ts: int} where ts is Unix epoch milliseconds of recorded_at), min_value (float|null), max_value (float|null), latest_value (float|null). Sparkline window: 20 most recent measurements ordered by recorded_at ASC. The ts field enables time-proportional x-axis rendering on the frontend without any backend coordinate calculation. min and max are computed over ALL measurements for the series (not just the sparkline window).",
+      "inputs": [
+        "label_id",
+        "Postgres connection"
+      ],
+      "outputs": [
+        "sparkline_points: JSON string of [{v, ts}]",
+        "min_value: float | null",
+        "max_value: float | null",
+        "latest_value: float | null"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "timestamp_display",
+      "description": "recorded_at values stored in Postgres as TIMESTAMPTZ are returned to the frontend as ISO-8601 strings (UTC). Frontend formats them for display: toLocaleString() with options {year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'} using the browser's local timezone. Time authority: client displays in local timezone; server stores in UTC. This is acceptable because recorded_at is a user-declared measurement time (not a server event time).",
+      "inputs": ["recorded_at ISO-8601 string from backend"],
+      "outputs": ["Human-readable local datetime string for display"]
+    },
+    {
+      "step": 6,
+      "name": "datetime_input",
+      "description": "For add/edit measurement forms, replace the single datetime-local input with two separate inputs: type=date (value=YYYY-MM-DD) and type=time (value=HH:MM). On submit, the frontend combines them with the browser's UTC offset to produce a timezone-aware ISO-8601 string: (1) combine as localStr = date + 'T' + time + ':00'; (2) compute the offset: const d = new Date(localStr); const off = -d.getTimezoneOffset(); const sign = off >= 0 ? '+' : '-'; const hh = String(Math.floor(Math.abs(off)/60)).padStart(2,'0'); const mm = String(Math.abs(off)%60).padStart(2,'0'); const tzStr = sign+hh+':'+mm; (3) send recorded_at = localStr + tzStr. Time authority: the user's local clock is the measurement time. The browser offset string makes this explicit. Postgres stores as TIMESTAMPTZ (converts to UTC internally). Display: formatted back to local timezone using toLocaleString(). This approach preserves the user's intent without relying on server timezone assumptions.",
+      "inputs": ["date input value (YYYY-MM-DD)", "time input value (HH:MM)", "browser UTC offset (computed via Date.getTimezoneOffset())"],
+      "outputs": ["recorded_at string: YYYY-MM-DDThh:mm:00+HH:MM or -HH:MM (timezone-aware ISO-8601)"]
+    },
+    {
+      "step": 7,
+      "name": "input_styling",
+      "description": "All input elements in SeriesDetailPage (add measurement form, edit form) are updated to use CSS theme tokens: background → var(--md-sys-color-surface), border → 1px solid var(--md-sys-color-outline-variant), color → var(--md-sys-color-on-surface), border-radius → 4px. No hardcoded hex colors remain on form inputs. Table header and row borders also updated to use var(--md-sys-color-outline-variant).",
+      "inputs": ["existing inline styles"],
+      "outputs": ["updated inline styles on all input elements in SeriesDetailPage"]
+    },
+    {
+      "step": 8,
+      "name": "list_row_layout",
+      "description": "SeriesListPage row layout changes from 3 columns (label | sparkline | current) to 4 columns: label | sparkline | min/max | current. Grid template: '140px 1fr 70px 80px'. Min/max column shows min and max from all measurements, stacked vertically (min on bottom, max on top). Current value column shows latest_value. Empty states: if no measurements, all value columns show '—'. Sparkline redesign: frontend uses sparkline_points [{v, ts}] array. X positions are proportional to timestamp range (ts_min to ts_max mapped to 0%–100% of container width). Y positions are normalized: (v - min_value) / (max_value - min_value) * 100%. Edge cases: single point → render centered dot; identical values (min==max) → render midline; empty dataset → render '—' dash; identical timestamps → render as single point.",
+      "inputs": [
+        "sparkline_points: [{v, ts}]",
+        "min_value: float | null",
+        "max_value: float | null",
+        "latest_value: float | null"
+      ],
+      "outputs": ["4-column list row with custom SVG sparkline component"]
+    },
+    {
+      "step": 9,
+      "name": "chronos_skill",
+      "description": "The Chronos NumericSeries skill is a Python function (or Chronos tool definition) that: (1) Accepts {measurements: [{label: str, value: float}], recorded_at?: str}. (2) Loads measurement catalog (fetches GET /api/measurement-definitions or uses bundled snapshot). (3) For each input label: searches catalog entries (key, label, aliases) for a case-insensitive exact match. Fails with CHRONOS_UNMAPPED if no match. Fails with CHRONOS_AMBIGUOUS if multiple matches (should not happen with well-defined catalog). (4) Constructs batch request: {recorded_at: recorded_at or current UTC ISO-8601, measurements: [{key, value}]}. (5) Calls POST /api/measurements/batch. Returns success or error verbatim. Constraint: no business logic, no silent remapping, no invented keys.",
+      "inputs": [
+        "measurements: [{label: str, value: float}]",
+        "recorded_at: str (optional, defaults to current UTC ISO-8601 if omitted)"
+      ],
+      "outputs": [
+        "{inserted: int} on success",
+        "CHRONOS_UNMAPPED error if label not found",
+        "CHRONOS_AMBIGUOUS error if label matches multiple entries",
+        "API error from batch endpoint verbatim"
+      ]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "02_Platform/LabelEngine",
+        "role": "labels.labels schema read for name resolution; HTTP API for label creation"
+      },
+      {
+        "component": "02_Platform/Postgres",
+        "role": "Shared Postgres instance"
+      },
+      {
+        "component": "02_Platform/packages",
+        "role": "platform_contracts, platform_errorhandling"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "recharts",
+        "role": "Recharts is replaced for sparkline: custom SVG component using time-proportional coordinates",
+        "reuse_existing": false,
+        "note": "InlineSparkline is reimplemented as a plain SVG element to support time-proportional x-axis. Recharts import is removed from SeriesListPage."
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "All Sprint01/02 forbidden items remain in force",
+      "Do not call LabelEngine HTTP API for batch key→series lookup — resolve directly via Postgres join on labels.labels",
+      "Do not invent measurement semantics beyond what is declared in measurement_definitions.json",
+      "Chronos skill must not contain business logic or silent remapping",
+      "Do not use recharts for the sparkline (replaced by custom SVG)"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state",
+    "note": "No new tables needed. The measurement catalog is a static JSON artifact. Existing series and measurements tables are unchanged. The 10_schema.sql is carried forward unchanged from Sprint01."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement GET /api/measurement-definitions endpoint in a new router file (e.g. backend/routers/catalog.py). Load measurement_definitions.json at app startup and serve from memory.",
+      "Implement POST /api/measurements/batch in backend/routers/catalog.py. Validate key against catalog, resolve key→series via SQL join, execute single-transaction insert for all measurements.",
+      "Extend NumericSeriesService.list_series_rows() to return sparkline_points (JSON [{v, ts}]), min_value, max_value per series.",
+      "Write measurement_definitions.json at 03_Application/NumericSeries/00_architecture/measurement_definitions.json with initial catalog entries: weight (kg), body_fat_pct (%), body_water_pct (%), bmi, steps (steps), sleep_hours (h), systolic_bp (mmHg), diastolic_bp (mmHg), heart_rate (bpm), calories_kcal (kcal).",
+      "Register catalog router in backend/main.py.",
+      "Write Chronos skill adapter at 01_System/Chronos/skills/numeric_series.py: label→key mapping, batch request construction, POST /api/measurements/batch call. Uses requests library. Config: NUMERIC_SERIES_URL env var."
+    ],
+    "ui_implementer": [
+      "Replace InlineSparkline recharts component with custom SVG implementation using time-proportional x-axis (ts field) and normalized y-axis (min_value/max_value from row). Handle all edge cases: single point, identical values, empty, identical timestamps.",
+      "Update SeriesListPage row to 4-column grid: label | sparkline | min/max stacked | latest_value.",
+      "Update SeriesDetailPage: replace datetime-local input with split date+time inputs; combine on submit.",
+      "Update SeriesDetailPage: fix all input inline styles to use CSS theme tokens (no hardcoded hex).",
+      "Update SeriesDetailPage: format recorded_at display using toLocaleString() with explicit locale options in browser local timezone.",
+      "Update SeriesDetailPage: fix table header/row border colors to use var(--md-sys-color-outline-variant).",
+      "Update SeriesDetailPage: update empty/loading state text colors to use theme tokens.",
+      "Update SeriesDetailPage 'Series ID' subtitle to display resolved series label name instead of raw label_id (fetch from catalog or use label_name returned by series endpoint if available)."
+    ],
+    "test_writer": [
+      "Write tests for GET /api/measurement-definitions: verify returns all catalog entries as Dataset.",
+      "Write tests for POST /api/measurements/batch happy path: single measurement inserted, returns 201 {inserted: 1}.",
+      "Write tests for POST /api/measurements/batch multi-measurement: two measurements in one request, both inserted atomically.",
+      "Write tests for POST /api/measurements/batch unknown key rejection (422 UNKNOWN_KEY).",
+      "Write tests for POST /api/measurements/batch missing recorded_at rejection (422).",
+      "Write tests for POST /api/measurements/batch invalid value (422 INVALID_VALUE).",
+      "Write tests for POST /api/measurements/batch atomicity: if second measurement has unknown key, first is not inserted.",
+      "Write tests for POST /api/measurements/batch series not found (key valid but no series row, 422 SERIES_NOT_FOUND).",
+      "Write tests for sparkline data fields: list endpoint returns sparkline_points, min_value, max_value fields.",
+      "Write tests for Chronos skill: label→key mapping success, unknown label error, batch API call construction."
+    ],
+    "reviewer": [
+      "Verify batch endpoint atomicity design: all-or-nothing transaction semantics are explicit in internal_flow step 3.",
+      "Verify Chronos skill constraints: no business logic, explicit failure on unmapped input.",
+      "Verify sparkline edge cases are all addressed in internal_flow step 8.",
+      "Verify time authority is explicit: client displays in local timezone, server stores UTC."
+    ]
+  },
+  "deferred_decisions": [
+    "Whether series creation UI should present a catalog picker (select from definitions) or remain a free-text name input. Draft says 'series = measurement' (one series per measurement type) but does not mandate a picker UI. Implementer may use a picker that sets label_name=key, or keep the existing free-text input.",
+    "Whether Chronos skill fetches catalog live from GET /api/measurement-definitions or uses a bundled snapshot. Live fetch is more consistent but adds a network call. Implementer decides based on Chronos runtime constraints."
+  ],
+  "risks": [
+    {
+      "risk": "Recharts removal from SeriesListPage: if recharts is imported elsewhere in the component it must be retained as a dependency. Check all imports before removing.",
+      "impact": "Build failure if recharts import is removed but still used."
+    },
+    {
+      "risk": "measurement_definitions.json loaded at startup: if file is missing or malformed, app fails to start. Implementer must add a clear startup error message.",
+      "impact": "Opaque startup failure without explicit error."
+    },
+    {
+      "risk": "Split date+time input: browser UTC offset computation via getTimezoneOffset() returns the offset for the current moment. If a historical date is entered and DST changes apply, the offset may be incorrect by 1 hour.",
+      "impact": "Measurement time may be off by one hour for historical entries entered during a DST boundary. Acceptable for MVP — the user controls the value and can correct it."
+    },
+    {
+      "risk": "Sparkline ts field: uses Unix epoch milliseconds (JavaScript Date.now() compatible). Backend must return as integer, not string.",
+      "impact": "Frontend time-proportional math fails if ts is a string."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should GET /api/series (list) continue to return sparkline_values (JSON float array) for backward compatibility with any consumer, or can the field be replaced entirely by sparkline_points [{v, ts}]?",
+      "owner": "implementer",
+      "note": "Recommendation: replace sparkline_values with sparkline_points. The only consumer is SeriesListPage which is being rewritten in this sprint."
+    }
+  ]
+}

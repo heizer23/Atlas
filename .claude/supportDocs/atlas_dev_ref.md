@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-04-11 21:10 UTC
+> Last updated: 2026-04-11 23:14 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -231,9 +231,9 @@ GET /health — liveness check, returns {status: ok}
 **Caller notes:**
 - No 00_architecture yet — stub only.
 
-### NumericSeries ⚠️
+### NumericSeries
 
-**Summary:** Generic numeric time-series tracking application.
+**Summary:** Three targeted changes: (1) replace inline CreateForm with a '+' button that routes to /series/new, handled by SeriesDetailPage in creation mode; (2) fix list row CSS to use theme tokens; (3) add POST /api/series/by-name/{label_name}/values for Chronos name-based external writes.
 
 | | |
 |---|---|
@@ -242,8 +242,10 @@ GET /health — liveness check, returns {status: ok}
 | Network | atlas-net |
 | URL prefix | `/api` |
 
-**Caller notes:**
-- No 00_architecture yet — stub only.
+**Endpoints:**
+```
+POST /api/series/by-name/{label_name}/values — write measurements by human-readable series name (Chronos integration)
+```
 
 ### StorageTracker
 

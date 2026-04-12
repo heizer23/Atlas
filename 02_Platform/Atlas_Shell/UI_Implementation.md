@@ -2,6 +2,7 @@
 > **Status:** Active — updated as implementation evolves. May change during feature work.
 > **Audience:** LLMs doing frontend work. Include this file in every UI prompt.
 > **Relationship:** Implements the types from `R-CON-BP-04` (UI Data Contract). Applies visual rules from `UI_DesignLanguage.md`. Does not define either.
+> For cross-application pattern examples and known violations: `UI_AppPatterns.md`.
 
 ---
 

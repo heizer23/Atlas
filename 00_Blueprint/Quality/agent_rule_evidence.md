@@ -253,3 +253,88 @@ severity: major
 recurrence_hint: "First observed — version header drift between rule registry and contract document"
 linked_immediate_artifact: 02_Platform/Atlas_Shell/Architecture_Audit_Report.md
 ---
+
+---
+entry_id: EVD-2026-04-10-001
+date: 2026-04-10
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: LabelEngine
+sprint: Sprint02_ReverseLookup
+pattern_name: invariant_sql_mismatch
+short_description: Architecture invariant declared case-insensitive ordering but the SQL fragment used case-sensitive ORDER BY l.name; caught in design review and required correction.
+evidence: "10_architecture.json contracts.invariants[1]: 'ordered case-insensitive consistent with existing search'; internal_flow[1].description SQL: 'ORDER BY l.name'; existing search_labels uses lower(name); corrected to ORDER BY lower(l.name) in 12_design_corrections"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern likely recurs whenever a designer states a sorting invariant in prose but writes SQL separately without verifying alignment"
+linked_immediate_artifact: 02_Platform/LabelEngine/Sprint02_ReverseLookup/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-11-001
+date: 2026-04-11
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: StorageTracker
+sprint: Sprint02_ShoppingTasks
+pattern_name: cross_artifact_row_shape_inconsistency
+short_description: The by_source endpoint row shape was declared as nested (source_tag + tasks list) in exposed_surfaces but flat (one row per task×source_tag) in internal_flow and test_spec, violating R-CON-BP-09.
+evidence: "11_design_review.md blocking issue #1: 'exposed_surfaces says each row has source_tag: str and tasks: list of ShoppingTaskRow (nested); internal_flow.step_17 says one row per (task, source_tag) combination (flat); 10_test_spec.md also describes flat rows'"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern likely recurs when a designer describes an aggregated view in exposed_surfaces conceptually (grouped) but designs the Dataset rows as flat"
+linked_immediate_artifact: 03_Application/StorageTracker/Sprint02_ShoppingTasks/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-11-002
+date: 2026-04-11
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: StorageTracker
+sprint: Sprint02_ShoppingTasks
+pattern_name: shared_row_type_column_omission
+short_description: ShoppingTaskRow shared type definition omitted source_tags despite being required by both the list filter and the by_source view; caught as a blocking R-CON-BP-11 violation in design review.
+evidence: "11_design_review.md blocking issue #2: 'ShoppingTaskRow does not include source_tags in the column list (lists: id, item_id, item_name, status, notes, created_at, completed_at); the by_source view requires source_tag per row and list endpoint is filtered by source_tag'"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern: shared row type defined before all consuming endpoints are fully designed, leaving columns required only by later endpoints unaccounted for"
+linked_immediate_artifact: 03_Application/StorageTracker/Sprint02_ShoppingTasks/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-12-001
+date: 2026-04-12
+source_agent: sprint_orchestrator
+run_type: execution_issue
+component: NumericSeries
+sprint: Sprint02_ChronosAndUX
+pattern_name: orchestrator_missing_bash_tool
+short_description: The sprint orchestrator could not launch the test-runner stage because the Bash tool was unavailable in its execution context; required human to re-invoke the orchestrator in a context with Bash access.
+evidence: "Sprint02_ChronosAndUX/99_sprint_log.md: '2026-04-12T00:15:00Z BLOCKED on test-runner: Bash tool not available in this orchestrator context; sprint_test_runner requires docker exec'"
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — orchestrator agent definition does not explicitly require or verify Bash tool availability before routing to test-runner"
+linked_immediate_artifact: 03_Application/NumericSeries/Sprint02_ChronosAndUX/99_sprint_log.md
+---
+
+---
+entry_id: EVD-2026-04-12-002
+date: 2026-04-12
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: NumericSeries
+sprint: Sprint03_Chronos&UXpt2
+pattern_name: time_authority_deferred_to_implementer
+short_description: Design introduced a split date+time input but deferred the timezone encoding decision to the implementer, violating R-CON-AL-06 which requires the design to declare the authoritative time source and consistency strategy.
+evidence: "10_architecture.json §internal_flow[5] (datetime_input): 'Implementer must choose one and document it'; §open_questions[0]: 'should the combined value be sent as naive local ... or UTC ... the design must resolve this'"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — time authority questions in UI input forms are consistently deferred to implementers rather than resolved in the design phase"
+linked_immediate_artifact: 03_Application/NumericSeries/Sprint03_Chronos&UXpt2/11_design_review.md
+---

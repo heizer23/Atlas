@@ -96,6 +96,11 @@ Systematically assess the design across every dimension. Every finding must refe
      - Are all referenced tables/fields actually defined?
      - Is ownership consistent (no accidental shared contract)?
 
+10. **UI Test Coverage** — If `10_scaffolding.json` lists any `.tsx` files under `files_changed`:
+    - Does `10_test_spec.md` exist?
+    - Does it contain at least one scenario whose name is prefixed `[UI]` or `[UI — manual]`?
+    - If either condition is false, this is a **Major** blocking finding: "UI files are in scope but no UI scenario is present in the test spec." Required fix: add at least one `[UI]` or `[UI — manual]` scenario describing observable user-facing behavior.
+
 ---
 
 ## Step 3 — Produce the Review Artifact
@@ -293,3 +298,5 @@ files_written: <comma-separated list of file paths relative to repo root>
 ```
 
 List every file you read and every file you created or modified. Keep paths relative to the repo root.
+
+**Do not write this block into any artifact file.** It belongs in your response text only — the orchestrator reads it from there and records it in `99_sprint_log.md`.

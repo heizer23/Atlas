@@ -314,7 +314,19 @@ If the sprint introduces a new shell-registered application or adds new API rout
 | `02_Platform/Atlas_Shell/nginx.conf` | `location /api/<prefix>` block proxying to the backend container |
 | `02_Platform/Atlas_Shell/vite.config.ts` | `'/api/<prefix>'` proxy entry (for local dev server only) |
 
-After updating these files, rebuild and restart the shell container to verify.
+**Shell rebuild trigger — broader than wiring changes:** Rebuild and restart the shell container whenever any of the following are modified:
+- Any file under `03_Application/<Component>/src/` (frontend source)
+- Any of the four shell wiring files above
+- `02_Platform/Atlas_Shell/platform-ui/` (shared UI library)
+
+The Shell Dockerfile COPYs `03_Application/<Component>/src/` at build time. Source changes are invisible until the image is rebuilt. This applies to every sprint that touches frontend files, not only sprints that introduce new apps.
+
+Rebuild command (run from repo root, with Atlas env vars sourced):
+```
+docker compose -f 02_Platform/Atlas_Shell/compose.yml build && docker compose -f 02_Platform/Atlas_Shell/compose.yml up -d
+```
+
+After restarting, verify the app renders correctly at its shell route before marking implementation complete.
 
 ## `apiFetch` URL convention
 
@@ -361,6 +373,7 @@ Verify:
 9. UI is functional but intentionally simple
 10. If `10_test_spec.md` is present: test functions exist for every scenario and are runnable
 11. If sprint touches shell wiring: `test_shell_proxy.py` exists; `main.tsx`, `Dockerfile`, `nginx.conf` all updated
+12. If sprint modifies any `src/` frontend file: shell container has been rebuilt and restarted; app renders at its shell route
 
 ---
 
@@ -407,3 +420,5 @@ files_written: <comma-separated list of file paths relative to repo root>
 ```
 
 List every file you read and every file you created or modified. Keep paths relative to the repo root.
+
+**Do not write this block into any artifact file.** It belongs in your response text only — the orchestrator reads it from there and records it in `99_sprint_log.md`.

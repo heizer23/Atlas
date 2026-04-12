@@ -39,6 +39,18 @@ class ExternalWriteRequest(BaseModel):
     entries: list[ExternalWriteEntry]
 
 
+# Sprint03: batch ingestion models
+
+class BatchMeasurementEntry(BaseModel):
+    key: str
+    value: float
+
+
+class BatchMeasurementRequest(BaseModel):
+    recorded_at: str  # ISO-8601, required — missing recorded_at is rejected
+    measurements: list[BatchMeasurementEntry]
+
+
 # ── Response bodies ───────────────────────────────────────────────────────────
 
 class MeasurementRecord(BaseModel):
