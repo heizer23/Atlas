@@ -231,7 +231,8 @@
       "Bash(claude doctor:*)",
       "Bash(crontab -)",
       "Bash(xargs -I{} echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"Sprint02_ChronosAndUX/foo.py\",\"content\":\"{}\"}}')",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Read(//home/linse/**)"
     ]
   },
   "hooks": {
