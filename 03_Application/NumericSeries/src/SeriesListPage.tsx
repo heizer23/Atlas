@@ -134,6 +134,28 @@ export default function SeriesListPage() {
 
   return (
     <div style={{ padding: '1rem', maxWidth: '900px' }}>
+      <style>{`
+        .ns-row {
+          display: grid;
+          grid-template-columns: 140px 56px minmax(0, 1fr) 72px;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 0.6rem 1rem;
+          margin-bottom: 0.4rem;
+          background: var(--md-sys-color-surface);
+          border-radius: 8px;
+          cursor: pointer;
+          border: 1px solid var(--md-sys-color-outline-variant);
+          box-sizing: border-box;
+        }
+        @media (max-width: 540px) {
+          .ns-row {
+            grid-template-columns: minmax(0, 1fr) 56px 64px;
+          }
+          .ns-spark { display: none; }
+        }
+      `}</style>
+
       {/* Page header with + button */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
         <h2 style={{ margin: 0 }}>Numeric Series</h2>
@@ -171,34 +193,14 @@ export default function SeriesListPage() {
           <div
             key={row.id}
             onClick={() => navigate(`/series/${row.id}`)}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '140px 1fr 70px 80px',
-              alignItems: 'center',
-              gap: '0.75rem',
-              padding: '0.6rem 1rem',
-              marginBottom: '0.4rem',
-              background: 'var(--md-sys-color-surface)',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              border: '1px solid var(--md-sys-color-outline-variant)',
-            }}
+            className="ns-row"
           >
             {/* Column 1: label */}
             <span style={{ fontWeight: 500, color: 'var(--md-sys-color-on-surface)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {row.label_name}
             </span>
 
-            {/* Column 2: sparkline */}
-            <div style={{ width: '100%', height: '28px' }}>
-              <InlineSparkline
-                points={sparkPoints}
-                minVal={row.min_value}
-                maxVal={row.max_value}
-              />
-            </div>
-
-            {/* Column 3: min / max stacked */}
+            {/* Column 2: min / max stacked (left of sparkline) */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
               <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.2 }}>
                 {fmtValue(row.max_value)}
@@ -206,6 +208,15 @@ export default function SeriesListPage() {
               <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.2 }}>
                 {fmtValue(row.min_value)}
               </span>
+            </div>
+
+            {/* Column 3: sparkline */}
+            <div className="ns-spark" style={{ width: '100%', height: '28px' }}>
+              <InlineSparkline
+                points={sparkPoints}
+                minVal={row.min_value}
+                maxVal={row.max_value}
+              />
             </div>
 
             {/* Column 4: current value */}
