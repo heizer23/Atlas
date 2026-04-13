@@ -150,7 +150,7 @@ export default function SeriesListPage() {
         }
         @media (max-width: 540px) {
           .ns-row {
-            grid-template-columns: 8rem 56px minmax(0, 1fr) 64px;
+            grid-template-columns: 5.5rem 56px minmax(0, 1fr) 64px;
           }
         }
       `}</style>
