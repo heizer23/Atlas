@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ReportPage from './ReportPage';
 import EntriesPage from './EntriesPage';
@@ -383,7 +383,8 @@ export function FoodIntake() {
 export default function ShellEntry() {
   return (
     <Routes>
-      <Route path="/"            element={<FoodIntake />} />
+      <Route path="/"            element={<Navigate to="day" replace />} />
+      <Route path="/log"         element={<FoodIntake />} />
       <Route path="/report"      element={<ReportPage />} />
       <Route path="/entries"     element={<EntriesPage />} />
       <Route path="/entries/:id" element={<EntryDetailPage />} />

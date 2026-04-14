@@ -14,6 +14,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart as ReBarChart,
   Bar,
@@ -68,28 +69,44 @@ const REPORT_OUTLINE_STYLE = `
 .report-table-area input:focus-visible {
   outline: 2px solid var(--md-sys-color-primary);
 }
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface {
+  outline: none !important;
+}
 `;
 
 // ── StackedBarPanel ───────────────────────────────────────────────────────────
 
 interface StackedBarPanelProps {
-  dataset:   Dataset;
-  metric:    NutMetric;
+  dataset:     Dataset;
+  metric:      NutMetric;
+  onBarClick?: (date: string) => void;
 }
 
-function StackedBarPanel({ dataset, metric }: StackedBarPanelProps) {
+function StackedBarPanel({ dataset, metric, onBarClick }: StackedBarPanelProps) {
   const bars = metric === 'kcal' ? KCAL_BARS : metric === 'protein' ? PROTEIN_BARS : ALCOHOL_BARS;
   const totalKey = metric === 'kcal' ? 'kcal_total' : metric === 'protein' ? 'protein_total' : 'alcohol_g_total';
   const unit     = metric === 'kcal' ? 'kcal' : 'g';
 
   const chartData = dataset.rows.map((row) => {
-    const entry: Record<string, unknown> = { bucket_label: String(row['bucket_label'] ?? '') };
+    const entry: Record<string, unknown> = {
+      _id:          String(row['id'] ?? ''),
+      bucket_label: String(row['bucket_label'] ?? ''),
+    };
     for (const bar of bars) {
       entry[bar.key] = Number(row[bar.key] ?? 0);
     }
     entry[totalKey] = Number(row[totalKey] ?? 0);
     return entry;
   });
+
+  function handleBarClick(dataPoint: Record<string, unknown>) {
+    const id = String(dataPoint._id ?? '');
+    if (onBarClick && /^\d{4}-\d{2}-\d{2}$/.test(id)) {
+      onBarClick(id);
+    }
+  }
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -100,7 +117,15 @@ function StackedBarPanel({ dataset, metric }: StackedBarPanelProps) {
         <Tooltip formatter={(value: number, name: string) => [`${value.toFixed(1)} ${unit}`, name]} />
         <Legend />
         {bars.map((bar) => (
-          <Bar key={bar.key} dataKey={bar.key} name={bar.label} stackId="a" fill={bar.color} />
+          <Bar
+            key={bar.key}
+            dataKey={bar.key}
+            name={bar.label}
+            stackId="a"
+            fill={bar.color}
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+            onClick={handleBarClick}
+          />
         ))}
       </ReBarChart>
     </ResponsiveContainer>
@@ -110,23 +135,34 @@ function StackedBarPanel({ dataset, metric }: StackedBarPanelProps) {
 // ── YearComboPanel ────────────────────────────────────────────────────────────
 
 interface YearComboPanelProps {
-  dataset: Dataset;
-  metric:  NutMetric;
+  dataset:     Dataset;
+  metric:      NutMetric;
+  onBarClick?: (date: string) => void;
 }
 
-function YearComboPanel({ dataset, metric }: YearComboPanelProps) {
+function YearComboPanel({ dataset, metric, onBarClick }: YearComboPanelProps) {
   const bars    = metric === 'kcal' ? KCAL_BARS : metric === 'protein' ? PROTEIN_BARS : ALCOHOL_BARS;
   const avgKey  = metric === 'kcal' ? 'kcal_avg' : metric === 'protein' ? 'protein_avg' : 'alcohol_g_avg';
   const unit    = metric === 'kcal' ? 'kcal' : 'g';
 
   const chartData = dataset.rows.map((row) => {
-    const entry: Record<string, unknown> = { bucket_label: String(row['bucket_label'] ?? '') };
+    const entry: Record<string, unknown> = {
+      _id:          String(row['id'] ?? ''),
+      bucket_label: String(row['bucket_label'] ?? ''),
+    };
     for (const bar of bars) {
       entry[bar.key] = Number(row[bar.key] ?? 0);
     }
     entry[avgKey] = Number(row[avgKey] ?? 0);
     return entry;
   });
+
+  function handleBarClick(dataPoint: Record<string, unknown>) {
+    const id = String(dataPoint._id ?? '');
+    if (onBarClick && /^\d{4}-\d{2}-\d{2}$/.test(id)) {
+      onBarClick(id);
+    }
+  }
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -137,7 +173,15 @@ function YearComboPanel({ dataset, metric }: YearComboPanelProps) {
         <Tooltip formatter={(value: number, name: string) => [`${value.toFixed(1)} ${unit}`, name]} />
         <Legend />
         {bars.map((bar) => (
-          <Bar key={bar.key} dataKey={bar.key} name={bar.label} stackId="a" fill={bar.color} />
+          <Bar
+            key={bar.key}
+            dataKey={bar.key}
+            name={bar.label}
+            stackId="a"
+            fill={bar.color}
+            style={{ cursor: onBarClick ? 'pointer' : 'default' }}
+            onClick={handleBarClick}
+          />
         ))}
         <Line
           type="monotone"
@@ -249,6 +293,7 @@ function DataTable({ dataset, metric }: DataTableProps) {
 // ── ReportPage ────────────────────────────────────────────────────────────────
 
 export default function ReportPage() {
+  const navigate = useNavigate();
   const [scope,          setScope]          = useState<Scope>('week');
   const [mode,           setMode]           = useState<Mode>('daily');
   const [metric,         setMetric]         = useState<NutMetric>('kcal');
@@ -291,6 +336,10 @@ export default function ReportPage() {
   }
 
   const showAvgLine = scope !== 'all_time';
+
+  function handleBarClick(date: string) {
+    navigate(`/food/day?date=${date}`);
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -403,9 +452,9 @@ export default function ReportPage() {
             <ErrorCard error={error} />
           ) : currentDataset ? (
             showAvgLine ? (
-              <YearComboPanel dataset={currentDataset} metric={metric} />
+              <YearComboPanel dataset={currentDataset} metric={metric} onBarClick={handleBarClick} />
             ) : (
-              <StackedBarPanel dataset={currentDataset} metric={metric} />
+              <StackedBarPanel dataset={currentDataset} metric={metric} onBarClick={handleBarClick} />
             )
           ) : null}
         </div>

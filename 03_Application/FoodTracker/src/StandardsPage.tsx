@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
@@ -75,11 +76,13 @@ function TodaySection({
   onCopy,
   onDelete,
   actioningId,
+  navigate,
 }: {
   entries:     TodayEntry[];
   onCopy:      (id: string) => void;
   onDelete:    (id: string) => void;
   actioningId: string | null;
+  navigate:    (path: string) => void;
 }) {
   if (entries.length === 0) {
     return (
@@ -127,7 +130,10 @@ function TodaySection({
                 opacity: busy ? 0.5 : 1,
               }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                onClick={() => navigate(`/food/entries/${entry.id}`)}
+              >
                 <p className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
                   {time} &middot; {entry.meal_type}
                   {entry.standard && (
@@ -271,7 +277,12 @@ function StandardsSection({
 // ── DayPage ───────────────────────────────────────────────────────────────────
 
 export default function StandardsPage() {
-  const [selectedDate, setSelectedDate] = useState<string>(() => todayIso());
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const dateFromUrl = searchParams.get('date');
+  const [selectedDate, setSelectedDate] = useState<string>(
+    dateFromUrl && /^\d{4}-\d{2}-\d{2}$/.test(dateFromUrl) ? dateFromUrl : todayIso(),
+  );
   const [payload,     setPayload]     = useState<DayPagePayload | null>(null);
   const [isLoading,   setIsLoading]   = useState(true);
   const [error,       setError]       = useState<ApiError | null>(null);
@@ -400,6 +411,7 @@ export default function StandardsPage() {
             onCopy={handleCopy}
             onDelete={handleDelete}
             actioningId={actioningId}
+            navigate={navigate}
           />
 
           <StandardsSection
