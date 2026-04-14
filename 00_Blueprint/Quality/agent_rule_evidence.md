@@ -338,3 +338,71 @@ severity: major
 recurrence_hint: "First observed — time authority questions in UI input forms are consistently deferred to implementers rather than resolved in the design phase"
 linked_immediate_artifact: 03_Application/NumericSeries/Sprint03_Chronos&UXpt2/11_design_review.md
 ---
+
+---
+entry_id: EVD-2026-04-14-001
+date: 2026-04-14
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: FoodTracker
+sprint: Sprint06_Search_Scale_Averages
+pattern_name: missing_schema_artifact_when_persistence_declared
+short_description: Designer declared persistence.owns_persistent_state == true and named 10_schema.sql as the schema artifact, but did not produce the file in the sprint folder.
+evidence: "10_architecture.json §persistence: {owns_persistent_state: true, schema_artifact: '10_schema.sql'}; Glob(Sprint06_Search_Scale_Averages/10_schema.sql) returns no results"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed in Sprint06 — first sprint to use the R-PRO-BP-01 v2 format for FoodTracker; prior sprints used legacy folder structure"
+linked_immediate_artifact: 03_Application/FoodTracker/Sprint06_Search_Scale_Averages/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-14-002
+date: 2026-04-14
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: FoodTracker
+sprint: Sprint06_Search_Scale_Averages
+pattern_name: missing_test_spec_with_tsx_in_scope
+short_description: Scaffolding lists three .tsx files as changed but no 10_test_spec.md was produced, violating R-PRO-BP-01 §10 which requires a test spec with at least one UI scenario when frontend files are in scope.
+evidence: "10_scaffolding.json §files: ReportPage.tsx, EntriesPage.tsx, EntryDetailPage.tsx all listed as changed; Glob(Sprint06_Search_Scale_Averages/10_test_spec.md) returns no results"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed in Sprint06 — first FoodTracker sprint requiring a test spec under the new process contract; pattern may recur in first sprints of any application transitioning to R-PRO-BP-01 v2 format"
+linked_immediate_artifact: 03_Application/FoodTracker/Sprint06_Search_Scale_Averages/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-14-003
+date: 2026-04-14
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: FoodTracker
+sprint: Sprint06_Search_Scale_Averages
+pattern_name: stale_exception_contract_after_field_addition
+short_description: Sprint adds a field (quantity_g) to a named exception contract (EntryDetail) but does not update the ARCHITECTURE_EXCEPTIONS.md field list, violating R-CON-BP-09.
+evidence: "10_architecture.json §internal_flow[step 6]: adds quantity_g to _serialise_entry_detail; ARCHITECTURE_EXCEPTIONS.md §EXC-FT-03: EntryDetail field list is '{id, logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fiber_g, fat_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes, standard, source_standard_id}' — quantity_g absent"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern: named contract defined in exception registry is not treated as a formal contract document requiring updates alongside each field addition sprint"
+linked_immediate_artifact: 03_Application/FoodTracker/Sprint06_Search_Scale_Averages/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-14-004
+date: 2026-04-14
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: FoodTracker
+sprint: Sprint07_Base_Quantity
+pattern_name: stale_exception_contract_after_field_rename
+short_description: Sprint renames quantity_g to base_quantity in all code artifacts but does not instruct the implementer to update the EntryDetail named contract in ARCHITECTURE_EXCEPTIONS.md, violating R-CON-BP-09.
+evidence: "10_architecture.json §internal_flow[step 5]: 'base_quantity replaces quantity_g'; ARCHITECTURE_EXCEPTIONS.md §EXC-FT-03: EntryDetail field list still includes 'quantity_g: float | null'; no deferral item targets ARCHITECTURE_EXCEPTIONS.md"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "Also seen in EVD-2026-04-14-003 — recurring pattern: ARCHITECTURE_EXCEPTIONS.md field list is not treated as a formal contract requiring update alongside every rename sprint"
+linked_immediate_artifact: 03_Application/FoodTracker/Sprint07_Base_Quantity/11_design_review.md
+---

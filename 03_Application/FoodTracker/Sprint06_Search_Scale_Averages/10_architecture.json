@@ -1,0 +1,296 @@
+{
+  "sprint_note": "Sprint 06 adds: alcohol (g) report view, avg-line extension to week/month scopes, client-side entry search, quantity_g scaling on log intake + entry detail rescale UX, and the migrations/005_add_quantity_g.sql schema change.",
+  "component_name": "food_tracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "FoodTracker records daily food intake, computes nutritional aggregates, and serves them through a Dataset-based API consumed by the Atlas Shell UI.",
+  "classification": {
+    "why_application": "Contains domain-specific meal-logging rules, nutritional scaling logic, and report aggregation that has meaning only within the FoodTracker domain.",
+    "non_goals": [
+      "Protein view for alcohol (no alcohol protein column exists)",
+      "Storing per-100g values separately — derivable from quantity_g and stored macros",
+      "Search on the Day tab or Standards tab",
+      "Unit conversion (only grams supported)",
+      "Quantity scaling for Standards",
+      "Rescaling via a dedicated endpoint — rescaling happens in the frontend before PUT"
+    ],
+    "not_platform": "Meal logging, nutritional aggregation, and scaling logic encode FoodTracker-specific business rules; they must not become reusable platform capabilities."
+  },
+  "contracts": {
+    "consumes": [
+      "platform_contracts.Dataset / DatasetMeta / ColumnSchema (02_Platform/packages/platform_contracts/contracts.py)",
+      "platform_errorhandling.api_error (02_Platform/03_ErrorHandling/)",
+      "foodtracker.food_logs table (private schema)"
+    ],
+    "provides": [
+      "GET /api/food/report — Dataset with per-meal-type kcal/protein/alcohol buckets; avg columns when scope in (year, month, week)",
+      "GET /api/food/entries — Dataset of food_logs rows (overview schema)",
+      "GET /api/food/entries/:id — EntryDetail JSON (non-Dataset)",
+      "PUT /api/food/entries/:id — full-replace edit; accepts optional quantity_g",
+      "POST /api/food/meals — intake with optional quantity_g scaling",
+      "POST /api/food/entries/:id/copy — copies row; preserves quantity_g",
+      "DELETE /api/food/entries/:id — hard delete",
+      "PATCH /api/food/entries/:id/standard — toggle standard flag",
+      "GET /api/food/template — plain-text JSON template (updated with quantity_g example)",
+      "POST /api/food/validate — validate + preview (unchanged)"
+    ],
+    "invariants": [
+      "quantity_g stored in food_logs is always NULL or > 0 (enforced by DB CHECK constraint)",
+      "When quantity_g is present at intake, all stored macro values are quantity_g/100 * per-100g input",
+      "Cross-field checks (good_fat_g <= fat_g, red_meat_g <= meat_g) apply to per-100g values before scaling",
+      "avg columns (kcal_avg, protein_avg, alcohol_g_avg) are present in rows if and only if scope is year, month, or week",
+      "alcohol_g_total included in every report bucket row regardless of scope",
+      "Client-side search does not affect backend — GET /api/food/entries response is always unfiltered"
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR (422): quantity_g present but not a number > 0",
+      "VALIDATION_ERROR (422): any required nutrition field missing or invalid",
+      "NOT_FOUND (404): entry id does not exist",
+      "DB_CONSTRAINT (400): database check constraint violated",
+      "INVALID_PARAM (422): scope or mode not in allowed set"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema",
+      "platform_errorhandling.api_error",
+      "psycopg2 (Postgres driver)",
+      "fastapi.APIRouter"
+    ],
+    "provides": [
+      "HTTP API at /api/food/* (all routes registered via FastAPI router in backend/main.py)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/report",
+        "purpose": "Rolling-window bucket aggregation; now includes alcohol_g_total, alcohol_g_avg, and avg cols for week/month scopes",
+        "ui_contract": "Dataset"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries",
+        "purpose": "All food_logs rows as Dataset (overview schema); unfiltered — client-side search in frontend",
+        "ui_contract": "Dataset"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries/:id",
+        "purpose": "Single entry detail; now includes quantity_g (float | null)",
+        "ui_contract": "EntryDetail (registered exception — see ARCHITECTURE_EXCEPTIONS.md)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/food/entries/:id",
+        "purpose": "Full-replace edit; accepts optional quantity_g > 0",
+        "ui_contract": "Dataset (single row on success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/meals",
+        "purpose": "Intake: validates, optionally scales macros by quantity_g, inserts row",
+        "ui_contract": "Dataset (single row on success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/entries/:id/copy",
+        "purpose": "Copy row; INSERT must include quantity_g column",
+        "ui_contract": "EntryDetail (registered exception)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/food/entries/:id",
+        "purpose": "Hard delete; unchanged this sprint",
+        "ui_contract": "none (204)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/food/entries/:id/standard",
+        "purpose": "Toggle standard flag; unchanged this sprint",
+        "ui_contract": "none"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/template",
+        "purpose": "Plain-text JSON template; updated to include commented quantity_g field",
+        "ui_contract": "text/plain"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "report_alcohol_column",
+      "description": "In _query_logs: add SUM(alcohol_g) AS alcohol_g_total to the SELECT. In _ZERO_METRICS: add alcohol_g_total: 0. In _make_row/_zero_fill: include alcohol_g_total in every row. In REPORT_SCHEMA: add ColumnSchema(key='alcohol_g_total', ...).",
+      "inputs": ["foodtracker.food_logs.alcohol_g"],
+      "outputs": ["alcohol_g_total per bucket row"]
+    },
+    {
+      "step": 2,
+      "name": "report_avg_scope_extension",
+      "description": "Change include_avgs from scope=='year' to scope in ('year','month','week'). The _zero_fill avg computation and the schema extension for avg columns already handle year; extend the same conditional to also emit avg columns for month and week. Query SQL already collects alcohol_g via step 1; add cumulative alcohol_g avg alongside kcal and protein avgs when include_avgs=True.",
+      "inputs": ["scope parameter", "kcal_total, protein_total, alcohol_g_total per bucket", "reported_days per bucket"],
+      "outputs": ["kcal_avg, protein_avg, alcohol_g_avg appended to rows when scope in (year, month, week)"]
+    },
+    {
+      "step": 3,
+      "name": "report_alcohol_avg_schema",
+      "description": "When include_avgs=True, append ColumnSchema(key='alcohol_g_avg', label='Avg daily alcohol (g)', type='number') to the schema list alongside existing kcal_avg and protein_avg entries.",
+      "inputs": ["include_avgs flag"],
+      "outputs": ["alcohol_g_avg column in Dataset schema"]
+    },
+    {
+      "step": 4,
+      "name": "intake_quantity_scaling",
+      "description": "In _validate_and_normalise (food.py): after existing validation, check for optional top-level quantity_g field. If present and > 0, treat all nutrition.* values as per-100g reference values; scale each macro as stored_value = ref_value * quantity_g / 100. Cross-field checks (good_fat_g <= fat_g, red_meat_g <= meat_g) applied to per-100g values before scaling. quantity_g stored in normalised dict.",
+      "inputs": ["quantity_g (optional, >0 number)", "nutrition.* fields (per-100g when quantity_g present)"],
+      "outputs": ["normalised dict with scaled macro values + quantity_g"]
+    },
+    {
+      "step": 5,
+      "name": "intake_db_insert_quantity_g",
+      "description": "In commit_meal (food.py): add quantity_g to the INSERT column list and VALUES tuple. When quantity_g is None (absent from intake), store NULL in the column.",
+      "inputs": ["normalised dict including quantity_g (float | None)"],
+      "outputs": ["food_logs row with quantity_g stored"]
+    },
+    {
+      "step": 6,
+      "name": "entry_detail_quantity_g",
+      "description": "In _serialise_entry_detail (entries.py): add quantity_g serialisation: float(row['quantity_g']) if not None else None. This field is returned in GET /api/food/entries/:id and POST /api/food/entries/:id/copy.",
+      "inputs": ["food_logs.quantity_g (NUMERIC(7,1) | NULL)"],
+      "outputs": ["EntryDetail.quantity_g (float | null)"]
+    },
+    {
+      "step": 7,
+      "name": "entry_edit_quantity_g",
+      "description": "In _validate_entry_edit_request (entries.py): accept optional quantity_g; validate as number > 0 if present (defaults to None when absent). Add quantity_g = %s to the UPDATE SET clause. quantity_g in validated dict is float | None.",
+      "inputs": ["PUT body optional quantity_g"],
+      "outputs": ["validated dict with quantity_g", "UPDATE SQL includes quantity_g column"]
+    },
+    {
+      "step": 8,
+      "name": "copy_entry_quantity_g",
+      "description": "In copy_entry (entries.py): add quantity_g to the INSERT column list and VALUES (using source['quantity_g'] which may be None). No scaling at copy time — the copy preserves the already-scaled stored macros and the original quantity_g reference.",
+      "inputs": ["source row quantity_g"],
+      "outputs": ["copied row with quantity_g preserved"]
+    },
+    {
+      "step": 9,
+      "name": "template_quantity_g",
+      "description": "Update TEMPLATE_JSON string in food.py to include quantity_g as a top-level optional field with a comment indicating it represents per-100g values when provided.",
+      "inputs": [],
+      "outputs": ["Updated template text"]
+    },
+    {
+      "step": 10,
+      "name": "frontend_report_alcohol_view",
+      "description": "In ReportPage.tsx: extend NutMetric type to 'kcal'|'protein'|'alcohol'. Add ALCOHOL_BARS constant. In YearComboPanel (to be renamed AvgComboPanel or left as-is): handle metric==='alcohol' using ALCOHOL_BARS and avgKey='alcohol_g_avg'. Extend View selector with third option. In DataTable: add alcohol branch showing bucket_label, alcohol_g_total, alcohol_g_avg (when present).",
+      "inputs": ["Dataset rows with alcohol_g_total, alcohol_g_avg"],
+      "outputs": ["Alcohol (g) view in chart and table"]
+    },
+    {
+      "step": 11,
+      "name": "frontend_report_avg_scope",
+      "description": "In ReportPage.tsx: change isYearScope to showAvgLine = scope !== 'all_time'. Use AvgComboPanel/YearComboPanel for week, month, year; use StackedBarPanel only for all_time.",
+      "inputs": ["scope state"],
+      "outputs": ["Average line shown in week and month charts"]
+    },
+    {
+      "step": 12,
+      "name": "frontend_entries_search",
+      "description": "In EntriesPage.tsx: add searchQuery/setSearchQuery state (default ''). Add a text input above the entries list (placeholder 'Search dishes...'). Filter entries before passing to GroupedEntries: include entry if dish_name.toLowerCase().includes(searchQuery.toLowerCase().trim()). When searchQuery is empty/whitespace show all. Date groups with zero matching entries omitted. GroupedEntries component is unchanged.",
+      "inputs": ["searchQuery string", "entries array"],
+      "outputs": ["Filtered entries passed to GroupedEntries"]
+    },
+    {
+      "step": 13,
+      "name": "frontend_entry_detail_quantity_rescale",
+      "description": "In EntryDetailPage.tsx: extend EntryDetail interface with quantity_g: number | null. Extend EntryFormState with quantity_g: number | null. In entryToFormState: map entry.quantity_g. Add quantity_g to _buildPutBody (send null explicitly when null). When entry.quantity_g !== null, show a 'Quantity (g)' input in the edit form. onChange for quantity_g: recompute all macro inputs proportionally (per100g = stored * 100 / original_quantity_g, new_stored = per100g * new_quantity_g / 100). Store per100g reference values in local state when quantity_g is non-null to enable correct proportional rescaling.",
+      "inputs": ["entry.quantity_g (number | null)", "user input for new quantity_g"],
+      "outputs": ["Macro fields updated proportionally in form state", "PUT body includes quantity_g and rescaled macros"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema types"},
+      {"component": "02_Platform/03_ErrorHandling", "role": "api_error helper"},
+      {"component": "03_Application/FoodTracker/backend/database.py", "role": "get_db connection context manager"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP routing", "reuse_existing": true},
+      {"name": "psycopg2", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "recharts", "role": "BarChart, ComposedChart for report UI", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "New platform packages for nutritional logic",
+      "Dedicated rescale endpoint",
+      "Storing per-100g reference values as separate columns"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Add quantity_g to INSERT in commit_meal (food.py) — column list and VALUES tuple",
+      "Add quantity_g validation and scaling logic to _validate_and_normalise (food.py)",
+      "Update TEMPLATE_JSON with quantity_g optional field comment",
+      "Add quantity_g to _validate_entry_edit_request and UPDATE SQL in entries.py",
+      "Add quantity_g to _serialise_entry_detail in entries.py",
+      "Add quantity_g to copy_entry INSERT in entries.py",
+      "Add alcohol_g_total to _query_logs SELECT and _ZERO_METRICS in report.py",
+      "Extend _zero_fill to compute alcohol_g_avg alongside kcal_avg/protein_avg when include_avgs=True",
+      "Change include_avgs condition to scope in ('year','month','week')",
+      "Extend REPORT_SCHEMA with alcohol_g_total ColumnSchema",
+      "Extend avg schema block with alcohol_g_avg ColumnSchema",
+      "Run migration: migrations/005_add_quantity_g.sql",
+      "Update schema.sql to include quantity_g column"
+    ],
+    "ui_implementer": [
+      "ReportPage.tsx: extend NutMetric to include 'alcohol'",
+      "ReportPage.tsx: add ALCOHOL_BARS constant",
+      "ReportPage.tsx: handle metric==='alcohol' in chart panel (ALCOHOL_BARS, avgKey='alcohol_g_avg')",
+      "ReportPage.tsx: add 'Alcohol (g)' option to View selector",
+      "ReportPage.tsx: add alcohol branch to DataTable",
+      "ReportPage.tsx: change isYearScope to showAvgLine = scope !== 'all_time'; use AvgComboPanel for week/month/year",
+      "EntriesPage.tsx: add searchQuery state and text input above entries list",
+      "EntriesPage.tsx: filter entries by searchQuery before passing to GroupedEntries",
+      "EntryDetailPage.tsx: extend EntryDetail and EntryFormState interfaces with quantity_g: number | null",
+      "EntryDetailPage.tsx: show Quantity (g) input when entry.quantity_g !== null",
+      "EntryDetailPage.tsx: implement proportional rescale logic on quantity_g change",
+      "EntryDetailPage.tsx: include quantity_g in _buildPutBody"
+    ],
+    "test_writer": [
+      "See 10_test_spec.md for all test scenarios",
+      "Write tests inside tests/ using pytest against the atlas-food-test container",
+      "Use fixtures from tests/fixtures.sql — extend to include rows with and without quantity_g"
+    ],
+    "reviewer": [
+      "Verify cross-field checks (good_fat_g <= fat_g, red_meat_g <= meat_g) apply to per-100g values before scaling in step 4",
+      "Verify copy_entry preserves quantity_g without re-scaling",
+      "Verify alcohol_g_avg cumulative average logic mirrors kcal_avg/protein_avg exactly",
+      "Verify include_avgs scope extension does not break all_time scope"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Proportional rescale precision loss",
+      "impact": "Per-100g values derived from stored macros via division may accumulate float rounding error; acceptable for display but not losslessly reversible"
+    },
+    {
+      "risk": "quantity_g NULL vs 0 ambiguity in legacy rows",
+      "impact": "Existing rows have quantity_g=NULL meaning 'absolute values'. Queries must treat NULL as 'not scaled' and not as 0."
+    }
+  ],
+  "open_questions": []
+}

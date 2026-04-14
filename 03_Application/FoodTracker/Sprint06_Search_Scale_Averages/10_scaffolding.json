@@ -1,0 +1,306 @@
+{
+  "sprint_note": "Sprint 06: quantity_g column (schema + migration), report alcohol/avg changes in report.py, quantity_g in food.py + entries.py, frontend changes in ReportPage.tsx + EntriesPage.tsx + EntryDetailPage.tsx.",
+  "component_name": "food_tracker",
+  "target_root": "03_Application/FoodTracker",
+  "directories": [
+    "03_Application/FoodTracker/migrations"
+  ],
+  "files": [
+    {
+      "path": "03_Application/FoodTracker/migrations/005_add_quantity_g.sql",
+      "stub_kind": "sql_migration",
+      "role": "Adds quantity_g NUMERIC(7,1) NULL column with CHECK constraint to foodtracker.food_logs",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/schema.sql",
+      "stub_kind": "sql_schema",
+      "role": "Canonical schema snapshot — add quantity_g column and CHECK constraint after alcohol_g",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/report.py",
+      "stub_kind": "python_module",
+      "role": "Report aggregation router — extend alcohol_g_total, avg to week/month, alcohol_g_avg",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "REPORT_SCHEMA",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "_ZERO_METRICS",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_query_logs",
+          "pattern": "repository",
+          "methods": [
+            {
+              "name": "_query_logs",
+              "visibility": "private",
+              "args": ["query: ReportQuery", "conn: psycopg2.extensions.connection"],
+              "returns": "dict[str, dict]",
+              "purpose": "[CHANGED] Add SUM(alcohol_g) AS alcohol_g_total to SELECT; add alcohol_g_total to returned dict"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_zero_fill",
+          "pattern": "mapper",
+          "methods": [
+            {
+              "name": "_zero_fill",
+              "visibility": "private",
+              "args": ["bucket_ids: list[str]", "label_map: dict[str, str]", "db_rows: dict[str, dict]", "include_avgs: bool = False"],
+              "returns": "list[dict]",
+              "purpose": "[CHANGED] Include alcohol_g_total in rows; when include_avgs=True, compute and emit alcohol_g_avg alongside kcal_avg and protein_avg"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_report",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "get_report",
+              "visibility": "public",
+              "args": ["scope: str", "mode: str"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Change include_avgs from scope=='year' to scope in ('year','month','week'); extend schema with alcohol_g_total and (when include_avgs) alcohol_g_avg"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/food.py",
+      "stub_kind": "python_module",
+      "role": "Meal intake router — add quantity_g optional scaling",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "TEMPLATE_JSON",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_validate_and_normalise",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_and_normalise",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "[CHANGED] After existing validation: read optional top-level quantity_g; validate > 0 if present; scale all nutrition.* by quantity_g/100 when present; cross-field checks on per-100g values; include quantity_g in normalised dict"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "commit_meal",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "commit_meal",
+              "visibility": "public",
+              "args": ["request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Add quantity_g to INSERT column list and VALUES tuple"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/entries.py",
+      "stub_kind": "python_module",
+      "role": "Entry CRUD router — add quantity_g to serialisation, validation, update, and copy",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "_serialise_entry_detail",
+          "pattern": "mapper",
+          "methods": [
+            {
+              "name": "_serialise_entry_detail",
+              "visibility": "private",
+              "args": ["row: dict"],
+              "returns": "dict",
+              "purpose": "[CHANGED] Add quantity_g: float(row['quantity_g']) if row['quantity_g'] is not None else None"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_validate_entry_edit_request",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_entry_edit_request",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "[CHANGED] Accept optional quantity_g: number > 0 if present; store float | None in validated dict"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "update_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "update_entry",
+              "visibility": "public",
+              "args": ["entry_id: str", "request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Add quantity_g = %s to UPDATE SET clause; pass validated['quantity_g'] as parameter"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "copy_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "copy_entry",
+              "visibility": "public",
+              "args": ["entry_id: str"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Add quantity_g to INSERT column list and VALUES; use source['quantity_g'] (may be None)"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/ReportPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Report view — extend NutMetric with alcohol; extend avg line to week/month; add alcohol chart/table view",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "NutMetric",
+          "pattern": "type_alias",
+          "methods": []
+        },
+        {
+          "kind": "constant",
+          "name": "ALCOHOL_BARS",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "YearComboPanel",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "YearComboPanel",
+              "visibility": "public",
+              "args": ["{ dataset: Dataset, metric: NutMetric }"],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Handle metric==='alcohol': use ALCOHOL_BARS and avgKey='alcohol_g_avg'"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "DataTable",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "DataTable",
+              "visibility": "public",
+              "args": ["{ dataset: Dataset, metric: NutMetric }"],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Add alcohol branch: columns bucket_label, alcohol_g_total, alcohol_g_avg (conditional)"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "ReportPage",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "ReportPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Add 'Alcohol (g)' View selector option; change isYearScope to showAvgLine = scope !== 'all_time'"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntriesPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Entries overview — add client-side search-as-you-type",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntriesPage",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "EntriesPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Add searchQuery state; add text input above entries list; filter entries by dish_name substring before passing to GroupedEntries"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntryDetailPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Entry detail/edit — add quantity_g display and proportional rescale UX",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntryDetailPage",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "EntryDetailPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Extend EntryDetail + EntryFormState with quantity_g; show Quantity (g) input when non-null; rescale macros proportionally on quantity_g change; include quantity_g in PUT body"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}

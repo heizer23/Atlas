@@ -390,6 +390,7 @@ export default function EntriesPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting,      setIsDeleting]      = useState(false);
   const [actionError,     setActionError]     = useState<ApiError | null>(null);
+  const [searchQuery,     setSearchQuery]     = useState<string>('');
 
   const fetchEntries = useCallback(async () => {
     const res = await apiFetch<{ meta: object; schema: object[]; rows: EntryRow[] }>('/food/entries');
@@ -502,19 +503,49 @@ export default function EntriesPage() {
         </div>
       )}
 
+      {/* Search input */}
+      <div style={{ marginBottom: 'var(--space-sm)' }}>
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search dishes\u2026"
+          style={{
+            width: '100%',
+            padding: '8px 12px',
+            background: 'var(--md-sys-color-surface)',
+            border: '1px solid var(--md-sys-color-outline)',
+            borderRadius: '4px',
+            color: 'var(--md-sys-color-on-surface)',
+            fontSize: '0.9rem',
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
+
       {entries === null || entries.length === 0 ? (
         <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
           No meal entries logged yet.
         </p>
-      ) : (
-        <GroupedEntries
-          entries={entries}
-          onToggleStandard={handleToggleStandard}
-          onCopy={handleCopy}
-          onDeleteTrigger={handleDeleteTrigger}
-          navigate={navigate}
-        />
-      )}
+      ) : (() => {
+        const trimmed = searchQuery.trim().toLowerCase();
+        const filtered = trimmed
+          ? entries.filter((e) => e.dish_name.toLowerCase().includes(trimmed))
+          : entries;
+        return filtered.length === 0 ? (
+          <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+            No entries match your search.
+          </p>
+        ) : (
+          <GroupedEntries
+            entries={filtered}
+            onToggleStandard={handleToggleStandard}
+            onCopy={handleCopy}
+            onDeleteTrigger={handleDeleteTrigger}
+            navigate={navigate}
+          />
+        );
+      })()}
     </div>
   );
 }

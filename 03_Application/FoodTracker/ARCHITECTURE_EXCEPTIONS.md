@@ -57,7 +57,7 @@ Governed by R-CON-BP-05 §3 (APPLICATION-scope exceptions are local and not cent
 **Rationale:** These are command endpoints (log, toggle, delete) that return confirmation of the action performed. R-CON-BP-04 explicitly permits non-Dataset shapes for "a command result" and "a form definition or submission result." Dataset is not a natural fit for mutation confirmations.
 
 **Named contracts:**
-- `EntryDetail`: `{ id, logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fiber_g, fat_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes, standard, source_standard_id }` as declared in `Sprint04_Standard Dishes/20_design/architecture.json`.
+- `EntryDetail`: `{ id, logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fiber_g, fat_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes, standard, source_standard_id, base_quantity }` as declared in `Sprint04_Standard Dishes/20_design/architecture.json` and updated in Sprint07_Base_Quantity. `base_quantity` is `float` (non-null) — the quantity that the stored nutrition values refer to; defaults to 100 for legacy entries.
 - `StandardToggleResult`: `{ id: string, standard: boolean }`
 - HTTP 204: no body; success is indicated by status code.
 

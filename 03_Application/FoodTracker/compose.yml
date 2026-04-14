@@ -18,6 +18,21 @@ services:
     networks:
       - atlas-net
 
+  food-tracker-test:
+    container_name: atlas-food-tracker-test
+    build:
+      context: ../..
+      dockerfile: 03_Application/FoodTracker/Dockerfile
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    command: ["sleep", "infinity"]
+    networks:
+      - atlas-net
+
 networks:
   atlas-net:
     external: true

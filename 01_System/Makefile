@@ -212,20 +212,26 @@ FOOD_COMPOSE=docker compose \
 	$(ENV_FILES)
 
 food-build:
-	$(FOOD_COMPOSE) build
+	$(FOOD_COMPOSE) build food-tracker
 
 food-up:
-	$(FOOD_COMPOSE) up -d
+	$(FOOD_COMPOSE) up -d food-tracker
 
 food-down:
 	$(FOOD_COMPOSE) down
 
 food-logs:
-	$(FOOD_COMPOSE) logs -f
+	$(FOOD_COMPOSE) logs -f food-tracker
 
 food-reboot:
-	$(FOOD_COMPOSE) down
-	$(FOOD_COMPOSE) up -d
+	$(FOOD_COMPOSE) stop food-tracker
+	$(FOOD_COMPOSE) up -d food-tracker
+
+food-test-up:
+	$(FOOD_COMPOSE) up -d food-tracker-test
+
+food-test-down:
+	$(FOOD_COMPOSE) stop food-tracker-test
 
 # endregion
 

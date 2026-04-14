@@ -94,6 +94,8 @@ def _serialise_entry_detail(row: dict) -> dict:
         # Sprint 04 v1.1 extension
         "standard":           bool(row["standard"]),
         "source_standard_id": str(row["source_standard_id"]) if row["source_standard_id"] else None,
+        # Sprint 07: base_quantity replaces quantity_g; always non-null after migration
+        "base_quantity":      float(row["base_quantity"]),
     }
 
 
@@ -280,22 +282,36 @@ def _validate_entry_edit_request(body: bytes) -> tuple[dict, None] | tuple[None,
     raw_notes = data.get("notes")
     notes = str(raw_notes) if raw_notes is not None else None
 
+    # Step 10 — base_quantity (optional, number > 0; defaults to 100 when absent)
+    raw_bq = data.get("base_quantity")
+    base_quantity: float = 100.0
+    if raw_bq is not None:
+        if not isinstance(raw_bq, (int, float)) or isinstance(raw_bq, bool) or raw_bq <= 0:
+            return None, _err(
+                "VALIDATION_ERROR",
+                "base_quantity must be a number > 0",
+                "base_quantity",
+                "INVALID_FIELD: base_quantity must be a positive number when present",
+            )
+        base_quantity = float(raw_bq)
+
     validated: dict[str, Any] = {
-        "logged_at":  logged_at,
-        "meal_type":  meal_type,
-        "dish_name":  dish_name,
-        "kcal":       kcal,
-        "protein_g":  protein_g,
-        "carbs_g":    carbs_g,
-        "fat_g":      fat_g,
-        "fiber_g":    fiber_g,
-        "good_fat_g": good_fat_g,
-        "meat_g":     meat_g,
-        "red_meat_g": red_meat_g,
-        "sodium_mg":  sodium_mg,
-        "alcohol_g":  alcohol_g,
-        "confidence": confidence,
-        "notes":      notes,
+        "logged_at":     logged_at,
+        "meal_type":     meal_type,
+        "dish_name":     dish_name,
+        "kcal":          kcal,
+        "protein_g":     protein_g,
+        "carbs_g":       carbs_g,
+        "fat_g":         fat_g,
+        "fiber_g":       fiber_g,
+        "good_fat_g":    good_fat_g,
+        "meat_g":        meat_g,
+        "red_meat_g":    red_meat_g,
+        "sodium_mg":     sodium_mg,
+        "alcohol_g":     alcohol_g,
+        "confidence":    confidence,
+        "notes":         notes,
+        "base_quantity": base_quantity,
     }
 
     return validated, None
@@ -435,22 +451,23 @@ async def update_entry(entry_id: str, request: Request) -> JSONResponse:
                     """
                     UPDATE foodtracker.food_logs
                     SET
-                        logged_at   = %s,
-                        meal_type   = %s,
-                        dish_name   = %s,
-                        kcal        = %s,
-                        protein_g   = %s,
-                        carbs_g     = %s,
-                        fat_g       = %s,
-                        fiber_g     = %s,
-                        good_fat_g  = %s,
-                        meat_g      = %s,
-                        red_meat_g  = %s,
-                        sodium_mg   = %s,
-                        alcohol_g   = %s,
-                        confidence  = %s,
-                        notes       = %s,
-                        updated_at  = CURRENT_TIMESTAMP
+                        logged_at     = %s,
+                        meal_type     = %s,
+                        dish_name     = %s,
+                        kcal          = %s,
+                        protein_g     = %s,
+                        carbs_g       = %s,
+                        fat_g         = %s,
+                        fiber_g       = %s,
+                        good_fat_g    = %s,
+                        meat_g        = %s,
+                        red_meat_g    = %s,
+                        sodium_mg     = %s,
+                        alcohol_g     = %s,
+                        confidence    = %s,
+                        notes         = %s,
+                        base_quantity = %s,
+                        updated_at    = CURRENT_TIMESTAMP
                     WHERE id = %s
                     RETURNING *
                     """,
@@ -470,6 +487,7 @@ async def update_entry(entry_id: str, request: Request) -> JSONResponse:
                         validated["alcohol_g"],
                         validated["confidence"],
                         validated["notes"],
+                        validated["base_quantity"],
                         entry_id,
                     ),
                 )
@@ -596,12 +614,12 @@ def copy_entry(entry_id: str) -> JSONResponse:
                     id, logged_at, meal_type, dish_name,
                     kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g,
                     meat_g, red_meat_g, sodium_mg, alcohol_g, confidence, notes,
-                    standard, source_standard_id
+                    standard, source_standard_id, base_quantity
                 ) VALUES (
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
-                    FALSE, NULL
+                    FALSE, NULL, %s
                 ) RETURNING *
                 """,
                 (
@@ -621,6 +639,7 @@ def copy_entry(entry_id: str) -> JSONResponse:
                     source["alcohol_g"],
                     source["confidence"],
                     source["notes"],
+                    source["base_quantity"],
                 ),
             )
             inserted = dict(cur.fetchone())

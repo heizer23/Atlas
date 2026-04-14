@@ -1,19 +1,16 @@
 /**
- * FoodTracker — ReportPage (Sprint 05)
+ * FoodTracker — ReportPage (Sprint 06)
  *
  * Route: /food/report
  *
- * Sprint 05 changes from Sprint 02:
- * - Default scope: week (was month).
- * - Rolling periods: no period_key sent. Backend computes rolling windows.
- * - New breakdown columns: per-meal-type kcal and protein.
- * - kcal/protein toggle to switch which breakdown set is shown.
- * - Week/month: stacked BarChart (one stack per meal type).
- * - Year: ComboChart — stacked bars + line for daily average (kcal_avg / protein_avg).
- * - all_time: stacked BarChart (no average line).
- * - Column-click outline removed (scoped CSS, not global).
- * - period_key removed from all requests.
- * - Drill-down navigation removed (period_key no longer exists).
+ * Sprint 06 changes from Sprint 05:
+ * - NutMetric extended with 'alcohol'.
+ * - ALCOHOL_BARS constant added.
+ * - YearComboPanel handles metric==='alcohol' (ALCOHOL_BARS, avgKey='alcohol_g_avg').
+ * - View selector extended with 'Alcohol (g)' option.
+ * - DataTable extended with alcohol branch.
+ * - showAvgLine = scope !== 'all_time' (avg line now shown for week and month).
+ * - StackedBarPanel used only for all_time scope.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -38,7 +35,7 @@ import type { Dataset, ApiError } from '@platform-ui/api/types';
 
 type Scope    = 'all_time' | 'year' | 'month' | 'week';
 type Mode     = 'aggregated' | 'daily';
-type NutMetric = 'kcal' | 'protein';
+type NutMetric = 'kcal' | 'protein' | 'alcohol';
 
 // Meal-type bar series — same order for all charts
 const KCAL_BARS: { key: string; label: string; color: string }[] = [
@@ -54,6 +51,10 @@ const PROTEIN_BARS: { key: string; label: string; color: string }[] = [
   { key: 'protein_lunch',     label: 'Lunch',     color: 'var(--atlas-chart-2)' },
   { key: 'protein_dinner',    label: 'Dinner',    color: 'var(--atlas-chart-3)' },
   { key: 'protein_snack',     label: 'Snacks',    color: 'var(--atlas-chart-4)' },
+];
+
+const ALCOHOL_BARS: { key: string; label: string; color: string }[] = [
+  { key: 'alcohol_g_total', label: 'Alcohol (g)', color: 'var(--atlas-chart-5)' },
 ];
 
 // ── Scoped style for outline removal ─────────────────────────────────────────
@@ -77,8 +78,8 @@ interface StackedBarPanelProps {
 }
 
 function StackedBarPanel({ dataset, metric }: StackedBarPanelProps) {
-  const bars = metric === 'kcal' ? KCAL_BARS : PROTEIN_BARS;
-  const totalKey = metric === 'kcal' ? 'kcal_total' : 'protein_total';
+  const bars = metric === 'kcal' ? KCAL_BARS : metric === 'protein' ? PROTEIN_BARS : ALCOHOL_BARS;
+  const totalKey = metric === 'kcal' ? 'kcal_total' : metric === 'protein' ? 'protein_total' : 'alcohol_g_total';
   const unit     = metric === 'kcal' ? 'kcal' : 'g';
 
   const chartData = dataset.rows.map((row) => {
@@ -114,8 +115,8 @@ interface YearComboPanelProps {
 }
 
 function YearComboPanel({ dataset, metric }: YearComboPanelProps) {
-  const bars    = metric === 'kcal' ? KCAL_BARS : PROTEIN_BARS;
-  const avgKey  = metric === 'kcal' ? 'kcal_avg' : 'protein_avg';
+  const bars    = metric === 'kcal' ? KCAL_BARS : metric === 'protein' ? PROTEIN_BARS : ALCOHOL_BARS;
+  const avgKey  = metric === 'kcal' ? 'kcal_avg' : metric === 'protein' ? 'protein_avg' : 'alcohol_g_avg';
   const unit    = metric === 'kcal' ? 'kcal' : 'g';
 
   const chartData = dataset.rows.map((row) => {
@@ -159,6 +160,9 @@ interface DataTableProps {
 }
 
 function DataTable({ dataset, metric }: DataTableProps) {
+  // Build column list based on metric; for alcohol, include avg column only if present in first row
+  const hasAlcoholAvg = dataset.rows.length > 0 && 'alcohol_g_avg' in dataset.rows[0];
+
   const cols =
     metric === 'kcal'
       ? [
@@ -170,13 +174,19 @@ function DataTable({ dataset, metric }: DataTableProps) {
           { key: 'kcal_alcohol',   label: 'Drink' },
           { key: 'kcal_total',     label: 'Total' },
         ]
-      : [
+      : metric === 'protein'
+      ? [
           { key: 'bucket_label',      label: 'Date' },
           { key: 'protein_breakfast', label: 'Breakfast' },
           { key: 'protein_lunch',     label: 'Lunch' },
           { key: 'protein_dinner',    label: 'Dinner' },
           { key: 'protein_snack',     label: 'Snacks' },
           { key: 'protein_total',     label: 'Total' },
+        ]
+      : [
+          { key: 'bucket_label',   label: 'Date' },
+          { key: 'alcohol_g_total', label: 'Alcohol (g)' },
+          ...(hasAlcoholAvg ? [{ key: 'alcohol_g_avg', label: 'Avg/day' }] : []),
         ];
 
   const unit = metric === 'kcal' ? 'kcal' : 'g';
@@ -280,7 +290,7 @@ export default function ReportPage() {
     setMode(newMode);
   }
 
-  const isYearScope = scope === 'year';
+  const showAvgLine = scope !== 'all_time';
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -372,6 +382,7 @@ export default function ReportPage() {
             >
               <option value="kcal">Calories (kcal)</option>
               <option value="protein">Protein (g)</option>
+              <option value="alcohol">Alcohol (g)</option>
             </select>
           </div>
         </div>
@@ -391,7 +402,7 @@ export default function ReportPage() {
           ) : error ? (
             <ErrorCard error={error} />
           ) : currentDataset ? (
-            isYearScope ? (
+            showAvgLine ? (
               <YearComboPanel dataset={currentDataset} metric={metric} />
             ) : (
               <StackedBarPanel dataset={currentDataset} metric={metric} />

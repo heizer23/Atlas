@@ -1,7 +1,15 @@
 """
 backend/routers/report.py
 
-Sprint 05 — GET /api/food/report
+Sprint 06 — GET /api/food/report
+
+Sprint 06 changes from Sprint 05:
+- alcohol_g_total added to every bucket row (SUM of alcohol_g per bucket).
+- include_avgs extended from scope=='year' to scope in ('year','month','week').
+- alcohol_g_avg added to rows when include_avgs=True (same rolling cumulative
+  average logic as kcal_avg / protein_avg).
+- REPORT_SCHEMA extended with alcohol_g_total ColumnSchema.
+- Avg schema block extended with alcohol_g_avg ColumnSchema.
 
 Rolling-window bucket aggregation over foodtracker.food_logs.
 
@@ -56,9 +64,10 @@ REPORT_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="protein_dinner",    label="Dinner protein (g)",    type="number"),
     ColumnSchema(key="protein_snack",     label="Snacks protein (g)",    type="number"),
     ColumnSchema(key="protein_total",     label="Total protein (g)",     type="number"),
+    ColumnSchema(key="alcohol_g_total",   label="Alcohol (g)",           type="number"),
 ]
 
-# Year scope adds running average columns — emitted in rows but not in base schema
+# Year/month/week scopes add running average columns — emitted in rows but not in base schema
 # (frontend renders them via ComboChart mapping, not as table columns)
 
 
@@ -254,10 +263,12 @@ def _query_logs(
     Returns dict mapping bucket_id → {
         kcal_breakfast, kcal_lunch, kcal_dinner, kcal_snack, kcal_alcohol, kcal_total,
         protein_breakfast, protein_lunch, protein_dinner, protein_snack, protein_total,
+        alcohol_g_total,
         reported_days  (count of distinct calendar days with at least one entry in bucket)
     }
 
     kcal_alcohol = SUM(kcal) WHERE alcohol_g > 0 (pseudo-meal-type, not tied to meal_type).
+    alcohol_g_total = SUM(alcohol_g) for all entries in bucket.
     """
 
     where_clause, params = _build_where_clause(query)
@@ -277,6 +288,7 @@ def _query_logs(
             SUM(CASE WHEN meal_type = 'dinner'    AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN protein_g ELSE 0 END) AS protein_dinner,
             SUM(CASE WHEN meal_type = 'snack'     AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN protein_g ELSE 0 END) AS protein_snack,
             SUM(protein_g) AS protein_total,
+            SUM(alcohol_g) AS alcohol_g_total,
             COUNT(DISTINCT logged_at::date) AS reported_days
         FROM foodtracker.food_logs
         {where_clause}
@@ -303,6 +315,7 @@ def _query_logs(
             "protein_dinner":    float(row["protein_dinner"]    or 0),
             "protein_snack":     float(row["protein_snack"]     or 0),
             "protein_total":     float(row["protein_total"]     or 0),
+            "alcohol_g_total":   float(row["alcohol_g_total"]   or 0),
             "reported_days":     int(row["reported_days"]       or 0),
         }
 
@@ -337,6 +350,7 @@ _ZERO_METRICS: dict[str, Any] = {
     "protein_dinner":    0,
     "protein_snack":     0,
     "protein_total":     0,
+    "alcohol_g_total":   0,
     "reported_days":     0,
 }
 
@@ -357,9 +371,9 @@ def _zero_fill(
       Emits one row per db_rows entry, sorted ascending by bucket_id.
       Derives bucket_label as day-of-month from YYYY-MM-DD key.
 
-    For year scope (include_avgs=True):
-      Appends kcal_avg and protein_avg per row = rolling cumulative average
-      over reported days only (cumulative sum ÷ cumulative reported_days count).
+    For year/month/week scopes (include_avgs=True):
+      Appends kcal_avg, protein_avg, and alcohol_g_avg per row = rolling cumulative
+      average over reported days only (cumulative sum ÷ cumulative reported_days count).
     """
 
     def _make_row(bid: str, label: str, metrics: dict) -> dict:
@@ -377,6 +391,7 @@ def _zero_fill(
             "protein_dinner":    metrics["protein_dinner"],
             "protein_snack":     metrics["protein_snack"],
             "protein_total":     metrics["protein_total"],
+            "alcohol_g_total":   metrics["alcohol_g_total"],
         }
         return row
 
@@ -396,18 +411,22 @@ def _zero_fill(
         # Cumulative rolling average over reported days only
         cumulative_kcal    = 0.0
         cumulative_protein = 0.0
+        cumulative_alcohol = 0.0
         cumulative_days    = 0
-        for i, (row, bid) in enumerate(zip(rows, bucket_ids if bucket_ids else sorted(db_rows.keys()))):
+        for row, bid in zip(rows, bucket_ids if bucket_ids else sorted(db_rows.keys())):
             metrics = db_rows.get(bid, _ZERO_METRICS)
             cumulative_kcal    += metrics["kcal_total"]
             cumulative_protein += metrics["protein_total"]
+            cumulative_alcohol += metrics["alcohol_g_total"]
             cumulative_days    += metrics["reported_days"]
             if cumulative_days > 0:
-                row["kcal_avg"]    = round(cumulative_kcal    / cumulative_days, 1)
-                row["protein_avg"] = round(cumulative_protein / cumulative_days, 1)
+                row["kcal_avg"]      = round(cumulative_kcal    / cumulative_days, 1)
+                row["protein_avg"]   = round(cumulative_protein / cumulative_days, 1)
+                row["alcohol_g_avg"] = round(cumulative_alcohol / cumulative_days, 1)
             else:
-                row["kcal_avg"]    = 0.0
-                row["protein_avg"] = 0.0
+                row["kcal_avg"]      = 0.0
+                row["protein_avg"]   = 0.0
+                row["alcohol_g_avg"] = 0.0
 
     return rows
 
@@ -447,7 +466,8 @@ def get_report(
       mode  — required: daily | aggregated
 
     Returns a Dataset with per-meal-type breakdown columns.
-    For year scope: rows also include kcal_avg and protein_avg fields.
+    All scopes include alcohol_g_total per row.
+    For year/month/week scopes: rows also include kcal_avg, protein_avg, alcohol_g_avg.
     Dataset meta includes reported_days (count of distinct days with entries in window).
     """
 
@@ -455,7 +475,7 @@ def get_report(
     if err is not None:
         return JSONResponse(status_code=422, content=err)
 
-    include_avgs = (query.scope == "year")
+    include_avgs = (query.scope in ("year", "month", "week"))
 
     with get_db() as conn:
         if query.scope == "all_time" and query.mode == "aggregated":
@@ -471,12 +491,13 @@ def get_report(
     rows  = _zero_fill(bucket_ids, label_map, db_rows, include_avgs=include_avgs)
     label = _build_report_label(query)
 
-    # Determine schema — year scope gets avg columns appended
+    # Determine schema — year/month/week scopes get avg columns appended
     schema = list(REPORT_SCHEMA)
     if include_avgs:
         schema = schema + [
-            ColumnSchema(key="kcal_avg",    label="Avg daily kcal",      type="number"),
-            ColumnSchema(key="protein_avg", label="Avg daily protein (g)", type="number"),
+            ColumnSchema(key="kcal_avg",      label="Avg daily kcal",        type="number"),
+            ColumnSchema(key="protein_avg",   label="Avg daily protein (g)", type="number"),
+            ColumnSchema(key="alcohol_g_avg", label="Avg daily alcohol (g)", type="number"),
         ]
 
     dataset = Dataset(

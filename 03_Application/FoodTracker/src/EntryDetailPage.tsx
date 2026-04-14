@@ -1,16 +1,19 @@
 /**
- * EntryDetailPage — Sprint 03
+ * EntryDetailPage — Sprint 07
  *
  * Entry detail and edit screen for /food/entries/:id.
  * Loads one existing meal entry by id. Renders an editable form.
  * Save issues PUT /api/food/entries/{id} with EntryEditRequest body.
  *
- * EntryEditRequest contract (architecture.json contracts.named_contracts.EntryEditRequest):
- * {logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fat_g,
- *  fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes?}
- *
- * No items field. No timestamp field. dish_name is user-editable.
- * Edit and intake are separate flows (Option A, 2026-03-21).
+ * Sprint 07 changes from Sprint 06:
+ * - EntryDetail.quantity_g: number | null → base_quantity: number (always present).
+ * - EntryFormState.quantity_g: number | null → base_quantity: number.
+ * - per100g state renamed to perUnit; computation changed from stored*100/q to stored/q.
+ * - Null guard removed — perUnit is always computed on load.
+ * - handleQuantityChange renamed to handleBaseQuantityChange;
+ *   rescale formula changed from perUnit[f]*newQty/100 to perUnit[f]*newQty.
+ * - "Quantity (g)" → "Base quantity"; field always shown (null guard removed).
+ * - PUT body uses base_quantity instead of quantity_g.
  */
 
 import { useState, useEffect } from 'react';
@@ -25,48 +28,51 @@ import type { ApiError } from '@platform-ui/api/types';
 /**
  * EntryDetail — conforms to architecture.json contracts.named_contracts.EntryDetail.
  * Returned by GET /api/food/entries/{id} and POST /api/food/entries/{id}/copy.
+ * Sprint 07: base_quantity replaces quantity_g; always a non-null float.
  */
 interface EntryDetail {
-  id:         string;
-  logged_at:  string;
-  meal_type:  string;
-  dish_name:  string;
-  kcal:       number;
-  protein_g:  number;
-  carbs_g:    number;
-  fat_g:      number;
-  fiber_g:    number;
-  good_fat_g: number;
-  meat_g:     number;
-  red_meat_g: number;
-  sodium_mg:  number;
-  alcohol_g:  number;
-  confidence: number;
-  notes:      string | null;
-  created_at: string;
-  updated_at: string;
+  id:             string;
+  logged_at:      string;
+  meal_type:      string;
+  dish_name:      string;
+  kcal:           number;
+  protein_g:      number;
+  carbs_g:        number;
+  fat_g:          number;
+  fiber_g:        number;
+  good_fat_g:     number;
+  meat_g:         number;
+  red_meat_g:     number;
+  sodium_mg:      number;
+  alcohol_g:      number;
+  confidence:     number;
+  notes:          string | null;
+  created_at:     string;
+  updated_at:     string;
+  base_quantity:  number;  // Sprint 07 — replaces quantity_g: number | null
 }
 
 /**
- * EntryFormState — local editing state for all user-editable fields
- * per the EntryEditRequest contract. dish_name is user-editable in this flow.
+ * EntryFormState — local editing state for all user-editable fields.
+ * Sprint 07: base_quantity replaces quantity_g.
  */
 interface EntryFormState {
-  logged_at:  string;
-  meal_type:  string;
-  dish_name:  string;
-  kcal:       number;
-  protein_g:  number;
-  carbs_g:    number;
-  fat_g:      number;
-  fiber_g:    number;
-  good_fat_g: number;
-  meat_g:     number;
-  red_meat_g: number;
-  sodium_mg:  number;
-  alcohol_g:  number;
-  confidence: number;
-  notes:      string;
+  logged_at:     string;
+  meal_type:     string;
+  dish_name:     string;
+  kcal:          number;
+  protein_g:     number;
+  carbs_g:       number;
+  fat_g:         number;
+  fiber_g:       number;
+  good_fat_g:    number;
+  meat_g:        number;
+  red_meat_g:    number;
+  sodium_mg:     number;
+  alcohol_g:     number;
+  confidence:    number;
+  notes:         string;
+  base_quantity: number;  // Sprint 07 — replaces quantity_g: number | null
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────────
@@ -75,50 +81,46 @@ const ALLOWED_MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'other'] as
 
 function entryToFormState(entry: EntryDetail): EntryFormState {
   return {
-    logged_at:  entry.logged_at,
-    meal_type:  entry.meal_type,
-    dish_name:  entry.dish_name,
-    kcal:       entry.kcal,
-    protein_g:  entry.protein_g,
-    carbs_g:    entry.carbs_g,
-    fat_g:      entry.fat_g,
-    fiber_g:    entry.fiber_g,
-    good_fat_g: entry.good_fat_g,
-    meat_g:     entry.meat_g,
-    red_meat_g: entry.red_meat_g,
-    sodium_mg:  entry.sodium_mg,
-    alcohol_g:  entry.alcohol_g ?? 0,
-    confidence: entry.confidence,
-    notes:      entry.notes ?? '',
+    logged_at:     entry.logged_at,
+    meal_type:     entry.meal_type,
+    dish_name:     entry.dish_name,
+    kcal:          entry.kcal,
+    protein_g:     entry.protein_g,
+    carbs_g:       entry.carbs_g,
+    fat_g:         entry.fat_g,
+    fiber_g:       entry.fiber_g,
+    good_fat_g:    entry.good_fat_g,
+    meat_g:        entry.meat_g,
+    red_meat_g:    entry.red_meat_g,
+    sodium_mg:     entry.sodium_mg,
+    alcohol_g:     entry.alcohol_g ?? 0,
+    confidence:    entry.confidence,
+    notes:         entry.notes ?? '',
+    base_quantity: entry.base_quantity,
   };
 }
 
 /**
  * _buildPutBody — constructs the EntryEditRequest JSON body string from form state.
- *
- * Conforms to architecture.json contracts.named_contracts.EntryEditRequest:
- * {logged_at, meal_type, dish_name, kcal, protein_g, carbs_g, fat_g,
- *  fiber_g, good_fat_g, meat_g, red_meat_g, sodium_mg, confidence, notes?}
- *
- * No items field. No timestamp field. dish_name taken directly from formState
- * and is user-editable (Option A).
+ * Sprint 07: base_quantity replaces quantity_g in the PUT body.
  */
 function _buildPutBody(formState: EntryFormState): string {
   const body: Record<string, unknown> = {
-    logged_at:  formState.logged_at,
-    meal_type:  formState.meal_type,
-    dish_name:  formState.dish_name,
-    kcal:       Math.round(formState.kcal),
-    protein_g:  formState.protein_g,
-    carbs_g:    formState.carbs_g,
-    fat_g:      formState.fat_g,
-    fiber_g:    formState.fiber_g,
-    good_fat_g: formState.good_fat_g,
-    meat_g:     formState.meat_g,
-    red_meat_g: formState.red_meat_g,
-    sodium_mg:  formState.sodium_mg,
-    alcohol_g:  formState.alcohol_g,
-    confidence: formState.confidence,
+    logged_at:     formState.logged_at,
+    meal_type:     formState.meal_type,
+    dish_name:     formState.dish_name,
+    kcal:          Math.round(formState.kcal),
+    protein_g:     formState.protein_g,
+    carbs_g:       formState.carbs_g,
+    fat_g:         formState.fat_g,
+    fiber_g:       formState.fiber_g,
+    good_fat_g:    formState.good_fat_g,
+    meat_g:        formState.meat_g,
+    red_meat_g:    formState.red_meat_g,
+    sodium_mg:     formState.sodium_mg,
+    alcohol_g:     formState.alcohol_g,
+    confidence:    formState.confidence,
+    base_quantity: formState.base_quantity,  // Sprint 07
   };
   if (formState.notes.trim() !== '') {
     body['notes'] = formState.notes;
@@ -196,6 +198,9 @@ export default function EntryDetailPage() {
   const [loadError,   setLoadError]   = useState<ApiError | null>(null);
   const [saveError,   setSaveError]   = useState<ApiError | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  // Sprint 07: perUnit stores per-unit reference values (stored / base_quantity).
+  // Always computed on load (base_quantity is never null).
+  const [perUnit, setPerUnit] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -207,6 +212,20 @@ export default function EntryDetailPage() {
         const detail = res as EntryDetail;
         setEntry(detail);
         setFormState(entryToFormState(detail));
+        // Sprint 07: base_quantity is always present; compute perUnit unconditionally.
+        const q = detail.base_quantity;
+        setPerUnit({
+          kcal:       detail.kcal       / q,
+          protein_g:  detail.protein_g  / q,
+          carbs_g:    detail.carbs_g    / q,
+          fat_g:      detail.fat_g      / q,
+          fiber_g:    detail.fiber_g    / q,
+          good_fat_g: detail.good_fat_g / q,
+          meat_g:     detail.meat_g     / q,
+          red_meat_g: detail.red_meat_g / q,
+          sodium_mg:  detail.sodium_mg  / q,
+          alcohol_g:  detail.alcohol_g  / q,
+        });
       }
     });
   }, [id]);
@@ -217,6 +236,35 @@ export default function EntryDetailPage() {
     setSaveError(null);
     setSaveSuccess(false);
     setFormState((prev) => prev ? { ...prev, [field]: value } : prev);
+  }
+
+  // ── Base quantity change handler — rescales all macro fields proportionally ──
+  // Sprint 07: formula is perUnit[f] * newQty (no /100 step).
+
+  function handleBaseQuantityChange(newQty: number) {
+    setSaveError(null);
+    setSaveSuccess(false);
+    if (!perUnit || newQty <= 0) {
+      setFormState((prev) => prev ? { ...prev, base_quantity: newQty } : prev);
+      return;
+    }
+    setFormState((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        base_quantity: newQty,
+        kcal:       Math.round(perUnit['kcal']       * newQty),
+        protein_g:  Math.round(perUnit['protein_g']  * newQty * 10) / 10,
+        carbs_g:    Math.round(perUnit['carbs_g']    * newQty * 10) / 10,
+        fat_g:      Math.round(perUnit['fat_g']      * newQty * 10) / 10,
+        fiber_g:    Math.round(perUnit['fiber_g']    * newQty * 10) / 10,
+        good_fat_g: Math.round(perUnit['good_fat_g'] * newQty * 10) / 10,
+        meat_g:     Math.round(perUnit['meat_g']     * newQty * 10) / 10,
+        red_meat_g: Math.round(perUnit['red_meat_g'] * newQty * 10) / 10,
+        sodium_mg:  Math.round(perUnit['sodium_mg']  * newQty * 10) / 10,
+        alcohol_g:  Math.round(perUnit['alcohol_g']  * newQty * 10) / 10,
+      };
+    });
   }
 
   // ── Save handler ───────────────────────────────────────────────────────────
@@ -359,6 +407,19 @@ export default function EntryDetailPage() {
             onChange={(e) => handleChange('dish_name', e.target.value)}
             style={inputStyle}
             placeholder="e.g. chicken breast, rice"
+          />
+        </FieldRow>
+
+        {/* Sprint 07: Base quantity — always shown; changing it rescales all macros */}
+        <FieldRow label="Base quantity">
+          <input
+            type="number"
+            value={formState.base_quantity}
+            min={0.1}
+            step="1"
+            onChange={(e) => handleBaseQuantityChange(parseFloat(e.target.value) || 0)}
+            style={inputStyle}
+            title="Changing base quantity rescales all macro values proportionally"
           />
         </FieldRow>
 

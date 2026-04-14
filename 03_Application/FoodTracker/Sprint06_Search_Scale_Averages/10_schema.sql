@@ -1,3 +1,6 @@
+-- FoodTracker schema snapshot — Sprint06_Search_Scale_Averages target state
+-- Adds: quantity_g NUMERIC(7,1) NULL with CHECK constraint
+
 BEGIN;
 
 CREATE SCHEMA IF NOT EXISTS foodtracker;
@@ -41,12 +44,10 @@ CREATE TABLE IF NOT EXISTS foodtracker.food_logs (
   standard            BOOLEAN NOT NULL DEFAULT FALSE,
   source_standard_id  UUID NULL,
 
-  -- Base quantity (Sprint 07)
-  -- The quantity that the stored nutrition values refer to.
-  -- Gram-based entries: grams consumed. Serving-based entries: serving count (usually 1).
-  -- Rescaling: new_macro = stored_macro / base_quantity * new_base_quantity.
-  -- Default 100: legacy entries use this placeholder until manually corrected.
-  base_quantity NUMERIC(7,1) NOT NULL DEFAULT 100,
+  -- Quantity scaling (Sprint 06)
+  -- NULL means the entry was logged with direct absolute values (existing behavior).
+  -- Non-null means the stored macros were scaled from per-100g values at log time.
+  quantity_g NUMERIC(7,1) DEFAULT NULL,
 
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -70,7 +71,7 @@ CREATE TABLE IF NOT EXISTS foodtracker.food_logs (
   CHECK (confidence BETWEEN 1 AND 5),
 
   CONSTRAINT food_logs_alcohol_g_nonneg CHECK (alcohol_g >= 0),
-  CONSTRAINT food_logs_base_quantity_pos CHECK (base_quantity > 0)
+  CONSTRAINT food_logs_quantity_g_pos CHECK (quantity_g IS NULL OR quantity_g > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_food_logs_logged_at ON foodtracker.food_logs (logged_at);

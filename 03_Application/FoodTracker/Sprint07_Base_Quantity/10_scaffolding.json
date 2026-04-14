@@ -1,0 +1,155 @@
+{
+  "sprint_note": "Sprint 07: new migration 006, schema.sql rename, backend renames in food.py + entries.py, frontend rename in EntryDetailPage.tsx.",
+  "component_name": "food_tracker",
+  "target_root": "03_Application/FoodTracker",
+  "directories": [],
+  "files": [
+    {
+      "path": "03_Application/FoodTracker/migrations/006_rename_quantity_g.sql",
+      "stub_kind": "sql_migration",
+      "role": "Backfills NULL quantity_g to 100, renames column to base_quantity, adds NOT NULL + DEFAULT 100, replaces CHECK constraint name",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/schema.sql",
+      "stub_kind": "sql_schema",
+      "role": "Canonical schema snapshot — replace quantity_g block with base_quantity NOT NULL DEFAULT 100 and updated constraint name",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/food.py",
+      "stub_kind": "python_module",
+      "role": "Meal intake router — rename quantity_g to base_quantity in template, validation, and INSERT",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "TEMPLATE_JSON",
+          "pattern": "constant",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "_validate_and_normalise",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_and_normalise",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "[CHANGED] Rename quantity_g to base_quantity in step 9; default to 100 when absent; scale nutrition.* by base_quantity/100; include base_quantity in normalised dict"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "commit_meal",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "commit_meal",
+              "visibility": "public",
+              "args": ["request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Replace quantity_g with base_quantity in INSERT column list and VALUES tuple"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/backend/routers/entries.py",
+      "stub_kind": "python_module",
+      "role": "Entry CRUD router — rename quantity_g to base_quantity in serialisation, validation, update SQL, and copy INSERT",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "_serialise_entry_detail",
+          "pattern": "mapper",
+          "methods": [
+            {
+              "name": "_serialise_entry_detail",
+              "visibility": "private",
+              "args": ["row: dict"],
+              "returns": "dict",
+              "purpose": "[CHANGED] Replace quantity_g serialisation with 'base_quantity': float(row['base_quantity']) — no null check needed"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_validate_entry_edit_request",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "_validate_entry_edit_request",
+              "visibility": "private",
+              "args": ["body: bytes"],
+              "returns": "tuple[dict, None] | tuple[None, dict]",
+              "purpose": "[CHANGED] Rename quantity_g to base_quantity; if absent from body, default to 100; validate > 0; store float in validated dict"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "update_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "update_entry",
+              "visibility": "public",
+              "args": ["entry_id: str", "request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Replace quantity_g = %s with base_quantity = %s in UPDATE SET clause"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "copy_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "copy_entry",
+              "visibility": "public",
+              "args": ["entry_id: str"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Replace quantity_g with base_quantity in INSERT column list and VALUES; use source['base_quantity']"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntryDetailPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Entry detail/edit — rename quantity_g to base_quantity; rename per100g state to perUnit; fix rescale formula; always show Base quantity field",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntryDetailPage",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "EntryDetailPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] EntryDetail.base_quantity: number (not null); perUnit = stored/base_quantity; rescale = perUnit*newQty; always show Base quantity field; PUT body uses base_quantity"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}

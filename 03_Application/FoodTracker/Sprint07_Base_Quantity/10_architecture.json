@@ -1,0 +1,257 @@
+{
+  "sprint_note": "Sprint 07 renames quantity_g to base_quantity across schema, migrations, backend, and frontend. Semantics are unified: base_quantity is always non-null (NOT NULL DEFAULT 100) after migration. Rescale formula simplified from per100g*newQty/100 to perUnit*newQty. No new endpoints; no new columns.",
+  "component_name": "food_tracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "FoodTracker records daily food intake, computes nutritional aggregates, and serves them through a Dataset-based API consumed by the Atlas Shell UI.",
+  "classification": {
+    "why_application": "Contains domain-specific meal-logging rules, nutritional scaling logic, and report aggregation that has meaning only within the FoodTracker domain.",
+    "non_goals": [
+      "Changes to the report tab or standards tab",
+      "Any UI to distinguish gram-based vs serving-based entries — naming convention is sufficient",
+      "Validation that base_quantity is an integer for serving-based entries",
+      "Storing per-unit reference values separately in the database"
+    ],
+    "not_platform": "Meal logging, nutritional aggregation, and scaling logic encode FoodTracker-specific business rules; they must not become reusable platform capabilities."
+  },
+  "contracts": {
+    "consumes": [
+      "platform_contracts.Dataset / DatasetMeta / ColumnSchema (02_Platform/packages/platform_contracts/contracts.py)",
+      "platform_errorhandling.api_error (02_Platform/03_ErrorHandling/)",
+      "foodtracker.food_logs table (private schema)"
+    ],
+    "provides": [
+      "GET /api/food/report — Dataset with per-meal-type kcal/protein/alcohol buckets; avg columns when scope in (year, month, week)",
+      "GET /api/food/entries — Dataset of food_logs rows (overview schema)",
+      "[CHANGED] GET /api/food/entries/:id — EntryDetail JSON (non-Dataset); now returns base_quantity: float (always non-null)",
+      "[CHANGED] PUT /api/food/entries/:id — full-replace edit; field renamed to base_quantity; defaults to 100 if absent",
+      "[CHANGED] POST /api/food/meals — intake with optional base_quantity scaling; field renamed from quantity_g",
+      "[CHANGED] POST /api/food/entries/:id/copy — copies row; preserves base_quantity",
+      "DELETE /api/food/entries/:id — hard delete",
+      "PATCH /api/food/entries/:id/standard — toggle standard flag",
+      "[CHANGED] GET /api/food/template — plain-text JSON template updated with base_quantity",
+      "POST /api/food/validate — validate + preview (unchanged)"
+    ],
+    "invariants": [
+      "[CHANGED] base_quantity stored in food_logs is always > 0 (NOT NULL, CHECK constraint, DEFAULT 100)",
+      "[CHANGED] Legacy rows that had quantity_g=NULL are backfilled to base_quantity=100 by migration",
+      "[CHANGED] When base_quantity is present at intake, all stored macro values are base_quantity/100 * per-100g input",
+      "Cross-field checks (good_fat_g <= fat_g, red_meat_g <= meat_g) apply to per-100g values before scaling",
+      "avg columns (kcal_avg, protein_avg, alcohol_g_avg) are present in rows if and only if scope is year, month, or week",
+      "alcohol_g_total included in every report bucket row regardless of scope",
+      "Client-side search does not affect backend — GET /api/food/entries response is always unfiltered"
+    ],
+    "failure_modes": [
+      "[CHANGED] VALIDATION_ERROR (422): base_quantity present but not a number > 0",
+      "VALIDATION_ERROR (422): any required nutrition field missing or invalid",
+      "NOT_FOUND (404): entry id does not exist",
+      "DB_CONSTRAINT (400): database check constraint violated",
+      "INVALID_PARAM (422): scope or mode not in allowed set"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema",
+      "platform_errorhandling.api_error",
+      "psycopg2 (Postgres driver)",
+      "fastapi.APIRouter"
+    ],
+    "provides": [
+      "HTTP API at /api/food/* (all routes registered via FastAPI router in backend/main.py)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/report",
+        "purpose": "Rolling-window bucket aggregation; unchanged this sprint",
+        "ui_contract": "Dataset"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries",
+        "purpose": "All food_logs rows as Dataset (overview schema); unchanged this sprint",
+        "ui_contract": "Dataset"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries/:id",
+        "purpose": "[CHANGED] Single entry detail; base_quantity replaces quantity_g; now always a float (never null)",
+        "ui_contract": "EntryDetail (registered exception — see ARCHITECTURE_EXCEPTIONS.md)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/food/entries/:id",
+        "purpose": "[CHANGED] Full-replace edit; field renamed to base_quantity; if absent from PUT body, defaults to 100",
+        "ui_contract": "Dataset (single row on success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/meals",
+        "purpose": "[CHANGED] Intake: field renamed to base_quantity; semantics unchanged",
+        "ui_contract": "Dataset (single row on success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/entries/:id/copy",
+        "purpose": "[CHANGED] Copy row; INSERT uses base_quantity column",
+        "ui_contract": "EntryDetail (registered exception)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/food/entries/:id",
+        "purpose": "Hard delete; unchanged this sprint",
+        "ui_contract": "none (204)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/food/entries/:id/standard",
+        "purpose": "Toggle standard flag; unchanged this sprint",
+        "ui_contract": "none"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/template",
+        "purpose": "[CHANGED] Plain-text JSON template; updated to include base_quantity field",
+        "ui_contract": "text/plain"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "migration_rename_column",
+      "description": "migrations/006_rename_quantity_g.sql: (1) UPDATE food_logs SET quantity_g=100 WHERE quantity_g IS NULL to backfill legacy NULLs. (2) ALTER TABLE RENAME COLUMN quantity_g TO base_quantity. (3) ALTER COLUMN base_quantity SET NOT NULL, SET DEFAULT 100. (4) DROP CONSTRAINT food_logs_quantity_g_pos. (5) ADD CONSTRAINT food_logs_base_quantity_pos CHECK (base_quantity > 0). Wrapped in BEGIN/COMMIT.",
+      "inputs": ["foodtracker.food_logs.quantity_g (NUMERIC(7,1) NULL)"],
+      "outputs": ["foodtracker.food_logs.base_quantity (NUMERIC(7,1) NOT NULL DEFAULT 100, CHECK > 0)"]
+    },
+    {
+      "step": 2,
+      "name": "schema_sql_update",
+      "description": "In schema.sql: replace the quantity_g column block and the food_logs_quantity_g_pos constraint with base_quantity NOT NULL DEFAULT 100 and food_logs_base_quantity_pos CHECK (base_quantity > 0). Comment updated to reflect Sprint 07 semantics.",
+      "inputs": ["schema.sql current state"],
+      "outputs": ["schema.sql reflecting base_quantity"]
+    },
+    {
+      "step": 3,
+      "name": "intake_base_quantity",
+      "description": "In food.py _validate_and_normalise: rename quantity_g to base_quantity throughout validation step 9 and normalised output dict. Behavior is unchanged: when base_quantity present and > 0, scale all nutrition.* by base_quantity/100. When absent, default to 100 (no scaling). Update TEMPLATE_JSON: replace quantity_g with base_quantity; update notes field.",
+      "inputs": ["optional top-level base_quantity (number > 0)", "nutrition.* fields"],
+      "outputs": ["normalised dict with base_quantity key; INSERT column base_quantity"]
+    },
+    {
+      "step": 4,
+      "name": "intake_db_insert_base_quantity",
+      "description": "In commit_meal (food.py): replace quantity_g with base_quantity in the INSERT column list and VALUES tuple. base_quantity from normalised dict is always a float (defaulted to 100 when absent).",
+      "inputs": ["normalised dict including base_quantity (float)"],
+      "outputs": ["food_logs row with base_quantity stored"]
+    },
+    {
+      "step": 5,
+      "name": "entry_detail_base_quantity",
+      "description": "In _serialise_entry_detail (entries.py): replace quantity_g serialisation with: 'base_quantity': float(row['base_quantity']). No null check needed — base_quantity is always non-null after migration.",
+      "inputs": ["food_logs.base_quantity (NUMERIC(7,1) NOT NULL)"],
+      "outputs": ["EntryDetail.base_quantity (float, always present)"]
+    },
+    {
+      "step": 6,
+      "name": "entry_edit_base_quantity",
+      "description": "In _validate_entry_edit_request (entries.py): rename step 10 from quantity_g to base_quantity. Change from optional to required-with-default: if absent from PUT body, default to 100. Validation: must be a number > 0. Validated dict key becomes 'base_quantity' (float). In UPDATE SQL: replace quantity_g = %s with base_quantity = %s.",
+      "inputs": ["PUT body optional base_quantity (number > 0, defaults to 100)"],
+      "outputs": ["validated dict with base_quantity (float)", "UPDATE SQL sets base_quantity"]
+    },
+    {
+      "step": 7,
+      "name": "copy_entry_base_quantity",
+      "description": "In copy_entry (entries.py): replace quantity_g in INSERT column list and VALUES; use source['base_quantity'] (always float after migration).",
+      "inputs": ["source row base_quantity (float)"],
+      "outputs": ["copied row with base_quantity preserved"]
+    },
+    {
+      "step": 8,
+      "name": "frontend_entry_detail_base_quantity",
+      "description": "In EntryDetailPage.tsx: (1) In EntryDetail interface: replace quantity_g: number | null with base_quantity: number. (2) In EntryFormState: replace quantity_g: number | null with base_quantity: number. (3) In entryToFormState: base_quantity: entry.base_quantity. (4) Rename per100g state to perUnit; change computation from stored*100/quantity_g to stored/base_quantity. (5) Always compute perUnit on load (no null guard). (6) Rename handleQuantityChange to handleBaseQuantityChange; change rescale formula from perUnit[f]*newQty/100 to perUnit[f]*newQty. (7) Remove the null guard around the quantity field display — always show 'Base quantity' input. (8) In _buildPutBody: replace quantity_g with base_quantity.",
+      "inputs": ["entry.base_quantity (number)", "user input for new base_quantity"],
+      "outputs": ["Macro fields updated proportionally in form state", "PUT body includes base_quantity and rescaled macros"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema types"},
+      {"component": "02_Platform/03_ErrorHandling", "role": "api_error helper"},
+      {"component": "03_Application/FoodTracker/backend/database.py", "role": "get_db connection context manager"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP routing", "reuse_existing": true},
+      {"name": "psycopg2", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "recharts", "role": "BarChart, ComposedChart for report UI", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "New platform packages for nutritional logic",
+      "Dedicated rescale endpoint",
+      "Storing per-unit reference values as separate columns",
+      "A type flag or separate column to distinguish gram-based from serving-based entries"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Run migrations/006_rename_quantity_g.sql against the live database",
+      "Update schema.sql: rename quantity_g to base_quantity, change to NOT NULL DEFAULT 100, update constraint name",
+      "In food.py _validate_and_normalise: rename quantity_g to base_quantity; update docstring comment for step 9",
+      "In food.py commit_meal: replace quantity_g with base_quantity in INSERT column list and VALUES tuple",
+      "Update TEMPLATE_JSON in food.py: replace quantity_g with base_quantity; update notes field",
+      "In entries.py _serialise_entry_detail: replace quantity_g serialisation with base_quantity (always float, no null check)",
+      "In entries.py _validate_entry_edit_request: rename to base_quantity; default to 100 if absent; update UPDATE SQL",
+      "In entries.py copy_entry: replace quantity_g with base_quantity in INSERT",
+      "Update ARCHITECTURE_EXCEPTIONS.md EXC-FT-03: in the EntryDetail named contract field list, replace 'quantity_g: float | null' with 'base_quantity: number'; update EXC-FT-04 reference accordingly"
+    ],
+    "ui_implementer": [
+      "EntryDetailPage.tsx: replace quantity_g: number | null with base_quantity: number in EntryDetail and EntryFormState",
+      "EntryDetailPage.tsx: update entryToFormState to use entry.base_quantity",
+      "EntryDetailPage.tsx: rename per100g state to perUnit; change computation to stored/base_quantity",
+      "EntryDetailPage.tsx: remove null guard on perUnit computation in useEffect (always compute)",
+      "EntryDetailPage.tsx: rename handleQuantityChange to handleBaseQuantityChange; change rescale formula to perUnit[f]*newQty",
+      "EntryDetailPage.tsx: remove null guard around quantity input — always show 'Base quantity' field",
+      "EntryDetailPage.tsx: update _buildPutBody to send base_quantity instead of quantity_g"
+    ],
+    "test_writer": [
+      "See 10_test_spec.md for all test scenarios",
+      "Write tests inside tests/ using pytest against the atlas-food-tracker-test container",
+      "Update tests/fixtures.sql: rename quantity_g column to base_quantity in all INSERT statements; replace all NULL values with 100 (base_quantity is NOT NULL DEFAULT 100 after migration)"
+    ],
+    "reviewer": [
+      "Verify migration backfills NULL rows to 100 before renaming column",
+      "Verify entry detail serialisation never returns null for base_quantity",
+      "Verify PUT body default-to-100 semantics when base_quantity absent",
+      "Verify perUnit computation uses /base_quantity (not /100) and rescale uses *newQty (not *newQty/100)",
+      "Verify copy_entry uses source['base_quantity'] (not source.get with fallback)"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Migration order — migration 006 must run before any backend restart that uses base_quantity column name",
+      "impact": "If backend restarts before migration runs, all food_logs writes fail. Migration must be applied first."
+    },
+    {
+      "risk": "Existing tests reference quantity_g fixture column",
+      "impact": "tests/fixtures.sql and any test functions asserting quantity_g must be updated to base_quantity."
+    },
+    {
+      "risk": "Backfill sets NULL rows to 100 — may not reflect user intent for legacy entries",
+      "impact": "Accepted per draft: placeholder value, user corrects manually over time."
+    }
+  ],
+  "open_questions": []
+}

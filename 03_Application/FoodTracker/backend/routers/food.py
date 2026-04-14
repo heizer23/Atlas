@@ -21,6 +21,7 @@ ALLOWED_MEAL_TYPES = {"breakfast", "lunch", "dinner", "snack", "drink", "other"}
 TEMPLATE_JSON = """{
   "timestamp": "2026-03-20T12:30:00",
   "meal_type": "lunch",
+  "base_quantity": 200,
   "items": [
     {
       "name": "chicken breast",
@@ -29,19 +30,19 @@ TEMPLATE_JSON = """{
     }
   ],
   "nutrition": {
-    "calories_kcal": 450,
-    "protein_g": 50,
-    "carbs_g": 20,
-    "fat_g": 10,
-    "fiber_g": 5,
+    "calories_kcal": 165,
+    "protein_g": 31,
+    "carbs_g": 0,
+    "fat_g": 3.6,
+    "fiber_g": 0,
     "good_fat_g": 0,
-    "meat_g": 0,
+    "meat_g": 100,
     "red_meat_g": 0,
-    "sodium_mg": 0,
+    "sodium_mg": 74,
     "alcohol_g": 0
   },
   "confidence": 4,
-  "notes": "estimated from description"
+  "notes": "nutrition values are per 100 units of base_quantity; omit base_quantity to log absolute values (base_quantity defaults to 100)"
 }"""
 
 MEAL_SCHEMA: list[ColumnSchema] = [
@@ -83,7 +84,7 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
     Returns (None, error_dict) on any failure — error_dict is ApiError-shaped;
     the route handler constructs the JSONResponse (HTTP 422) from it.
 
-    Validation order follows sprint definition §6.2 exactly:
+    Validation order:
       1. JSON parse
       2. timestamp parseable as ISO-8601
       3. meal_type in allowed enum
@@ -92,8 +93,12 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
       6. required numeric fields present and >= 0
       7. optional numeric fields satisfy individual >= 0 check if present;
          cross-field checks (good_fat_g <= fat_g, red_meat_g <= meat_g)
-         run only after both operands individually pass
+         run only after both operands individually pass (applied to per-100g
+         values when base_quantity is present)
       8. confidence integer 1–5 if present
+      9. optional top-level base_quantity: number > 0 if present; when present,
+         scale all nutrition.* as stored_value = ref_value * base_quantity / 100.
+         When absent, base_quantity defaults to 100 (values stored as-is).
     """
 
     # Step 1 — JSON parse
@@ -335,23 +340,52 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
     if notes is not None:
         notes = str(notes)
 
+    # Step 9 — optional base_quantity: when present, treat nutrition.* as per-100g
+    # reference values and scale before storing. When absent, default to 100
+    # (values stored as-is; base_quantity=100 means "macros are for 100 units").
+    raw_bq = data.get("base_quantity")
+    base_quantity: float = 100.0
+    if raw_bq is not None:
+        if not isinstance(raw_bq, (int, float)) or isinstance(raw_bq, bool) or raw_bq <= 0:
+            return None, _err(
+                "VALIDATION_ERROR",
+                "base_quantity must be a number > 0",
+                "base_quantity",
+                "INVALID_FIELD: base_quantity must be a positive number when present",
+            )
+        base_quantity = float(raw_bq)
+        # Scale all macro values from per-100g to the consumed quantity.
+        # Cross-field checks above were applied to per-100g values — correct.
+        factor = base_quantity / 100.0
+        kcal       = int(round(calories_kcal * factor))
+        protein_g  = round(protein_g  * factor, 1)
+        carbs_g    = round(carbs_g    * factor, 1)
+        fat_g      = round(fat_g      * factor, 1)
+        fiber_g    = round(fiber_g    * factor, 1)
+        good_fat_g = round(good_fat_g * factor, 1)
+        meat_g     = round(meat_g     * factor, 1)
+        red_meat_g = round(red_meat_g * factor, 1)
+        sodium_mg  = round(sodium_mg  * factor, 1)
+        alcohol_g  = round(alcohol_g  * factor, 1)
+
     normalised: dict[str, Any] = {
-        "logged_at":  logged_at,
-        "meal_type":  meal_type,
-        "dish_name":  dish_name,
-        "items":      normalised_items,
-        "kcal":       kcal,
-        "protein_g":  protein_g,
-        "carbs_g":    carbs_g,
-        "fat_g":      fat_g,
-        "fiber_g":    fiber_g,
-        "good_fat_g": good_fat_g,
-        "meat_g":     meat_g,
-        "red_meat_g": red_meat_g,
-        "sodium_mg":  sodium_mg,
-        "alcohol_g":  alcohol_g,
-        "confidence": confidence,
-        "notes":      notes,
+        "logged_at":     logged_at,
+        "meal_type":     meal_type,
+        "dish_name":     dish_name,
+        "items":         normalised_items,
+        "kcal":          kcal,
+        "protein_g":     protein_g,
+        "carbs_g":       carbs_g,
+        "fat_g":         fat_g,
+        "fiber_g":       fiber_g,
+        "good_fat_g":    good_fat_g,
+        "meat_g":        meat_g,
+        "red_meat_g":    red_meat_g,
+        "sodium_mg":     sodium_mg,
+        "alcohol_g":     alcohol_g,
+        "confidence":    confidence,
+        "notes":         notes,
+        "base_quantity": base_quantity,
     }
 
     return normalised, None
@@ -393,11 +427,13 @@ async def commit_meal(request: Request) -> JSONResponse:
                     INSERT INTO foodtracker.food_logs (
                         id, logged_at, meal_type, dish_name,
                         kcal, protein_g, carbs_g, fat_g, fiber_g, good_fat_g,
-                        meat_g, red_meat_g, sodium_mg, alcohol_g, confidence, notes
+                        meat_g, red_meat_g, sodium_mg, alcohol_g, confidence, notes,
+                        base_quantity
                     ) VALUES (
                         %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s,
+                        %s
                     ) RETURNING *
                     """,
                     (
@@ -417,6 +453,7 @@ async def commit_meal(request: Request) -> JSONResponse:
                         normalised["alcohol_g"],
                         normalised["confidence"],
                         normalised["notes"],
+                        normalised["base_quantity"],
                     ),
                 )
                 inserted = dict(cur.fetchone())
