@@ -42,7 +42,7 @@ TEMPLATE_JSON = """{
     "alcohol_g": 0
   },
   "confidence": 4,
-  "notes": "nutrition values are per 100 units of base_quantity; omit base_quantity to log absolute values (base_quantity defaults to 100)"
+  "notes": "nutrition values are for exactly base_quantity units as given; omit base_quantity to default to 100"
 }"""
 
 MEAL_SCHEMA: list[ColumnSchema] = [
@@ -96,9 +96,9 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
          run only after both operands individually pass (applied to per-100g
          values when base_quantity is present)
       8. confidence integer 1–5 if present
-      9. optional top-level base_quantity: number > 0 if present; when present,
-         scale all nutrition.* as stored_value = ref_value * base_quantity / 100.
-         When absent, base_quantity defaults to 100 (values stored as-is).
+      9. optional top-level base_quantity: number > 0 if present; stored exactly
+         as given. Nutrition values are stored as-is — they are the values for
+         exactly base_quantity units. When absent, base_quantity defaults to 100.
     """
 
     # Step 1 — JSON parse
@@ -340,9 +340,9 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
     if notes is not None:
         notes = str(notes)
 
-    # Step 9 — optional base_quantity: when present, treat nutrition.* as per-100g
-    # reference values and scale before storing. When absent, default to 100
-    # (values stored as-is; base_quantity=100 means "macros are for 100 units").
+    # Step 9 — optional base_quantity: stored exactly as given. Nutrition values
+    # are not transformed — they are the values for exactly base_quantity units.
+    # When absent, base_quantity defaults to 100.
     raw_bq = data.get("base_quantity")
     base_quantity: float = 100.0
     if raw_bq is not None:
@@ -354,19 +354,6 @@ def _validate_and_normalise(body: bytes) -> tuple[dict, None] | tuple[None, dict
                 "INVALID_FIELD: base_quantity must be a positive number when present",
             )
         base_quantity = float(raw_bq)
-        # Scale all macro values from per-100g to the consumed quantity.
-        # Cross-field checks above were applied to per-100g values — correct.
-        factor = base_quantity / 100.0
-        kcal       = int(round(calories_kcal * factor))
-        protein_g  = round(protein_g  * factor, 1)
-        carbs_g    = round(carbs_g    * factor, 1)
-        fat_g      = round(fat_g      * factor, 1)
-        fiber_g    = round(fiber_g    * factor, 1)
-        good_fat_g = round(good_fat_g * factor, 1)
-        meat_g     = round(meat_g     * factor, 1)
-        red_meat_g = round(red_meat_g * factor, 1)
-        sodium_mg  = round(sodium_mg  * factor, 1)
-        alcohol_g  = round(alcohol_g  * factor, 1)
 
     normalised: dict[str, Any] = {
         "logged_at":     logged_at,

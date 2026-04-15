@@ -4,7 +4,7 @@ Tests for: quantity_g → base_quantity rename in intake, entry detail, PUT edit
 Run inside atlas-food-tracker-test: docker exec atlas-food-tracker-test pytest tests/test_sprint07.py -v
 
 Scenarios from 10_test_spec.md:
-- [Backend] Intake with base_quantity scales macros proportionally
+- [Backend] Intake with base_quantity stores values as-is (no scaling)
 - [Backend] Intake without base_quantity stores absolute values with base_quantity 100
 - [Backend] Intake with invalid base_quantity returns VALIDATION_ERROR
 - [Backend] Entry detail GET returns base_quantity as non-null float
@@ -53,8 +53,8 @@ def _minimal_put_body(**overrides) -> str:
 
 # ── Intake scenarios ───────────────────────────────────────────────────────────
 
-def test_intake_with_base_quantity_scales_macros_proportionally(client):
-    """Intake with base_quantity: 200 scales macros from per-100g values."""
+def test_intake_with_base_quantity_stores_values_as_is(client):
+    """Intake with base_quantity: 200 stores macros exactly as given (no scaling)."""
     body = json.dumps({
         "timestamp":    "2026-04-14T12:00:00",
         "meal_type":    "lunch",
@@ -70,8 +70,8 @@ def test_intake_with_base_quantity_scales_macros_proportionally(client):
     r = client.post("/api/food/meals", content=body)
     assert r.status_code == 200
     row = r.json()["rows"][0]
-    assert row["kcal"] == 330
-    assert row["protein_g"] == 62.0
+    assert row["kcal"] == 165
+    assert row["protein_g"] == 31.0
 
 
 def test_intake_without_base_quantity_stores_absolute_with_base_quantity_100(client):

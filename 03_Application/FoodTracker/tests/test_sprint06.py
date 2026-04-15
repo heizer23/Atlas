@@ -39,16 +39,16 @@ def _meal_body(base_quantity=None, kcal=165, protein_g=31, carbs_g=0, fat_g=3.6,
     return json.dumps(body)
 
 
-# ── [Backend] Intake with base_quantity scales macros proportionally ──────────
+# ── [Backend] Intake with base_quantity stores values as-is ───────────────────
 
-def test_intake_with_quantity_g_scales_macros_proportionally(client):
-    """POST /api/food/meals with base_quantity=200 and per-100g kcal=165 → stored kcal=330."""
+def test_intake_with_base_quantity_stores_values_as_is(client):
+    """POST /api/food/meals with base_quantity=200 and kcal=165 → stored kcal=165 (no scaling)."""
     body = _meal_body(base_quantity=200, kcal=165, protein_g=31)
     r = client.post("/api/food/meals", content=body)
     assert r.status_code == 200
     row = r.json()["rows"][0]
-    assert row["kcal"] == 330
-    assert abs(row["protein_g"] - 62.0) < 0.5
+    assert row["kcal"] == 165
+    assert abs(row["protein_g"] - 31.0) < 0.5
 
 
 # ── [Backend] Intake without base_quantity stores absolute values ─────────────

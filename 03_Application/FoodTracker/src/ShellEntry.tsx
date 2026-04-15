@@ -44,7 +44,7 @@ interface PreviewData {
   alcohol_g:  number;
   confidence: number;
   notes:      string | null;
-  quantity_g: number | null;
+  base_quantity: number | null;
 }
 
 interface SuccessData {
@@ -60,7 +60,7 @@ const PREVIEW_FIELDS: { key: keyof PreviewData; label: string }[] = [
   { key: 'logged_at',  label: 'Date / Time' },
   { key: 'meal_type',  label: 'Meal' },
   { key: 'dish_name',  label: 'Dish' },
-  { key: 'quantity_g', label: 'Quantity (g)' },
+  { key: 'base_quantity', label: 'Base Quantity (g)' },
   { key: 'kcal',       label: 'kcal' },
   { key: 'protein_g',  label: 'Protein (g)' },
   { key: 'carbs_g',    label: 'Carbs (g)' },
