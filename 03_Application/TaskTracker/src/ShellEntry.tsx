@@ -25,15 +25,16 @@ interface TaskLabel {
 }
 
 interface TaskRow extends Row {
-  id:           string;
-  title:        string;
-  description?: string;
-  status:       string;
-  priority:     string;
-  due_date?:    string;
+  id:            string;
+  title:         string;
+  description?:  string;
+  status:        string;
+  priority:      string;
+  due_date?:     string;
   effort_hours?: number | null;
-  created_at?:  string;
-  labels?:      TaskLabel[];
+  created_at?:   string;
+  completed_at?: string;
+  labels?:       TaskLabel[];
 }
 
 interface LinkGroupItem {
@@ -1189,7 +1190,25 @@ function TaskCreatePanel({
         <button className="icon-btn" aria-label="Cancel" onClick={onCancel}>
           <span className="material-symbols-rounded">arrow_back</span>
         </button>
-        <h1 className="type-headline">New Task</h1>
+        <div style={{ display: 'flex', gap: 'var(--space-sm)', marginLeft: 'var(--space-sm)' }}>
+          <button
+            className="btn-filled"
+            onClick={() => handleSubmit('open')}
+            disabled={saving || !title.trim()}
+          >
+            {saving ? 'Creating…' : 'Create as Open'}
+          </button>
+          <button
+            className="btn-outlined"
+            onClick={() => handleSubmit('pending')}
+            disabled={saving || !title.trim()}
+          >
+            Create as Pending
+          </button>
+          <button className="btn-outlined" onClick={onCancel} disabled={saving}>
+            Cancel
+          </button>
+        </div>
       </div>
 
       {saveError && (
@@ -1335,25 +1354,6 @@ function TaskCreatePanel({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
-          <button
-            className="btn-filled"
-            onClick={() => handleSubmit('open')}
-            disabled={saving || !title.trim()}
-          >
-            {saving ? 'Creating…' : 'Create as Open'}
-          </button>
-          <button
-            className="btn-outlined"
-            onClick={() => handleSubmit('pending')}
-            disabled={saving || !title.trim()}
-          >
-            Create as Pending
-          </button>
-          <button className="btn-outlined" onClick={onCancel} disabled={saving}>
-            Cancel
-          </button>
-        </div>
 
       </div>
     </div>
@@ -1667,14 +1667,10 @@ function TasksPage() {
     fetchTasks(view);
   }
 
-  // ── Render pending tab (two sections: Open, then Pending) ────────────────────
+  // ── Render pending tab ───────────────────────────────────────────────────────
 
   function renderPendingTab(filteredTasks: TaskRow[]) {
-    const openTasks    = filteredTasks.filter(t => t.status === 'open');
     const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
-
-    const openEffort  = openTasks.reduce((sum, t)    => sum + (t.effort_hours ?? 0), 0);
-    const totalEffort = filteredTasks.reduce((sum, t) => sum + (t.effort_hours ?? 0), 0);
 
     const cardHandlers = {
       onOpen:         setSelected,
@@ -1684,46 +1680,16 @@ function TasksPage() {
       onAddLabel:     handleAddLabel,
     };
 
+    if (pendingTasks.length === 0) {
+      return (
+        <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+          No pending tasks.
+        </p>
+      );
+    }
+
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
-        {/* Total effort summary (open + pending) */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-            Total effort:&nbsp;
-            <strong>{formatEffort(totalEffort)}</strong>
-            {' '}(open + pending)
-          </span>
-        </div>
-
-        {/* Open section */}
-        <div>
-          <div className="section-header">
-            <span className="section-label">Open</span>
-            <span className="section-badge">{formatEffort(openEffort)}</span>
-          </div>
-          {openTasks.length === 0 ? (
-            <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
-              No open tasks.
-            </p>
-          ) : (
-            <TaskGroupedList tasks={openTasks} {...cardHandlers} pendingMode />
-          )}
-        </div>
-
-        {/* Pending section */}
-        <div>
-          <div className="section-header">
-            <span className="section-label">Pending</span>
-          </div>
-          {pendingTasks.length === 0 ? (
-            <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)', margin: 0 }}>
-              No pending tasks.
-            </p>
-          ) : (
-            <TaskGroupedList tasks={pendingTasks} {...cardHandlers} pendingMode />
-          )}
-        </div>
-      </div>
+      <TaskGroupedList tasks={pendingTasks} {...cardHandlers} pendingMode />
     );
   }
 
@@ -1796,19 +1762,110 @@ function TasksPage() {
         <ErrorCard error={error} />
       ) : view === 'pending' ? (
         renderPendingTab(displayedTasks)
+      ) : view === 'active' ? (
+        (() => {
+          const activeOnlyTasks = displayedTasks.filter(t => t.status !== 'done');
+          const todayDoneTasks  = displayedTasks.filter(t => t.status === 'done');
+          const hasActive = activeOnlyTasks.length > 0;
+          const hasDone   = todayDoneTasks.length > 0;
+          if (!hasActive && !hasDone) {
+            return (
+              <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+                No tasks in this view.
+              </p>
+            );
+          }
+          return (
+            <>
+              {hasActive && (
+                <TaskGroupedList
+                  tasks={activeOnlyTasks}
+                  onOpen={setSelected}
+                  onStatusToggle={handleStatusToggle}
+                  onDelete={handleDelete}
+                  onLink={handleLink}
+                  onAddLabel={handleAddLabel}
+                />
+              )}
+              {hasDone && (
+                <div style={{ marginTop: hasActive ? 'var(--space-lg)' : 0 }}>
+                  <div className="section-header">
+                    <span className="section-label">Done</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                    {todayDoneTasks.map(task => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onOpen={setSelected}
+                        onStatusToggle={handleStatusToggle}
+                        onDelete={handleDelete}
+                        onLink={handleLink}
+                        onAddLabel={handleAddLabel}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()
       ) : displayedTasks.length === 0 ? (
         <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
           No tasks in this view.
         </p>
       ) : (
-        <TaskGroupedList
-          tasks={displayedTasks}
-          onOpen={setSelected}
-          onStatusToggle={handleStatusToggle}
-          onDelete={handleDelete}
-          onLink={handleLink}
-          onAddLabel={handleAddLabel}
-        />
+        // Done tab — group by completion date descending
+        (() => {
+          const today     = new Date().toISOString().slice(0, 10);
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+          function dayLabel(dateStr: string): string {
+            if (dateStr === today)     return 'Today';
+            if (dateStr === yesterday) return 'Yesterday';
+            return new Date(dateStr + 'T00:00:00').toLocaleDateString(undefined, {
+              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+            });
+          }
+
+          // Group by date of completed_at (fall back to created_at date)
+          const byDay = new Map<string, TaskRow[]>();
+          for (const task of displayedTasks) {
+            const raw  = task.completed_at ?? task.created_at ?? '';
+            const date = raw.slice(0, 10);
+            const key  = date || 'Unknown';
+            if (!byDay.has(key)) byDay.set(key, []);
+            byDay.get(key)!.push(task);
+          }
+
+          // Sort day keys descending
+          const sortedKeys = Array.from(byDay.keys()).sort((a, b) => b.localeCompare(a));
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+              {sortedKeys.map(key => (
+                <div key={key}>
+                  <p className="section-label" style={{ marginBottom: 'var(--space-xs)' }}>
+                    {key === 'Unknown' ? 'Unknown date' : dayLabel(key)}
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                    {byDay.get(key)!.map(task => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        onOpen={setSelected}
+                        onStatusToggle={handleStatusToggle}
+                        onDelete={handleDelete}
+                        onLink={handleLink}
+                        onAddLabel={handleAddLabel}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()
       )}
 
       {linkingTask && (
