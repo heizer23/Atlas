@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
     private fun logFcmToken() {
         FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
             Log.i(TAG, "FCM token: $token")
+            AtlasMessagingService.registerToken(this, token)
         }
     }
 }

@@ -9,9 +9,14 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+
 private const val TAG = "AtlasMessaging"
 private const val CHANNEL_ID = "atlas_platform"
 private const val CHANNEL_NAME = "Atlas Notifications"
+private const val REGISTER_URL = "https://workout.linspad.net/api/devices/token"
 
 class AtlasMessagingService : FirebaseMessagingService() {
 
@@ -24,12 +29,41 @@ class AtlasMessagingService : FirebaseMessagingService() {
     }
 
     // Called when FCM issues or rotates the registration token.
-    // Token is persisted locally and logged. When it rotates, update FCM_TOKEN
-    // in secrets.env on the server and restart the Notifications service.
+    // Automatically registers the new token with the Atlas notifications service.
     override fun onNewToken(token: String) {
-        Log.i(TAG, "FCM token updated — update FCM_TOKEN in secrets.env if this is a new token: $token")
+        Log.i(TAG, "FCM token updated — registering with Atlas")
         getSharedPreferences("atlas_prefs", MODE_PRIVATE)
             .edit().putString("fcm_token", token).apply()
+        registerTokenWithAtlas(token)
+    }
+
+    private fun registerTokenWithAtlas(token: String) {
+        registerToken(this, token)
+    }
+
+    companion object {
+        fun registerToken(context: android.content.Context, token: String) {
+            Thread {
+                try {
+                    val conn = URL(REGISTER_URL).openConnection() as HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.doOutput = true
+                    conn.connectTimeout = 10_000
+                    conn.readTimeout = 10_000
+                    OutputStreamWriter(conn.outputStream).use { it.write("""{"token":"$token"}""") }
+                    val code = conn.responseCode
+                    if (code == 200) {
+                        Log.i(TAG, "FCM token registered with Atlas (device_id=default)")
+                    } else {
+                        Log.w(TAG, "Atlas device registration returned HTTP $code")
+                    }
+                    conn.disconnect()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to register FCM token with Atlas: $e")
+                }
+            }.start()
+        }
     }
 
     // All Atlas notifications are data-only (no FCM notification object),
