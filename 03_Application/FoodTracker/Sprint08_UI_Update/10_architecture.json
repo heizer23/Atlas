@@ -1,0 +1,230 @@
+{
+  "sprint_note": "Sprint 08 fixes date-context propagation (manual entry, copy, JSON logging all use the user-selected date), adds a date picker to EntryDetailPage, and moves the Save button to a fixed top-right position in both the detail view and the JSON logging view. No schema changes.",
+  "component_name": "food_tracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "FoodTracker records daily food intake, computes nutritional aggregates, and serves them through a Dataset-based API consumed by the Atlas Shell UI.",
+  "classification": {
+    "why_application": "Contains domain-specific meal-logging rules, nutritional scaling logic, and report aggregation that has meaning only within the FoodTracker domain.",
+    "non_goals": [
+      "Nutrition model changes",
+      "Meal structure changes",
+      "Historical analytics",
+      "Bulk editing",
+      "Any schema migration"
+    ],
+    "not_platform": "Meal logging, date-context logic, and nutritional aggregation encode FoodTracker-specific business rules; they must not become reusable platform capabilities."
+  },
+  "contracts": {
+    "consumes": [
+      "platform_contracts.Dataset / DatasetMeta / ColumnSchema (02_Platform/packages/platform_contracts/contracts.py)",
+      "platform_errorhandling.api_error (02_Platform/03_ErrorHandling/)",
+      "foodtracker.food_logs table (private schema)"
+    ],
+    "provides": [
+      "GET /api/food/report — Dataset with per-meal-type kcal/protein/alcohol buckets; avg columns when scope in (year, month, week)",
+      "GET /api/food/entries — Dataset of food_logs rows (overview schema)",
+      "GET /api/food/entries/:id — EntryDetail JSON (non-Dataset)",
+      "[CHANGED] PUT /api/food/entries/:id — full-replace edit; logged_at accepted from body; server does NOT override with current timestamp",
+      "[CHANGED] POST /api/food/meals — intake; timestamp accepted from body as-is; server does NOT substitute today",
+      "[CHANGED] POST /api/food/entries/:id/copy — copies row; logged_at now accepts optional explicit date parameter from caller instead of hardcoding datetime.now()",
+      "DELETE /api/food/entries/:id — hard delete",
+      "PATCH /api/food/entries/:id/standard — toggle standard flag",
+      "GET /api/food/template — plain-text JSON template (unchanged)",
+      "POST /api/food/validate — validate + preview (unchanged)"
+    ],
+    "invariants": [
+      "base_quantity stored in food_logs is always > 0 (NOT NULL, CHECK constraint, DEFAULT 100)",
+      "When a copy is created with an explicit logged_at, the stored date is the caller-provided date, not server wall-clock",
+      "When a copy is created without explicit logged_at, logged_at defaults to datetime.now() (backward-compatible)",
+      "Frontend date context is the authoritative date source for new meal creation and copy operations",
+      "avg columns (kcal_avg, protein_avg, alcohol_g_avg) are present in rows if and only if scope is year, month, or week",
+      "alcohol_g_total included in every report bucket row regardless of scope",
+      "Client-side search does not affect backend — GET /api/food/entries response is always unfiltered"
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR (422): base_quantity present but not a number > 0",
+      "VALIDATION_ERROR (422): any required nutrition field missing or invalid",
+      "NOT_FOUND (404): entry id does not exist",
+      "DB_CONSTRAINT (400): database check constraint violated",
+      "INVALID_PARAM (422): scope or mode not in allowed set"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "platform_contracts.Dataset, DatasetMeta, ColumnSchema",
+      "platform_errorhandling.api_error",
+      "psycopg2 (Postgres driver)",
+      "fastapi.APIRouter"
+    ],
+    "provides": [
+      "HTTP API at /api/food/* (all routes registered via FastAPI router in backend/main.py)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/report",
+        "purpose": "Rolling-window bucket aggregation; unchanged this sprint",
+        "ui_contract": "Dataset"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries",
+        "purpose": "All food_logs rows as Dataset (overview schema); unchanged this sprint",
+        "ui_contract": "Dataset"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/entries/:id",
+        "purpose": "Single entry detail; unchanged this sprint",
+        "ui_contract": "EntryDetail (registered exception — see ARCHITECTURE_EXCEPTIONS.md)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/food/entries/:id",
+        "purpose": "Full-replace edit; logged_at accepted from PUT body; unchanged behavior — always was body-driven",
+        "ui_contract": "Dataset (single row on success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/food/meals",
+        "purpose": "[CHANGED] Intake: timestamp in body is preserved exactly as provided. No server-side date substitution. Frontend must send the user's selected date.",
+        "ui_contract": "Dataset (single row on success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "[CHANGED] POST /api/food/entries/:id/copy",
+        "purpose": "Copy row. Accepts optional JSON body with logged_at field. If provided, the copy uses that date; if absent, defaults to datetime.now(). Frontend passes context date.",
+        "ui_contract": "EntryDetail (registered exception)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/food/entries/:id",
+        "purpose": "Hard delete; unchanged this sprint",
+        "ui_contract": "none (204)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/food/entries/:id/standard",
+        "purpose": "Toggle standard flag; unchanged this sprint",
+        "ui_contract": "none"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/food/template",
+        "purpose": "Plain-text JSON template; unchanged this sprint",
+        "ui_contract": "text/plain"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "copy_entry_accept_logged_at",
+      "description": "In entries.py copy_entry: change from POST (no body) to POST (optional JSON body). If request body is present and contains a parseable 'logged_at' string (ISO-8601), use that value. If body is absent or logged_at is absent, fall back to datetime.now().strftime('%Y-%m-%dT%H:%M:%S'). Body parsing must not raise on empty body — treat empty body as absent.",
+      "inputs": ["source row from food_logs", "optional request body with logged_at (ISO-8601 string)"],
+      "outputs": ["new food_logs row with caller-provided or current-timestamp logged_at"]
+    },
+    {
+      "step": 2,
+      "name": "entries_page_date_context",
+      "description": "EntriesPage.tsx: add a selectedDate state (YYYY-MM-DD string, default today = new Date().toLocaleDateString('en-CA')). Render a date input control in the page header (type='date', value=selectedDate). Pass selectedDate down to GroupedEntries and to the copy handler. When the copy action fires, include {logged_at: selectedDate + 'T12:00:00'} in the POST /api/food/entries/:id/copy body.",
+      "inputs": ["user's date picker selection"],
+      "outputs": ["selectedDate state (YYYY-MM-DD)", "copy POST body includes logged_at"]
+    },
+    {
+      "step": 3,
+      "name": "json_logging_date_context",
+      "description": "ShellEntry.tsx FoodIntake component: add a selectedDate state (YYYY-MM-DD, default today via new Date().toLocaleDateString('en-CA')). Render a date input control above the paste area. When the template is fetched (useEffect on mount) or when selectedDate changes, update the displayed template string by replacing the date portion of the timestamp field with selectedDate. The user copies the template and fills it in; the timestamp in the pasted JSON is taken as-is by the backend (no client-side override at submit time). The backend already preserves the timestamp field exactly — no backend change is needed for this flow. UI responsibility is limited to: (1) showing the date picker, (2) reflecting selectedDate in the displayed template so the user sees the correct date when copying the template.",
+      "inputs": ["selectedDate state"],
+      "outputs": ["template string displayed with selectedDate in timestamp field", "POST /food/validate and POST /food/meals receive the timestamp exactly as the user typed it"]
+    },
+    {
+      "step": 4,
+      "name": "entry_detail_date_picker",
+      "description": "EntryDetailPage.tsx: the 'Date / Time' field row currently uses a plain text input for logged_at (format YYYY-MM-DDTHH:MM:SS). Replace with two adjacent controls: a date input (type='date') and a time input (type='time'). On load, split entry.logged_at into date portion (YYYY-MM-DD) and time portion (HH:MM). When either changes, recombine into YYYY-MM-DDTHH:MM:SS and update formState.logged_at. PUT body continues to send logged_at as before — no backend change needed.",
+      "inputs": ["entry.logged_at (YYYY-MM-DDTHH:MM:SS)"],
+      "outputs": ["date input (YYYY-MM-DD) and time input (HH:MM) split controls", "formState.logged_at recombined on change"]
+    },
+    {
+      "step": 5,
+      "name": "save_button_fixed_position",
+      "description": "EntryDetailPage.tsx: move the Save button container from its current inline position (below the form) to a fixed-position element at top-right. Implement using position:'fixed', top:'var(--space-md)', right:'var(--space-md)', zIndex: 100. The existing save success/error feedback stays in its current inline location so it does not obscure content. The fixed Save button shows 'Saving...' while isSaving. Same change applies to ShellEntry.tsx FoodIntake flow: in the 'preview' state, the Accept button should be fixed top-right; Back stays inline.",
+      "inputs": ["isSaving state", "formState"],
+      "outputs": ["Save button visible at top-right regardless of scroll position"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema types"},
+      {"component": "02_Platform/03_ErrorHandling", "role": "api_error helper"},
+      {"component": "03_Application/FoodTracker/backend/database.py", "role": "get_db connection context manager"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP routing", "reuse_existing": true},
+      {"name": "psycopg2", "role": "Postgres driver", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "New platform packages for date logic",
+      "Server-side date injection or override of client-provided timestamps",
+      "Schema migrations",
+      "New backend endpoints beyond the copy_entry body change"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "postgres",
+    "ownership": "private_application_state",
+    "note": "No schema changes this sprint. Schema is unchanged from Sprint07_Base_Quantity."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "In entries.py copy_entry: accept optional JSON body. Parse body to extract logged_at if present. Use caller-provided logged_at (validate as ISO-8601) or fall back to datetime.now().strftime('%Y-%m-%dT%H:%M:%S'). Empty body must not cause an error.",
+      "Verify food.py commit_meal already uses the body timestamp field exactly (it does — logged_at = normalised['logged_at'] which comes from data['timestamp']). No backend change needed for the JSON logging flow.",
+      "Backend for copy_entry: body is optional bytes. Use request: Request parameter and await request.body(). If body is non-empty, json.loads it and extract 'logged_at'. If that value is a valid ISO-8601 datetime, use it. Otherwise fall back to datetime.now()."
+    ],
+    "ui_implementer": [
+      "EntriesPage.tsx: add selectedDate state (YYYY-MM-DD, default = new Date().toLocaleDateString('en-CA')). Render date input in page header. Pass selectedDate to copy handler. In handleCopy, POST body = JSON.stringify({ logged_at: selectedDate + 'T12:00:00' }).",
+      "EntryDetailPage.tsx: replace the single text input for logged_at with a date input + time input pair. Split on load: dateStr = formState.logged_at.slice(0,10), timeStr = formState.logged_at.slice(11,16). Combine on change: logged_at = dateStr + 'T' + timeStr + ':00'. Keep PUT body format as 'YYYY-MM-DDTHH:MM:SS'.",
+      "EntryDetailPage.tsx: add a fixed Save button at top-right. CSS: position:'fixed', top: '1rem', right: '1rem', zIndex: 100. Keep existing inline save feedback (success/error) where it is.",
+      "ShellEntry.tsx FoodIntake: add selectedDate state (YYYY-MM-DD, default today via new Date().toLocaleDateString('en-CA')). Render a date input above the paste area. When template is fetched (useEffect on mount) or when selectedDate changes, update the displayed template state by replacing the date portion of the timestamp field with selectedDate (keep time unchanged, e.g. replace '2026-03-20' with selectedDate in the template string). Do not modify pastedJson before submitting — user is responsible for their timestamp. In preview state, fix the Accept button at top-right (position:'fixed', top:'1rem', right:'1rem', zIndex:100). Back button stays inline.",
+      "Ensure date input uses en-CA locale or type='date' native value format (YYYY-MM-DD) consistently across all usages."
+    ],
+    "test_writer": [
+      "See 10_test_spec.md for all test scenarios",
+      "Write backend tests in tests/ using pytest against atlas-food-tracker-test container",
+      "No fixture changes required — this sprint has no schema changes"
+    ],
+    "reviewer": [
+      "Verify copy_entry accepts optional body without breaking callers that send no body",
+      "Verify copy_entry uses caller-provided logged_at when present and valid",
+      "Verify copy_entry falls back to datetime.now() when body absent or logged_at absent",
+      "Verify frontend copy handler passes logged_at to POST body",
+      "Verify date picker splits and recombines logged_at correctly without dropping seconds",
+      "Verify fixed Save button does not obscure content in narrow viewports — check z-index and positioning"
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "copy_entry body parsing: the existing endpoint signature may be GET-style with no body. FastAPI may reject unexpected body on a POST if not declared.",
+      "impact": "If copy_entry does not declare Request parameter, body parsing fails. Implementer must add 'request: Request' parameter and await request.body()."
+    },
+    {
+      "risk": "Fixed Save button may overlap shell navigation bar on mobile narrow viewport",
+      "impact": "Visual overlap is an aesthetic issue, not a correctness issue. Acceptable for this sprint. Can be refined in a later sprint."
+    },
+    {
+      "risk": "Date input type='date' value format (YYYY-MM-DD) is browser-native; locale differences may affect display but not the stored value format",
+      "impact": "Low risk — YYYY-MM-DD is the universal ISO format for type='date'. No action required."
+    }
+  ],
+  "open_questions": []
+}

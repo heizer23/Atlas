@@ -1,4 +1,4 @@
--- FoodTracker Sprint 07 test fixtures
+-- FoodTracker Sprint 07 + Sprint 08 test fixtures
 -- IDs use deterministic UUIDs for readability.
 -- Sprint 07: quantity_g renamed to base_quantity; NULLs replaced with 100 (NOT NULL after migration).
 -- fix-0001: scaled-chicken — 200g chicken breast (macros scaled from per-100g)

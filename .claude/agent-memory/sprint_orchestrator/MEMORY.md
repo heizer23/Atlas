@@ -14,6 +14,8 @@
 - [NumericSeries Sprint02 Pattern](project_numericseries_sprint02.md) — Chronos by-name write + UX polish; SPRINT_COMPLETE (tests passed)
 - [NumericSeries Sprint03 Pattern](project_numericseries_sprint03.md) — Catalog + batch ingestion + SVG sparkline + Chronos skill; IMPLEMENTATION_IN_PROGRESS; test-runner blocked on Bash; container rebuild required
 - [StorageTracker Sprint01 Pattern](project_storagetracker_sprint01.md) — Household item tracker; SPRINT_COMPLETE; full automated loop; port 8022 (8020 taken by Notifications); tests written but run inside Docker
+- [FoodTracker Sprint06 Pattern](project_foodtracker_sprint06.md) — Search/scale/averages; IMPLEMENTATION_IN_PROGRESS; food-tracker-test container newly added, needs build before test run; schema.sql backfilled with Sprint04 columns
+- [FoodTracker Sprint07 Pattern](project_foodtracker_sprint07.md) — quantity_g→base_quantity rename; IMPLEMENTATION_IN_PROGRESS; container rebuild + migration 006 required before test run
 
 ## Feedback
 - [Skip specs reviewer stage](feedback_skip_specs_stage.md) — DRAFT_READY routes directly to designer; sprint_specs_reviewer is never used

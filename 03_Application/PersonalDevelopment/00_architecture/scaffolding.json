@@ -1,0 +1,267 @@
+{
+  "component_name": "personal_development",
+  "target_root": "03_Application/PersonalDevelopment",
+  "directories": [
+    "03_Application/PersonalDevelopment",
+    "03_Application/PersonalDevelopment/frontend",
+    "03_Application/PersonalDevelopment/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "Atlas Shell registration — side-effect import by main.tsx; calls AppRegistry.register() with Learning app config",
+      "public_objects": [
+        {
+          "kind": "side_effect",
+          "name": "AppRegistry.register call",
+          "pattern": "shell_registration",
+          "description": "Registers appId=learning, label=Learning, basePath=/learning, component=React.lazy(ShellEntry), mobilePrimaryNav=[{id:learning-units, label:Units, path:/learning, order:1}], desktopNav=[{id:learning-units, label:Units, path:/learning, order:1}]"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/ShellEntry.tsx",
+      "stub_kind": "react_component",
+      "role": "Shell entry point — default export consumed by React.lazy in shellConfig.ts; owns the React Router <Routes> tree for the Learning tile",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "ShellEntry",
+          "pattern": "shell_entry",
+          "methods": [
+            {
+              "name": "default export",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Renders <Routes> with: / -> LearningPage, /new -> CreateTrainingUnitPage, /:unitId -> UnitDetailPage"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/LearningPage.tsx",
+      "stub_kind": "react_component",
+      "role": "Learning tile main list view — fetches training-units, renders sorted unit cards with progress and subtask counts, provides navigation to unit detail and creation",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "LearningPage",
+          "pattern": "page_component",
+          "methods": [
+            {
+              "name": "LearningPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Fetches GET /tasks/training-units on mount; renders loading skeleton, error card, or list of TrainingUnitCards; includes add button navigating to /learning/new"
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "TrainingUnitCard",
+          "pattern": "card_component",
+          "methods": [
+            {
+              "name": "TrainingUnitCard",
+              "visibility": "private",
+              "args": [
+                "unit: TrainingUnitRow",
+                "onClick: () => void"
+              ],
+              "returns": "JSX.Element",
+              "purpose": "Renders one training unit card: title, labels chips, priority chip, progress bar (completed_child_count/total_child_count), last activity date (last_child_completed_at), status badge"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/UnitDetailPage.tsx",
+      "stub_kind": "react_component",
+      "role": "Training unit detail view — shows parsed potential subtasks (unchecked/activated), child training_session tasks with duration editing, and unit edit controls",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "UnitDetailPage",
+          "pattern": "page_component",
+          "methods": [
+            {
+              "name": "UnitDetailPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Reads :unitId from route params; fetches unit from GET /tasks/training-units (or single-task GET) and child tasks; renders PotentialSubtaskList and ChildTaskList; handles activation via activateSubtask()"
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "PotentialSubtaskList",
+          "pattern": "list_component",
+          "methods": [
+            {
+              "name": "PotentialSubtaskList",
+              "visibility": "private",
+              "args": [
+                "unchecked: UncheckedSubtask[]",
+                "activated: ActivatedSubtask[]",
+                "onActivate: (line: string) => Promise<void>",
+                "activating: string | null"
+              ],
+              "returns": "JSX.Element",
+              "purpose": "Renders unchecked lines with 'Create task' button and activated lines with checkmark and task link; shows spinner on the activating line"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "ChildTaskList",
+          "pattern": "list_component",
+          "methods": [
+            {
+              "name": "ChildTaskList",
+              "visibility": "private",
+              "args": [
+                "tasks: ChildTaskRow[]",
+                "onDurationChange: (taskId: string, minutes: number | null) => Promise<void>"
+              ],
+              "returns": "JSX.Element",
+              "purpose": "Renders child training_session tasks with status, title, and inline actual_duration_minutes editing"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/CreateTrainingUnitPage.tsx",
+      "stub_kind": "react_component",
+      "role": "Form to create a new training_unit task — fields: title (required), description (with optional ## Potential Subtasks guidance), priority, labels; posts to TaskTracker; redirects to /learning on success",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "CreateTrainingUnitPage",
+          "pattern": "page_component",
+          "methods": [
+            {
+              "name": "CreateTrainingUnitPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "Renders creation form; on submit calls POST /tasks with task_type=training_unit; on success navigates to /learning"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/markdownSubtasks.ts",
+      "stub_kind": "typescript_module",
+      "role": "Pure functions for parsing and updating the ## Potential Subtasks markdown section in task.description — no React dependency; unit-testable in isolation",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "POTENTIAL_SUBTASKS_HEADING",
+          "pattern": "constant",
+          "description": "String constant '## Potential Subtasks' used as the section delimiter"
+        },
+        {
+          "kind": "function",
+          "name": "parseSubtasks",
+          "pattern": "parser",
+          "methods": [
+            {
+              "name": "parseSubtasks",
+              "visibility": "public",
+              "args": [
+                "description: string | null | undefined"
+              ],
+              "returns": "{ unchecked: UncheckedSubtask[]; activated: ActivatedSubtask[] }",
+              "purpose": "Extracts lines from the ## Potential Subtasks section; classifies each as unchecked ('- [ ] <title>') or activated ('- [x] <title> → task: <uuid>'); returns empty arrays if section absent or description null"
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "activateSubtaskLine",
+          "pattern": "transformer",
+          "methods": [
+            {
+              "name": "activateSubtaskLine",
+              "visibility": "public",
+              "args": [
+                "description: string",
+                "lineText: string",
+                "taskId: string"
+              ],
+              "returns": "string",
+              "purpose": "Returns updated description string with the first matching '- [ ] <lineText>' replaced by '- [x] <lineText> → task: <taskId>'; leaves description unchanged if line not found"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/frontend/types.ts",
+      "stub_kind": "typescript_module",
+      "role": "TypeScript interface definitions for Learning tile domain types used across frontend files",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "TrainingUnitRow",
+          "pattern": "data_model",
+          "description": "Interface: { id: string; title: string; description: string | null; status: string; priority: string; labels: { id: string; name: string }[]; last_child_completed_at: string | null; completed_child_count: number; total_child_count: number; actual_duration_minutes: number | null; completed_at: string | null }"
+        },
+        {
+          "kind": "constant",
+          "name": "ChildTaskRow",
+          "pattern": "data_model",
+          "description": "Interface: { id: string; title: string; status: string; priority: string; actual_duration_minutes: number | null; completed_at: string | null; task_type: string }"
+        },
+        {
+          "kind": "constant",
+          "name": "UncheckedSubtask",
+          "pattern": "data_model",
+          "description": "Interface: { lineText: string }"
+        },
+        {
+          "kind": "constant",
+          "name": "ActivatedSubtask",
+          "pattern": "data_model",
+          "description": "Interface: { lineText: string; taskId: string }"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/PersonalDevelopment/tests/test_markdown_subtasks.py",
+      "stub_kind": "python_test_module",
+      "role": "Unit tests for markdownSubtasks parsing logic — tests the parse and update contract independently of the UI; mirrors the TypeScript module behavior for backend-equivalent validation if needed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Extend existing TaskTracker router: add GET /training-units endpoint, extend TaskCreate/TaskUpdate models with new fields, extend row_to_dict with new columns, add training_unit exclusion to GET /tasks, set completed_at server-side on done transition",
+      "public_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/main.tsx",
+      "stub_kind": "typescript_module",
+      "role": "[CHANGED] Add side-effect import for PersonalDevelopment shellConfig: import '../../../../03_Application/PersonalDevelopment/frontend/shellConfig'",
+      "public_objects": []
+    }
+  ]
+}

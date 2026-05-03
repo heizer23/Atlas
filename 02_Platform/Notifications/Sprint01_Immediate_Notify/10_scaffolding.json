@@ -1,0 +1,128 @@
+{
+  "component": "Notifications",
+  "sprint": "Sprint01_Immediate_Notify",
+  "layer": "02_Platform",
+  "version": "1.0",
+  "date": "2026-04-15",
+
+  "files_changed": [
+    {
+      "path": "02_Platform/Notifications/backend/models.py",
+      "action": "extend",
+      "description": "Add ImmediateSendRequest and ImmediateSendResponse Pydantic models. Do not modify existing NotificationCreateRequest or NotificationRecord.",
+      "additions": [
+        {
+          "class": "ImmediateSendRequest",
+          "fields": {
+            "title": "str",
+            "body": "str",
+            "source": "str = 'claude'"
+          },
+          "notes": "No field validators needed. title and body are not constrained beyond being non-empty strings (Pydantic will reject missing fields automatically)."
+        },
+        {
+          "class": "ImmediateSendResponse",
+          "fields": {
+            "id": "str",
+            "title": "str",
+            "body": "str",
+            "dispatched_at": "datetime"
+          },
+          "notes": "dispatched_at is server-captured application time, not read from DB. Pydantic will serialise it as ISO-8601."
+        }
+      ]
+    },
+    {
+      "path": "02_Platform/Notifications/backend/service.py",
+      "action": "extend",
+      "description": "Add send_immediate() method to NotificationService. Do not modify existing create(), cancel(), or replace() methods.",
+      "additions": [
+        {
+          "method": "send_immediate",
+          "signature": "def send_immediate(self, payload: ImmediateSendRequest) -> ImmediateSendResponse",
+          "steps": [
+            "1. Query notifications.device WHERE device_id='default'; if no row raise NoDefaultDeviceError",
+            "2. fcm_token = row['fcm_token']",
+            "3. notification_id = str(uuid.uuid4())",
+            "4. dispatched_at = datetime.now(timezone.utc)",
+            "5. Call send_fcm_message(token=fcm_token, notification_id=notification_id, title=payload.title, body=payload.body, label='', deep_link=''); if raises, raise FCMDispatchError(original_exception)",
+            "6. INSERT INTO notifications.notification (id, source, fire_at, title, body, label, deep_link, fcm_token, status) VALUES (notification_id, payload.source, NULL, payload.title, payload.body, '', '', fcm_token, 'dispatched')",
+            "7. conn.commit()",
+            "8. Return ImmediateSendResponse(id=notification_id, title=payload.title, body=payload.body, dispatched_at=dispatched_at)"
+          ],
+          "new_exceptions": [
+            {
+              "class": "NoDefaultDeviceError",
+              "description": "Raised when notifications.device has no row for device_id='default'."
+            },
+            {
+              "class": "FCMDispatchError",
+              "description": "Raised when send_fcm_message() raises. Wraps the original exception as cause."
+            }
+          ]
+        }
+      ],
+      "imports_to_add": [
+        "from datetime import datetime, timezone",
+        "from backend.models import ImmediateSendRequest, ImmediateSendResponse",
+        "from backend.fcm_client import send_fcm_message"
+      ]
+    },
+    {
+      "path": "02_Platform/Notifications/backend/routers/notifications.py",
+      "action": "extend",
+      "description": "Add POST /notifications/send route. Do not modify existing routes.",
+      "additions": [
+        {
+          "route": "POST /notifications/send",
+          "function": "send_notification",
+          "handler": [
+            "Call _service.send_immediate(body)",
+            "On NoDefaultDeviceError: return api_error(code='NO_DEFAULT_DEVICE', message='No default device registered. Open AtlasPhone to register an FCM token.', status=503)",
+            "On FCMDispatchError: return api_error(code='FCM_DISPATCH_FAILED', message='FCM dispatch failed. The notification was not delivered.', status=502)",
+            "On success: return ImmediateSendResponse (status 200)"
+          ],
+          "response_model": "ImmediateSendResponse",
+          "status_code": 200
+        }
+      ],
+      "imports_to_add": [
+        "from backend.models import ImmediateSendRequest, ImmediateSendResponse",
+        "from backend.service import NoDefaultDeviceError, FCMDispatchError"
+      ],
+      "route_ordering_note": "POST /notifications/send must be registered BEFORE POST /notifications/{notification_id}/replace to avoid path ambiguity. In FastAPI, static path segments ('send') take priority over path parameters when registered first. Verify route order in the file."
+    },
+    {
+      "path": "02_Platform/Notifications/Sprint01_Immediate_Notify/10_schema.sql",
+      "action": "create",
+      "description": "Migration to make label, deep_link nullable and fire_at nullable in notifications.notification. Safe to run on a live table; existing rows are unaffected (they already have non-null values in these columns).",
+      "content_summary": [
+        "ALTER TABLE notifications.notification ALTER COLUMN fire_at DROP NOT NULL;",
+        "ALTER TABLE notifications.notification ALTER COLUMN label DROP NOT NULL;",
+        "ALTER TABLE notifications.notification ALTER COLUMN label SET DEFAULT '';",
+        "ALTER TABLE notifications.notification ALTER COLUMN deep_link DROP NOT NULL;",
+        "ALTER TABLE notifications.notification ALTER COLUMN deep_link SET DEFAULT '';"
+      ]
+    }
+  ],
+
+  "files_unchanged": [
+    "02_Platform/Notifications/backend/main.py",
+    "02_Platform/Notifications/backend/fcm_client.py",
+    "02_Platform/Notifications/backend/database.py",
+    "02_Platform/Notifications/backend/scheduler.py",
+    "02_Platform/Notifications/backend/dispatch_job.py",
+    "02_Platform/Notifications/backend/routers/devices.py",
+    "02_Platform/Notifications/20_Data/schema.sql"
+  ],
+
+  "no_new_files": "No new modules or packages are created. All additions are extensions to existing files.",
+
+  "implementation_notes": [
+    "Do not import FCMDispatchError or NoDefaultDeviceError in router until they are defined in service.py.",
+    "The POST /notifications/send route returns status_code=200, not 201, because the notification is already dispatched — there is no pending state.",
+    "dispatched_at in the response is the datetime captured BEFORE the INSERT, not read back from Postgres. Do not add a dispatched_at column to the schema.",
+    "The fire_at column being NULL in immediate-send rows means the APScheduler dispatch job (WHERE fire_at <= NOW()) will silently ignore them — no code change to dispatch_job.py needed.",
+    "Run the migration (10_schema.sql) against the live container before running tests."
+  ]
+}

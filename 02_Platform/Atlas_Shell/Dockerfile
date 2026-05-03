@@ -24,6 +24,7 @@ COPY 03_Application/FoodTracker/src/    03_Application/FoodTracker/src/
 COPY 03_Application/Chronicle/src/      03_Application/Chronicle/src/
 COPY 03_Application/NumericSeries/src/  03_Application/NumericSeries/src/
 COPY 03_Application/StorageTracker/src/ 03_Application/StorageTracker/src/
+COPY 03_Application/PersonalDevelopment/frontend/ 03_Application/PersonalDevelopment/frontend/
 
 WORKDIR /repo/02_Platform/Atlas_Shell
 RUN npm run build

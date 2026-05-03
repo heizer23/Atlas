@@ -24,39 +24,65 @@ def _preference_client() -> httpx.Client:
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-# ── Column schema — stable; matches tasktracker_schema.sql ───────────────────
+# ── Column schema — stable; matches schema.sql ────────────────────────────────
 
 TASK_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="title",        label="Title",       type="string", sortable=True,  filterable=False),
-    ColumnSchema(key="status",       label="Status",      type="enum",   sortable=True,  filterable=True),
-    ColumnSchema(key="priority",     label="Priority",    type="enum",   sortable=True,  filterable=True),
-    ColumnSchema(key="due_date",     label="Due Date",    type="date",   sortable=True,  filterable=False),
-    ColumnSchema(key="effort_hours", label="Effort (h)",  type="number", sortable=True,  filterable=False),
-    ColumnSchema(key="created_at",   label="Created",     type="date",   sortable=True,  filterable=False),
-    ColumnSchema(key="description",  label="Description", type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="title",                    label="Title",             type="string", sortable=True,  filterable=False),
+    ColumnSchema(key="status",                   label="Status",            type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="priority",                 label="Priority",          type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="due_date",                 label="Due Date",          type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="effort_hours",             label="Effort (h)",        type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="created_at",               label="Created",           type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="description",              label="Description",       type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="task_type",                label="Type",              type="string", sortable=False, filterable=False),
+    ColumnSchema(key="parent_task_id",           label="Parent",            type="string", sortable=False, filterable=False),
+    ColumnSchema(key="actual_duration_minutes",  label="Duration (min)",    type="number", sortable=False, filterable=False),
+    ColumnSchema(key="completed_at",             label="Completed At",      type="date",   sortable=False, filterable=False),
+]
+
+# Schema for the training-units endpoint (declares derived fields)
+TRAINING_UNIT_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="id",                       label="ID",                type="string", sortable=False, filterable=False),
+    ColumnSchema(key="title",                    label="Title",             type="string", sortable=True,  filterable=False),
+    ColumnSchema(key="status",                   label="Status",            type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="priority",                 label="Priority",          type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="labels",                   label="Labels",            type="string", sortable=False, filterable=False),
+    ColumnSchema(key="actual_duration_minutes",  label="Duration (min)",    type="number", sortable=False, filterable=False),
+    ColumnSchema(key="completed_at",             label="Completed At",      type="date",   sortable=False, filterable=False),
+    ColumnSchema(key="last_child_completed_at",  label="Last Activity",     type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="completed_child_count",    label="Done Sessions",     type="number", sortable=False, filterable=False),
+    ColumnSchema(key="total_child_count",        label="Total Sessions",    type="number", sortable=False, filterable=False),
+    ColumnSchema(key="description",              label="Description",       type="string", sortable=False, filterable=False, detail_visible=True),
 ]
 
 VALID_STATUS   = {"open", "in_progress", "pending", "done"}
 VALID_PRIORITY = {"low", "medium", "high"}
+VALID_TASK_TYPE = {"normal", "training_unit", "training_session"}
 
 # ── Request bodies ─────────────────────────────────────────────────────────────
 
 class TaskCreate(BaseModel):
-    title:        str
-    description:  str | None = None
-    status:       str = "open"
-    priority:     str = "medium"
-    due_date:     str | None = None
-    effort_hours: float | None = None
+    title:                   str
+    description:             str | None = None
+    status:                  str = "open"
+    priority:                str = "medium"
+    due_date:                str | None = None
+    effort_hours:            float | None = None
+    task_type:               str = "normal"
+    parent_task_id:          str | None = None
+    actual_duration_minutes: int | None = None
 
 
 class TaskUpdate(BaseModel):
-    title:        str | None = None
-    description:  str | None = None
-    status:       str | None = None
-    priority:     str | None = None
-    due_date:     str | None = None
-    effort_hours: float | None = None
+    title:                   str | None = None
+    description:             str | None = None
+    status:                  str | None = None
+    priority:                str | None = None
+    due_date:                str | None = None
+    effort_hours:            float | None = None
+    task_type:               str | None = None
+    parent_task_id:          str | None = None
+    actual_duration_minutes: int | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,6 +96,10 @@ def row_to_dict(row: Any) -> dict[str, Any]:
         d["created_at"] = d["created_at"].date().isoformat()
     if d.get("updated_at"):
         d["updated_at"] = d["updated_at"].date().isoformat()
+    if d.get("completed_at"):
+        d["completed_at"] = d["completed_at"].isoformat()
+    if d.get("parent_task_id"):
+        d["parent_task_id"] = str(d["parent_task_id"])
     return d
 
 
@@ -111,109 +141,223 @@ def single_row_dataset(row: Any) -> JSONResponse:
 VALID_VIEW = {"active", "pending_board"}
 
 
+@router.get("/training-units", response_model=None)
+def list_training_units() -> JSONResponse:
+    """List all training_unit tasks with derived child aggregate fields.
+
+    Returns Dataset with TRAINING_UNIT_SCHEMA columns.
+    Sort order: DONE units first (by last_child_completed_at DESC), then OPEN units
+    (by priority DESC using high > medium > low mapping).
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                    t.id,
+                    t.title,
+                    t.description,
+                    t.status,
+                    t.priority,
+                    t.actual_duration_minutes,
+                    t.completed_at,
+                    max(c.completed_at) as last_child_completed_at,
+                    count(c.id) filter (where c.status = 'done') as completed_child_count,
+                    count(c.id) as total_child_count
+                from tasktracker.tasks t
+                left join tasktracker.tasks c
+                    on c.parent_task_id = t.id
+                    and c.task_type = 'training_session'
+                where t.task_type = 'training_unit'
+                group by t.id, t.title, t.description, t.status, t.priority,
+                         t.actual_duration_minutes, t.completed_at
+                order by
+                    case when t.status = 'done' then 0 else 1 end asc,
+                    case when t.status = 'done' then max(c.completed_at) end desc nulls last,
+                    case t.priority
+                        when 'high'   then 1
+                        when 'medium' then 2
+                        when 'low'    then 3
+                        else 4
+                    end asc
+                """
+            )
+            rows = cur.fetchall()
+
+    unit_ids = [str(r["id"]) for r in rows]
+    labels_by_task = fetch_labels_for_tasks(unit_ids)
+
+    result_rows = []
+    for r in rows:
+        d: dict[str, Any] = {}
+        d["id"] = str(r["id"])
+        d["title"] = r["title"]
+        d["description"] = r["description"]
+        d["status"] = r["status"]
+        d["priority"] = r["priority"]
+        d["actual_duration_minutes"] = r["actual_duration_minutes"]
+        d["completed_at"] = r["completed_at"].isoformat() if r["completed_at"] else None
+        d["last_child_completed_at"] = r["last_child_completed_at"].isoformat() if r["last_child_completed_at"] else None
+        d["completed_child_count"] = r["completed_child_count"] or 0
+        d["total_child_count"] = r["total_child_count"] or 0
+        d["labels"] = labels_by_task.get(d["id"], [])
+        result_rows.append(d)
+
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="training_unit",
+            label="Training Units",
+            total=len(result_rows),
+            page=1,
+            page_size=max(len(result_rows), 1),
+            row_actions=["edit"],
+        ),
+        **{"schema": TRAINING_UNIT_SCHEMA},
+        rows=result_rows,
+    ))
+
+
 @router.get("", response_model=None)
 def list_tasks(
-    status:    str | None = None,
-    view:      str | None = None,
-    page:      int = 1,
-    page_size: int = 25,
+    status:         str | None = None,
+    view:           str | None = None,
+    task_type:      str | None = None,
+    parent_task_id: str | None = None,
+    page:           int = 1,
+    page_size:      int = 25,
 ) -> JSONResponse:
     if status and status not in VALID_STATUS:
         return api_error("INVALID_FILTER", f"status must be one of: {', '.join(sorted(VALID_STATUS))}")
     if view and view not in VALID_VIEW:
         return api_error("INVALID_FILTER", f"view must be one of: {', '.join(sorted(VALID_VIEW))}")
+    if task_type and task_type not in VALID_TASK_TYPE:
+        return api_error("INVALID_FILTER", f"task_type must be one of: {', '.join(sorted(VALID_TASK_TYPE))}")
     if page < 1:
-        return api_error("INVALID_PARAM", "page must be ≥ 1")
+        return api_error("INVALID_PARAM", "page must be >= 1")
 
     offset = (page - 1) * page_size
+
+    # Build extra filters beyond the view-specific WHERE clause.
+    # By default, training_unit tasks are excluded from the main list.
+    # If task_type is explicitly specified, use it directly.
+    # Otherwise add task_type != 'training_unit' to all branches.
+    extra_conditions: list[str] = []
+    extra_params: list[Any] = []
+
+    if task_type:
+        extra_conditions.append("task_type = %s")
+        extra_params.append(task_type)
+    else:
+        extra_conditions.append("task_type != 'training_unit'")
+
+    if parent_task_id:
+        extra_conditions.append("parent_task_id = %s")
+        extra_params.append(parent_task_id)
+
+    extra_sql = (" and " + " and ".join(extra_conditions)) if extra_conditions else ""
+
+    select_cols = """id, title, description, status, priority, due_date,
+                     effort_hours, created_at, updated_at,
+                     task_type, parent_task_id, actual_duration_minutes, completed_at"""
 
     with get_db() as conn:
         with conn.cursor() as cur:
             if view == "active":
                 # Active view: open + in_progress, plus done tasks updated today
                 cur.execute(
-                    """
+                    f"""
                     select count(*) from tasktracker.tasks
-                    where status in ('open', 'in_progress')
-                       or (status = 'done' and updated_at::date >= current_date)
+                    where (status in ('open', 'in_progress')
+                       or (status = 'done' and updated_at::date >= current_date))
+                    {extra_sql}
                     """,
+                    extra_params,
                 )
                 total = cur.fetchone()["count"]
                 cur.execute(
-                    """
-                    select id, title, description, status, priority, due_date,
-                           effort_hours, created_at, updated_at
+                    f"""
+                    select {select_cols}
                     from tasktracker.tasks
-                    where status in ('open', 'in_progress')
-                       or (status = 'done' and updated_at::date >= current_date)
+                    where (status in ('open', 'in_progress')
+                       or (status = 'done' and updated_at::date >= current_date))
+                    {extra_sql}
                     order by created_at desc
                     limit %s offset %s
                     """,
-                    (page_size, offset),
+                    extra_params + [page_size, offset],
                 )
             elif view == "pending_board":
                 # Pending board: open + pending tasks
                 cur.execute(
-                    "select count(*) from tasktracker.tasks where status in ('open', 'pending')",
+                    f"select count(*) from tasktracker.tasks where status in ('open', 'pending'){extra_sql}",
+                    extra_params,
                 )
                 total = cur.fetchone()["count"]
                 cur.execute(
-                    """
-                    select id, title, description, status, priority, due_date,
-                           effort_hours, created_at, updated_at
+                    f"""
+                    select {select_cols}
                     from tasktracker.tasks
                     where status in ('open', 'pending')
+                    {extra_sql}
                     order by created_at desc
                     limit %s offset %s
                     """,
-                    (page_size, offset),
+                    extra_params + [page_size, offset],
                 )
             elif status == "done":
                 # Done view: sorted by last modified descending
                 cur.execute(
-                    "select count(*) from tasktracker.tasks where status = 'done'",
+                    f"select count(*) from tasktracker.tasks where status = 'done'{extra_sql}",
+                    extra_params,
                 )
                 total = cur.fetchone()["count"]
                 cur.execute(
-                    """
-                    select id, title, description, status, priority, due_date,
-                           effort_hours, created_at, updated_at
+                    f"""
+                    select {select_cols}
                     from tasktracker.tasks
                     where status = 'done'
+                    {extra_sql}
                     order by updated_at desc
                     limit %s offset %s
                     """,
-                    (page_size, offset),
+                    extra_params + [page_size, offset],
                 )
             elif status:
                 cur.execute(
-                    "select count(*) from tasktracker.tasks where status = %s",
-                    (status,),
+                    f"select count(*) from tasktracker.tasks where status = %s{extra_sql}",
+                    [status] + extra_params,
                 )
                 total = cur.fetchone()["count"]
                 cur.execute(
-                    """
-                    select id, title, description, status, priority, due_date,
-                           effort_hours, created_at, updated_at
+                    f"""
+                    select {select_cols}
                     from tasktracker.tasks
                     where status = %s
+                    {extra_sql}
                     order by created_at desc
                     limit %s offset %s
                     """,
-                    (status, page_size, offset),
+                    [status] + extra_params + [page_size, offset],
                 )
             else:
-                cur.execute("select count(*) from tasktracker.tasks")
-                total = cur.fetchone()["count"]
                 cur.execute(
-                    """
-                    select id, title, description, status, priority, due_date,
-                           effort_hours, created_at, updated_at
+                    f"select count(*) from tasktracker.tasks where 1=1{extra_sql}",
+                    extra_params,
+                )
+                total = cur.fetchone()["count"]
+                # When fetching child tasks by parent_task_id, sort oldest-first (created_at ASC).
+                # Default ordering is newest-first.
+                order_dir = "asc" if parent_task_id else "desc"
+                cur.execute(
+                    f"""
+                    select {select_cols}
                     from tasktracker.tasks
-                    order by created_at desc
+                    where 1=1
+                    {extra_sql}
+                    order by created_at {order_dir}
                     limit %s offset %s
                     """,
-                    (page_size, offset),
+                    extra_params + [page_size, offset],
                 )
 
             rows = [row_to_dict(r) for r in cur.fetchall()]
@@ -248,13 +392,19 @@ def create_task(body: TaskCreate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"priority must be one of: {', '.join(sorted(VALID_PRIORITY))}")
     if body.effort_hours is not None and body.effort_hours < 0:
         return api_error("VALIDATION_ERROR", "effort_hours must be >= 0")
+    if body.task_type not in VALID_TASK_TYPE:
+        return api_error("VALIDATION_ERROR", f"task_type must be one of: {', '.join(sorted(VALID_TASK_TYPE))}")
+    if body.actual_duration_minutes is not None and body.actual_duration_minutes < 0:
+        return api_error("VALIDATION_ERROR", "actual_duration_minutes must be >= 0")
 
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into tasktracker.tasks (id, title, description, status, priority, due_date, effort_hours)
-                values (%s, %s, %s, %s, %s, %s, %s)
+                insert into tasktracker.tasks
+                    (id, title, description, status, priority, due_date, effort_hours,
+                     task_type, parent_task_id, actual_duration_minutes)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (
@@ -265,6 +415,9 @@ def create_task(body: TaskCreate) -> JSONResponse:
                     body.priority,
                     body.due_date or None,
                     body.effort_hours,
+                    body.task_type,
+                    body.parent_task_id or None,
+                    body.actual_duration_minutes,
                 ),
             )
             row = cur.fetchone()
@@ -281,6 +434,10 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"priority must be one of: {', '.join(sorted(VALID_PRIORITY))}")
     if body.effort_hours is not None and body.effort_hours < 0:
         return api_error("VALIDATION_ERROR", "effort_hours must be >= 0")
+    if body.task_type and body.task_type not in VALID_TASK_TYPE:
+        return api_error("VALIDATION_ERROR", f"task_type must be one of: {', '.join(sorted(VALID_TASK_TYPE))}")
+    if body.actual_duration_minutes is not None and body.actual_duration_minutes < 0:
+        return api_error("VALIDATION_ERROR", "actual_duration_minutes must be >= 0")
 
     fields: dict[str, Any] = {}
     if body.title       is not None: fields["title"]       = body.title.strip() or None
@@ -288,17 +445,49 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
     if body.status      is not None: fields["status"]      = body.status
     if body.priority    is not None: fields["priority"]    = body.priority
     if body.due_date    is not None: fields["due_date"]    = body.due_date or None
+    if body.task_type   is not None: fields["task_type"]   = body.task_type
     # Use model_fields_set to distinguish "not sent" (skip) from "explicitly null" (clear column)
-    if "effort_hours" in body.model_fields_set: fields["effort_hours"] = body.effort_hours
+    if "effort_hours"            in body.model_fields_set: fields["effort_hours"]            = body.effort_hours
+    if "actual_duration_minutes" in body.model_fields_set: fields["actual_duration_minutes"] = body.actual_duration_minutes
+    if "parent_task_id"          in body.model_fields_set: fields["parent_task_id"]          = body.parent_task_id or None
 
     if not fields:
         return api_error("VALIDATION_ERROR", "no fields provided to update")
 
-    set_parts = [f"{k} = %s" for k in fields] + ["updated_at = now()"]
-    set_clause = ", ".join(set_parts)
-    values = list(fields.values()) + [task_id]
-
+    # Fetch current row to determine if status is transitioning to done
     with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select status, completed_at from tasktracker.tasks where id = %s",
+                (task_id,),
+            )
+            current = cur.fetchone()
+
+        if current is None:
+            return api_error("NOT_FOUND", f"task {task_id} not found", status=404)
+
+        # Server-side completed_at management:
+        # - Set completed_at = now() when transitioning TO done AND completed_at IS NULL
+        # - Clear completed_at when transitioning FROM done to any other status
+        new_status = fields.get("status")
+        if new_status == "done" and current["status"] != "done" and current["completed_at"] is None:
+            fields["completed_at"] = "now()"
+        elif new_status and new_status != "done" and current["status"] == "done":
+            fields["completed_at"] = None
+
+        # Build SET clause — completed_at = now() is a SQL function, not a param
+        set_parts = []
+        values: list[Any] = []
+        for k, v in fields.items():
+            if k == "completed_at" and v == "now()":
+                set_parts.append("completed_at = now()")
+            else:
+                set_parts.append(f"{k} = %s")
+                values.append(v)
+        set_parts.append("updated_at = now()")
+        set_clause = ", ".join(set_parts)
+        values.append(task_id)
+
         with conn.cursor() as cur:
             cur.execute(
                 f"update tasktracker.tasks set {set_clause} where id = %s returning *",  # noqa: S608

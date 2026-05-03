@@ -1,19 +1,16 @@
 /**
- * EntryDetailPage — Sprint 07
+ * EntryDetailPage — Sprint 08
  *
  * Entry detail and edit screen for /food/entries/:id.
  * Loads one existing meal entry by id. Renders an editable form.
  * Save issues PUT /api/food/entries/{id} with EntryEditRequest body.
  *
- * Sprint 07 changes from Sprint 06:
- * - EntryDetail.quantity_g: number | null → base_quantity: number (always present).
- * - EntryFormState.quantity_g: number | null → base_quantity: number.
- * - per100g state renamed to perUnit; computation changed from stored*100/q to stored/q.
- * - Null guard removed — perUnit is always computed on load.
- * - handleQuantityChange renamed to handleBaseQuantityChange;
- *   rescale formula changed from perUnit[f]*newQty/100 to perUnit[f]*newQty.
- * - "Quantity (g)" → "Base quantity"; field always shown (null guard removed).
- * - PUT body uses base_quantity instead of quantity_g.
+ * Sprint 08 changes from Sprint 07:
+ * - logged_at text input replaced with date input + time input pair.
+ *   On load: split entry.logged_at into date (YYYY-MM-DD) and time (HH:MM).
+ *   On change: recombine into YYYY-MM-DDTHH:MM:SS for formState.logged_at.
+ * - Save button moved to fixed position (top-right, always visible).
+ *   Inline save feedback (success/error) remains below the form.
  */
 
 import { useState, useEffect } from 'react';
@@ -77,7 +74,7 @@ interface EntryFormState {
 
 // ── Private helpers ────────────────────────────────────────────────────────────
 
-const ALLOWED_MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'other'] as const;
+const ALLOWED_MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'drink', 'other'] as const;
 
 function entryToFormState(entry: EntryDetail): EntryFormState {
   return {
@@ -344,6 +341,16 @@ export default function EntryDetailPage() {
 
   return (
     <div className="page">
+      {/* Sprint 08: fixed Save button — always visible regardless of scroll position */}
+      <button
+        className="btn-filled"
+        style={{ position: 'fixed', top: '1rem', right: '1rem', zIndex: 100 }}
+        onClick={handleSave}
+        disabled={isSaving}
+      >
+        {isSaving ? 'Saving…' : 'Save'}
+      </button>
+
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', marginBottom: 'var(--space-md)' }}>
         <button className="btn-outlined" onClick={() => navigate('/food/entries')}>
           Back
@@ -378,14 +385,30 @@ export default function EntryDetailPage() {
           marginBottom: 'var(--space-md)',
         }}
       >
+        {/* Sprint 08: date + time split controls for logged_at — stacked vertically */}
         <FieldRow label="Date / Time">
-          <input
-            type="text"
-            value={formState.logged_at}
-            onChange={(e) => handleChange('logged_at', e.target.value)}
-            style={inputStyle}
-            placeholder="YYYY-MM-DDTHH:MM:SS"
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
+            <input
+              type="date"
+              value={formState.logged_at.slice(0, 10)}
+              onChange={(e) => {
+                const datePart = e.target.value;                    // YYYY-MM-DD
+                const timePart = formState.logged_at.slice(11, 16); // HH:MM
+                handleChange('logged_at', `${datePart}T${timePart}:00`);
+              }}
+              style={inputStyle}
+            />
+            <input
+              type="time"
+              value={formState.logged_at.slice(11, 16)}
+              onChange={(e) => {
+                const datePart = formState.logged_at.slice(0, 10);  // YYYY-MM-DD
+                const timePart = e.target.value;                    // HH:MM
+                handleChange('logged_at', `${datePart}T${timePart}:00`);
+              }}
+              style={inputStyle}
+            />
+          </div>
         </FieldRow>
 
         <FieldRow label="Meal type">
@@ -554,21 +577,12 @@ export default function EntryDetailPage() {
         </FieldRow>
       </section>
 
-      {/* Save controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-        <button
-          className="btn-filled"
-          onClick={handleSave}
-          disabled={isSaving}
-        >
-          {isSaving ? 'Saving…' : 'Save'}
-        </button>
-        {saveSuccess && (
-          <span className="type-label" style={{ color: 'var(--md-sys-color-primary)' }}>
-            Saved.
-          </span>
-        )}
-      </div>
+      {/* Sprint 08: Save button is now fixed top-right. Inline feedback remains here. */}
+      {saveSuccess && (
+        <p className="type-label" style={{ color: 'var(--md-sys-color-primary)', marginTop: 'var(--space-sm)' }}>
+          Saved.
+        </p>
+      )}
 
       {saveError && (
         <div style={{ marginTop: 'var(--space-sm)' }}>

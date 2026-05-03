@@ -4,6 +4,8 @@ Pydantic request and response models for the Notifications platform API.
 INVARIANT: NotificationRecord must never include fcm_token.
 fcm_token is accepted in NotificationCreateRequest but is a platform-internal
 dispatch field — it must never appear in API responses.
+
+INVARIANT: ImmediateSendResponse must never include fcm_token.
 """
 
 from datetime import datetime
@@ -39,3 +41,26 @@ class NotificationRecord(BaseModel):
     deep_link:  str
     status:     str
     created_at: datetime
+
+
+class ImmediateSendRequest(BaseModel):
+    """Request body for POST /api/notifications/send.
+
+    Caller provides only title and body. FCM token is resolved internally
+    from the default device registration. source is optional audit metadata.
+    """
+    title:  str
+    body:   str
+    source: str = "claude"
+
+
+class ImmediateSendResponse(BaseModel):
+    """Response for a successful immediate send.
+
+    dispatched_at is server time captured after FCM send() returned successfully.
+    fcm_token is intentionally absent.
+    """
+    id:            str
+    title:         str
+    body:          str
+    dispatched_at: datetime

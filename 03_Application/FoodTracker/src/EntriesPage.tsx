@@ -1,17 +1,13 @@
 /**
- * EntriesPage — Sprint 04
+ * EntriesPage — Sprint 08
  *
  * Top-level entries overview screen for /food/entries.
- * Fetches GET /api/food/entries on mount. Each row now exposes a three-dots
- * menu with Standard / Remove Standard / Delete actions.
  *
- * Sprint 04 changes from Sprint 03:
- * - EntryRow now includes `standard: boolean`
- * - Flat action buttons replaced with ThreeDotsMenu per row
- * - Standard / Remove Standard calls PATCH /api/food/entries/{id}/standard
- *   and updates local state on success (no full re-fetch needed)
- * - Delete flow unchanged from Sprint 03
- * - row_actions from backend is now ['delete'] only; Copy button removed
+ * Sprint 08 changes from Sprint 04:
+ * - Add selectedDate state (YYYY-MM-DD, default = today).
+ * - Render a date input in the page header.
+ * - handleCopy POSTs { logged_at: selectedDate + 'T12:00:00' } to the copy endpoint
+ *   so copied meals default to the user's selected date, not server now().
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -384,6 +380,11 @@ function GroupedEntries({ entries, onToggleStandard, onCopy, onDeleteTrigger, na
 export default function EntriesPage() {
   const navigate = useNavigate();
 
+  // Sprint 08: date context — all copy operations default to this date
+  const [selectedDate,    setSelectedDate]    = useState<string>(
+    () => new Date().toLocaleDateString('en-CA'),  // YYYY-MM-DD
+  );
+
   const [entries,         setEntries]         = useState<EntryRow[] | null>(null);
   const [isLoading,       setIsLoading]       = useState(true);
   const [error,           setError]           = useState<ApiError | null>(null);
@@ -427,7 +428,9 @@ export default function EntriesPage() {
 
   async function handleCopy(id: string) {
     setActionError(null);
-    const res = await apiFetch<unknown>(`/food/entries/${id}/copy`, { method: 'POST' });
+    // Sprint 08: pass selectedDate so the copy lands on the user's chosen day.
+    const body = JSON.stringify({ logged_at: `${selectedDate}T12:00:00` });
+    const res = await apiFetch<unknown>(`/food/entries/${id}/copy`, { method: 'POST', body });
     if (isApiError(res)) {
       setActionError(res);
     } else {
@@ -494,7 +497,26 @@ export default function EntriesPage() {
       />
 
       <div className="page-header">
-        <h1 className="type-display">Entries</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
+          <h1 className="type-display" style={{ margin: 0 }}>Entries</h1>
+          {/* Sprint 08: date context picker — copies land on this date */}
+          <label className="type-label" style={{ color: 'var(--md-sys-color-on-surface-variant)', display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+            Date
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{
+                padding: '4px 8px',
+                border: '1px solid var(--md-sys-color-outline)',
+                borderRadius: '4px',
+                background: 'var(--md-sys-color-surface)',
+                color: 'var(--md-sys-color-on-surface)',
+                fontSize: '0.9rem',
+              }}
+            />
+          </label>
+        </div>
       </div>
 
       {actionError && (

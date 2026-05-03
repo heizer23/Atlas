@@ -232,7 +232,21 @@
       "Bash(crontab -)",
       "Bash(xargs -I{} echo '{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"Sprint02_ChronosAndUX/foo.py\",\"content\":\"{}\"}}')",
       "Bash(echo \"exit: $?\")",
-      "Read(//home/linse/**)"
+      "Read(//home/linse/**)",
+      "Bash(ATLAS_PG_USER=atlas ATLAS_PG_PASSWORD=change-me ATLAS_PG_PORT=5432 ATLAS_PG_DB=atlas DATA_ROOT=/tmp docker compose -f /home/linse/Prod/Atlas/03_Application/FoodTracker/compose.yml up -d food-tracker-test)",
+      "Bash(npx tsc:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(ls 02_Platform/Atlas_Shell/node_modules/.bin/tsc)",
+      "Bash(ls 03_Application/FoodTracker/node_modules/.bin/tsc)",
+      "Bash(tsc --version)",
+      "Bash(node -e \"require\\('typescript'\\)\")",
+      "Bash(adb logcat:*)",
+      "Bash(apt-get install:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(adb version:*)",
+      "Bash(adb pair:*)",
+      "Bash(adb devices:*)",
+      "Bash(env)"
     ]
   },
   "hooks": {

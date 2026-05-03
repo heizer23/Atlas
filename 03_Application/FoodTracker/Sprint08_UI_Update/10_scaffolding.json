@@ -1,0 +1,100 @@
+{
+  "sprint_note": "Sprint 08: copy_entry backend accepts optional body with logged_at; EntriesPage adds date context + passes to copy; EntryDetailPage adds date picker split + fixed Save; ShellEntry FoodIntake adds date context + fixed Accept.",
+  "component_name": "food_tracker",
+  "target_root": "03_Application/FoodTracker",
+  "directories": [],
+  "files": [
+    {
+      "path": "03_Application/FoodTracker/backend/routers/entries.py",
+      "stub_kind": "python_module",
+      "role": "Entry CRUD router — copy_entry now accepts optional JSON body with logged_at to support caller-specified date",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "copy_entry",
+          "pattern": "router",
+          "methods": [
+            {
+              "name": "copy_entry",
+              "visibility": "public",
+              "args": ["entry_id: str", "request: Request"],
+              "returns": "JSONResponse",
+              "purpose": "[CHANGED] Accept optional JSON body. If body contains logged_at (valid ISO-8601 datetime string), use it for the copy's logged_at. Otherwise fall back to datetime.now().strftime('%Y-%m-%dT%H:%M:%S'). All other fields: source row values as before."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntriesPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Entries overview — add date context picker; pass selected date to copy handler",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntriesPage",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "EntriesPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Add selectedDate state (YYYY-MM-DD, default = today via new Date().toLocaleDateString('en-CA')). Render date input in page header. Pass selectedDate into handleCopy. handleCopy POSTs JSON body { logged_at: selectedDate + 'T12:00:00' } to /api/food/entries/:id/copy."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/EntryDetailPage.tsx",
+      "stub_kind": "tsx_component",
+      "role": "Entry detail/edit — add date+time split picker for logged_at; add fixed Save button at top-right",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "EntryDetailPage",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "EntryDetailPage",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Replace logged_at text input with date input (type='date') + time input (type='time') pair. Add fixed Save button (position:fixed, top:1rem, right:1rem, zIndex:100). Keep existing inline save feedback."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/FoodTracker/src/ShellEntry.tsx",
+      "stub_kind": "tsx_component",
+      "role": "FoodIntake component — add date context picker; pre-populate template timestamp; fix Accept button in preview state",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "FoodIntake",
+          "pattern": "component",
+          "methods": [
+            {
+              "name": "FoodIntake",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSX.Element",
+              "purpose": "[CHANGED] Add selectedDate state (YYYY-MM-DD, default today). Render date input above paste area. When template is displayed, replace template timestamp date portion with selectedDate. In preview state, render Accept button as fixed top-right; Back remains inline."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}

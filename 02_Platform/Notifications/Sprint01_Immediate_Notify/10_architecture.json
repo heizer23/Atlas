@@ -1,0 +1,135 @@
+{
+  "component": "Notifications",
+  "sprint": "Sprint01_Immediate_Notify",
+  "layer": "02_Platform",
+  "version": "1.0",
+  "date": "2026-04-15",
+
+  "overview": "Adds POST /api/notifications/send — a single-step, synchronous FCM dispatch endpoint. The caller provides only title and body; the platform resolves the FCM token internally, dispatches immediately, and persists an audit record with status=dispatched. No change to the existing scheduler path.",
+
+  "scope": {
+    "in_scope": [
+      "New endpoint: POST /api/notifications/send",
+      "New Pydantic models: ImmediateSendRequest, ImmediateSendResponse",
+      "New service method: NotificationService.send_immediate()",
+      "Schema migration: make label and deep_link nullable; allow fire_at to be NULL (NULL = immediate send)",
+      "Internal FCM token resolution from notifications.device WHERE device_id='default'",
+      "Synchronous FCM dispatch in the request handler (not via scheduler)"
+    ],
+    "out_of_scope": [
+      "Scheduling path (fire_at, APScheduler, dispatch job) — unchanged",
+      "Android app — unchanged",
+      "nginx — unchanged",
+      "Existing POST /api/notifications/ — unchanged",
+      "Multiple devices",
+      "Deep links",
+      "UI components"
+    ]
+  },
+
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_migration": true,
+    "migration_file": "02_Platform/Notifications/Sprint01_Immediate_Notify/10_schema.sql",
+    "migration_description": "ALTER TABLE notifications.notification: make label nullable with DEFAULT '', make deep_link nullable with DEFAULT '', make fire_at nullable (NULL represents immediate-send, non-NULL represents scheduled). Existing rows are unaffected. The dispatch job already filters WHERE status='pending' AND fire_at <= NOW(); NULL fire_at rows will never match (NULL comparisons return NULL/false), so immediate-send rows are invisible to the scheduler.",
+    "existing_schema_owner": "02_Platform/Notifications/20_Data/schema.sql"
+  },
+
+  "interfaces": {
+    "new_endpoint": {
+      "method": "POST",
+      "path": "/api/notifications/send",
+      "router_file": "02_Platform/Notifications/backend/routers/notifications.py",
+      "request_model": "ImmediateSendRequest",
+      "response_model": "ImmediateSendResponse",
+      "success_status": 200,
+      "error_cases": [
+        {
+          "condition": "No row in notifications.device WHERE device_id='default'",
+          "status": 503,
+          "code": "NO_DEFAULT_DEVICE",
+          "message": "No default device registered. Open AtlasPhone to register an FCM token."
+        },
+        {
+          "condition": "FCM dispatch call raises an exception",
+          "status": 502,
+          "code": "FCM_DISPATCH_FAILED",
+          "message": "FCM dispatch failed. The notification was not delivered."
+        }
+      ]
+    },
+    "inputs": {
+      "ImmediateSendRequest": {
+        "title": "str — required, non-empty, Android notification title",
+        "body": "str — required, non-empty, Android notification body text",
+        "source": "str — optional, defaults to 'claude', stored for audit only"
+      }
+    },
+    "outputs": {
+      "ImmediateSendResponse": {
+        "id": "str — UUID of the persisted notification record",
+        "title": "str — echoed from request",
+        "body": "str — echoed from request",
+        "dispatched_at": "datetime (ISO-8601 UTC) — server time at the moment FCM send() returned successfully"
+      }
+    }
+  },
+
+  "internal_flow": {
+    "POST /api/notifications/send": [
+      "1. Validate request body against ImmediateSendRequest (title required, body required, source defaults to 'claude')",
+      "2. Query notifications.device WHERE device_id='default'; if no row → return 503 NO_DEFAULT_DEVICE",
+      "3. Generate notification_id = uuid4()",
+      "4. Record dispatched_at = datetime.now(UTC) [server time authority]",
+      "5. Call send_fcm_message(token=fcm_token, notification_id=..., title=..., body=..., label='', deep_link='') — synchronous; if raises → return 502 FCM_DISPATCH_FAILED (no DB write on FCM failure)",
+      "6. INSERT INTO notifications.notification (id, source, fire_at, title, body, label, deep_link, fcm_token, status) VALUES (..., NULL, ..., '', '', <fcm_token>, 'dispatched') RETURNING id, title, body, dispatched_at (NOTE: dispatched_at is not a column — use created_at as the audit timestamp; the response dispatched_at is the value captured in step 4 and passed to the INSERT as created_at override or returned from application logic)",
+      "7. Return ImmediateSendResponse {id, title, body, dispatched_at}"
+    ],
+    "time_authority": "Server time (datetime.now(timezone.utc)) captured after successful FCM send() call. This is the authoritative dispatched_at value."
+  },
+
+  "schema_notes": {
+    "dispatched_at_column": "The existing notifications.notification table does not have a dispatched_at column. The response field dispatched_at is derived from server time captured in application logic (step 4 above), not read back from the database. The persisted record uses created_at (auto-set by DEFAULT NOW()) as the audit timestamp. The response dispatched_at is the in-memory datetime from step 4.",
+    "fire_at_null_semantics": "NULL fire_at means immediate send. The dispatch job WHERE fire_at <= NOW() never matches NULL rows (SQL NULL comparison = NULL, not true). No scheduler change needed.",
+    "label_deep_link_empty_string": "Immediate-send rows store label='' and deep_link='' (empty string, not NULL). These are passed to send_fcm_message as data fields per the FCM payload contract v1.0. The Android app receives them as empty strings. No Android change required."
+  },
+
+  "contracts": {
+    "fcm_token_never_logged": "INVARIANT: fcm_token fetched from notifications.device is used only for FCM dispatch. It must not appear in any log output (matches existing module invariant).",
+    "fcm_token_never_in_response": "INVARIANT: fcm_token must never appear in ImmediateSendResponse or any HTTP response body.",
+    "no_db_write_on_fcm_failure": "If FCM dispatch raises, no notification record is written to Postgres. The 502 response is the only artifact of a failed dispatch.",
+    "idempotency": "POST /api/notifications/send is not idempotent. Each call produces a new UUID and a new FCM dispatch.",
+    "existing_scheduler_path_unchanged": "The APScheduler dispatch job, POST /api/notifications/, DELETE /api/notifications/{id}, and POST /api/notifications/{id}/replace are entirely unchanged.",
+    "single_device": "This endpoint always targets device_id='default'. Multi-device support is out of scope."
+  },
+
+  "dependencies": {
+    "internal": [
+      "backend.database.get_db — existing connection pool",
+      "backend.fcm_client.send_fcm_message — existing FCM dispatch function",
+      "backend.service.NotificationService — extended with send_immediate()",
+      "platform_errorhandling.api_response.api_error — existing error envelope"
+    ],
+    "external": [
+      "firebase_admin (already initialised on startup via init_fcm())",
+      "Postgres notifications schema (notifications.notification, notifications.device)"
+    ]
+  },
+
+  "files_changed": [
+    "02_Platform/Notifications/backend/models.py",
+    "02_Platform/Notifications/backend/service.py",
+    "02_Platform/Notifications/backend/routers/notifications.py",
+    "02_Platform/Notifications/Sprint01_Immediate_Notify/10_schema.sql"
+  ],
+
+  "files_unchanged": [
+    "02_Platform/Notifications/backend/main.py",
+    "02_Platform/Notifications/backend/fcm_client.py",
+    "02_Platform/Notifications/backend/database.py",
+    "02_Platform/Notifications/backend/scheduler.py",
+    "02_Platform/Notifications/backend/dispatch_job.py",
+    "02_Platform/Notifications/backend/routers/devices.py",
+    "02_Platform/Notifications/20_Data/schema.sql"
+  ]
+}

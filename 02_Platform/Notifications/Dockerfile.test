@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy platform packages (path relative to repo root build context)
+COPY 02_Platform/packages /platform_packages
+ENV PYTHONPATH="/platform_packages"
+
+# Copy service source, schema, tests, and sprint artifacts
+COPY 02_Platform/Notifications/pyproject.toml .
+COPY 02_Platform/Notifications/backend/ ./backend/
+COPY 02_Platform/Notifications/20_Data/ ./20_Data/
+COPY 02_Platform/Notifications/tests/ ./tests/
+COPY 02_Platform/Notifications/Sprint01_Immediate_Notify/ ./Sprint01_Immediate_Notify/
+
+RUN --mount=type=cache,target=/root/.cache/pip pip install -e ".[test]"
+
+# Test container: no uvicorn, no FCM startup. Tests use FastAPI TestClient.
+CMD ["sleep", "infinity"]

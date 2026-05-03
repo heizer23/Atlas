@@ -72,18 +72,15 @@ services:
   notifications-test:
     build:
       context: ../..
-      dockerfile: 02_Platform/Notifications/Dockerfile
+      dockerfile: 02_Platform/Notifications/Dockerfile.test
     container_name: atlas-notifications-test
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:9020:8000"
     environment:
       ATLAS_PG_DB:       atlas_test
       ATLAS_PG_USER:     ${ATLAS_PG_USER}
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
-      NOTIFICATIONS_DISPATCH_INTERVAL_SECONDS: ${NOTIFICATIONS_DISPATCH_INTERVAL_SECONDS:-30}
     networks:
       - atlas-net
 

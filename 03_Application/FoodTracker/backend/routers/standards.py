@@ -324,7 +324,7 @@ def get_standards_page() -> JSONResponse:
 
 
 @router.post("/standards/{standard_id}/log", response_model=None)
-def log_from_standard(standard_id: str) -> JSONResponse:
+async def log_from_standard(standard_id: str, request: Request) -> JSONResponse:
     """
     POST /api/food/standards/{standard_id}/log
 
@@ -332,10 +332,26 @@ def log_from_standard(standard_id: str) -> JSONResponse:
     a new row copying all nutrition values. The new row always has:
       standard = FALSE  (firm invariant — copies are never standards)
       source_standard_id = standard_id
-      logged_at = datetime.now()
+      logged_at = body["logged_at"] if provided and valid ISO-8601, else datetime.now()
 
     Returns the inserted row as EntryDetail (Sprint 04 v1.1) with HTTP 201.
     """
+    # Resolve logged_at from optional body
+    new_logged_at_override: str | None = None
+    try:
+        body = await request.body()
+        if body:
+            body_data = json.loads(body)
+            if isinstance(body_data, dict) and "logged_at" in body_data:
+                raw_lat = body_data["logged_at"]
+                try:
+                    parsed_lat = datetime.fromisoformat(str(raw_lat))
+                    new_logged_at_override = parsed_lat.strftime("%Y-%m-%dT%H:%M:%S")
+                except (ValueError, TypeError):
+                    pass
+    except (json.JSONDecodeError, ValueError):
+        pass
+
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -363,7 +379,7 @@ def log_from_standard(standard_id: str) -> JSONResponse:
             )
 
         new_id = str(uuid.uuid4())
-        new_logged_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        new_logged_at = new_logged_at_override or datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
         with conn.cursor() as cur:
             cur.execute(

@@ -574,13 +574,36 @@ def delete_entry(entry_id: str) -> Response:
 
 
 @router.post("/entries/{entry_id}/copy", response_model=None)
-def copy_entry(entry_id: str) -> JSONResponse:
+async def copy_entry(entry_id: str, request: Request) -> JSONResponse:
     """
     POST /api/food/entries/{id}/copy — copies one row from foodtracker.food_logs.
-    The copy gets a new uuid4() id and logged_at = datetime.now().
+    The copy gets a new uuid4() id.
+
+    logged_at behaviour (Sprint 08):
+    - If request body is non-empty JSON and contains a valid 'logged_at' ISO-8601
+      datetime string, the copy uses that value.
+    - Otherwise (empty body, missing field, or unparseable value), falls back to
+      datetime.now().strftime('%Y-%m-%dT%H:%M:%S').
+
     Returns the newly created row as an EntryDetail dict (HTTP 201).
     Returns ApiError HTTP 404 if the source row does not exist.
     """
+    # Resolve logged_at from optional body — Sprint 08
+    new_logged_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        body = await request.body()
+        if body:
+            body_data = json.loads(body)
+            if isinstance(body_data, dict) and "logged_at" in body_data:
+                raw_lat = body_data["logged_at"]
+                try:
+                    parsed_lat = datetime.fromisoformat(str(raw_lat))
+                    new_logged_at = parsed_lat.strftime("%Y-%m-%dT%H:%M:%S")
+                except (ValueError, TypeError):
+                    pass  # fall back to datetime.now()
+    except (json.JSONDecodeError, ValueError):
+        pass  # empty or non-JSON body — use default
+
     with get_db() as conn:
         with conn.cursor() as cur:
             # Read source row
@@ -605,7 +628,6 @@ def copy_entry(entry_id: str) -> JSONResponse:
 
         source = dict(source)
         new_id = str(uuid.uuid4())
-        new_logged_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
         with conn.cursor() as cur:
             cur.execute(

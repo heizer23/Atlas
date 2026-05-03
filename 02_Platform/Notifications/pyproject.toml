@@ -12,5 +12,12 @@ dependencies = [
     "firebase-admin",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "httpx",
+    "starlette",
+]
+
 [tool.setuptools]
 packages = ["backend", "backend.routers"]

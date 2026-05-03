@@ -1,5 +1,5 @@
 /**
- * FoodTracker ShellEntry
+ * FoodTracker ShellEntry — Sprint 08
  *
  * Default-export React component for the Atlas Shell outlet.
  * Renders nested <Routes> (no BrowserRouter — inherits the shell's router context).
@@ -10,6 +10,13 @@
  *   /food/report       → ReportPage (Sprint 02 — reporting slice)
  *   /food/entries      → EntriesPage (Sprint 03 — entry overview with row actions)
  *   /food/entries/:id  → EntryDetailPage (Sprint 03 — entry detail and edit)
+ *
+ * Sprint 08 changes:
+ * - FoodIntake: add selectedDate state (YYYY-MM-DD, default today).
+ *   Date picker above paste area. Template timestamp date is replaced with
+ *   selectedDate when template loads or date changes. User edits and submits
+ *   their own timestamp — no submit-time override.
+ * - FoodIntake preview state: Accept button is fixed top-right; Back stays inline.
  */
 
 import { useState, useEffect } from 'react';
@@ -75,6 +82,22 @@ const PREVIEW_FIELDS: { key: keyof PreviewData; label: string }[] = [
   { key: 'notes',      label: 'Notes' },
 ];
 
+// ── Sprint 08 helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Replace the date portion (YYYY-MM-DD) of the "timestamp" field in the
+ * template string with newDate, keeping the time part intact.
+ * Matches the first ISO-8601-like date in the timestamp value.
+ * Safe to call repeatedly — idempotent for the same newDate.
+ */
+function _injectDateIntoTemplate(templateStr: string, newDate: string): string {
+  // Match "timestamp": "YYYY-MM-DD..." in the template JSON string
+  return templateStr.replace(
+    /("timestamp"\s*:\s*")(\d{4}-\d{2}-\d{2})/,
+    `$1${newDate}`,
+  );
+}
+
 // ── FoodIntake ─────────────────────────────────────────────────────────────────
 
 export function FoodIntake() {
@@ -88,19 +111,36 @@ export function FoodIntake() {
   const [formError,      setFormError]      = useState<ApiError | null>(null);
   const [inFlight,       setInFlight]       = useState(false);
 
+  // Sprint 08: date context — template display shows this date.
+  // User is responsible for matching their pasted JSON timestamp to this date.
+  const [selectedDate, setSelectedDate] = useState<string>(
+    () => new Date().toLocaleDateString('en-CA'),  // YYYY-MM-DD
+  );
+
   // Fetch template on mount.
   // apiFetch always JSON.parse()s the response body. The template endpoint
   // returns text/plain whose body is itself valid JSON, so apiFetch yields a
   // parsed JS object. We re-serialise it to a formatted string for display.
+  // Sprint 08: after fetching, replace the template timestamp date with selectedDate.
   useEffect(() => {
     apiFetch<unknown>('/food/template').then((res) => {
       if (isApiError(res)) {
         setTemplateErr(res);
       } else {
-        setTemplate(JSON.stringify(res, null, 2));
+        const raw = JSON.stringify(res, null, 2);
+        setTemplate(_injectDateIntoTemplate(raw, selectedDate));
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Sprint 08: when selectedDate changes and template is already loaded, update it.
+  useEffect(() => {
+    if (template !== null) {
+      setTemplate((prev) => prev ? _injectDateIntoTemplate(prev, selectedDate) : prev);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate]);
 
   // ── Idle handlers ────────────────────────────────────────────────────────────
 
@@ -232,6 +272,26 @@ export function FoodIntake() {
           )}
         </section>
 
+        {/* Sprint 08: date context picker — updates the template timestamp date */}
+        <section style={{ marginBottom: 'var(--space-sm)' }}>
+          <label className="type-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', color: 'var(--md-sys-color-on-surface-variant)' }}>
+            Logging date
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{
+                padding: '4px 8px',
+                border: '1px solid var(--md-sys-color-outline)',
+                borderRadius: '4px',
+                background: 'var(--md-sys-color-surface)',
+                color: 'var(--md-sys-color-on-surface)',
+                fontSize: '0.9rem',
+              }}
+            />
+          </label>
+        </section>
+
         <section>
           <label className="type-label" htmlFor="paste-area" style={{ display: 'block', marginBottom: 'var(--space-xs)' }}>
             Paste filled JSON here
@@ -310,12 +370,18 @@ export function FoodIntake() {
           ))}
         </dl>
 
+        {/* Sprint 08: Accept button is fixed top-right; Back stays inline */}
+        <button
+          className="btn-filled"
+          style={{ position: 'fixed', top: '1rem', right: '1rem', zIndex: 100 }}
+          onClick={handleAccept}
+          disabled={inFlight}
+        >
+          {inFlight ? 'Saving…' : 'Accept'}
+        </button>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'center' }}>
           <button className="btn-outlined" onClick={handleBack} disabled={inFlight}>
             Back
-          </button>
-          <button className="btn-filled" onClick={handleAccept} disabled={inFlight}>
-            {inFlight ? 'Saving…' : 'Accept'}
           </button>
         </div>
 

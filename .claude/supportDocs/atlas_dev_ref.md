@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-04-11 23:14 UTC
+> Last updated: 2026-04-30 14:09 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -246,6 +246,17 @@ GET /health — liveness check, returns {status: ok}
 ```
 POST /api/series/by-name/{label_name}/values — write measurements by human-readable series name (Chronos integration)
 ```
+
+### PersonalDevelopment
+
+**Summary:** Learning tile: a dedicated Atlas Shell application entry that surfaces TaskTracker training_unit tasks with progress, markdown-defined potential subtasks, and child-task activation — implemented entirely as a frontend-only tile backed by TaskTracker API extensions.
+
+| | |
+|---|---|
+| Container | — |
+| Host port | — |
+| Network | atlas-net |
+| URL prefix | `/api` |
 
 ### StorageTracker
 

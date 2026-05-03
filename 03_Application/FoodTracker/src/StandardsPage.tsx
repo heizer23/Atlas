@@ -333,7 +333,8 @@ export default function StandardsPage() {
     setActionError(null);
     setActioningId(id);
     try {
-      const res = await apiFetch<unknown>(`/food/entries/${id}/copy`, { method: 'POST' });
+      const body = JSON.stringify({ logged_at: `${selectedDate}T12:00:00` });
+      const res = await apiFetch<unknown>(`/food/entries/${id}/copy`, { method: 'POST', body });
       if (isApiError(res)) setActionError(res);
       else await fetchPayload(selectedDate);
     } finally {
@@ -361,7 +362,8 @@ export default function StandardsPage() {
     setActionError(null);
     setActioningId(standardId);
     try {
-      const res = await apiFetch<unknown>(`/food/standards/${standardId}/log`, { method: 'POST' });
+      const body = JSON.stringify({ logged_at: `${selectedDate}T12:00:00` });
+      const res = await apiFetch<unknown>(`/food/standards/${standardId}/log`, { method: 'POST', body });
       if (isApiError(res)) setActionError(res);
       else await fetchPayload(selectedDate);
     } finally {

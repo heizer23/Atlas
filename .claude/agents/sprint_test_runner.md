@@ -4,7 +4,7 @@ description: "Use this agent after implementation completes and a `10_test_spec.
 tools: Bash, Glob, Grep, Read, Write
 model: sonnet
 color: yellow
-version: "2026-04-11"
+version: "2026-04-15"
 ---
 
 You are the Atlas test runner.
@@ -24,23 +24,27 @@ Before running, confirm:
 
 ---
 
-# Step 1 — Identify the test container
+# Step 1 — Identify and rebuild the test container
 
 Atlas runs a persistent test stack that mirrors prod. Every component has a `-test` container running against the `atlas_test` database.
 
 1. Read `compose.yml` in the component root. Find the `container_name` field (e.g. `atlas-storagetracker`). The test container name is that value with `-test` appended (e.g. `atlas-storagetracker-test`).
 
-2. Verify the test container is running:
+2. Always rebuild and start the test container before running tests. This ensures the container reflects the latest implementation — do not skip even if the container is already running:
+   ```bash
+   docker compose \
+     -f /home/linse/Prod/Atlas/01_System/test/compose.test.yml \
+     --env-file /home/linse/Prod/Atlas/01_System/config.env \
+     --env-file /home/linse/Prod/Atlas/01_System/secrets.env \
+     up -d <container_name>-test --build
+   ```
+   If this fails, write `50_test_report.md` with `TESTS_FAILED_FIXABLE` and include the exact docker error.
+
+3. Verify the container is running:
    ```bash
    docker ps --filter name=<container_name>-test --format '{{.Names}}'
    ```
-
-3. If not running, start the test stack:
-   ```bash
-   make -C /home/linse/Prod/Atlas/01_System test-up
-   sleep 5
-   ```
-   Then re-check. If the container still does not start, write `50_test_report.md` with `TESTS_FAILED_FIXABLE` and state the exact docker error.
+   If not running after the build step, write `50_test_report.md` with `TESTS_FAILED_FIXABLE` and state the exact docker error.
 
 4. Verify `atlas_test` database exists:
    ```bash
@@ -219,7 +223,7 @@ After completing all work, include this block verbatim at the end of your respon
 
 ```
 ## Activity Report
-agent_version: 2026-04-11
+agent_version: 2026-04-15
 files_read: <comma-separated list of file paths relative to repo root>
 files_written: <comma-separated list of file paths relative to repo root>
 ```

@@ -1,0 +1,289 @@
+{
+  "component_name": "personal_development",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Learning tile: a dedicated Atlas Shell application entry that surfaces TaskTracker training_unit tasks with progress, markdown-defined potential subtasks, and child-task activation — implemented entirely as a frontend-only tile backed by TaskTracker API extensions.",
+  "classification": {
+    "why_application": "Owns the Learning domain UI, defines learning-specific sort rules, parses the markdown potential-subtask contract, and interprets training_unit task semantics — none of which belong in a generic platform service. The TaskTracker schema extensions are domain-carrying additions to an existing application.",
+    "non_goals": [
+      "No new backend service — all persistence is owned by TaskTracker",
+      "No LearningGoal, LearningMean, or LearningSession objects",
+      "No over-generalised hierarchy system",
+      "No new platform components",
+      "No server-side markdown storage — the ## Potential Subtasks section lives inside task.description"
+    ],
+    "not_platform": "All behavior is specific to the Learning domain concept. The markdown parsing and training_unit semantics have no generic reuse value across Atlas."
+  },
+  "contracts": {
+    "consumes": [
+      "TaskTracker GET /api/tasks/training-units — returns Dataset of training_unit tasks with derived fields: last_child_completed_at, completed_child_count, total_child_count, labels embedded; sorted DONE first by last_child_completed_at DESC then OPEN by priority DESC",
+      "TaskTracker POST /api/tasks — create task; accepts task_type, parent_task_id, actual_duration_minutes, completed_at in addition to existing fields",
+      "TaskTracker PATCH /api/tasks/{task_id} — partial update; accepts task_type, actual_duration_minutes, completed_at; sets completed_at = now() server-side when status transitions to done",
+      "TaskTracker GET /api/tasks — excludes task_type = training_unit by default; returns training_session tasks as normal tasks",
+      "TaskTracker GET /api/tasks?task_type=training_session&parent_task_id=<uuid> — fetches child training_session tasks for a given parent training_unit; parameters: task_type=training_session (required, fixed), parent_task_id (uuid, required); ordering: created_at ASC; empty-result behavior: return empty rows array; time basis: server",
+      "TaskTracker GET /api/tasks/labels/search — label search proxy (existing)",
+      "TaskTracker GET /api/tasks/{task_id}/labels — labels on one task (existing)",
+      "TaskTracker PUT /api/tasks/{task_id}/labels — replace all labels on a task (existing)",
+      "platform_contracts.Dataset and ApiError — from 02_Platform/packages/platform_contracts/contracts.py"
+    ],
+    "provides": [
+      "Learning tile registered in Atlas Shell navigation under appId=learning, basePath=/learning",
+      "Training unit list view: displays each training_unit task with title, labels, priority, progress bar, last activity date, potential subtasks (parsed from description), and active child tasks",
+      "Subtask activation: promotes a markdown unchecked line into a training_session task linked to the parent, updates description markdown in-place",
+      "Child task duration update: user can update actual_duration_minutes on training_session tasks from the Learning tile"
+    ],
+    "invariants": [
+      "The Learning tile only displays task_type = training_unit tasks",
+      "The main TaskTracker task list excludes task_type = training_unit tasks",
+      "All API calls from the Learning frontend route through the TaskTracker backend — no direct calls to LabelEngine",
+      "A potential subtask line - [ ] <title> is only promoted once; after promotion it becomes - [x] <title> → task: <uuid> in the description",
+      "Activated subtask tasks are created with task_type = training_session, parent_task_id = parent unit id, status = open",
+      "completed_at is set server-side by TaskTracker when status transitions to done — the frontend does not supply it",
+      "All read endpoints return Dataset per R-CON-BP-04",
+      "Label inheritance on activation: the child task receives the same labels as the parent training_unit at creation time; labels are applied via PUT /api/tasks/{id}/labels immediately after task creation"
+    ],
+    "failure_modes": [
+      "TASKTRACKER_UNAVAILABLE — TaskTracker backend unreachable; Learning tile shows ErrorCard; no silent degradation on the units list",
+      "TRAINING_UNITS_EMPTY — no training_unit tasks exist; tile shows an empty-state message",
+      "SUBTASK_ACTIVATION_FAILED — POST /api/tasks fails; error shown inline; description not updated",
+      "DESCRIPTION_UPDATE_FAILED — PATCH /api/tasks/{id} fails after task creation; task exists but description still shows unchecked; user must retry or manually update",
+      "LABEL_INHERIT_FAILED — PUT /api/tasks/{id}/labels fails after creation; task created without inherited labels; error surfaced inline"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "TaskTracker TrainingUnitRow: {id, title, description, status, priority, labels: [{id, name}], last_child_completed_at: str|null (ISO datetime), completed_child_count: int, total_child_count: int, actual_duration_minutes: int|null, completed_at: str|null} — emitted by GET /api/tasks/training-units"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "TaskTracker HTTP API at TASKTRACKER_URL (env var resolved via Nginx proxy at /tasks/) — all endpoints listed in contracts.consumes",
+      "AppRegistry.register() from @atlas/shell — side-effect import from shellConfig.ts"
+    ],
+    "provides": [
+      "Atlas Shell navigation entry: appId=learning, label=Learning, basePath=/learning",
+      "Route /learning — LearningPage showing training unit list",
+      "Route /learning/new — CreateTrainingUnitPage (create training_unit task)",
+      "Route /learning/:unitId — UnitDetailPage (unit detail, potential subtasks, child tasks)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "shell_registration",
+        "name": "shellConfig.ts side-effect import",
+        "purpose": "Registers the Learning tile in the Atlas Shell navigation via AppRegistry.register()",
+        "ui_contract": "none"
+      },
+      {
+        "type": "react_route",
+        "name": "/learning",
+        "purpose": "Lists all training_unit tasks with progress and last activity; sorted DONE first, then OPEN by priority",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "react_route",
+        "name": "/learning/new",
+        "purpose": "Form to create a new training_unit task with title, description (including ## Potential Subtasks), priority, and labels",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "react_route",
+        "name": "/learning/:unitId",
+        "purpose": "Detail view for a training_unit: shows parsed potential subtasks with activation buttons, active child tasks with duration editing",
+        "ui_contract": "Dataset | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "shell_registration",
+      "description": "shellConfig.ts is imported as a side-effect by Atlas Shell main.tsx. It calls AppRegistry.register() with appId=learning, basePath=/learning, component=React.lazy(ShellEntry), and nav items.",
+      "inputs": [
+        "Atlas Shell main.tsx side-effect import"
+      ],
+      "outputs": [
+        "Learning tile visible in Atlas Shell navigation"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "learning_list_load",
+      "description": "On /learning mount, LearningPage fetches GET /tasks/training-units. Response is a Dataset with TrainingUnitRow rows. Frontend derives progress = completed_child_count / total_child_count (0 if total_child_count = 0). Rows are already sorted server-side.",
+      "inputs": [
+        "GET /tasks/training-units response (Dataset)"
+      ],
+      "outputs": [
+        "Rendered list of training unit cards with title, labels, priority chip, progress bar (completed/total), last activity date (last_child_completed_at), status badge"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "potential_subtask_parsing",
+      "description": "Frontend parses task.description to extract the ## Potential Subtasks section. Lines matching '- [ ] <title>' are unchecked (activatable). Lines matching '- [x] <title> → task: <uuid>' are checked (already activated). Parsing is client-side, purely string-based. No regex library required — simple line-by-line scan.",
+      "inputs": [
+        "task.description string from TrainingUnitRow"
+      ],
+      "outputs": [
+        "unchecked_lines: {lineText: string}[], activated_lines: {lineText: string, taskId: string}[]"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "subtask_activation",
+      "description": "User clicks 'Create task' on an unchecked potential subtask line. Frontend: (1) POST /tasks with {title: lineText, task_type: training_session, parent_task_id: unit.id, status: open, priority: inherit from parent}. (2) If parent has labels, PUT /tasks/{newId}/labels with parent label names. (3) PATCH /tasks/{unit.id} to update description: replace '- [ ] <title>' with '- [x] <title> → task: <uuid>'. Errors at each step are surfaced inline; step 3 failure leaves the task created but description unupdated.",
+      "inputs": [
+        "unit.id",
+        "lineText",
+        "parent.priority",
+        "parent label names"
+      ],
+      "outputs": [
+        "new training_session task created and linked",
+        "parent description updated",
+        "UI re-renders activated line as checked"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "child_task_duration_update",
+      "description": "From UnitDetailPage, user edits actual_duration_minutes on a visible child training_session task. Frontend calls PATCH /tasks/{childId} with {actual_duration_minutes: value}. On success, updates local state.",
+      "inputs": [
+        "childId",
+        "actual_duration_minutes value"
+      ],
+      "outputs": [
+        "updated task row returned as Dataset (single row)",
+        "UI reflects new duration"
+      ]
+    },
+    {
+      "step": 6,
+      "name": "training_unit_creation",
+      "description": "CreateTrainingUnitPage submits POST /tasks with {title, description (including ## Potential Subtasks section if provided), task_type: training_unit, status: open, priority}. After creation, PUT /tasks/{id}/labels if labels were specified. Redirects to /learning on success.",
+      "inputs": [
+        "title",
+        "description",
+        "priority",
+        "labels"
+      ],
+      "outputs": [
+        "new training_unit task",
+        "redirect to /learning"
+      ]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "03_Application/TaskTracker",
+        "role": "Sole data source; provides all task persistence, training_unit endpoint, label management proxy. PersonalDevelopment is a pure consumer of TaskTracker APIs."
+      },
+      {
+        "component": "02_Platform/Atlas_Shell",
+        "role": "Shell registration via AppRegistry.register(); provides @atlas/shell import alias, shared UI components (ErrorCard, Skeleton), and apiFetch client"
+      },
+      {
+        "component": "02_Platform/packages/platform_contracts",
+        "role": "Dataset and ApiError types — imported from canonical path for TypeScript type safety"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "react",
+        "role": "UI framework",
+        "reuse_existing": true
+      },
+      {
+        "name": "react-router-dom",
+        "role": "Client-side routing (Routes, Route, useNavigate, useParams)",
+        "reuse_existing": true
+      },
+      {
+        "name": "typescript",
+        "role": "Type checking",
+        "reuse_existing": true
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "PersonalDevelopment frontend calling LabelEngine directly — all label calls route through TaskTracker",
+      "PersonalDevelopment introducing a new backend service",
+      "PersonalDevelopment owning any Postgres tables — all persistence owned by TaskTracker",
+      "Using LinkingEngine for parent-child relationships — controlled deviation: parent_task_id column on tasktracker.tasks is used instead",
+      "Setting completed_at from the frontend — TaskTracker backend sets it server-side on status=done transition"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "migration_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "none — all persistence owned by TaskTracker",
+    "notes": "PersonalDevelopment does not own a schema. The 10_schema.sql artifact contains ALTER TABLE migrations against tasktracker.tasks (owned by TaskTracker). These columns are added to TaskTracker's existing table to support the Learning domain. The migration is applied via TaskTracker's schema initialization path or as a separate migration script."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement GET /api/tasks/training-units in TaskTracker routers/tasks.py: query tasks where task_type=training_unit, LEFT JOIN or subquery for last_child_completed_at, completed_child_count, total_child_count; apply sort order (done first by last_child_completed_at DESC, then open by priority DESC); embed labels via LabelEngine batch call; return Dataset",
+      "Extend TaskTracker TaskCreate and TaskUpdate Pydantic models to accept task_type, parent_task_id, actual_duration_minutes, completed_at fields",
+      "Extend TaskTracker row_to_dict() to include task_type, parent_task_id, actual_duration_minutes, completed_at in all task responses",
+      "Add server-side logic in PATCH /api/tasks/{task_id}: when status transitions to done and completed_at is not provided, set completed_at = now()",
+      "Modify GET /api/tasks to exclude task_type = training_unit by default (add WHERE task_type != 'training_unit' to all query branches)",
+      "Apply 10_schema.sql migration against the tasktracker schema (via psql or migration runner)",
+      "Create 03_Application/PersonalDevelopment/frontend/shellConfig.ts following the TaskTracker pattern",
+      "Create 03_Application/PersonalDevelopment/frontend/ShellEntry.tsx as the React entry point",
+      "Create 03_Application/PersonalDevelopment/frontend/LearningPage.tsx: fetches training-units, renders sorted list with progress bars and subtask counts",
+      "Create 03_Application/PersonalDevelopment/frontend/UnitDetailPage.tsx: fetches single unit + children, renders potential subtask list with activation buttons and child task list with duration editing",
+      "Create 03_Application/PersonalDevelopment/frontend/CreateTrainingUnitPage.tsx: form for creating a training_unit task",
+      "Create 03_Application/PersonalDevelopment/frontend/markdownSubtasks.ts: pure function parseSubtasks(description: string) -> {unchecked, activated} and updateSubtaskLine(description, lineText, taskId) -> string",
+      "Add side-effect import for PersonalDevelopment shellConfig to 02_Platform/Atlas_Shell/src/shell/main.tsx",
+      "Extend TaskTracker TASK_SCHEMA constant to include the new columns (task_type, parent_task_id, actual_duration_minutes, completed_at)",
+      "Add TRAINING_UNIT_SCHEMA ColumnSchema list in TaskTracker for the training-units endpoint response — columns: [{name: id, type: string}, {name: title, type: string}, {name: status, type: enum, values: [open, in_progress, pending, done]}, {name: priority, type: enum, values: [low, medium, high]}, {name: labels, type: string, nullable: true}, {name: actual_duration_minutes, type: number, nullable: true}, {name: completed_at, type: date, nullable: true}, {name: last_child_completed_at, type: date, nullable: true}, {name: completed_child_count, type: number}, {name: total_child_count, type: number}, {name: description, type: string, nullable: true, detail_visible: true}]"
+    ],
+    "ui_implementer": [
+      "Implement progress bar component inline or reuse Atlas Shell components — progress = completed_child_count / total_child_count displayed as percentage",
+      "Render potential subtask lines as a list with 'Create task' buttons for unchecked lines and a checkmark + link for activated lines",
+      "Apply label filter bar to the Learning tile list (same mechanism as TaskTracker label filter, using PreferenceStore scope=learning.unit-list)"
+    ],
+    "test_writer": [
+      "Write pytest tests for GET /api/tasks/training-units covering: empty result, single unit with no children, unit with mixed done/open children, correct sort order",
+      "Write pytest tests for GET /api/tasks default exclusion of training_unit tasks",
+      "Write pytest tests for POST /api/tasks with task_type=training_unit and task_type=training_session with parent_task_id",
+      "Write pytest tests for PATCH /api/tasks/{id} setting completed_at server-side on status=done transition",
+      "Write pytest tests for parseSubtasks() markdown parsing (unit tests): unchecked lines, activated lines, section absent, section empty",
+      "Write pytest tests for updateSubtaskLine(): verifies correct string replacement"
+    ],
+    "reviewer": [
+      "Confirm that the GET /api/tasks training_unit exclusion does not break any existing TaskTracker tests",
+      "Confirm that completed_at is never returned as null for tasks where status=done (after migration)",
+      "Confirm that the schema migration is safe to apply idempotently (IF NOT EXISTS on all ALTER TABLE statements)"
+    ]
+  },
+  "deferred_decisions": [
+    "Whether the training-units endpoint supports label filtering server-side or leaves it client-side as in TaskTracker"
+  ],
+  "risks": [
+    {
+      "risk": "GET /api/tasks training_unit exclusion breaks existing TaskTracker tests or client behavior",
+      "impact": "Existing active-view and pending-board tests may fail if fixtures contain training_unit tasks; implementer must audit existing fixtures and ensure the exclusion is additive-only for new fixture rows"
+    },
+    {
+      "risk": "Description PATCH race condition on subtask activation",
+      "impact": "If two subtasks are activated near-simultaneously, the second PATCH may overwrite the first activation marker in the description. Mitigated by single-user context — documented as known limitation"
+    },
+    {
+      "risk": "completed_at server-side assignment relies on PATCH detecting status transition to done",
+      "impact": "If PATCH is called with status=done but completed_at already set, server must not overwrite it. Implementer must check: only set completed_at = now() if status transitions TO done AND completed_at IS NULL in the existing row"
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should GET /api/tasks/training-units support pagination or return all units in one page? Training units are expected to be few (<100), so a single-page response may be sufficient.",
+      "owner": "implementer"
+    },
+    {
+      "question": "Should child tasks (training_session) be fetched in the UnitDetailPage via a dedicated endpoint or via GET /api/tasks?parent_task_id=<uuid>? The latter requires adding a parent_task_id query param to GET /api/tasks.",
+      "owner": "implementer"
+    }
+  ]
+}

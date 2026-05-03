@@ -406,3 +406,54 @@ severity: major
 recurrence_hint: "Also seen in EVD-2026-04-14-003 — recurring pattern: ARCHITECTURE_EXCEPTIONS.md field list is not treated as a formal contract requiring update alongside every rename sprint"
 linked_immediate_artifact: 03_Application/FoodTracker/Sprint07_Base_Quantity/11_design_review.md
 ---
+
+---
+entry_id: EVD-2026-04-30-001
+date: 2026-04-30
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: PersonalDevelopment
+sprint: Sprint01-Core
+pattern_name: ownership_flag_contradicts_prose_note
+short_description: Designer set owns_persistent_state=true while the notes field in the same section states "PersonalDevelopment does not own a schema", creating a direct intra-artifact boolean/prose contradiction.
+evidence: "10_architecture.json §persistence: owns_persistent_state=true; §persistence.notes: 'PersonalDevelopment does not own a schema. The 10_schema.sql artifact contains ALTER TABLE migrations against tasktracker.tasks (owned by TaskTracker).'"
+likely_root_cause: definition_quality
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — pattern: boolean ownership fields are set based on the presence of an SQL artifact rather than actual table ownership semantics; likely to recur in extension sprints that migrate foreign-owned tables"
+linked_immediate_artifact: 03_Application/PersonalDevelopment/Sprint01-Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-04-30-002
+date: 2026-04-30
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: PersonalDevelopment
+sprint: Sprint01-Core
+pattern_name: consumed_endpoint_absent_from_contracts
+short_description: UnitDetailPage requires a child-task fetch endpoint to display training_session tasks, but no such endpoint is declared in contracts.consumes; the decision was deferred to the implementer rather than resolved in design.
+evidence: "10_architecture.json §deferred_decisions[1]: 'Whether UnitDetailPage fetches child tasks via a dedicated endpoint or via GET /api/tasks?parent_task_id=<uuid>... owner: implementer'; §contracts.consumes: no child-fetch endpoint listed; §internal_flow step 4 lists unit.id as input without specifying how children are retrieved"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern: open questions about which endpoint a page component uses are deferred to the implementer rather than resolved in design, making contracts.consumes incomplete"
+linked_immediate_artifact: 03_Application/PersonalDevelopment/Sprint01-Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-05-03-001
+date: 2026-05-03
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: FoodTracker
+sprint: Sprint08_UI_Update
+pattern_name: contradictory_internal_flow_branching
+short_description: internal_flow step described two mutually exclusive implementation approaches for the same behavior, then chose one without cleanly removing the other, making the implementer's expected behavior undefined.
+evidence: "10_architecture.json §internal_flow step 3 (json_logging_date_context): 'inject the selectedDate into the pastedJson by parsing it ... Alternatively (simpler and equally valid) ... Simpler approach chosen: prepopulate template only'"
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern: designer evaluates multiple implementation options inline within internal_flow rather than resolving to one approach before writing the artifact"
+linked_immediate_artifact: 03_Application/FoodTracker/Sprint08_UI_Update/11_design_review.md
+---
