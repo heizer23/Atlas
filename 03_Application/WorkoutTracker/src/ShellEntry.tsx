@@ -1462,7 +1462,7 @@ function SettingsView() {
           </select>
           <span className="type-body">:</span>
           <select value={minute} onChange={e => setMinute(Number(e.target.value))} style={selectStyle}>
-            {[0, 15, 30, 45].map(m => (
+            {Array.from({ length: 60 }, (_, m) => (
               <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
             ))}
           </select>
