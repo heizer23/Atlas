@@ -20,6 +20,3 @@ services:
       ATLAS_PG_USER: ${ATLAS_PG_USER}
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT: ${ATLAS_PG_PORT}
-      # CalendarConnector (host network — port 8021 on localhost)
-      CALENDAR_CONNECTOR_URL: http://localhost:8021
-      ATLAS_BASE_URL: https://workout.linspad.net
