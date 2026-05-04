@@ -1,0 +1,304 @@
+{
+  "sprint_note": "Adds CalendarConnector env vars and _sync_calendar_event helper to tasks.py; updates compose.yml with CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL. No schema change. No frontend change.",
+  "component_name": "tasktracker",
+  "target_root": "03_Application/TaskTracker",
+  "directories": [
+    "03_Application/TaskTracker",
+    "03_Application/TaskTracker/backend",
+    "03_Application/TaskTracker/backend/routers",
+    "03_Application/TaskTracker/migrations",
+    "03_Application/TaskTracker/src",
+    "03_Application/TaskTracker/00_architecture"
+  ],
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/pyproject.toml",
+      "stub_kind": "toml",
+      "role": "Package metadata and dependency declarations — fastapi, uvicorn, psycopg2-binary, pydantic, httpx. Unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "Container image definition — unchanged from Sprint09.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/compose.yml",
+      "stub_kind": "yaml",
+      "role": "Docker Compose service definition for tasktracker. Sprint10: add CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL to the tasktracker service environment block.",
+      "change": "changed",
+      "change_detail": "Add two env vars to tasktracker.environment: CALENDAR_CONNECTOR_URL: http://atlas-calendar-connector:8000 and ATLAS_BASE_URL: https://workout.linspad.net",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/schema.sql",
+      "stub_kind": "sql",
+      "role": "Canonical DDL for the tasktracker schema — unchanged from Sprint09. No migration required.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/run_local.py",
+      "stub_kind": "python_module",
+      "role": "Local development launcher — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty. Unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management and schema initialization — unchanged from Sprint09.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entrypoint — unchanged from Sprint09.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty. Unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "stub_kind": "python_module",
+      "role": "All task HTTP endpoints plus label and preference proxy endpoints. Sprint10: add CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL constants, _calendar_client() helper, and _sync_calendar_event() helper; update create_task and update_task to fire calendar sync after commit.",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "purpose": "APIRouter instance with prefix=/tasks and tag='tasks', mounted by main.py under /api."
+        },
+        {
+          "kind": "constant",
+          "name": "TASK_SCHEMA",
+          "pattern": "module_constant",
+          "purpose": "Stable list of ColumnSchema objects for the tasks Dataset — unchanged from Sprint09."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_STATUS",
+          "pattern": "module_constant",
+          "purpose": "Allowed task status values: open, in_progress, scheduled, pending, done — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_PRIORITY",
+          "pattern": "module_constant",
+          "purpose": "Allowed task priority values: low, medium, high — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_VIEW",
+          "pattern": "module_constant",
+          "purpose": "Allowed view parameter values: active, pending_board, scheduled — unchanged."
+        },
+        {
+          "kind": "class",
+          "name": "TaskCreate",
+          "pattern": "data_model",
+          "purpose": "Request body for POST /api/tasks — unchanged from Sprint09."
+        },
+        {
+          "kind": "class",
+          "name": "TaskUpdate",
+          "pattern": "data_model",
+          "purpose": "Request body for PATCH /api/tasks/{task_id} — unchanged from Sprint09."
+        },
+        {
+          "kind": "class",
+          "name": "LabelAttachBody",
+          "pattern": "data_model",
+          "purpose": "Request body for POST /api/tasks/{task_id}/labels — unchanged."
+        },
+        {
+          "kind": "class",
+          "name": "LabelFilterPutBody",
+          "pattern": "data_model",
+          "purpose": "Request body for PUT /api/tasks/preferences/label_filter — unchanged."
+        },
+        {
+          "kind": "class",
+          "name": "LabelSetBody",
+          "pattern": "data_model",
+          "purpose": "Request body for PUT /api/tasks/{task_id}/labels — unchanged."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "LABEL_ENGINE_URL",
+          "purpose": "Base URL for LabelEngine — from LABEL_ENGINE_URL env var, default http://localhost:8050."
+        },
+        {
+          "kind": "constant",
+          "name": "PREFERENCE_STORE_URL",
+          "purpose": "Base URL for PreferenceStore — from PREFERENCE_STORE_URL env var, default http://localhost:8060."
+        },
+        {
+          "kind": "constant",
+          "name": "CALENDAR_CONNECTOR_URL",
+          "purpose": "[NEW] Base URL for CalendarConnector — from CALENDAR_CONNECTOR_URL env var, default empty string. Empty string means calendar sync is disabled.",
+          "change": "new"
+        },
+        {
+          "kind": "constant",
+          "name": "ATLAS_BASE_URL",
+          "purpose": "[NEW] Base URL for Atlas deep links — from ATLAS_BASE_URL env var, default https://workout.linspad.net. Used to construct the task deep link in calendar event descriptions.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "_label_client",
+          "purpose": "Return a configured httpx.Client targeting LABEL_ENGINE_URL with 5s timeout — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_preference_client",
+          "purpose": "Return a configured httpx.Client targeting PREFERENCE_STORE_URL with 5s timeout — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_calendar_client",
+          "purpose": "[NEW] Return a configured httpx.Client targeting CALENDAR_CONNECTOR_URL with 5s timeout. Pattern mirrors _label_client() and _preference_client(). Caller is responsible for checking CALENDAR_CONNECTOR_URL is non-empty before calling this.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "_sync_calendar_event",
+          "visibility": "private",
+          "args": [
+            "task_id: str",
+            "title: str",
+            "scheduled_at: date | None",
+            "description: str | None",
+            "action: str"
+          ],
+          "returns": "None",
+          "purpose": "[NEW] Best-effort calendar sync helper. If CALENDAR_CONNECTOR_URL is empty, returns immediately. action='create': POST /api/calendar/events with atlas_event_id=task_id, title='[Atlas] '+title, start_at=scheduled_at.isoformat(), end_at=(scheduled_at+1day).isoformat(), all_day=True, description='Atlas task: {ATLAS_BASE_URL}/tasks/{task_id}\\n\\n{description or \"\"}'. action='update': PATCH /api/calendar/events/{task_id} with the same fields. action='delete': DELETE /api/calendar/events/{task_id}. All httpx exceptions (ConnectError, TimeoutException, etc.) and non-2xx responses are caught and logged as log.warning with status code and body. Never raises. Must be called after DB commit.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "row_to_dict",
+          "purpose": "Convert a psycopg2 RealDictRow to a plain dict — unchanged from Sprint09."
+        },
+        {
+          "kind": "function",
+          "name": "fetch_labels_for_tasks",
+          "purpose": "Batch-fetch labels for a list of task IDs via LabelEngine — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "dataset_response",
+          "purpose": "Serialize a Dataset to JSONResponse — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "single_row_dataset",
+          "purpose": "Wrap a single task row dict in a Dataset — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_run_auto_promotion",
+          "purpose": "Execute the auto-promotion UPDATE for view=active and view=pending_board — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "list_tasks",
+          "purpose": "GET /api/tasks — paginated task list with view/status/label support — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "create_task",
+          "purpose": "[CHANGED] POST /api/tasks — validates and inserts task. After conn.commit(), if body.status == 'scheduled', calls _sync_calendar_event(task_id, body.title, scheduled_at_date, body.description, 'create'). scheduled_at_date is body.scheduled_at parsed from the ISO string to a Python date object (date.fromisoformat(body.scheduled_at)). Returns single-row Dataset.",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "update_task",
+          "purpose": "[CHANGED] PATCH /api/tasks/{task_id} — partial update. Pre-update snapshot fetches status, scheduled_at, title, description from DB. After conn.commit(), evaluates calendar action: (1) new_status='scheduled' and old_status!='scheduled' → 'create'; (2) new_status='scheduled' or (new_status is None and old_status='scheduled') and (scheduled_at or title changed) → 'update'; (3) new_status!='scheduled' and old_status='scheduled' → 'delete'; (4) else → no-op. Calls _sync_calendar_event as appropriate. scheduled_at passed as Python date object. Returns single-row Dataset or 404.",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "delete_task",
+          "purpose": "DELETE /api/tasks/{task_id} — removes the task; no calendar sync. Unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "search_labels",
+          "purpose": "GET /api/tasks/labels/search — proxies LabelEngine — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "list_used_labels",
+          "purpose": "GET /api/tasks/labels/used — proxies LabelEngine — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "get_label_filter_preference",
+          "purpose": "GET /api/tasks/preferences/label_filter — proxies PreferenceStore — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "put_label_filter_preference",
+          "purpose": "PUT /api/tasks/preferences/label_filter — proxies PreferenceStore — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "get_task_labels",
+          "purpose": "GET /api/tasks/{task_id}/labels — proxies LabelEngine — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "attach_task_label",
+          "purpose": "POST /api/tasks/{task_id}/labels — proxies LabelEngine — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "detach_task_label",
+          "purpose": "DELETE /api/tasks/{task_id}/labels/{label_id} — proxies LabelEngine — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "set_task_labels",
+          "purpose": "PUT /api/tasks/{task_id}/labels — atomically replaces all labels — unchanged."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/src/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "Atlas Shell registration — unchanged from Sprint09.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_react_module",
+      "role": "Main React entry point — unchanged from Sprint09. No frontend changes in Sprint10.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

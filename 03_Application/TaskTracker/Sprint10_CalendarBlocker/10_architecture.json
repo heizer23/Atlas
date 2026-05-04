@@ -1,0 +1,328 @@
+{
+  "sprint_note": "Wires scheduled task status to CalendarConnector: create all-day event on schedule, update on date/title change, delete on unschedule. Best-effort, non-blocking. No schema change. No frontend change.",
+  "component_name": "tasktracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Lightweight single-user task management application that creates, tracks, and labels tasks with status, priority, due date, effort, and scheduled time fields, persisting tasks in Postgres and delegating label management to LabelEngine, user preferences to PreferenceStore, and calendar blocking to CalendarConnector.",
+  "classification": {
+    "why_application": "Owns task domain state (tasktracker.tasks table), enforces task-specific business rules (status transitions, priority validation, effort constraints, scheduled promotion logic, calendar sync trigger logic), and wires platform services to TaskTracker-scoped behavior. Contains no reusable infrastructure.",
+    "non_goals": [
+      "Multi-user or authentication — single-user only",
+      "Server-side label filtering on GET /tasks",
+      "Label storage — delegated to LabelEngine",
+      "Preference storage — delegated to PreferenceStore",
+      "Reverse calendar sync — changes in Google Calendar do not flow back to Atlas",
+      "Frontend changes — all logic in backend only",
+      "LinkingEngine integration — task.id is used directly as atlas_event_id",
+      "Deep-link route /tasks/:id — planted in event description; route added in Sprint 11",
+      "Retry logic for failed calendar sync calls",
+      "Push notifications on auto-promotion",
+      "Recurring scheduled tasks",
+      "Background job scheduler — promotion is lazy on page load only"
+    ],
+    "not_platform": "Task domain rules, the tasktracker.tasks schema, the wiring of LabelEngine/PreferenceStore/CalendarConnector for this domain, and the calendar sync trigger decisions (when to create/update/delete) are TaskTracker-specific application behavior, not reusable platform infrastructure."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL (env var, default http://localhost:8050) — POST /api/objects/labels/batch, GET /api/labels, GET /api/labels/used?object_type=task, GET /api/objects/{task_id}/labels, POST /api/objects/{task_id}/labels, DELETE /api/objects/{task_id}/labels/{label_id}",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL (env var, default http://localhost:8060) — GET and PUT /api/preferences/tasktracker.task-list/label_filter",
+      "[NEW] CalendarConnector HTTP API at CALENDAR_CONNECTOR_URL (env var, default empty string) — POST /api/calendar/events (create), PATCH /api/calendar/events/{task_id} (update), DELETE /api/calendar/events/{task_id} (delete)",
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via ATLAS_PG_* environment variables",
+      "platform_contracts — ColumnSchema, Dataset, DatasetMeta from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling — api_error helper, exception handlers, request timing, structured logging"
+    ],
+    "provides": [
+      "GET /api/tasks — list tasks with optional status/view filter and pagination; labels embedded per row",
+      "GET /api/tasks with view=active — auto-promotion then SELECT excluding scheduled/done-not-today",
+      "GET /api/tasks with view=pending_board — auto-promotion then SELECT open/pending",
+      "GET /api/tasks with view=scheduled — scheduled tasks ordered by scheduled_at ASC NULLS LAST",
+      "[CHANGED] POST /api/tasks — creates task; if status=scheduled, fires best-effort calendar create after successful INSERT",
+      "[CHANGED] PATCH /api/tasks/{task_id} — updates task; fires best-effort calendar create/update/delete depending on status transition after successful PATCH commit",
+      "DELETE /api/tasks/{task_id} — deletes task; returns empty Dataset",
+      "Label proxy endpoints (search, used, per-task CRUD, set) — thin forwards to LabelEngine",
+      "Preference proxy endpoints (label_filter GET/PUT) — thin forwards to PreferenceStore"
+    ],
+    "invariants": [
+      "All GET endpoints return Dataset per R-CON-BP-04",
+      "task.id is a UUID generated at insert time; never caller-supplied",
+      "task.status must be one of: open, in_progress, scheduled, pending, done",
+      "task.priority must be one of: low, medium, high",
+      "task.effort_hours must be >= 0 if provided",
+      "task.title must not be empty or blank",
+      "On POST, status is restricted to open, pending, or scheduled",
+      "PATCH distinguishes field omitted (no change) from field explicitly null (clear column) via model_fields_set",
+      "task.updated_at is always set server-side to now() on every PATCH",
+      "Calendar sync is best-effort: any CalendarConnector error (network, non-2xx, timeout) is logged as a warning and does not affect the task operation response",
+      "If CALENDAR_CONNECTOR_URL is empty or not set, all calendar sync calls are silently skipped",
+      "[NEW] calendar sync is triggered only after a successful DB commit — never before",
+      "[NEW] atlas_event_id passed to CalendarConnector is always the task's UUID string (task.id)",
+      "[NEW] All-day event: start_at = scheduled_at.isoformat(), end_at = (scheduled_at + 1 day).isoformat()",
+      "[NEW] Event title: '[Atlas] ' + task.title",
+      "[NEW] Event description: 'Atlas task: {ATLAS_BASE_URL}/tasks/{task_id}\\n\\n{task_description or \"\"}'",
+      "Labels are embedded in GET /tasks rows via a single LabelEngine batch call; LabelEngine failure returns empty labels per row without failing the request",
+      "Label proxy endpoints pass object_type=task to all LabelEngine calls",
+      "PreferenceStore scope for all TaskTracker preferences is tasktracker.task-list",
+      "Schema is initialized idempotently at startup via schema.sql"
+    ],
+    "failure_modes": [
+      "INVALID_FILTER — GET /tasks with unknown status or view — 400 ApiError",
+      "INVALID_PARAM — GET /tasks with page < 1 — 400 ApiError",
+      "VALIDATION_ERROR — POST or PATCH with invalid field values — 400 ApiError",
+      "VALIDATION_ERROR — POST or PATCH with status=scheduled and no scheduled_at — 400 ApiError",
+      "NOT_FOUND — PATCH or DELETE on unknown task_id — 404 ApiError",
+      "[NEW] CALENDAR_SYNC_SKIPPED — CALENDAR_CONNECTOR_URL not set — silent skip, no log",
+      "[NEW] CALENDAR_SYNC_WARNING — CalendarConnector unreachable or returns non-2xx — warning logged, task response unaffected",
+      "LabelEngine unreachable on GET /tasks — labels defaults to empty list; request succeeds",
+      "LabelEngine unreachable on GET /tasks/labels/used — returns empty Dataset",
+      "LabelEngine/PreferenceStore unreachable on proxy endpoints — passes through HTTP status and body",
+      "DATABASE_UNAVAILABLE — Postgres unreachable — startup logs error; requests fail until DB is reachable"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": [
+      "TaskRow: {id: str (UUID), title: str, description: str|null, status: str, priority: str, due_date: str|null (ISO date), effort_hours: float|null, scheduled_at: str|null (ISO date), created_at: str (ISO datetime), updated_at: str (ISO datetime), labels: [{id, name, attached_at}]} — emitted in Dataset rows by GET /tasks and single-row responses"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL — httpx.Client with 5s timeout",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL — httpx.Client with 5s timeout",
+      "[NEW] CalendarConnector HTTP API at CALENDAR_CONNECTOR_URL — httpx.Client with 5s timeout; all errors caught and logged, never re-raised",
+      "psycopg2.pool.SimpleConnectionPool via get_db() context manager — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/03_ErrorHandling/"
+    ],
+    "provides": [
+      "HTTP API mounted at /api (FastAPI, uvicorn)",
+      "CORS: allow_origin_regex=http://localhost:\\d+ — all localhost ports during development",
+      "Allowed methods: GET, POST, PATCH, DELETE"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks",
+        "purpose": "List tasks with optional status or view filter and pagination. Embeds labels per row from LabelEngine batch call. view=active and view=pending_board trigger auto-promotion before SELECT. view=scheduled returns scheduled tasks ordered by scheduled_at ASC.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/tasks",
+        "purpose": "Create a new task. Accepts status=scheduled with required scheduled_at. If status=scheduled, fires best-effort calendar create after DB commit. Returns created task as Dataset (single row).",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/tasks/{task_id}",
+        "purpose": "Partially update a task. Field omission means no change; explicit null clears nullable fields. After DB commit, fires best-effort calendar create/update/delete based on status transition. Returns updated task as Dataset (single row).",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/tasks/{task_id}",
+        "purpose": "Delete a task. Returns empty Dataset on success.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/search",
+        "purpose": "Search labels by name prefix via LabelEngine.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/used",
+        "purpose": "Return all labels attached to at least one task. Gracefully degrades to empty Dataset on LabelEngine failure.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/{task_id}/labels",
+        "purpose": "Return all labels attached to one task via LabelEngine.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/tasks/{task_id}/labels",
+        "purpose": "Attach a label by name to a task via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/tasks/{task_id}/labels/{label_id}",
+        "purpose": "Detach a label from a task via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/{task_id}/labels",
+        "purpose": "Atomically replace all labels on a task via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/preferences/label_filter",
+        "purpose": "Retrieve stored label filter selection from PreferenceStore.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/preferences/label_filter",
+        "purpose": "Persist label filter selection to PreferenceStore.",
+        "ui_contract": "ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() creates psycopg2 SimpleConnectionPool. init_schema() reads schema.sql and executes DDL idempotently. CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL are read from environment at module load. Errors are logged; application continues.",
+      "inputs": ["ATLAS_PG_* or DATABASE_URL env vars", "CALENDAR_CONNECTOR_URL env var (may be empty)", "ATLAS_BASE_URL env var (default https://workout.linspad.net)", "schema.sql"],
+      "outputs": ["live connection pool", "tasktracker schema and tasks table in Postgres", "module-level CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL constants"]
+    },
+    {
+      "step": 2,
+      "name": "task_list",
+      "description": "GET /tasks validates params, runs auto-promotion if view=active or view=pending_board, executes the appropriate SELECT, embeds labels via LabelEngine batch POST. Returns Dataset. Unchanged from Sprint09.",
+      "inputs": ["status param", "view param", "page", "page_size", "server CURRENT_DATE (UTC)"],
+      "outputs": ["Dataset with task rows and embedded labels"]
+    },
+    {
+      "step": 3,
+      "name": "task_create",
+      "description": "POST /tasks validates title, status (open|pending|scheduled), priority, effort_hours, and scheduled_at. Inserts row with UUID. Commits. If status=scheduled, calls _sync_calendar_event(task_id, title, scheduled_at, description, 'create') after commit. Returns Dataset (single row). Calendar failure never propagates to response.",
+      "inputs": ["TaskCreate body including optional scheduled_at"],
+      "outputs": ["Dataset (inserted task row)", "optional calendar create side-effect (best-effort)"]
+    },
+    {
+      "step": 4,
+      "name": "task_update",
+      "description": "PATCH /tasks/{task_id} validates status/priority if provided. Fetches pre-update snapshot (status, scheduled_at, title, description). Builds SET clause from model_fields_set. Executes UPDATE RETURNING *. Commits. Then evaluates calendar action from pre/post state: (a) any→scheduled (new): 'create'; (b) scheduled→scheduled and scheduled_at or title changed: 'update'; (c) scheduled→other: 'delete'; (d) no status change, not scheduled: no-op. Calls _sync_calendar_event as appropriate. Returns Dataset (single row) or 404 ApiError. Calendar failure never propagates.",
+      "inputs": ["task_id path param", "TaskUpdate body", "pre-update DB snapshot (status, scheduled_at, title, description)"],
+      "outputs": ["Dataset (updated task row) | 404 ApiError", "optional calendar create/update/delete side-effect (best-effort)"]
+    },
+    {
+      "step": 5,
+      "name": "task_delete",
+      "description": "DELETE /tasks/{task_id} executes DELETE RETURNING id. Returns empty Dataset or 404 ApiError. Note: no calendar cleanup on DELETE — the task is gone and CalendarConnector's idempotent delete is not called in this sprint (calendar event orphan risk is accepted as a deferred decision).",
+      "inputs": ["task_id path param"],
+      "outputs": ["empty Dataset | 404 ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "calendar_sync",
+      "description": "_sync_calendar_event(task_id, title, scheduled_at, description, action): if CALENDAR_CONNECTOR_URL is empty, returns immediately. Otherwise opens an httpx.Client targeting CALENDAR_CONNECTOR_URL. For 'create': POST /api/calendar/events with {atlas_event_id, title, start_at, end_at, description, all_day=true}. For 'update': PATCH /api/calendar/events/{task_id} with {title, start_at, end_at, description, all_day=true}. For 'delete': DELETE /api/calendar/events/{task_id}. All httpx exceptions and non-2xx responses are caught, logged as warnings, and swallowed. start_at = scheduled_at.isoformat(), end_at = (scheduled_at + timedelta(days=1)).isoformat(). title is prefixed with '[Atlas] '. description = 'Atlas task: {ATLAS_BASE_URL}/tasks/{task_id}\\n\\n{description or \"\"}'.",
+      "inputs": ["task_id: str (UUID)", "title: str", "scheduled_at: date (for create/update)", "description: str|None", "action: Literal['create', 'update', 'delete']"],
+      "outputs": ["none (side-effect only; all errors swallowed with log.warning)"]
+    },
+    {
+      "step": 7,
+      "name": "label_proxy",
+      "description": "Label endpoints are thin proxies to LabelEngine with object_type=task. Results mapped to Dataset for read endpoints. Unchanged from Sprint09.",
+      "inputs": ["task_id, label_name, or label_id as applicable"],
+      "outputs": ["Dataset (read endpoints) | LabelEngine response pass-through (mutations)"]
+    },
+    {
+      "step": 8,
+      "name": "preference_proxy",
+      "description": "Preference endpoints are thin proxies to PreferenceStore under scope=tasktracker.task-list. Unchanged from Sprint09.",
+      "inputs": ["label_ids list (PUT)"],
+      "outputs": ["Dataset or 404 ApiError (GET) | PreferenceRecord or ApiError (PUT)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — TaskTracker owns the tasktracker schema within it"},
+      {"component": "02_Platform/LabelEngine", "role": "Source of all label data; TaskTracker proxies all label operations with object_type=task"},
+      {"component": "02_Platform/PreferenceStore", "role": "Persists user label filter selections under scope tasktracker.task-list"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema — used in all read endpoint responses"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error helper, exception handlers, request timing, structured logging"}
+    ],
+    "internal_optional": [
+      {"component": "02_Platform/CalendarConnector", "role": "[NEW] Calendar event lifecycle management for scheduled tasks — consumed best-effort via HTTP; absent or unreachable CalendarConnector does not prevent task operations"}
+    ],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request body validation", "reuse_existing": true},
+      {"name": "httpx", "role": "Synchronous HTTP client for LabelEngine, PreferenceStore, and CalendarConnector proxy calls", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling LabelEngine, PreferenceStore, or CalendarConnector directly",
+      "Calendar sync errors failing the task API response — calendar is always best-effort",
+      "Using LinkingEngine to map task IDs to calendar event IDs — task.id is the atlas_event_id directly",
+      "Background job or scheduler for calendar sync — all sync is synchronous, post-commit",
+      "Re-implementing label storage or preference storage in TaskTracker",
+      "Background job or scheduler for auto-promotion — promotion is lazy on page load only"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgresql",
+    "schema_name": "tasktracker",
+    "table_name": "tasktracker.tasks",
+    "notes": "No schema change in Sprint10. The tasktracker.tasks table is unchanged from Sprint09 (scheduled_at date column and expanded status constraint already in place). No migration file required."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "[NEW] Add CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL module-level constants to backend/routers/tasks.py, read from environment",
+      "[NEW] Add _calendar_client() helper returning an httpx.Client(base_url=CALENDAR_CONNECTOR_URL, timeout=5.0) — mirrors _label_client() and _preference_client()",
+      "[NEW] Add _sync_calendar_event(task_id, title, scheduled_at, description, action) helper: if CALENDAR_CONNECTOR_URL is empty return immediately; build event payload; call CalendarConnector; catch all exceptions and non-2xx responses; log as warning; never re-raise",
+      "[NEW] In create_task: after conn.commit(), if body.status == 'scheduled', call _sync_calendar_event(task_id, body.title, scheduled_at_as_date, body.description, 'create')",
+      "[NEW] In update_task: after conn.commit(), evaluate pre-update vs post-update state to determine calendar action; see internal_flow step 4 decision table; call _sync_calendar_event as appropriate",
+      "[NEW] Add CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL to compose.yml tasktracker service environment block",
+      "Ensure scheduled_at is available as a Python date object inside the calendar sync call path — row_to_dict serializes it to ISO string but the sync helper receives it before serialization (use body.scheduled_at for create, or the pre/post snapshot values for update)"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "[NEW] Write test: create task with status=scheduled when CALENDAR_CONNECTOR_URL is set — verify CalendarConnector POST is called with correct atlas_event_id, title, start_at, end_at, all_day=true",
+      "[NEW] Write test: create task with status=scheduled when CALENDAR_CONNECTOR_URL is empty — verify no HTTP call made, task created successfully",
+      "[NEW] Write test: PATCH task from non-scheduled to scheduled — verify calendar create is called",
+      "[NEW] Write test: PATCH scheduled task with new scheduled_at — verify calendar update is called",
+      "[NEW] Write test: PATCH scheduled task with same scheduled_at and same title — verify no calendar update is called (no-op)",
+      "[NEW] Write test: PATCH task from scheduled to open — verify calendar delete is called",
+      "[NEW] Write test: calendar create returns non-2xx — verify task PATCH still returns 200 (best-effort, non-blocking)",
+      "[NEW] Write test: calendar create raises network exception — verify task POST still returns the created task Dataset"
+    ],
+    "reviewer": [
+      "Verify that _sync_calendar_event is called after conn.commit() — never inside the DB transaction block",
+      "Verify that scheduled_at is available as a Python date when passed to _sync_calendar_event (not the ISO string from row_to_dict)",
+      "Verify the 'no-op' branch for PATCH scheduled→scheduled with unchanged scheduled_at and unchanged title is explicit in implementation",
+      "Verify compose.yml change includes both CALENDAR_CONNECTOR_URL and ATLAS_BASE_URL",
+      "Confirm that task DELETE does not trigger a calendar delete (accepted deferred decision)"
+    ]
+  },
+  "deferred_decisions": [
+    "Calendar cleanup on task DELETE: the current design does not call CalendarConnector DELETE when a task is hard-deleted. The calendar event will become orphaned. This is acceptable for Sprint10; a cleanup strategy can be added in a future sprint if needed.",
+    "scheduled_at change detection in PATCH: the 'update' branch requires knowing whether scheduled_at or title actually changed. The pre-update snapshot fetched for status validation already includes scheduled_at and title — implementer must compare pre-snapshot values against the body fields using model_fields_set to determine if an update is warranted."
+  ],
+  "risks": [
+    {
+      "risk": "Calendar event orphan on task DELETE",
+      "impact": "A deleted task leaves a dangling calendar event in Google. Low impact for single-user; event can be manually removed. Deferred to a future sprint."
+    },
+    {
+      "risk": "CalendarConnector not yet OAuth-authorized at runtime",
+      "impact": "Calendar sync returns non-2xx (NO_CALENDAR_CONNECTION or INSUFFICIENT_SCOPE). Warning logged, task operation succeeds. User must connect CalendarConnector separately."
+    },
+    {
+      "risk": "PATCH update 'no-op' detection requires comparing pre-snapshot title against body title",
+      "impact": "If implementer omits this check, spurious PATCH calls to CalendarConnector may occur on every scheduled PATCH. Non-fatal but wasteful. Reviewer should verify."
+    },
+    {
+      "risk": "scheduled_at stored as date in DB (not timestamptz)",
+      "impact": "All-day events use date-only strings — this matches the CalendarConnector all_day=true expectation. No correctness issue."
+    }
+  ],
+  "open_questions": []
+}

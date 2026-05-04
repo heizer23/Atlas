@@ -40,9 +40,9 @@ def test_scheduled_view_returns_scheduled_tasks_ordered_asc(client, db_conn):
     id_a = str(uuid.uuid4())
     id_b = str(uuid.uuid4())
     # Task A: scheduled 14 days from now
-    insert_task(db_conn, id_a, "task-A-later", "scheduled", scheduled_at="2099-02-01T09:00:00+00:00")
+    insert_task(db_conn, id_a, "task-A-later", "scheduled", scheduled_at="2099-02-01")
     # Task B: scheduled 7 days from now (earlier)
-    insert_task(db_conn, id_b, "task-B-sooner", "scheduled", scheduled_at="2099-01-01T09:00:00+00:00")
+    insert_task(db_conn, id_b, "task-B-sooner", "scheduled", scheduled_at="2099-01-01")
 
     r = client.get("/api/tasks?view=scheduled")
     assert r.status_code == 200
@@ -78,7 +78,7 @@ def test_auto_promotion_promotes_past_due_task(client, db_conn):
     task_id = str(uuid.uuid4())
     # scheduled_at = yesterday
     insert_task(db_conn, task_id, "past-due-task", "scheduled",
-                scheduled_at="2000-01-01T09:00:00+00:00")
+                scheduled_at="2000-01-01")
 
     # Fetch active view — triggers auto-promotion
     r = client.get("/api/tasks?view=active")
@@ -97,7 +97,7 @@ def test_auto_promotion_does_not_promote_future_task(client, db_conn):
     """A scheduled task with scheduled_at in the future is NOT promoted on view=active fetch."""
     task_id = str(uuid.uuid4())
     insert_task(db_conn, task_id, "future-task", "scheduled",
-                scheduled_at="2099-12-31T23:59:00+00:00")
+                scheduled_at="2099-12-31")
 
     client.get("/api/tasks?view=active")
 
@@ -113,7 +113,7 @@ def test_active_view_excludes_future_scheduled_tasks(client, db_conn):
     """view=active response does not include future-scheduled tasks."""
     task_id = str(uuid.uuid4())
     insert_task(db_conn, task_id, "exclude-scheduled", "scheduled",
-                scheduled_at="2099-12-31T23:59:00+00:00")
+                scheduled_at="2099-12-31")
 
     r = client.get("/api/tasks?view=active")
     assert r.status_code == 200
@@ -128,7 +128,7 @@ def test_create_task_with_scheduled_status_and_scheduled_at(client):
     r = client.post("/api/tasks", json={
         "title": "Plan review",
         "status": "scheduled",
-        "scheduled_at": "2099-01-01T09:00:00",
+        "scheduled_at": "2099-01-01",
     })
     assert r.status_code == 200, r.text
     rows = get_rows(r)
@@ -159,7 +159,7 @@ def test_patch_task_to_scheduled_with_scheduled_at(client, db_conn):
 
     r = client.patch(
         f"/api/tasks/{task_id}",
-        json={"status": "scheduled", "scheduled_at": "2099-06-01T10:00:00"},
+        json={"status": "scheduled", "scheduled_at": "2099-06-01"},
     )
     assert r.status_code == 200, r.text
     rows = get_rows(r)
@@ -173,7 +173,7 @@ def test_patch_clears_scheduled_at_when_status_changes_away(client, db_conn):
     """PATCH with status=open and scheduled_at=null clears the scheduled_at field."""
     task_id = str(uuid.uuid4())
     insert_task(db_conn, task_id, "scheduled-to-clear", "scheduled",
-                scheduled_at="2099-01-01T09:00:00+00:00")
+                scheduled_at="2099-01-01")
 
     r = client.patch(
         f"/api/tasks/{task_id}",
@@ -192,7 +192,7 @@ def test_create_task_with_scheduled_at_and_non_scheduled_status(client):
     r = client.post("/api/tasks", json={
         "title": "Note with future ref",
         "status": "open",
-        "scheduled_at": "2099-03-15T08:00:00",
+        "scheduled_at": "2099-03-15",
     })
     assert r.status_code == 200, r.text
     rows = get_rows(r)

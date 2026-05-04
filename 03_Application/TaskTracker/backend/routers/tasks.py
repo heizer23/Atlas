@@ -1,5 +1,7 @@
+import logging
 import os
 import uuid
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -11,16 +13,94 @@ from backend.database import get_db
 from platform_errorhandling import api_error
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 
+log = logging.getLogger("tasktracker")
+
 # ── Platform service clients ──────────────────────────────────────────────────
 
 LABEL_ENGINE_URL      = os.environ.get("LABEL_ENGINE_URL",      "http://localhost:8050")
 PREFERENCE_STORE_URL  = os.environ.get("PREFERENCE_STORE_URL",  "http://localhost:8060")
+CALENDAR_CONNECTOR_URL = os.environ.get("CALENDAR_CONNECTOR_URL", "")
+ATLAS_BASE_URL         = os.environ.get("ATLAS_BASE_URL",         "https://workout.linspad.net")
+
 
 def _label_client() -> httpx.Client:
     return httpx.Client(base_url=LABEL_ENGINE_URL, timeout=5.0)
 
 def _preference_client() -> httpx.Client:
     return httpx.Client(base_url=PREFERENCE_STORE_URL, timeout=5.0)
+
+def _calendar_client() -> httpx.Client:
+    return httpx.Client(base_url=CALENDAR_CONNECTOR_URL, timeout=5.0)
+
+
+def _sync_calendar_event(
+    task_id: str,
+    title: str,
+    scheduled_at: "date | None",
+    description: "str | None",
+    action: str,
+) -> None:
+    """Best-effort calendar sync — never raises, never blocks the task response.
+
+    action: 'create' | 'update' | 'delete'
+    If CALENDAR_CONNECTOR_URL is empty, returns immediately (silent skip).
+    All errors are logged as warnings and swallowed.
+    Must be called AFTER DB commit.
+    """
+    if not CALENDAR_CONNECTOR_URL:
+        return
+
+    prefixed_title = f"[Atlas] {title}"
+    event_description = f"Atlas task: {ATLAS_BASE_URL}/tasks/{task_id}\n\n{description or ''}"
+
+    try:
+        with _calendar_client() as client:
+            if action == "create":
+                start_at = scheduled_at.isoformat()
+                end_at = (scheduled_at + timedelta(days=1)).isoformat()
+                resp = client.post(
+                    "/api/calendar/events",
+                    json={
+                        "atlas_event_id": task_id,
+                        "title": prefixed_title,
+                        "start_at": start_at,
+                        "end_at": end_at,
+                        "description": event_description,
+                        "all_day": True,
+                    },
+                )
+                if resp.status_code not in (200, 201):
+                    log.warning(
+                        "Calendar create returned non-2xx: status=%s body=%s task_id=%s",
+                        resp.status_code, resp.text[:200], task_id,
+                    )
+            elif action == "update":
+                start_at = scheduled_at.isoformat()
+                end_at = (scheduled_at + timedelta(days=1)).isoformat()
+                resp = client.patch(
+                    f"/api/calendar/events/{task_id}",
+                    json={
+                        "title": prefixed_title,
+                        "start_at": start_at,
+                        "end_at": end_at,
+                        "description": event_description,
+                        "all_day": True,
+                    },
+                )
+                if resp.status_code != 200:
+                    log.warning(
+                        "Calendar update returned non-2xx: status=%s body=%s task_id=%s",
+                        resp.status_code, resp.text[:200], task_id,
+                    )
+            elif action == "delete":
+                resp = client.delete(f"/api/calendar/events/{task_id}")
+                if resp.status_code != 200:
+                    log.warning(
+                        "Calendar delete returned non-2xx: status=%s body=%s task_id=%s",
+                        resp.status_code, resp.text[:200], task_id,
+                    )
+    except Exception as exc:
+        log.warning("Calendar sync failed (best-effort, task unaffected): action=%s task_id=%s error=%s", action, task_id, exc)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -445,6 +525,7 @@ def create_task(body: TaskCreate) -> JSONResponse:
     if body.actual_duration_minutes is not None and body.actual_duration_minutes < 0:
         return api_error("VALIDATION_ERROR", "actual_duration_minutes must be >= 0")
 
+    task_id = str(uuid.uuid4())
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -456,7 +537,7 @@ def create_task(body: TaskCreate) -> JSONResponse:
                 returning *
                 """,
                 (
-                    str(uuid.uuid4()),
+                    task_id,
                     body.title.strip(),
                     body.description or None,
                     body.status,
@@ -471,6 +552,16 @@ def create_task(body: TaskCreate) -> JSONResponse:
             )
             row = cur.fetchone()
         conn.commit()
+
+    # Best-effort calendar sync — after commit, never blocks response
+    if body.status == "scheduled" and body.scheduled_at:
+        _sync_calendar_event(
+            task_id=task_id,
+            title=body.title.strip(),
+            scheduled_at=date.fromisoformat(body.scheduled_at),
+            description=body.description,
+            action="create",
+        )
 
     return single_row_dataset(row)
 
@@ -504,11 +595,11 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
     if not fields:
         return api_error("VALIDATION_ERROR", "no fields provided to update")
 
-    # Fetch current row to determine status transitions
+    # Fetch current row to determine status transitions and calendar sync
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select status, completed_at, scheduled_at from tasktracker.tasks where id = %s",
+                "select status, completed_at, scheduled_at, title, description from tasktracker.tasks where id = %s",
                 (task_id,),
             )
             current = cur.fetchone()
@@ -557,6 +648,57 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
 
     if row is None:
         return api_error("NOT_FOUND", f"task {task_id} not found", status=404)
+
+    # Best-effort calendar sync — after commit, never blocks response
+    old_status = current["status"]
+    new_status_resolved = fields.get("status") or old_status
+
+    if new_status_resolved == "scheduled" and old_status != "scheduled":
+        # Transition TO scheduled: create calendar event
+        sched = body.scheduled_at or (
+            current["scheduled_at"].isoformat() if current.get("scheduled_at") else None
+        )
+        if sched:
+            new_title = fields.get("title", current["title"])
+            new_desc = fields.get("description", current.get("description"))
+            _sync_calendar_event(
+                task_id=task_id,
+                title=new_title,
+                scheduled_at=date.fromisoformat(sched) if isinstance(sched, str) else sched,
+                description=new_desc,
+                action="create",
+            )
+    elif new_status_resolved == "scheduled" and old_status == "scheduled":
+        # Still scheduled — check if scheduled_at or title changed
+        new_sched_at = fields.get("scheduled_at")
+        new_title_val = fields.get("title")
+        scheduled_at_changed = "scheduled_at" in body.model_fields_set and new_sched_at != (
+            current["scheduled_at"].isoformat() if current.get("scheduled_at") else None
+        )
+        title_changed = "title" in body.model_fields_set and new_title_val and new_title_val.strip() != current.get("title", "")
+        if scheduled_at_changed or title_changed:
+            resolved_sched = new_sched_at or (
+                current["scheduled_at"].isoformat() if current.get("scheduled_at") else None
+            )
+            resolved_title = (new_title_val.strip() if new_title_val else None) or current["title"]
+            resolved_desc = fields.get("description", current.get("description"))
+            if resolved_sched:
+                _sync_calendar_event(
+                    task_id=task_id,
+                    title=resolved_title,
+                    scheduled_at=date.fromisoformat(resolved_sched) if isinstance(resolved_sched, str) else resolved_sched,
+                    description=resolved_desc,
+                    action="update",
+                )
+    elif old_status == "scheduled" and new_status_resolved != "scheduled":
+        # Transition AWAY from scheduled: delete calendar event
+        _sync_calendar_event(
+            task_id=task_id,
+            title=current["title"],
+            scheduled_at=None,
+            description=None,
+            action="delete",
+        )
 
     return single_row_dataset(row)
 
