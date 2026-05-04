@@ -20,9 +20,11 @@ mcp = FastMCP("Atlas MCP Gateway", auth=auth)
 # Add new application tool modules here as Atlas grows.
 # ---------------------------------------------------------------------------
 from foodtracker.tools import log_meal, get_nutrition_summary  # noqa: E402
+from tasktracker.tools import schedule_task                    # noqa: E402
 
 mcp.tool(log_meal)
 mcp.tool(get_nutrition_summary)
+mcp.tool(schedule_task)
 
 if __name__ == "__main__":
     mcp.run(transport="http", host="0.0.0.0", port=8002)
