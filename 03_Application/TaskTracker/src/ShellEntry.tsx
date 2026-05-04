@@ -34,6 +34,7 @@ interface TaskRow extends Row {
   effort_hours?: number | null;
   created_at?:   string;
   completed_at?: string;
+  scheduled_at?: string | null;
   labels?:       TaskLabel[];
 }
 
@@ -80,6 +81,17 @@ const PRIORITY_SYMBOL: Record<string, string> = {
 function formatEffort(hours: number): string {
   if (hours === 0) return '0 h';
   return Number.isInteger(hours) ? `${hours} h` : `${hours.toFixed(1)} h`;
+}
+
+// ── Scheduled time formatting ─────────────────────────────────────────────────
+
+function formatScheduledAt(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  // Parse as local date (YYYY-MM-DD) to avoid UTC offset shifting the displayed day
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (isNaN(dt.getTime())) return '';
+  return dt.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 // ── LinkModal ─────────────────────────────────────────────────────────────────
@@ -878,6 +890,8 @@ function TaskDetailEdit({
   const [effortHours, setEffortHours] = useState(
     task.effort_hours != null ? String(task.effort_hours) : ''
   );
+  // scheduled_at: stored as YYYY-MM-DD date string
+  const [scheduledAt, setScheduledAt] = useState(task.scheduled_at ?? '');
   const [saving,          setSaving]          = useState(false);
   const [saveError,       setSaveError]       = useState<ApiError | null>(null);
   const [linkGroups,      setLinkGroups]      = useState<LinkGroup[]>([]);
@@ -903,6 +917,9 @@ function TaskDetailEdit({
     setSaveError(null);
 
     const effortValue = effortHours.trim() === '' ? null : parseFloat(effortHours);
+    // When status is not scheduled, send null to clear scheduled_at.
+    // When status is scheduled, send the entered value (or null if empty — backend will reject).
+    const scheduledAtValue = status === 'scheduled' ? (scheduledAt || null) : null;
 
     const body = {
       title:        title.trim(),
@@ -911,6 +928,7 @@ function TaskDetailEdit({
       priority,
       due_date:     dueDate || null,
       effort_hours: effortValue,
+      scheduled_at: scheduledAtValue,
     };
 
     const res = await apiFetch<{ meta: object; schema: object[]; rows: TaskRow[] }>(
@@ -985,10 +1003,24 @@ function TaskDetailEdit({
           <select value={status} onChange={(e) => setStatus(e.target.value)} style={inputStyle}>
             <option value="open">Open</option>
             <option value="in_progress">In Progress</option>
+            <option value="scheduled">Scheduled</option>
             <option value="pending">Pending</option>
             <option value="done">Done</option>
           </select>
         </div>
+
+        {status === 'scheduled' && (
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Scheduled Date *</label>
+            <input
+              type="date"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              style={inputStyle}
+              required
+            />
+          </div>
+        )}
 
         <div style={fieldStyle}>
           <label style={labelStyle}>Priority</label>
@@ -1084,13 +1116,15 @@ function TaskCreatePanel({
   onCreated,
 }: {
   onCancel:  () => void;
-  onCreated: (status: 'open' | 'pending') => void;
+  onCreated: (status: 'open' | 'pending' | 'scheduled') => void;
 }) {
   const [title,        setTitle]        = useState('');
   const [description,  setDescription]  = useState('');
+  const [createStatus, setCreateStatus] = useState<'open' | 'pending' | 'scheduled'>('open');
   const [priority,     setPriority]     = useState('medium');
   const [dueDate,      setDueDate]      = useState('');
   const [effortHours,  setEffortHours]  = useState('');
+  const [scheduledAt,  setScheduledAt]  = useState('');
   const [pendingLabels, setPendingLabels] = useState<string[]>([]);
   const [labelQuery,   setLabelQuery]   = useState('');
   const [labelSugs,    setLabelSugs]    = useState<LabelRecord[]>([]);
@@ -1121,8 +1155,12 @@ function TaskCreatePanel({
     setPendingLabels(prev => prev.filter(l => l !== name));
   }
 
-  async function handleSubmit(status: 'open' | 'pending') {
+  async function handleSubmit() {
     if (!title.trim() || saving) return;
+    if (createStatus === 'scheduled' && !scheduledAt) {
+      setSaveError({ error: { code: 'VALIDATION_ERROR', message: 'Scheduled At is required for scheduled tasks', request_id: '' } });
+      return;
+    }
     setSaving(true);
     setSaveError(null);
 
@@ -1133,10 +1171,11 @@ function TaskCreatePanel({
       body: JSON.stringify({
         title:        title.trim(),
         description:  description.trim() || null,
-        status,
+        status:       createStatus,
         priority,
         due_date:     dueDate || null,
         effort_hours: effortValue,
+        ...(createStatus === 'scheduled' ? { scheduled_at: scheduledAt } : {}),
       }),
     });
 
@@ -1156,7 +1195,7 @@ function TaskCreatePanel({
     }
 
     setSaving(false);
-    onCreated(status);
+    onCreated(createStatus);
   }
 
   const inputStyle: React.CSSProperties = {
@@ -1193,17 +1232,10 @@ function TaskCreatePanel({
         <div style={{ display: 'flex', gap: 'var(--space-sm)', marginLeft: 'var(--space-sm)' }}>
           <button
             className="btn-filled"
-            onClick={() => handleSubmit('open')}
+            onClick={handleSubmit}
             disabled={saving || !title.trim()}
           >
-            {saving ? 'Creating…' : 'Create as Open'}
-          </button>
-          <button
-            className="btn-outlined"
-            onClick={() => handleSubmit('pending')}
-            disabled={saving || !title.trim()}
-          >
-            Create as Pending
+            {saving ? 'Creating…' : 'Create'}
           </button>
           <button className="btn-outlined" onClick={onCancel} disabled={saving}>
             Cancel
@@ -1228,6 +1260,32 @@ function TaskCreatePanel({
           <label style={labelStyle}>Description</label>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
         </div>
+
+        <div style={fieldStyle}>
+          <label style={labelStyle}>Status</label>
+          <select
+            value={createStatus}
+            onChange={(e) => setCreateStatus(e.target.value as 'open' | 'pending' | 'scheduled')}
+            style={inputStyle}
+          >
+            <option value="open">Open</option>
+            <option value="pending">Pending</option>
+            <option value="scheduled">Scheduled</option>
+          </select>
+        </div>
+
+        {createStatus === 'scheduled' && (
+          <div style={fieldStyle}>
+            <label style={labelStyle}>Scheduled Date *</label>
+            <input
+              type="date"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+              style={inputStyle}
+              required
+            />
+          </div>
+        )}
 
         <div style={fieldStyle}>
           <label style={labelStyle}>Priority</label>
@@ -1516,11 +1574,12 @@ function LabelFilterBar({
 
 // ── View types ────────────────────────────────────────────────────────────────
 
-type ViewTab = 'active' | 'pending' | 'done';
+type ViewTab = 'active' | 'scheduled' | 'pending' | 'done';
 
 function viewFetchUrl(view: ViewTab): string {
-  if (view === 'active')  return '/tasks?view=active';
-  if (view === 'pending') return '/tasks?view=pending_board';
+  if (view === 'active')    return '/tasks?view=active';
+  if (view === 'scheduled') return '/tasks?view=scheduled';
+  if (view === 'pending')   return '/tasks?view=pending_board';
   return '/tasks?status=done';
 }
 
@@ -1529,8 +1588,9 @@ function viewFetchUrl(view: ViewTab): string {
 function TasksPage() {
   const location = useLocation();
   const view: ViewTab =
-    location.pathname === '/tasks/pending' ? 'pending' :
-    location.pathname === '/tasks/done'    ? 'done'    : 'active';
+    location.pathname === '/tasks/scheduled' ? 'scheduled' :
+    location.pathname === '/tasks/pending'   ? 'pending'   :
+    location.pathname === '/tasks/done'      ? 'done'      : 'active';
 
   const [tasks,            setTasks]            = useState<TaskRow[] | null>(null);
   const [isLoading,        setIsLoading]        = useState(true);
@@ -1661,10 +1721,83 @@ function TasksPage() {
     fetchTasks(view);
   }
 
-  function handleCreated(_status: 'open' | 'pending') {
+  function handleCreated(_status: 'open' | 'pending' | 'scheduled') {
     setCreating(false);
-    // Switch to the matching tab so the new task is visible
+    // Re-fetch current view so the new task is visible
     fetchTasks(view);
+  }
+
+  // ── Render scheduled tab ────────────────────────────────────────────────────
+
+  function renderScheduledTab(scheduledTasks: TaskRow[]) {
+    if (scheduledTasks.length === 0) {
+      return (
+        <p className="type-body" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+          No scheduled tasks.
+        </p>
+      );
+    }
+
+    // Group by scheduled_at date (tasks with null date fall under a 'No date' group)
+    const groups = new Map<string, TaskRow[]>();
+    for (const task of scheduledTasks) {
+      const key = task.scheduled_at ?? '';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(task);
+    }
+
+    const taskCard = (task: TaskRow) => (
+      <div
+        key={task.id}
+        onClick={() => setSelected(task)}
+        style={{
+          display:      'flex',
+          alignItems:   'center',
+          gap:          'var(--space-sm)',
+          padding:      'var(--space-sm) var(--space-md)',
+          background:   'var(--md-sys-color-surface)',
+          border:       '1px solid var(--md-sys-color-outline-variant)',
+          borderRadius: '8px',
+          cursor:       'pointer',
+        }}
+      >
+        <span
+          className="type-body"
+          style={{ flex: 1, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+          {task.title}
+        </span>
+        <span
+          className="type-label"
+          title={task.priority}
+          style={{
+            flexShrink: 0,
+            minWidth:   '24px',
+            textAlign:  'center',
+            fontSize:   '1rem',
+            fontWeight: 600,
+            color:      PRIORITY_COLOUR[task.priority] ?? 'inherit',
+          }}
+        >
+          {PRIORITY_SYMBOL[task.priority] ?? '–'}
+        </span>
+      </div>
+    );
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+        {[...groups.entries()].map(([dateKey, tasks]) => (
+          <div key={dateKey || '__nodate__'}>
+            <span className="section-label" style={{ display: 'block', marginBottom: 'var(--space-sm)' }}>
+              {dateKey ? formatScheduledAt(dateKey) : 'No date'}
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+              {tasks.map(taskCard)}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   // ── Render pending tab ───────────────────────────────────────────────────────
@@ -1760,6 +1893,8 @@ function TasksPage() {
         <Skeleton />
       ) : error ? (
         <ErrorCard error={error} />
+      ) : view === 'scheduled' ? (
+        renderScheduledTab(tasks ?? [])
       ) : view === 'pending' ? (
         renderPendingTab(displayedTasks)
       ) : view === 'active' ? (

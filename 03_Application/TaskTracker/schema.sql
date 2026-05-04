@@ -46,4 +46,19 @@ create index if not exists ix_tasks_task_type
 create index if not exists ix_tasks_parent_task_id
     on tasktracker.tasks(parent_task_id);
 
+-- Sprint09: scheduled status support
+alter table tasktracker.tasks
+    drop constraint if exists tasks_status_check;
+
+alter table tasktracker.tasks
+    add constraint tasks_status_check
+        check (status in ('open', 'in_progress', 'scheduled', 'pending', 'done'));
+
+alter table tasktracker.tasks
+    add column if not exists scheduled_at date;
+
+create index if not exists ix_tasks_scheduled_at
+    on tasktracker.tasks(scheduled_at)
+    where status = 'scheduled';
+
 commit;

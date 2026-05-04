@@ -38,6 +38,7 @@ TASK_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="parent_task_id",           label="Parent",            type="string", sortable=False, filterable=False),
     ColumnSchema(key="actual_duration_minutes",  label="Duration (min)",    type="number", sortable=False, filterable=False),
     ColumnSchema(key="completed_at",             label="Completed At",      type="date",   sortable=False, filterable=False),
+    ColumnSchema(key="scheduled_at",             label="Scheduled At",      type="string", sortable=True,  filterable=False),
 ]
 
 # Schema for the training-units endpoint (declares derived fields)
@@ -55,7 +56,7 @@ TRAINING_UNIT_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="description",              label="Description",       type="string", sortable=False, filterable=False, detail_visible=True),
 ]
 
-VALID_STATUS   = {"open", "in_progress", "pending", "done"}
+VALID_STATUS   = {"open", "in_progress", "scheduled", "pending", "done"}
 VALID_PRIORITY = {"low", "medium", "high"}
 VALID_TASK_TYPE = {"normal", "training_unit", "training_session"}
 
@@ -71,6 +72,7 @@ class TaskCreate(BaseModel):
     task_type:               str = "normal"
     parent_task_id:          str | None = None
     actual_duration_minutes: int | None = None
+    scheduled_at:            str | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -83,6 +85,7 @@ class TaskUpdate(BaseModel):
     task_type:               str | None = None
     parent_task_id:          str | None = None
     actual_duration_minutes: int | None = None
+    scheduled_at:            str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,6 +101,8 @@ def row_to_dict(row: Any) -> dict[str, Any]:
         d["updated_at"] = d["updated_at"].date().isoformat()
     if d.get("completed_at"):
         d["completed_at"] = d["completed_at"].isoformat()
+    if d.get("scheduled_at"):
+        d["scheduled_at"] = d["scheduled_at"].isoformat()
     if d.get("parent_task_id"):
         d["parent_task_id"] = str(d["parent_task_id"])
     return d
@@ -138,7 +143,25 @@ def single_row_dataset(row: Any) -> JSONResponse:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-VALID_VIEW = {"active", "pending_board"}
+VALID_VIEW = {"active", "pending_board", "scheduled"}
+
+
+def _run_auto_promotion(conn: Any) -> None:
+    """Promote scheduled tasks whose scheduled_at is today or in the past.
+
+    Runs as a side-effect of the active and pending_board view fetches.
+    Executes within the caller's connection; caller must commit.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            update tasktracker.tasks
+               set status = 'in_progress', updated_at = now()
+             where status = 'scheduled'
+               and scheduled_at is not null
+               and scheduled_at <= current_date
+            """
+        )
 
 
 @router.get("/training-units", response_model=None)
@@ -258,16 +281,19 @@ def list_tasks(
 
     select_cols = """id, title, description, status, priority, due_date,
                      effort_hours, created_at, updated_at,
-                     task_type, parent_task_id, actual_duration_minutes, completed_at"""
+                     task_type, parent_task_id, actual_duration_minutes, completed_at,
+                     scheduled_at"""
 
     with get_db() as conn:
         with conn.cursor() as cur:
             if view == "active":
-                # Active view: open + in_progress, plus done tasks updated today
+                # Auto-promote scheduled tasks whose time has arrived
+                _run_auto_promotion(conn)
+                # Active view: open + in_progress (excluding scheduled), plus done tasks updated today
                 cur.execute(
                     f"""
                     select count(*) from tasktracker.tasks
-                    where (status in ('open', 'in_progress')
+                    where (status not in ('done', 'pending', 'scheduled')
                        or (status = 'done' and updated_at::date >= current_date))
                     {extra_sql}
                     """,
@@ -278,7 +304,7 @@ def list_tasks(
                     f"""
                     select {select_cols}
                     from tasktracker.tasks
-                    where (status in ('open', 'in_progress')
+                    where (status not in ('done', 'pending', 'scheduled')
                        or (status = 'done' and updated_at::date >= current_date))
                     {extra_sql}
                     order by created_at desc
@@ -287,6 +313,8 @@ def list_tasks(
                     extra_params + [page_size, offset],
                 )
             elif view == "pending_board":
+                # Auto-promote scheduled tasks whose time has arrived
+                _run_auto_promotion(conn)
                 # Pending board: open + pending tasks
                 cur.execute(
                     f"select count(*) from tasktracker.tasks where status in ('open', 'pending'){extra_sql}",
@@ -300,6 +328,24 @@ def list_tasks(
                     where status in ('open', 'pending')
                     {extra_sql}
                     order by created_at desc
+                    limit %s offset %s
+                    """,
+                    extra_params + [page_size, offset],
+                )
+            elif view == "scheduled":
+                # Scheduled view: tasks with status=scheduled ordered by scheduled_at ASC
+                cur.execute(
+                    f"select count(*) from tasktracker.tasks where status = 'scheduled'{extra_sql}",
+                    extra_params,
+                )
+                total = cur.fetchone()["count"]
+                cur.execute(
+                    f"""
+                    select {select_cols}
+                    from tasktracker.tasks
+                    where status = 'scheduled'
+                    {extra_sql}
+                    order by scheduled_at asc nulls last
                     limit %s offset %s
                     """,
                     extra_params + [page_size, offset],
@@ -386,8 +432,10 @@ def list_tasks(
 def create_task(body: TaskCreate) -> JSONResponse:
     if not body.title.strip():
         return api_error("VALIDATION_ERROR", "title cannot be empty")
-    if body.status not in {"open", "pending"}:
-        return api_error("VALIDATION_ERROR", "status must be one of: open, pending")
+    if body.status not in {"open", "pending", "scheduled"}:
+        return api_error("VALIDATION_ERROR", "status must be one of: open, pending, scheduled")
+    if body.status == "scheduled" and not body.scheduled_at:
+        return api_error("VALIDATION_ERROR", "scheduled_at is required when status is scheduled")
     if body.priority not in VALID_PRIORITY:
         return api_error("VALIDATION_ERROR", f"priority must be one of: {', '.join(sorted(VALID_PRIORITY))}")
     if body.effort_hours is not None and body.effort_hours < 0:
@@ -403,8 +451,8 @@ def create_task(body: TaskCreate) -> JSONResponse:
                 """
                 insert into tasktracker.tasks
                     (id, title, description, status, priority, due_date, effort_hours,
-                     task_type, parent_task_id, actual_duration_minutes)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     task_type, parent_task_id, actual_duration_minutes, scheduled_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (
@@ -418,6 +466,7 @@ def create_task(body: TaskCreate) -> JSONResponse:
                     body.task_type,
                     body.parent_task_id or None,
                     body.actual_duration_minutes,
+                    body.scheduled_at or None,
                 ),
             )
             row = cur.fetchone()
@@ -450,21 +499,31 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
     if "effort_hours"            in body.model_fields_set: fields["effort_hours"]            = body.effort_hours
     if "actual_duration_minutes" in body.model_fields_set: fields["actual_duration_minutes"] = body.actual_duration_minutes
     if "parent_task_id"          in body.model_fields_set: fields["parent_task_id"]          = body.parent_task_id or None
+    if "scheduled_at"            in body.model_fields_set: fields["scheduled_at"]            = body.scheduled_at or None
 
     if not fields:
         return api_error("VALIDATION_ERROR", "no fields provided to update")
 
-    # Fetch current row to determine if status is transitioning to done
+    # Fetch current row to determine status transitions
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select status, completed_at from tasktracker.tasks where id = %s",
+                "select status, completed_at, scheduled_at from tasktracker.tasks where id = %s",
                 (task_id,),
             )
             current = cur.fetchone()
 
         if current is None:
             return api_error("NOT_FOUND", f"task {task_id} not found", status=404)
+
+        # If transitioning to scheduled, ensure scheduled_at is set (from body or existing)
+        new_status_from_body = fields.get("status")
+        if new_status_from_body == "scheduled":
+            # scheduled_at must be present: either provided in this PATCH or already non-null in DB
+            scheduled_at_in_body = "scheduled_at" in body.model_fields_set and body.scheduled_at
+            scheduled_at_in_db   = current.get("scheduled_at") is not None
+            if not scheduled_at_in_body and not scheduled_at_in_db:
+                return api_error("VALIDATION_ERROR", "scheduled_at is required when status is scheduled")
 
         # Server-side completed_at management:
         # - Set completed_at = now() when transitioning TO done AND completed_at IS NULL

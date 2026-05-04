@@ -1,0 +1,471 @@
+{
+  "sprint_note": "Adds scheduled status support: migration 009, schema.sql update, tasks.py changes, ShellEntry.tsx Scheduled tab, shellConfig.ts nav update.",
+  "component_name": "tasktracker",
+  "target_root": "03_Application/TaskTracker",
+  "directories": [
+    "03_Application/TaskTracker",
+    "03_Application/TaskTracker/backend",
+    "03_Application/TaskTracker/backend/routers",
+    "03_Application/TaskTracker/migrations",
+    "03_Application/TaskTracker/src",
+    "03_Application/TaskTracker/00_architecture"
+  ],
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/pyproject.toml",
+      "stub_kind": "toml",
+      "role": "Package metadata and dependency declarations — fastapi, uvicorn, psycopg2-binary, pydantic, httpx",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "Container image definition — python:3.12-slim, copies platform_packages into /platform_packages and sets PYTHONPATH, installs pyproject.toml deps, starts uvicorn backend.main:app on port 8000",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/compose.yml",
+      "stub_kind": "yaml",
+      "role": "Docker Compose service definition for tasktracker: port 127.0.0.1:8010:8000, ATLAS_PG_* env vars, LABEL_ENGINE_URL and PREFERENCE_STORE_URL service references, logs volume, atlas-net network",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/schema.sql",
+      "stub_kind": "sql",
+      "role": "Canonical DDL for the tasktracker schema — updated to include scheduled_at timestamptz column and expanded status check constraint (open/in_progress/scheduled/pending/done); idempotent via ADD COLUMN IF NOT EXISTS and DROP/ADD CONSTRAINT",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/migrations/009_scheduled_status.sql",
+      "stub_kind": "sql",
+      "role": "Migration: drop and re-add tasks_status_check to include 'scheduled'; add scheduled_at timestamptz column; create partial index ix_tasks_scheduled_at on status='scheduled' rows",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/run_local.py",
+      "stub_kind": "python_module",
+      "role": "Local development launcher — loads 01_System/secrets.env, sets PYTHONPATH to platform packages (mirrors Docker), overrides ATLAS_PG_HOST to 127.0.0.1, starts uvicorn on port 8010",
+      "public_objects": [],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "load_env",
+          "purpose": "Parse a key=value env file and populate os.environ using setdefault semantics (does not overwrite existing vars)."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management and schema initialization — builds DSN from ATLAS_PG_* env vars or DATABASE_URL override, manages a psycopg2 SimpleConnectionPool with RealDictCursor, executes schema.sql on startup",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "DATABASE_URL",
+          "pattern": "module_constant",
+          "purpose": "Module-level DSN string computed at import time from _build_url()."
+        },
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "None",
+          "purpose": "Initialize the psycopg2 SimpleConnectionPool (minconn=1, maxconn=5, RealDictCursor) using the module-level DATABASE_URL."
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "None",
+          "purpose": "Execute schema.sql (located one directory above backend/) against the database — idempotent via IF NOT EXISTS."
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "methods": [],
+          "visibility": "public",
+          "args": [],
+          "returns": "Generator[psycopg2.extensions.connection, None, None]",
+          "purpose": "Context manager that yields a pooled connection, rolls back on exception, and returns the connection to the pool on exit."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_build_url",
+          "purpose": "Construct Postgres DSN from DATABASE_URL environment override or ATLAS_PG_* variables (user, password, host, port, db)."
+        },
+        {
+          "kind": "constant",
+          "name": "_pool",
+          "purpose": "Module-level SimpleConnectionPool instance, None until init_pool() is called."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entrypoint — constructs app, installs CORS middleware (all localhost ports), platform exception handlers and request timing, mounts tasks router under /api, initializes pool and schema on startup",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "singleton",
+          "purpose": "FastAPI application instance (title='TaskTracker', version='0.1.0'). Mounts tasks router at /api prefix with CORS, error handling, and request timing middleware."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "on_startup",
+          "purpose": "FastAPI startup event handler — calls init_pool() then init_schema(); logs errors without raising so uvicorn continues running if the database is temporarily unavailable."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — empty",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "stub_kind": "python_module",
+      "role": "All task HTTP endpoints plus label and preference proxy endpoints — CRUD for tasks (list, create, patch, delete), label search/used/attach/detach/set, and preference read/write for the label filter; all read endpoints return Dataset, mutations return Dataset or 204",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "purpose": "APIRouter instance with prefix=/tasks and tag='tasks', mounted by main.py under /api."
+        },
+        {
+          "kind": "constant",
+          "name": "TASK_SCHEMA",
+          "pattern": "module_constant",
+          "purpose": "[CHANGED] Stable list of ColumnSchema objects for the tasks Dataset — title, status, priority, due_date, effort_hours, scheduled_at, created_at, description. scheduled_at: key='scheduled_at', label='Scheduled At', type='string', sortable=True, filterable=False."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_STATUS",
+          "pattern": "module_constant",
+          "purpose": "[CHANGED] Allowed task status values: open, in_progress, scheduled, pending, done."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_PRIORITY",
+          "pattern": "module_constant",
+          "purpose": "Allowed task priority values: low, medium, high."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_VIEW",
+          "pattern": "module_constant",
+          "purpose": "[CHANGED] Allowed view parameter values: active, pending_board, scheduled."
+        },
+        {
+          "kind": "class",
+          "name": "TaskCreate",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "title",        "type": "str"},
+            {"name": "description",  "type": "str | None"},
+            {"name": "status",       "type": "str", "default": "open"},
+            {"name": "priority",     "type": "str", "default": "medium"},
+            {"name": "due_date",     "type": "str | None"},
+            {"name": "effort_hours", "type": "float | None"},
+            {"name": "scheduled_at", "type": "str | None", "change": "new"}
+          ],
+          "purpose": "[CHANGED] Request body for POST /api/tasks. Now includes optional scheduled_at (required when status=scheduled)."
+        },
+        {
+          "kind": "class",
+          "name": "TaskUpdate",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "title",        "type": "str | None"},
+            {"name": "description",  "type": "str | None"},
+            {"name": "status",       "type": "str | None"},
+            {"name": "priority",     "type": "str | None"},
+            {"name": "due_date",     "type": "str | None"},
+            {"name": "effort_hours", "type": "float | None"},
+            {"name": "scheduled_at", "type": "str | None", "change": "new"}
+          ],
+          "purpose": "[CHANGED] Request body for PATCH /api/tasks/{task_id}. Now includes optional scheduled_at. Uses model_fields_set to distinguish field omission from explicit null — critical for scheduled_at and effort_hours clear semantics."
+        },
+        {
+          "kind": "class",
+          "name": "LabelAttachBody",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "label_name", "type": "str"}
+          ],
+          "purpose": "Request body for POST /api/tasks/{task_id}/labels."
+        },
+        {
+          "kind": "class",
+          "name": "LabelFilterPutBody",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "label_ids", "type": "list[str]"}
+          ],
+          "purpose": "Request body for PUT /api/tasks/preferences/label_filter."
+        },
+        {
+          "kind": "class",
+          "name": "LabelSetBody",
+          "pattern": "data_model",
+          "methods": [],
+          "fields": [
+            {"name": "labels", "type": "list[str]"}
+          ],
+          "purpose": "Request body for PUT /api/tasks/{task_id}/labels — atomically replaces all labels by name."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "LABEL_ENGINE_URL",
+          "purpose": "Base URL for LabelEngine service — from LABEL_ENGINE_URL env var, default http://localhost:8050."
+        },
+        {
+          "kind": "constant",
+          "name": "PREFERENCE_STORE_URL",
+          "purpose": "Base URL for PreferenceStore service — from PREFERENCE_STORE_URL env var, default http://localhost:8060."
+        },
+        {
+          "kind": "function",
+          "name": "_label_client",
+          "purpose": "Return a configured httpx.Client targeting LABEL_ENGINE_URL with a 5s timeout."
+        },
+        {
+          "kind": "function",
+          "name": "_preference_client",
+          "purpose": "Return a configured httpx.Client targeting PREFERENCE_STORE_URL with a 5s timeout."
+        },
+        {
+          "kind": "function",
+          "name": "row_to_dict",
+          "purpose": "[CHANGED] Convert a psycopg2 RealDictRow to a plain dict — coerces uuid id to str, date and timestamptz fields (including scheduled_at) to ISO datetime strings or null."
+        },
+        {
+          "kind": "function",
+          "name": "fetch_labels_for_tasks",
+          "purpose": "Batch-fetch labels for a list of task IDs via LabelEngine POST /api/objects/labels/batch; returns {task_id: [{id, name, attached_at}]} or empty dict on failure."
+        },
+        {
+          "kind": "function",
+          "name": "dataset_response",
+          "purpose": "Serialize a Dataset to JSONResponse using model_dump(by_alias=True, mode='json')."
+        },
+        {
+          "kind": "function",
+          "name": "single_row_dataset",
+          "purpose": "Wrap a single task row dict in a Dataset with total=1 and row_actions=['edit', 'delete']."
+        },
+        {
+          "kind": "function",
+          "name": "_run_auto_promotion",
+          "purpose": "[NEW] Execute the auto-promotion UPDATE: set status='in_progress', updated_at=now() WHERE status='scheduled' AND scheduled_at IS NOT NULL AND scheduled_at::date <= CURRENT_DATE. Runs within the same DB connection before the view SELECT. Takes a DB connection as argument.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "list_tasks",
+          "purpose": "[CHANGED] GET /api/tasks — paginated task list; supports status filter and view=active (auto-promote then SELECT NOT IN done/pending/scheduled plus done-today), view=pending_board (auto-promote then SELECT open/pending), view=scheduled (SELECT scheduled ORDER BY scheduled_at ASC); embeds labels via batch fetch from LabelEngine."
+        },
+        {
+          "kind": "function",
+          "name": "create_task",
+          "purpose": "[CHANGED] POST /api/tasks — validates and inserts a new task including optional scheduled_at; enforces scheduled_at required when status=scheduled; returns single-row Dataset."
+        },
+        {
+          "kind": "function",
+          "name": "update_task",
+          "purpose": "[CHANGED] PATCH /api/tasks/{task_id} — partial update; only fields present in model_fields_set are applied; supports scheduled_at field; enforces scheduled_at presence when status=scheduled (via deferred decision logic); returns single-row Dataset or 404 ApiError."
+        },
+        {
+          "kind": "function",
+          "name": "delete_task",
+          "purpose": "DELETE /api/tasks/{task_id} — removes the task; returns empty Dataset (200) or 404 ApiError."
+        },
+        {
+          "kind": "function",
+          "name": "search_labels",
+          "purpose": "GET /api/tasks/labels/search?q= — proxies LabelEngine GET /api/labels; returns Dataset of matching label records."
+        },
+        {
+          "kind": "function",
+          "name": "list_used_labels",
+          "purpose": "GET /api/tasks/labels/used — proxies LabelEngine GET /api/labels/used?object_type=task; degrades gracefully to empty Dataset on LabelEngine failure."
+        },
+        {
+          "kind": "function",
+          "name": "get_label_filter_preference",
+          "purpose": "GET /api/tasks/preferences/label_filter — proxies PreferenceStore GET for scope=tasktracker.task-list key=label_filter; passes through Dataset or 404 ApiError."
+        },
+        {
+          "kind": "function",
+          "name": "put_label_filter_preference",
+          "purpose": "PUT /api/tasks/preferences/label_filter — proxies PreferenceStore PUT to persist label_ids as JSON array under scope=tasktracker.task-list key=label_filter."
+        },
+        {
+          "kind": "function",
+          "name": "get_task_labels",
+          "purpose": "GET /api/tasks/{task_id}/labels — proxies LabelEngine; returns Dataset of labels attached to the task."
+        },
+        {
+          "kind": "function",
+          "name": "attach_task_label",
+          "purpose": "POST /api/tasks/{task_id}/labels — proxies LabelEngine to attach a label by name to the task."
+        },
+        {
+          "kind": "function",
+          "name": "detach_task_label",
+          "purpose": "DELETE /api/tasks/{task_id}/labels/{label_id} — proxies LabelEngine; returns 204 on success."
+        },
+        {
+          "kind": "function",
+          "name": "set_task_labels",
+          "purpose": "PUT /api/tasks/{task_id}/labels — atomically replaces all labels: fetches current labels, detaches each, then attaches each name in the new list."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/migrations/009_scheduled_status.sql",
+      "stub_kind": "sql",
+      "role": "Migration 009: expand status CHECK constraint to include 'scheduled'; add scheduled_at timestamptz column; create partial index on scheduled tasks",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/src/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "[CHANGED] Atlas Shell registration — adds Scheduled tab to mobilePrimaryNav and desktopNav (order 2, /tasks/scheduled); Pending shifts to order 3, Done to order 4",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_react_module",
+      "role": "[CHANGED] Main React entry point — adds Scheduled tab (ViewTab='scheduled'), viewFetchUrl branch for view=scheduled, route /tasks/scheduled, scheduled_at field in TaskRow, scheduled status options in create/edit forms, datetime-local input for scheduled_at, ScheduledRow rendering",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "component",
+          "name": "ShellEntry",
+          "purpose": "[CHANGED] Default export. Root component mounted by the Atlas Shell — wraps TasksPage in React Router Routes at /tasks, /tasks/scheduled, /tasks/pending, /tasks/done."
+        },
+        {
+          "kind": "component",
+          "name": "TasksPage",
+          "purpose": "Primary view controller — manages active/scheduled/pending/done tab state, task list fetching, label filter state, create/edit panel visibility, and coordinates all child components."
+        },
+        {
+          "kind": "component",
+          "name": "LabelFilterBar",
+          "purpose": "Horizontal chip bar for filtering the task list by label — loads used labels from /tasks/labels/used, reads persisted selection from /tasks/preferences/label_filter, persists changes on toggle."
+        },
+        {
+          "kind": "component",
+          "name": "TaskGroupedList",
+          "purpose": "Renders tasks grouped by status (Open / Pending sections) with per-group effort summaries — used for the Pending board view."
+        },
+        {
+          "kind": "component",
+          "name": "TaskCreatePanel",
+          "purpose": "[CHANGED] Slide-in panel for creating a new task — includes title, description, priority, due date, effort, label, and scheduled status fields. When status=scheduled, shows required datetime-local input for scheduled_at. After successful creation with status=scheduled, navigates to Scheduled tab."
+        },
+        {
+          "kind": "component",
+          "name": "TaskDetailEdit",
+          "purpose": "[CHANGED] Inline edit panel for an existing task — all editable fields plus label management. When status=scheduled (or user selects scheduled), shows datetime-local input for scheduled_at. When status changes away from scheduled, clears scheduled_at (sends null in PATCH)."
+        },
+        {
+          "kind": "component",
+          "name": "TaskCard",
+          "purpose": "Single task row card — displays title, status, priority chip, due date, effort, and label chips; exposes edit, delete, and link actions via ThreeDotsMenu."
+        },
+        {
+          "kind": "component",
+          "name": "LabelPopover",
+          "purpose": "Popover for attaching labels to a task — searches labels by prefix via /tasks/labels/search and attaches on selection."
+        },
+        {
+          "kind": "component",
+          "name": "LabelSection",
+          "purpose": "Displays and manages the label chips on a task card or edit panel — renders attached labels and provides detach affordance."
+        },
+        {
+          "kind": "component",
+          "name": "ThreeDotsMenu",
+          "purpose": "Overflow menu for a task card providing edit, delete, and link actions."
+        },
+        {
+          "kind": "component",
+          "name": "LinkModal",
+          "purpose": "Modal for creating typed task-to-task links (SubTask, Related To) — searches all tasks by title and submits the relationship."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "formatEffort",
+          "purpose": "Format an effort_hours number as a human-readable string (e.g. '2 h', '1.5 h', '0 h')."
+        },
+        {
+          "kind": "function",
+          "name": "formatScheduledAt",
+          "purpose": "[NEW] Format a scheduled_at ISO datetime string as a human-readable label: 'Mon 5 May 09:00'. Returns empty string for null/undefined.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "viewFetchUrl",
+          "purpose": "[CHANGED] Return the correct /api/tasks query URL for a given view tab (active, scheduled, pending_board, done)."
+        },
+        {
+          "kind": "constant",
+          "name": "PRIORITY_COLOUR",
+          "purpose": "Map of priority string to CSS color value for priority chip rendering."
+        },
+        {
+          "kind": "constant",
+          "name": "PRIORITY_SYMBOL",
+          "purpose": "Map of priority string to directional arrow symbol (↑, –, ↓)."
+        },
+        {
+          "kind": "constant",
+          "name": "LINK_TYPE_OPTIONS",
+          "purpose": "Static options array for the link type selector in LinkModal."
+        }
+      ]
+    }
+  ]
+}
