@@ -33,6 +33,7 @@ import type { Row, FormField, Dataset, ApiError } from "@platform-ui/api/types";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type HistoryData = { rows: Row[] };
+type ExerciseProgress = { exercise: string; total_reps: number; delta: number | null };
 
 // ── Form field definitions ────────────────────────────────────────────────────
 
@@ -202,6 +203,47 @@ function HistoryChart({
   );
 }
 
+// ── RepChip ───────────────────────────────────────────────────────────────────
+// Renders a colored delta pill for rep-progress comparison.
+// delta > 0 → green; delta < 0 → red; delta === 0 or null → grey outline.
+
+function RepChip({ delta, chipLabel }: { delta: number | null; chipLabel?: string }) {
+  const isPositive = delta !== null && delta > 0;
+  const isNegative = delta !== null && delta < 0;
+
+  const displayLabel =
+    chipLabel !== undefined ? chipLabel
+    : delta === null ? "—"
+    : delta > 0      ? `+${delta}`
+    : delta < 0      ? `−${Math.abs(delta)}`
+    : "—";
+
+  const chipStyle: React.CSSProperties = {
+    flexShrink: 0,
+    height: 20,
+    borderRadius: 10,
+    padding: "0 7px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: ".3px",
+    whiteSpace: "nowrap",
+    ...(isPositive
+      ? { background: "var(--atlas-chart-3)", color: "#fff" }
+      : isNegative
+      ? { background: "var(--md-sys-color-error)", color: "var(--md-sys-color-on-error)" }
+      : {
+          background: "transparent",
+          border: "1px solid var(--md-sys-color-outline-variant)",
+          color: "var(--md-sys-color-on-surface-variant)",
+        }),
+  };
+
+  return <div style={chipStyle}>{displayLabel}</div>;
+}
+
 // ── Exercise row ──────────────────────────────────────────────────────────────
 
 interface ExerciseRowProps {
@@ -223,6 +265,31 @@ function ExerciseRow({
   onEdit,
   onDelete,
 }: ExerciseRowProps) {
+  // Fixed-position dropdown: capture button viewport coords on open.
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
+
+  function handleToggleMenu(e: React.MouseEvent) {
+    if (buttonRef.current) {
+      setButtonRect(buttonRef.current.getBoundingClientRect());
+    }
+    onToggleMenu(e);
+  }
+
+  // Rep-progress chip: compare current total_reps to most recent prior session.
+  const currentTotal = typeof row.total_reps === "number" ? row.total_reps : null;
+  let repDelta: number | null = null;
+  if (currentTotal !== null && history) {
+    const prevRow = [...history.rows].reverse().find((r) => r.id !== row.id);
+    if (prevRow) {
+      const prevTotal = [
+        prevRow.set1_reps, prevRow.set2_reps, prevRow.set3_reps,
+        prevRow.set4_reps, prevRow.set5_reps,
+      ].reduce<number>((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
+      repDelta = currentTotal - prevTotal;
+    }
+  }
+
   return (
     <div
       onClick={onClick}
@@ -268,14 +335,17 @@ function ExerciseRow({
         )}
       </div>
 
+      <RepChip delta={repDelta} />
+
       <HistoryChart history={history} size="mini" />
 
       <div
-        style={{ flexShrink: 0, position: "relative" }}
+        style={{ flexShrink: 0 }}
         onClick={(e) => e.stopPropagation()}
       >
         <button
-          onClick={onToggleMenu}
+          ref={buttonRef}
+          onClick={handleToggleMenu}
           style={{
             width: 40,
             height: 40,
@@ -295,18 +365,18 @@ function ExerciseRow({
           </span>
         </button>
 
-        {menuOpen && (
+        {menuOpen && buttonRect && (
           <div
             style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
+              position: "fixed",
+              top: buttonRect.bottom + 4,
+              right: window.innerWidth - buttonRect.right,
               minWidth: 168,
               background: "var(--md-sys-color-surface-variant)",
               borderRadius: 4,
               boxShadow: "0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)",
               padding: "8px 0",
-              zIndex: 100,
+              zIndex: 1000,
             }}
           >
             <div
@@ -459,19 +529,36 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const filteredHistory: HistoryData | undefined = history
-    ? { rows: history.rows.filter((r) => r.id !== row.id) }
-    : undefined;
-
+  // Build liveRow using row.workout_date (not "Today") so it sorts correctly.
   const liveRow: Record<string, unknown> = {
-    workout_date: "Today",
+    workout_date: row.workout_date,
     _active: true,
-    set1_reps: completed[0] ? parseInt(reps[0]) || 0 : 0,
-    set2_reps: completed[1] ? parseInt(reps[1]) || 0 : 0,
-    set3_reps: completed[2] ? parseInt(reps[2]) || 0 : 0,
-    set4_reps: completed[3] ? parseInt(reps[3]) || 0 : 0,
-    set5_reps: completed[4] ? parseInt(reps[4]) || 0 : 0,
+    set1_reps: completed[0] ? parseInt(reps[0]) || 0 : (row as Record<string, unknown>).set1_reps ?? 0,
+    set2_reps: completed[1] ? parseInt(reps[1]) || 0 : (row as Record<string, unknown>).set2_reps ?? 0,
+    set3_reps: completed[2] ? parseInt(reps[2]) || 0 : (row as Record<string, unknown>).set3_reps ?? 0,
+    set4_reps: completed[3] ? parseInt(reps[3]) || 0 : (row as Record<string, unknown>).set4_reps ?? 0,
+    set5_reps: completed[4] ? parseInt(reps[4]) || 0 : (row as Record<string, unknown>).set5_reps ?? 0,
   };
+
+  // Build filteredHistory with liveRow inserted at the correct chronological position.
+  // ISO 8601 date strings sort lexicographically, so direct string comparison is correct.
+  const filteredHistory: HistoryData | undefined = history
+    ? (() => {
+        const baseRows = history.rows.filter((r) => r.id !== row.id);
+        const insertIdx = baseRows.findIndex(
+          (r) => String(r.workout_date) > String(row.workout_date)
+        );
+        const merged =
+          insertIdx === -1
+            ? [...baseRows, liveRow as unknown as Row]
+            : [
+                ...baseRows.slice(0, insertIdx),
+                liveRow as unknown as Row,
+                ...baseRows.slice(insertIdx),
+              ];
+        return { rows: merged };
+      })()
+    : undefined;
 
   function adjustRep(i: number, delta: number) {
     setReps((prev) => {
@@ -727,7 +814,6 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
         <HistoryChart
           history={filteredHistory}
           size="full"
-          liveRow={completed.some((c) => c) ? liveRow : undefined}
         />
       </div>
 
@@ -786,6 +872,7 @@ function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
 
 interface SessionListProps {
   dataset: Dataset | null;
+  progressBySession: Record<string, ExerciseProgress[]>;
   onRowClick: (row: Row) => void;
   onDelete: (id: string) => void;
   onCopy: (row: Row) => void;
@@ -793,17 +880,18 @@ interface SessionListProps {
 
 function SessionList({
   dataset,
+  progressBySession,
   onRowClick,
   onDelete,
   onCopy,
 }: SessionListProps) {
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<{ id: string; rect: DOMRect } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleOutside(e: MouseEvent) {
       if (listRef.current && !listRef.current.contains(e.target as Node)) {
-        setOpenMenuId(null);
+        setOpenMenu(null);
       }
     }
     document.addEventListener("mousedown", handleOutside);
@@ -837,7 +925,7 @@ function SessionList({
         <div
           key={row.id}
           onClick={() => {
-            setOpenMenuId(null);
+            setOpenMenu(null);
             onRowClick(row);
           }}
           style={{
@@ -878,6 +966,13 @@ function SessionList({
             >
               {fmtDate(row.workout_date)}
             </div>
+            {(progressBySession[row.id] ?? []).length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                {(progressBySession[row.id] ?? []).map((ex) => (
+                  <RepChip key={ex.exercise} delta={ex.delta} chipLabel={ex.exercise} />
+                ))}
+              </div>
+            )}
           </div>
 
           <div
@@ -894,13 +989,14 @@ function SessionList({
           </div>
 
           <div
-            style={{ flexShrink: 0, position: "relative" }}
+            style={{ flexShrink: 0 }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
-              onClick={() =>
-                setOpenMenuId(openMenuId === row.id ? null : row.id)
-              }
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                setOpenMenu(openMenu?.id === row.id ? null : { id: row.id, rect });
+              }}
               style={{
                 width: 40,
                 height: 40,
@@ -923,24 +1019,24 @@ function SessionList({
               </span>
             </button>
 
-            {openMenuId === row.id && (
+            {openMenu?.id === row.id && openMenu.rect && (
               <div
                 style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  right: 0,
+                  position: "fixed",
+                  top: openMenu.rect.bottom + 4,
+                  right: window.innerWidth - openMenu.rect.right,
                   minWidth: 160,
                   background: "var(--md-sys-color-surface-variant)",
                   borderRadius: 4,
                   boxShadow:
                     "0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)",
                   padding: "8px 0",
-                  zIndex: 100,
+                  zIndex: 1000,
                 }}
               >
                 <div
                   onClick={() => {
-                    setOpenMenuId(null);
+                    setOpenMenu(null);
                     onCopy(row);
                   }}
                   style={{
@@ -975,7 +1071,7 @@ function SessionList({
                 />
                 <div
                   onClick={() => {
-                    setOpenMenuId(null);
+                    setOpenMenu(null);
                     onDelete(row.id);
                   }}
                   style={{
@@ -1026,12 +1122,31 @@ function LogView() {
   const [exerciseError, setExerciseError] = useState<ApiError | null>(null);
   const [mutateError, setMutateError] = useState<ApiError | null>(null);
   const [historyByExercise, setHistoryByExercise] = useState<Record<string, HistoryData>>({});
+  const [progressBySession, setProgressBySession] = useState<Record<string, ExerciseProgress[]>>({});
   const [innerView, setInnerView] = useState<
     "sessions" | "exercises" | "exercise-view" | "session-create" | "exercise-add"
   >("sessions");
 
   const { dataset: sessionDataset, error: sessionError, refresh: refreshSessions } =
     useDataset("/workout/sessions");
+
+  useEffect(() => {
+    if (!sessionDataset) return;
+    sessionDataset.rows.forEach((row) => {
+      apiFetch<Dataset>(`/workout/sessions/${row.id}/progress`).then((res) => {
+        if (!isApiError(res)) {
+          setProgressBySession((prev) => ({
+            ...prev,
+            [row.id]: res.rows.map((r) => ({
+              exercise: r.exercise as string,
+              total_reps: r.total_reps as number,
+              delta: r.delta != null ? (r.delta as number) : null,
+            })),
+          }));
+        }
+      });
+    });
+  }, [sessionDataset]);
 
   // Suppress unused warning — navigate is available for future sub-routing needs
   void navigate;
@@ -1334,6 +1449,7 @@ function LogView() {
 
       <SessionList
         dataset={sessionDataset}
+        progressBySession={progressBySession}
         onRowClick={openSession}
         onDelete={handleSessionDelete}
         onCopy={handleSessionCopy}

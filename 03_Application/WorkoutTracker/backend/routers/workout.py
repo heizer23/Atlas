@@ -382,6 +382,49 @@ def exercise_history(name: str) -> JSONResponse:
     ))
 
 
+@router.get("/sessions/{session_id}/progress", response_model=None)
+def session_exercise_progress(session_id: str) -> JSONResponse:
+    """Per-exercise progress for a session, read from the exercise_session_history view."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT exercise, total_reps, delta
+                FROM workout.exercise_session_history
+                WHERE session_id = %s
+                ORDER BY created_at ASC
+                """,
+                (session_id,),
+            )
+            rows = cur.fetchall()
+
+    progress_schema: list[ColumnSchema] = [
+        ColumnSchema(key="exercise",   label="Exercise",    type="string", sortable=False),
+        ColumnSchema(key="total_reps", label="Total Reps",  type="number", sortable=False),
+        ColumnSchema(key="delta",      label="vs Last Time",type="number", sortable=False),
+    ]
+
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="exercise_progress",
+            label="Session Progress",
+            total=len(rows),
+            page=1,
+            page_size=len(rows) or 1,
+        ),
+        **{"schema": progress_schema},
+        rows=[
+            {
+                "id": str(i),
+                "exercise": r["exercise"],
+                "total_reps": int(r["total_reps"]),
+                "delta": int(r["delta"]) if r["delta"] is not None else None,
+            }
+            for i, r in enumerate(rows)
+        ],
+    ))
+
+
 @router.delete("/exercises/{exercise_id}", response_model=None)
 def delete_exercise(exercise_id: str) -> JSONResponse:
     with get_db() as conn:

@@ -1,0 +1,158 @@
+{
+  "sprint_note": "Sprint01: three frontend-only UX fixes — fixed-position dropdown overflow, rep-progress chip on exercise rows, and chronologically-correct liveRow insertion in ExerciseView chart.",
+  "component_name": "workout_tracker",
+  "layer": "03_Application",
+  "source_definition": "Sprint01_ExerciseUX/00_draft.md",
+  "summary": "WorkoutTracker is a session-based workout logging application that lets users record exercises with sets/reps/weight, view per-exercise history charts, and track rep-progress trends across sessions.",
+  "classification": {
+    "why_application": "WorkoutTracker owns domain objects (sessions, exercises, sets), enforces workout-domain rules (rep counting, history aggregation), and renders domain-specific UI flows that have no generic reuse value.",
+    "non_goals": [
+      "No schema changes this sprint",
+      "No new backend endpoints this sprint",
+      "No changes to backend routers or database layer",
+      "No performance analytics (PerformanceView is a placeholder)",
+      "No full history view (HistoryView is a placeholder)"
+    ],
+    "not_platform": "All logic is specific to the workout domain — session structure, exercise rep history, and per-exercise progress semantics cannot be generalized into reusable platform infrastructure."
+  },
+  "contracts": {
+    "consumes": [
+      "GET /workout/sessions — Dataset of workout sessions",
+      "GET /workout/sessions/{id}/exercises — Dataset of exercises for a session",
+      "GET /workout/exercises/history?name= — HistoryData (rows of past exercise entries)",
+      "PATCH /workout/exercises/{id} — update an exercise row",
+      "DELETE /workout/sessions/{id}",
+      "DELETE /workout/exercises/{id}",
+      "POST /workout/sessions — create session + first exercise",
+      "POST /workout/sessions/{id}/exercises — add exercise to session"
+    ],
+    "provides": [
+      "Read-only rep-progress delta chip on each ExerciseRow (computed client-side from historyByExercise)",
+      "Fixed-position dropdown menus in ExerciseList and SessionList (unclipped by overflow:hidden ancestors)",
+      "ExerciseView history chart with liveRow inserted at chronologically correct position"
+    ],
+    "invariants": [
+      "The rep-progress chip is derived entirely from already-loaded historyByExercise — no additional API calls",
+      "Dropdown position is computed from getBoundingClientRect() at open time and uses position:fixed — not relative to any ancestor",
+      "liveRow workout_date in ExerciseView equals row.workout_date (not the string 'Today')",
+      "liveRow is inserted at the correct sorted index in the history array, not always appended"
+    ],
+    "failure_modes": [
+      "historyByExercise entry absent for an exercise: chip renders grey with '—' (no previous data)",
+      "getBoundingClientRect() returns zero-rect if button is not mounted: dropdown renders at 0,0 — acceptable edge case on unmount"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "apiFetch from @platform-ui/api/client",
+      "useDataset hook from @platform-ui/hooks/useDataset",
+      "Dataset, Row, ApiError, FormField types from @platform-ui/api/types",
+      "CreateForm, ErrorCard from @platform-ui/components"
+    ],
+    "provides": [
+      "ShellEntry default export — consumed by Atlas Shell via AppRegistry"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "shell_entry",
+        "name": "ShellEntry",
+        "purpose": "Default React export consumed by Atlas Shell AppRegistry for the /workout route subtree",
+        "ui_contract": "none — this is a UI entry point, not a data endpoint"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "dropdown_fixed_position",
+      "description": "In ExerciseRow, add a buttonRef (useRef) to the three-dots button. On toggle, store buttonRef.current.getBoundingClientRect() coordinates in state as buttonRect. Render the dropdown with position:fixed, top = buttonRect.bottom + 4, right = window.innerWidth - buttonRect.right. Apply the same pattern to the SessionList three-dots button.",
+      "inputs": ["three-dots button DOM node via useRef", "MouseEvent triggering toggle"],
+      "outputs": ["dropdown rendered as viewport-level fixed overlay, unclipped by overflow:hidden ancestors"]
+    },
+    {
+      "step": 2,
+      "name": "rep_progress_chip",
+      "description": "In ExerciseRow, compute prevTotalReps from historyByExercise[row.exercise as string].rows — find the last row whose id !== row.id and sum its set1_reps..set5_reps (null-safe). Compute currentTotalReps = row.total_reps (already on the Row). Derive delta = currentTotalReps - prevTotalReps. Render a colored pill between the name/weight block and the mini HistoryChart: green (var(--atlas-chart-3), white text) if delta > 0, red (var(--md-sys-color-error), var(--md-sys-color-on-error) text) if delta < 0, grey outline (var(--md-sys-color-outline-variant) border, transparent fill, var(--md-sys-color-on-surface-variant) text, '—') if delta === 0 or no prior row.",
+      "inputs": ["row.total_reps (number, already on Row)", "historyByExercise[exerciseName].rows"],
+      "outputs": ["RepChip element rendered between name block and mini chart: 36–44px wide, 20px tall pill showing '+N', '−N', or '—'"]
+    },
+    {
+      "step": 3,
+      "name": "live_row_chronological_insertion",
+      "description": "In ExerciseView, replace the liveRow workout_date value from the string 'Today' to row.workout_date. After constructing filteredHistory (history rows with current row excluded), find the correct insertion index by comparing workout_date strings lexicographically (ISO 8601 strings sort correctly). Splice liveRow into the sorted position. Pass this merged array as chart data instead of appending. When completed.some(c => c) is false, still construct liveRow using stored rep values from row (unchanged behavior — liveRow is always present at the correct position).",
+      "inputs": ["row.workout_date (ISO date string)", "filteredHistory.rows (array sorted by workout_date ascending)"],
+      "outputs": ["chart data array with liveRow at correct chronological index; liveRow._active:true distinguishes it visually"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Atlas_Shell/platform-ui", "role": "apiFetch, useDataset, Dataset/Row/ApiError types, CreateForm, ErrorCard"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "recharts", "role": "BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer", "reuse_existing": true},
+      {"name": "react-router-dom", "role": "Routes, Route, useNavigate", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "No new npm packages — all changes use existing dependencies",
+      "No backend changes — this sprint is frontend-only",
+      "No new API endpoints"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "postgres",
+    "ownership": "private_application_state — managed by WorkoutTracker backend; not changed this sprint"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Item 1: Add buttonRef (useRef<HTMLButtonElement>) to ExerciseRow three-dots button; store buttonRect in state on toggle; render dropdown with position:fixed using buttonRect coordinates",
+      "Item 1: Apply same fixed-position dropdown pattern to SessionList three-dots button",
+      "Item 2: Add RepChip inline component or helper in ShellEntry.tsx that accepts delta and renders the pill",
+      "Item 2: Compute prevTotalReps in ExerciseRow from historyByExercise prop (sum set1..set5_reps of last history row with id !== row.id)",
+      "Item 2: Render RepChip between the name/weight block and HistoryChart in ExerciseRow layout",
+      "Item 3: Replace liveRow workout_date: 'Today' with row.workout_date in ExerciseView",
+      "Item 3: Compute chronological insertion index for liveRow using lexicographic comparison of workout_date ISO strings; splice instead of append"
+    ],
+    "ui_implementer": [],
+    "test_writer": [
+      "Write UI scenario: dropdown renders above the viewport fold without clipping when triggered on last row",
+      "Write UI scenario: rep-progress chip shows correct color and delta for green, red, and grey states",
+      "Write UI scenario: ExerciseView chart positions the active bar at the correct date column for a historical session"
+    ],
+    "reviewer": [
+      "Verify that fixed-position dropdown coordinates account for scroll offset correctly (getBoundingClientRect returns viewport-relative coords, which is correct for position:fixed — no additional scroll offset needed)",
+      "Verify that total_reps computation in RepChip is null-safe for all five set columns",
+      "Verify that liveRow insertion handles edge cases: liveRow date earlier than all history, liveRow date later than all history, empty filteredHistory"
+    ]
+  },
+  "deferred_decisions": [
+    "Whether to extract RepChip as a standalone file or keep it as an inline helper in ShellEntry.tsx — left to implementer judgment"
+  ],
+  "risks": [
+    {
+      "risk": "getBoundingClientRect() scroll drift",
+      "impact": "If the list is scrolled and the dropdown is opened, the position is still correct because getBoundingClientRect() returns viewport-relative coordinates, which are the correct input for position:fixed. No impact expected."
+    },
+    {
+      "risk": "total_reps field absence on Row",
+      "impact": "The draft states row.total_reps is already computed by the backend. If the field is absent on old rows, the chip will show '—' (grey, no prior data path). Implementer must null-guard row.total_reps."
+    },
+    {
+      "risk": "Duplicate workout_date in history",
+      "impact": "If filteredHistory contains multiple rows with the same workout_date as row.workout_date, liveRow will be inserted after the last matching row — this is correct per spec (sorted order)."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Does the backend guarantee that rows in the history endpoint response are sorted by workout_date ascending, or must the frontend sort before insertion?",
+      "owner": "implementer"
+    }
+  ]
+}

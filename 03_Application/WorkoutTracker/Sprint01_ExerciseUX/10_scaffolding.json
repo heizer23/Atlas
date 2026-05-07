@@ -1,0 +1,77 @@
+{
+  "sprint_note": "Sprint01: all changes are in ShellEntry.tsx only — no new files, no directory changes.",
+  "component_name": "workout_tracker",
+  "target_root": "03_Application/WorkoutTracker",
+  "directories": [
+    "03_Application/WorkoutTracker/src"
+  ],
+  "files": [
+    {
+      "path": "03_Application/WorkoutTracker/src/ShellEntry.tsx",
+      "change": "changed",
+      "stub_kind": "react_module",
+      "role": "Single-file React application entry point for WorkoutTracker, registered with Atlas Shell. Contains all views and helper components.",
+      "changes_this_sprint": [
+        "ExerciseRow: add buttonRef (useRef<HTMLButtonElement>) on three-dots button; capture buttonRect on toggle; render dropdown with position:fixed using buttonRect.bottom+4 for top and window.innerWidth-buttonRect.right for right",
+        "SessionList: apply same fixed-position dropdown pattern to the session three-dots button",
+        "ExerciseRow: add RepChip inline helper or component — accepts (delta: number | null) prop; renders green pill (var(--atlas-chart-3)) for positive, red pill (var(--md-sys-color-error)) for negative, grey outline pill for zero/null",
+        "ExerciseRow: compute prevTotalReps from history prop (last row with id !== row.id, sum set1..set5_reps null-safe); derive delta = (row.total_reps as number) - prevTotalReps; pass to RepChip",
+        "ExerciseRow: render RepChip between the name/weight flex block and the HistoryChart mini bar",
+        "ExerciseView: replace liveRow.workout_date = 'Today' with liveRow.workout_date = row.workout_date",
+        "ExerciseView: after constructing filteredHistory, find insertion index by comparing workout_date ISO strings lexicographically; splice liveRow in at correct position; pass merged array as chart data — applies whether or not completed.some(c => c)"
+      ],
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "ShellEntry",
+          "pattern": "react_default_export",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "HistoryChart",
+          "pattern": "react_component",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "ExerciseRow",
+          "pattern": "react_component",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "ExerciseList",
+          "pattern": "react_component",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "ExerciseView",
+          "pattern": "react_component",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "SessionList",
+          "pattern": "react_component",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "LogView",
+          "pattern": "react_component",
+          "methods": []
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "RepChip",
+          "pattern": "react_component",
+          "note": "Inline helper rendering the colored delta pill. May be promoted to public if reviewer prefers."
+        }
+      ]
+    }
+  ]
+}
