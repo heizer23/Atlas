@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -29,10 +30,14 @@ app.include_router(workout.router, prefix="/api")
 
 @app.on_event("startup")
 def on_startup() -> None:
-    try:
-        log.info("Initialising connection pool...")
-        init_pool()
-        log.info("Ready.")
-    except Exception as exc:
-        log.error("Startup failed (database may not be reachable): %s", exc)
-        log.error("Requests will fail until the database is available.")
+    for attempt in range(1, 11):
+        try:
+            log.info("Initialising connection pool (attempt %d)...", attempt)
+            init_pool()
+            log.info("Ready.")
+            return
+        except Exception as exc:
+            log.warning("DB not ready (attempt %d/10): %s", attempt, exc)
+            if attempt < 10:
+                time.sleep(3)
+    log.error("Could not connect to database after 10 attempts — requests will fail.")
