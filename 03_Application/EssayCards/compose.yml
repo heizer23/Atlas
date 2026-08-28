@@ -1,0 +1,24 @@
+services:
+  essaycards:
+    build:
+      context: ../..
+      dockerfile: 03_Application/EssayCards/Dockerfile
+    container_name: atlas-essaycards
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8024:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    volumes:
+      - ${DATA_ROOT}/essaycards/logs:/app/logs
+      - ${DATA_ROOT}/essaycards/content:/app/content:ro
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

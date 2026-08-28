@@ -81,7 +81,10 @@ sudo mkdir -p \
   "${DATA_ROOT}/chronos/config" \
   "${DATA_ROOT}/calendar_connector/logs" \
   "${DATA_ROOT}/storagetracker/logs" \
-  "${DATA_ROOT}/numericseries/logs"
+  "${DATA_ROOT}/numericseries/logs" \
+  "${DATA_ROOT}/calendar/logs" \
+  "${DATA_ROOT}/essaycards/logs" \
+  "${DATA_ROOT}/essaycards/content"
 
 echo "==> Setting ownership and permissions"
 # Postgres container runs as uid/gid 999 by default

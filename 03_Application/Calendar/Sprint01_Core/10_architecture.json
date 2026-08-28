@@ -1,0 +1,237 @@
+{
+  "component_name": "calendar",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Atlas-owned timeblocking calendar application: users create, edit, move, and delete calendar blocks, optionally linked to TaskTracker tasks, persisted in Postgres.",
+  "classification": {
+    "why_application": "Owns calendar block domain logic, event lifecycle rules, task-linking semantics, and user-facing CRUD behavior — application-specific, not reusable platform infrastructure.",
+    "non_goals": [
+      "Google Calendar export",
+      "Outlook integration",
+      "Recurrence rules",
+      "Attendees",
+      "Notifications",
+      "Automatic scheduling",
+      "Capacity planning",
+      "Task drag-and-drop from task list",
+      "Multi-user calendars",
+      "Public sharing",
+      "Task search UI"
+    ],
+    "not_platform": "Calendar blocks carry domain meaning (task_block, personal_block, blocker) and enforce application-specific rules (start_at < end_at, task link semantics). This is not reusable generic infrastructure."
+  },
+  "contracts": {
+    "consumes": [
+      "Postgres via ATLAS_PG_DB environment variable",
+      "TaskTracker task IDs as opaque foreign references (no join, no ownership)"
+    ],
+    "provides": [
+      "CRUD for CalendarEvent objects",
+      "GET /api/cal/events returns Dataset of events",
+      "POST /api/cal/events creates a new CalendarEvent, returns Dataset (single row)",
+      "PATCH /api/cal/events/{event_id} partially updates a CalendarEvent, returns Dataset (single row)",
+      "DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset",
+      "Invariant: start_at < end_at is enforced by the backend on create and update",
+      "Invariant: deleting a CalendarEvent never deletes the linked task",
+      "Invariant: updating a CalendarEvent never updates the linked task"
+    ],
+    "invariants": [
+      "start_at must be strictly before end_at — enforced on create and patch",
+      "source_object_type must be 'task' when source_object_id is provided, null otherwise",
+      "A CalendarEvent deletion is independent of TaskTracker — the linked task is never modified",
+      "PATCH distinguishes field omission from explicit null: omitted fields unchanged, explicit null clears nullable fields (notes, source_object_id, source_object_type)"
+    ],
+    "failure_modes": [
+      "CALENDAR_EVENT_NOT_FOUND — event_id does not exist, returns 404 ApiError",
+      "CALENDAR_VALIDATION_ERROR — start_at >= end_at or source_object fields inconsistent, returns 422 ApiError",
+      "CALENDAR_DB_ERROR — Postgres unavailable, returns 503 ApiError",
+      "CALENDAR_INVALID_PATCH — patch body contains invalid field combination, returns 422 ApiError"
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [],
+    "provides": [
+      "HTTP API at /api/cal (CALENDAR_APP_PORT)",
+      "Atlas Shell frontend registered at /calendar"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/cal/events",
+        "purpose": "List all CalendarEvents ordered by start_at ASC. Supports optional query params: start (ISO-8601 datetime, inclusive lower bound) and end (ISO-8601 datetime, exclusive upper bound). Returns Dataset.",
+        "ui_contract": "Dataset",
+        "params": {
+          "start": "ISO-8601 datetime string, optional, inclusive — filters events where start_at >= start",
+          "end": "ISO-8601 datetime string, optional, exclusive — filters events where start_at < end"
+        },
+        "default_behavior": "No params returns all events ordered start_at ASC",
+        "empty_result": "Returns Dataset with empty rows array and total=0"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/cal/events",
+        "purpose": "Create a new CalendarEvent. Returns Dataset (single row) on success.",
+        "ui_contract": "Dataset",
+        "body": {
+          "title": "string, required",
+          "start_at": "ISO-8601 datetime string, required",
+          "end_at": "ISO-8601 datetime string, required",
+          "event_type": "task_block | personal_block | blocker, required",
+          "source_object_type": "task | null, optional, default null",
+          "source_object_id": "string | null, optional, default null",
+          "notes": "string | null, optional"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/cal/events/{event_id}",
+        "purpose": "Partially update a CalendarEvent. Field omission means no change. Explicit null clears nullable fields. Returns Dataset (single row).",
+        "ui_contract": "Dataset",
+        "patch_semantics": {
+          "omitted": "field unchanged",
+          "provided_with_value": "field updated to provided value",
+          "provided_as_null": "nullable fields (notes, source_object_id, source_object_type) cleared to NULL"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/cal/events/{event_id}",
+        "purpose": "Delete a CalendarEvent by ID. Returns empty Dataset on success, 404 ApiError if not found.",
+        "ui_contract": "Dataset"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "request_received",
+      "description": "FastAPI router receives HTTP request. Path/query/body parameters validated by Pydantic models. Event ID extracted from path for PATCH and DELETE.",
+      "inputs": ["HTTP request"],
+      "outputs": ["Pydantic-validated request model or 422 validation error"]
+    },
+    {
+      "step": 2,
+      "name": "business_validation",
+      "description": "For create and update: verify start_at < end_at. Verify source_object consistency: if source_object_id is provided then source_object_type must be 'task' and vice versa. If validation fails, return 422 ApiError with CALENDAR_VALIDATION_ERROR code.",
+      "inputs": ["Validated Pydantic model"],
+      "outputs": ["Validated event data or 422 ApiError"]
+    },
+    {
+      "step": 3,
+      "name": "database_operation",
+      "description": "CalendarEventRepository executes the appropriate SQL via psycopg2 (RealDictCursor): INSERT for create, UPDATE with partial fields for patch (omitted fields excluded from SET clause), DELETE for delete, SELECT for list (with optional start/end filters and ORDER BY start_at ASC).",
+      "inputs": ["Validated event data, optional filters"],
+      "outputs": ["CalendarEvent record(s) or not-found signal or DB error"]
+    },
+    {
+      "step": 4,
+      "name": "response_mapping",
+      "description": "CalendarEventMapper converts CalendarEvent record(s) to Dataset shape. Meta contains object_type='calendar_event', label='Calendar Events', total=count, page=1, page_size=count, row_actions=['edit','delete']. Schema columns: id, title, start_at, end_at, event_type, source_object_type, source_object_id, notes, created_at, updated_at.",
+      "inputs": ["CalendarEvent record(s)"],
+      "outputs": ["Dataset"]
+    },
+    {
+      "step": 5,
+      "name": "response_returned",
+      "description": "Router returns Dataset as JSON response. On error, returns ApiError envelope.",
+      "inputs": ["Dataset or ApiError"],
+      "outputs": ["HTTP JSON response"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset/ApiError contract types"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP routing and request parsing", "reuse_existing": true},
+      {"name": "psycopg2", "role": "Postgres driver (RealDictCursor pattern, consistent with all Atlas applications)", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request/response validation models", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "@fullcalendar/react", "role": "Calendar UI component library for week/day view with drag and resize", "reuse_existing": false},
+      {"name": "@fullcalendar/daygrid", "role": "FullCalendar day/week grid view plugin", "reuse_existing": false},
+      {"name": "@fullcalendar/timegrid", "role": "FullCalendar time grid (week/day) plugin", "reuse_existing": false},
+      {"name": "@fullcalendar/interaction", "role": "FullCalendar drag, resize, and click interaction plugin", "reuse_existing": false}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "CalendarConnector — that service is the Google Calendar adapter; this application must NOT call it",
+      "Direct task table joins — task data is accessed only by task_id reference, never by joining the tasks table"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement FastAPI router at backend/routers/calendar.py with four endpoints",
+      "Implement CalendarEventRepository with psycopg2 (RealDictCursor): list (with optional start/end filter), get_by_id, create, patch (partial update excluding omitted fields), delete",
+      "Implement CalendarEventMapper converting DB rows to Dataset",
+      "Implement Pydantic models: CalendarEventCreate, CalendarEventPatch (all fields Optional with sentinel for omit-vs-null), CalendarEventRow",
+      "Run database migration 001_calendar_events.sql against atlas DB",
+      "Implement conftest.py with atlas_test DB connection and fixture loading",
+      "Implement tests/test_calendar.py covering all test spec scenarios",
+      "Implement tests/fixtures.sql with at least 3 CalendarEvent fixtures covering: standalone block, task-linked block, personal block",
+      "Implement compose entry for atlas-calendar container at port 8023",
+      "Implement run_local.py app entrypoint"
+    ],
+    "ui_implementer": [
+      "Implement src/ShellEntry.tsx: FullCalendar week view as default, day view switch, event rendering, drag-to-move (updates start_at and end_at), resize-to-extend (updates end_at), click-to-open edit modal, time range select to create new event",
+      "Implement EventModal component: form for title, start_at, end_at, event_type, source_object_id (text input for task id), notes fields; Save and Delete buttons; validation showing error if start >= end",
+      "Implement src/shellConfig.ts registering appId='calendar', basePath='/calendar', mobilePrimaryNav=[{id:'calendar-week', label:'Week', path:'/calendar'}], desktopNav same",
+      "Add side-effect import of Calendar shellConfig to 02_Platform/Atlas_Shell/src/shell/main.tsx",
+      "Add FullCalendar npm dependencies to 02_Platform/Atlas_Shell/package.json",
+      "Call GET /api/cal/events on mount passing current view's start/end window as query params; re-fetch on view navigation",
+      "On drag/resize: call PATCH /api/cal/events/{id} with new start_at/end_at; on failure show inline error",
+      "On delete: call DELETE /api/cal/events/{id}; on success remove from calendar",
+      "On create: call POST /api/cal/events with form data; on success add to calendar"
+    ],
+    "test_writer": [
+      "Map test spec scenarios to pytest functions in tests/test_calendar.py",
+      "Use fixtures.sql as test data source via conftest truncate-and-reload"
+    ],
+    "reviewer": [
+      "Verify PATCH null-vs-omit semantics are correctly implemented in the Pydantic patch model",
+      "Verify URL prefix /api/cal does not conflict with CalendarConnector's /api/calendar prefix",
+      "Verify FullCalendar dependency is added to Atlas Shell package.json, not duplicated per-app",
+      "Verify start_at < end_at invariant is enforced in business_validation, not just in the DB constraint"
+    ]
+  },
+  "deferred_decisions": [
+    "Port number for atlas-calendar container — 8023 proposed (8022=StorageTracker, 8024+ unused)",
+    "Whether FullCalendar license (open-source v6 MIT) is acceptable — assumed yes for MVP"
+  ],
+  "risks": [
+    {
+      "risk": "URL prefix collision with CalendarConnector",
+      "impact": "nginx or API gateway may route /api/calendar/* to the wrong backend. This design uses /api/cal to avoid the conflict but reviewers must verify nginx/proxy config handles both prefixes correctly."
+    },
+    {
+      "risk": "FullCalendar drag/resize events fire onChange with partial objects; implementer must map these carefully to PATCH body",
+      "impact": "If start_at or end_at is not extracted correctly from FullCalendar event objects, drag/resize will silently corrupt event times"
+    },
+    {
+      "risk": "source_object_id references a task that may not exist",
+      "impact": "No FK constraint is enforced across application boundaries. A stale task_id reference will not cause a DB error but will display a dangling link in the UI. This is acceptable for MVP."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should GET /api/cal/events default to returning only the current week's events, or all events? The draft says 'view calendar blocks in week/day view' suggesting a windowed fetch is intended.",
+      "owner": "architecture",
+      "resolution": "Design declares: no params returns all events; UI caller passes start/end params matching the visible FullCalendar window. This satisfies the MVP requirement without inventing a server-side default window."
+    },
+    {
+      "question": "Should DELETE return 204 No Content or an empty Dataset?",
+      "owner": "architecture",
+      "resolution": "Draft says 'empty Dataset or 204 for delete'. Design chooses empty Dataset (200) to match the pattern used by other Atlas applications (StorageTracker, TaskTracker) for consistency."
+    }
+  ]
+}

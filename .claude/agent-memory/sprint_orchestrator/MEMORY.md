@@ -16,6 +16,9 @@
 - [StorageTracker Sprint01 Pattern](project_storagetracker_sprint01.md) — Household item tracker; SPRINT_COMPLETE; full automated loop; port 8022 (8020 taken by Notifications); tests written but run inside Docker
 - [FoodTracker Sprint06 Pattern](project_foodtracker_sprint06.md) — Search/scale/averages; IMPLEMENTATION_IN_PROGRESS; food-tracker-test container newly added, needs build before test run; schema.sql backfilled with Sprint04 columns
 - [FoodTracker Sprint07 Pattern](project_foodtracker_sprint07.md) — quantity_g→base_quantity rename; IMPLEMENTATION_IN_PROGRESS; container rebuild + migration 006 required before test run
+- [Calendar Sprint01 Pattern](project_calendar_sprint01.md) — Atlas-owned timeblocking calendar (NOT CalendarConnector); IMPLEMENTATION_IN_PROGRESS; container build required; FullCalendar added to Shell; port 8023
+- [EssayCards Sprint01 Pattern](project_essaycards_sprint01.md) — New app: essay reader + SRS flashcards; DESIGN_APPROVED, stopped by request before implementation; port 8024; recurring ApiError-bypass gap found in Pydantic body-model mutation endpoints (fixed by dropping Pydantic body model, no prior working precedent in repo)
+- [EssayCards Sprint02 Pattern](project_essaycards_sprint02.md) — JSON ingest endpoint + shared upsert refactor; TESTS_PASSING; fully unattended single-pass loop (0 correction/fix loops); designer caught scope item already built in prior sprint's live code
 
 ## Feedback
 - [Skip specs reviewer stage](feedback_skip_specs_stage.md) — DRAFT_READY routes directly to designer; sprint_specs_reviewer is never used

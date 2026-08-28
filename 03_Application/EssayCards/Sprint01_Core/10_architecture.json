@@ -1,0 +1,289 @@
+{
+  "component_name": "essaycards",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Long-form essay reader paired with spaced-repetition flashcards: essays are ingested from an author-maintained markdown file into ordered sections, each section owns flashcards that link back to the passage that taught them, and a due-queue review loop schedules re-review using a deterministic interval algorithm.",
+  "classification": {
+    "why_application": "Owns the essaycards schema (essays, sections, flashcards, review state), owns the markdown ingestion grammar and upsert-by-stable-key semantics, and owns the spaced-repetition scheduling algorithm — all essay-content-specific and review-specific domain behavior, not reusable technical infrastructure.",
+    "non_goals": [
+      "Multiple essays / topic library UI",
+      "In-app authoring or editing UI for essay text or flashcards",
+      "User accounts / multi-user review state",
+      "Typed-answer grading (flip-and-self-assess only, not text matching)",
+      "Review statistics, streaks, retention graphs",
+      "Notifications/reminders when cards become due",
+      "Offline support",
+      "Any ingestion path other than the markdown format defined in this document (no upload UI, no API-based import)"
+    ],
+    "not_platform": "The markdown ingestion grammar, the essay/section/flashcard domain model, and the spaced-repetition scheduling formula are meaningful only within this application. No other Atlas application ingests essay content or schedules flashcard review; nothing here is a generic reusable primitive."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via ATLAS_PG_* or DATABASE_URL env vars",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling — api_error helper, exception handlers, request timing, structured logging",
+      "A markdown source file provided by the user on the local filesystem, mounted into the container for the ingestion CLI to read (no HTTP upload path exists)"
+    ],
+    "provides": [
+      "GET /api/essaycards/essays — list all ingested essays; no params; returns Dataset ordered by created_at asc",
+      "GET /api/essaycards/essays/{essay_id} — single essay with its ordered sections embedded; returns Dataset (single row); 404 ApiError if not found",
+      "GET /api/essaycards/flashcards/due — due flashcards, optionally scoped to an essay or a section within an essay; returns Dataset ordered by next_due_at asc",
+      "POST /api/essaycards/flashcards/{flashcard_id}/review — grade a card and persist its next scheduling state; mutation endpoint, returns typed record on success"
+    ],
+    "invariants": [
+      "All read endpoints (GET) return Dataset per R-CON-BP-04",
+      "essays.slug is unique; essay_sections.(essay_id, anchor_slug) is unique; flashcards.(essay_id, card_key) is unique — these are exactly the three upsert keys defined by the ingestion contract",
+      "anchor_slug is always author-assigned from the source file's `{#slug}` heading suffix — the parser never derives an anchor from heading text",
+      "card_key is always the author-assigned id from the source file (e.g. fc-origins-1) — the parser never generates ids",
+      "Re-ingestion of an existing flashcard (matched by card_key) updates question, answer, and section_id only; flashcard_review_state.last_reviewed_at and next_due_at are never modified by re-ingestion",
+      "A newly ingested flashcard (no prior row with that card_key) gets flashcard_review_state.last_reviewed_at = null and next_due_at = the flashcard row's created_at, making it due immediately",
+      "Ingestion is fully transactional: parsing and validation happen entirely before any database write; if any validation error occurs anywhere in the file, no rows are inserted or updated for that ingestion run",
+      "'Due' is defined as next_due_at <= now(), where now() is evaluated by Postgres at query time (single time-authority; see R-CON-AL-06 note below)",
+      "The four grade values are exactly: again, hard, good, easy — no other value is accepted",
+      "POST .../review reads and validates the request body manually against the raw parsed JSON (grade must be present and be a string in {again, hard, good, easy}) instead of relying on a Pydantic-enforced required field. Every invalid-body shape — missing grade, non-string grade, out-of-set grade, or an unparsable JSON body — is caught by application code and returned as ApiError with error.code=VALIDATION_ERROR (400); FastAPI's default RequestValidationError 422 shape is never produced by this endpoint, per R-CON-BP-04",
+      "Grading always sets last_reviewed_at to the request-handling instant, for every grade including again",
+      "For grade=again: next_due_at = now + 5 seconds, flat — the floor/doubling formula does not apply to again",
+      "For grade in {hard, good, easy}: floor is 1 minute / 20 minutes / 1 day respectively; elapsed = null if last_reviewed_at was null else (now - last_reviewed_at); interval = floor if elapsed is null else max(floor, 2 * elapsed); next_due_at = now + interval",
+      "R-CON-AL-06 time authority: the single authoritative 'now' for a review request is read once from Postgres (`select now()`) at the start of the review transaction, then reused as both the persisted last_reviewed_at value and the base for computing next_due_at — the client never sends a timestamp and the app server's local clock is never used, avoiding drift between the due-boundary check and the scheduling arithmetic",
+      "R-CON-AL-04/05 (partial update / null-vs-omit semantics) do not apply to this component: there are no PATCH or partial-update endpoints. The only mutation endpoint (POST .../review) takes one required field (grade) with no nullable/omittable fields and no partial-update meaning",
+      "Section body_markdown excludes the trailing flashcards fence — see 'Markdown ingestion grammar' below for the exact extraction rule",
+      "Content appearing in the source file before the first `##` section heading is discarded — there is no essay-level intro/body field in this schema; only sections carry markdown content. This is an explicit design decision (not a bug) — see risks.",
+      "If GET /flashcards/due is called with section_id set and essay_id omitted, this is rejected as VALIDATION_ERROR (section_id requires essay_id, per the draft's stated allowed combinations)",
+      "If GET /flashcards/due is called with an essay_id/section_id combination where the section does not actually belong to that essay, the query returns zero rows (not an error) — the WHERE clause ANDs both filters against the flashcard row's own essay_id and section_id columns"
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — POST .../review with a grade outside {again, hard, good, easy}, including a missing grade field, a non-string grade value, or an unparsable JSON body (all validated manually against the raw request body, never via Pydantic required-field enforcement), or GET /flashcards/due with section_id but no essay_id — 400 ApiError",
+      "NOT_FOUND — GET /essays/{essay_id} with unknown id, or POST .../review with unknown flashcard_id — 404 ApiError",
+      "INGESTION_ERROR — the one-shot CLI ingestion script exits non-zero and writes nothing to the database when: YAML front matter is missing or unparsable; title or slug is missing from front matter; a `##` heading lacks the required `{#slug}` anchor suffix; a section contains more than one ```flashcards fenced block; a section has non-blank content after its ```flashcards fenced block; the ```flashcards block is not valid YAML or is missing the top-level `cards` key; any card entry is missing id, q, or a; the same anchor_slug appears twice in one file; the same card id (card_key) appears twice in one file. This is a CLI-local failure mode, not an HTTP response — it has no ApiError shape because ingestion has no HTTP surface.",
+      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during a request — startup logs the error and continues; requests fail until the database is reachable"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool (minconn=1, maxconn=5) via get_db() context manager — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/packages/platform_errorhandling/",
+      "PyYAML (yaml.safe_load) — used only by the ingestion CLI, never by the HTTP API"
+    ],
+    "provides": [
+      "HTTP API mounted at /api/essaycards (FastAPI, uvicorn)",
+      "CORS: allow_origin_regex=http://localhost:\\d+ — all localhost ports during development",
+      "Allowed methods: GET, POST",
+      "backend.ingest — a CLI entrypoint (python -m backend.ingest <path>), not an HTTP surface, run manually by the user after editing the source markdown file"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays",
+        "purpose": "List all ingested essays.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {},
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — no parameters",
+          "ordering": "created_at asc",
+          "grouping": "none",
+          "time_basis": "n/a — no time filter",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "valid — Dataset with rows=[] when no essay has been ingested; UI shows an empty state, not an error",
+          "zero_fill_behavior": "not applicable — flat list, not a time series"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}",
+        "purpose": "Return one essay and its ordered sections, embedded on the single returned row.",
+        "ui_contract": "Dataset | ApiError",
+        "params": { "essay_id": "path param, uuid, required" },
+        "query_behavior": {
+          "supported_parameters": "essay_id (path)",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — single required path param",
+          "ordering": "embedded sections ordered by order_index asc",
+          "grouping": "none",
+          "time_basis": "n/a",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "404 ApiError if essay_id does not exist; an essay with zero sections is valid and returns sections: []",
+          "zero_fill_behavior": "not applicable"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/due",
+        "purpose": "List due flashcards, optionally scoped to one essay or one section within an essay.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "essay_id": "optional, uuid",
+          "section_id": "optional, uuid, requires essay_id to also be present"
+        },
+        "query_behavior": {
+          "supported_parameters": "essay_id (optional), section_id (optional, requires essay_id)",
+          "defaults": "neither param given → all due cards system-wide",
+          "allowed_combinations": "{}: system-wide; {essay_id}: due cards in that essay; {essay_id, section_id}: due cards in that section only. {section_id only} is rejected with VALIDATION_ERROR.",
+          "ordering": "next_due_at asc (most overdue first)",
+          "grouping": "none",
+          "time_basis": "server time — 'due' means next_due_at <= now(), where now() is evaluated by Postgres at query execution time",
+          "boundary_construction": "WHERE next_due_at <= now() [AND essay_id = :essay_id] [AND section_id = :section_id]",
+          "empty_result_behavior": "valid — Dataset with rows=[] when nothing is due for the given scope",
+          "zero_fill_behavior": "not applicable — flat list, not a time series"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/flashcards/{flashcard_id}/review",
+        "purpose": "Grade a flashcard and persist its updated review-scheduling state using the spaced-repetition formula.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record { flashcard_id, last_reviewed_at, next_due_at } on success (200), ApiError on failure",
+        "params": { "flashcard_id": "path param, uuid, required" },
+        "body": { "grade": "one of again | hard | good | easy, required. Parsed and validated manually by the handler from the raw JSON request body (not a Pydantic-required field), so every invalid shape — missing grade, non-string grade, out-of-set grade, or unparsable JSON — is caught by application code and returned as ApiError with error.code=VALIDATION_ERROR (400), never FastAPI's default RequestValidationError 422 shape" }
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() creates the psycopg2 SimpleConnectionPool. init_schema() reads schema.sql and executes DDL idempotently. Errors are logged; the application continues running (requests fail until Postgres is reachable).",
+      "inputs": ["ATLAS_PG_* or DATABASE_URL env vars", "schema.sql"],
+      "outputs": ["live connection pool", "essaycards schema with essays, essay_sections, flashcards, flashcard_review_state tables present"]
+    },
+    {
+      "step": 2,
+      "name": "ingest_parse",
+      "description": "backend/ingest.py reads the file at the given path. Parses YAML front matter delimited by a leading '---' line and the next '---' line (yaml.safe_load); requires non-empty title and slug, else aborts. Scans the remaining body line-by-line for `^##\\s+(.+?)\\s*\\{#([a-zA-Z0-9_-]+)\\}\\s*$` to find section boundaries in order of appearance; any `##` heading line that does not match this pattern aborts ingestion citing the line number and heading text. Content before the first matched section heading is discarded (no essay-level intro field exists). For each section, scans its content for a fenced block opened by a line matching `^```flashcards\\s*$` and closed by the next line matching `^```\\s*$`: zero matches means the section has zero flashcards (body_markdown = full trimmed section content); exactly one match means body_markdown = content before the opening fence (trimmed) and everything after the closing fence must be blank/whitespace-only (else abort); more than one match aborts ('multiple flashcards blocks in one section'). The matched fenced content is parsed as YAML expecting a top-level `cards` list of mappings, each requiring non-empty string keys id, q, a — extra keys are ignored; a missing required key aborts, citing the section anchor_slug and the card's position. Duplicate anchor_slug across sections, or duplicate card id (card_key) across the whole file, aborts ingestion before any database write.",
+      "inputs": ["markdown file at given filesystem path"],
+      "outputs": ["in-memory parsed structure: {title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]} — or an ingestion abort with a descriptive error and non-zero exit code, no DB writes made"]
+    },
+    {
+      "step": 3,
+      "name": "ingest_upsert",
+      "description": "Opens one database transaction. Upserts the essay row keyed by slug (INSERT ... ON CONFLICT (slug) DO UPDATE SET title, updated_at). For each section in file order, upserts keyed by (essay_id, anchor_slug) (INSERT ... ON CONFLICT DO UPDATE SET heading, order_index, body_markdown, updated_at). For each card, upserts keyed by (essay_id, card_key) (INSERT ... ON CONFLICT DO UPDATE SET question, answer, section_id, updated_at RETURNING id, created_at, (xmax = 0) AS was_inserted). When was_inserted is true, inserts a matching flashcard_review_state row with last_reviewed_at = null and next_due_at = the returned created_at. When was_inserted is false (an existing card was updated), flashcard_review_state is left completely untouched. Commits on success; rolls back the entire transaction on any database error.",
+      "inputs": ["parsed structure from step 2"],
+      "outputs": ["essay, section, and flashcard rows upserted in Postgres; flashcard_review_state rows created only for newly-inserted flashcards; printed summary of created/updated counts"]
+    },
+    {
+      "step": 4,
+      "name": "essays_list",
+      "description": "GET /api/essaycards/essays selects id, title, slug from essaycards.essays ordered by created_at asc. Returns Dataset.",
+      "inputs": [],
+      "outputs": ["Dataset with essay rows"]
+    },
+    {
+      "step": 5,
+      "name": "essay_detail",
+      "description": "GET /api/essaycards/essays/{essay_id} fetches the essay row (404 ApiError if missing), then fetches all essay_sections for that essay_id ordered by order_index asc, and embeds them as a `sections` list on the single returned row (list of {id, heading, anchor_slug, order_index, body_markdown}). Returns Dataset (single row).",
+      "inputs": ["essay_id path param"],
+      "outputs": ["Dataset (single row with embedded sections list) | 404 ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "flashcards_due",
+      "description": "GET /api/essaycards/flashcards/due validates that section_id is not present without essay_id (400 VALIDATION_ERROR if violated). Joins flashcards to flashcard_review_state, filters WHERE next_due_at <= now() plus any provided essay_id/section_id equality filters, orders by next_due_at asc. Returns Dataset with rows {id, flashcard_id, question, answer, essay_id, section_id, anchor_slug, next_due_at} — anchor_slug is denormalized from essay_sections via join so the client can build the 'Jump to passage' link without a second request.",
+      "inputs": ["essay_id query param (optional)", "section_id query param (optional)"],
+      "outputs": ["Dataset with due flashcard rows | 400 ApiError"]
+    },
+    {
+      "step": 7,
+      "name": "flashcard_review",
+      "description": "POST /api/essaycards/flashcards/{flashcard_id}/review reads the raw JSON request body directly (not through a Pydantic body model, so FastAPI's automatic RequestValidationError path is never triggered for this endpoint) and validates manually that a `grade` key is present and is a string one of {again, hard, good, easy}; any other shape — missing key, non-string value, out-of-set value, or an unparsable JSON body — returns 400 ApiError with error.code=VALIDATION_ERROR. Opens a transaction; SELECT now() once to obtain the single authoritative instant for this request. Fetches the flashcard's current flashcard_review_state (404 NOT_FOUND if the flashcard_id does not exist). Calls backend.scheduling.compute_next_due_at(grade, last_reviewed_at, now) which implements the exact floor/doubling formula. UPDATEs flashcard_review_state SET last_reviewed_at = now, next_due_at = computed_value, updated_at = now WHERE flashcard_id = :id. Commits. Returns the typed record {flashcard_id, last_reviewed_at, next_due_at}.",
+      "inputs": ["flashcard_id path param", "grade body field"],
+      "outputs": ["{flashcard_id, last_reviewed_at, next_due_at} (200) | 400 ApiError | 404 ApiError"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — EssayCards owns the essaycards schema within it"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema — used in all read endpoint responses"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error helper, exception handlers, request timing, structured logging"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request body validation", "reuse_existing": true},
+      {"name": "pyyaml", "role": "Parses YAML front matter and the fenced flashcards block during ingestion — new dependency, not currently used elsewhere in the repo", "reuse_existing": false},
+      {"name": "pytest", "role": "Backend test runner", "reuse_existing": true},
+      {"name": "httpx", "role": "Test client (via pytest + ASGI transport)", "reuse_existing": true},
+      {"name": "react-markdown", "role": "Renders section body_markdown as HTML in the reader view — new frontend dependency, must be added to 02_Platform/Atlas_Shell/package.json and aliased in vite.config.ts following the FullCalendar precedent, not installed per-application", "reuse_existing": false}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling Postgres directly",
+      "Re-implementing platform_contracts or platform_errorhandling locally",
+      "Any HTTP or UI-based ingestion path in Sprint 1 — ingestion is CLI-only",
+      "Auto-generating anchor_slug or card_key from content — both must be author-assigned and read verbatim from the source file"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement backend/database.py: connection pool + init_schema, identical pattern to StorageTracker/Calendar (ATLAS_PG_* / DATABASE_URL, SimpleConnectionPool minconn=1 maxconn=5, RealDictCursor, get_db() context manager)",
+      "Implement backend/main.py: FastAPI app, CORS, install_exception_handlers, install_request_timing, include essays.router and flashcards.router both with prefix /api/essaycards",
+      "Implement backend/routers/essays.py: GET '' (list) and GET '/{essay_id}' (detail with embedded sections)",
+      "Implement backend/routers/flashcards.py: GET '/due' and POST '/{flashcard_id}/review'; register '/due' before any future single-segment parameterized route to avoid FastAPI path-matching ambiguity. POST '/{flashcard_id}/review' must read and validate the `grade` field manually from the raw request body (not a Pydantic-required field) so that a missing or wrong-typed grade returns ApiError VALIDATION_ERROR rather than FastAPI's default RequestValidationError 422 shape, per contracts.invariants",
+      "Implement backend/scheduling.py: compute_next_due_at(grade, last_reviewed_at, now) as a pure, independently unit-testable function implementing the exact floor/doubling formula from contracts.invariants — do not inline this logic in the router",
+      "Implement backend/ingest.py exactly per internal_flow steps 2-3: front matter parsing, section splitting via the anchor-required heading regex, single-flashcards-fence-per-section extraction, YAML cards parsing, pre-DB duplicate detection (anchor_slug, card_key), then one transactional upsert pass. Expose a callable entrypoint (e.g. def ingest(path: str) -> IngestSummary) so tests can invoke it directly without shelling out, plus a `python -m backend.ingest <path>` CLI wrapper for manual use.",
+      "Add /api/essaycards location block to 02_Platform/Atlas_Shell/nginx.conf, proxying to atlas-essaycards:8000, following the existing per-app location block pattern",
+      "Add a compose.yml volume mount for the essay source content directory (e.g. ${DATA_ROOT}/essaycards/content:/app/content:ro) so the ingestion CLI can be run via `docker exec atlas-essaycards python -m backend.ingest /app/content/<file>.md`",
+      "Copy 10_schema.sql to schema.sql at the component root (canonical runtime path, loaded idempotently by database.py at startup)",
+      "Implement tests/conftest.py, tests/fixtures.sql, tests/test_essays.py, tests/test_flashcards.py, tests/test_ingest.py per 10_test_spec.md",
+      "Implement compose.yml (port 127.0.0.1:8024:8000), Dockerfile, pyproject.toml, run_local.py following the StorageTracker/Calendar templates"
+    ],
+    "ui_implementer": [
+      "Implement src/ShellEntry.tsx with two top-level views: Reader (renders one essay's sections in order via react-markdown, with a 'Review this section' button at the end of each section) and Review Session (shows one due card at a time — question only; Flip reveals answer plus a 'Jump to passage' link; then the four grade buttons appear)",
+      "Reader view: fetch GET /api/essaycards/essays/{essay_id}; render each section's body_markdown; each section carries a DOM anchor (id={anchor_slug}) so 'Jump to passage' links can navigate directly to it",
+      "Review Session view: on session start, fetch GET /api/essaycards/flashcards/due with the appropriate scope (no params for the global entry point; essay_id + section_id when launched from a section's 'Review this section' button) and hold that list in local state for the whole session — do not re-fetch mid-session, per the draft's explicit no-live-poll rule",
+      "Grade button click calls POST /api/essaycards/flashcards/{flashcard_id}/review with {grade}; on success, advance to the next card in the locally-held queue; session ends when the locally-held queue is exhausted",
+      "'Jump to passage' link navigates to the Reader route for the card's essay_id and scrolls to the DOM element matching anchor_slug",
+      "Implement src/shellConfig.ts: appId 'essaycards', basePath '/essaycards', nav entries for the essay list/reader and a top-level 'Due for review' nav entry that opens the Review Session with no section filter",
+      "Add side-effect import of EssayCards shellConfig to 02_Platform/Atlas_Shell/src/shell/main.tsx",
+      "Add react-markdown to 02_Platform/Atlas_Shell/package.json dependencies and alias it in vite.config.ts resolve.alias (pin to the shell's own node_modules, following the FullCalendar precedent)",
+      "Add a /api/essaycards vite dev-server proxy entry to 02_Platform/Atlas_Shell/vite.config.ts targeting http://localhost:8024"
+    ],
+    "test_writer": [
+      "Map every scenario in 10_test_spec.md to a concrete pytest function",
+      "Unit-test backend.scheduling.compute_next_due_at directly (no HTTP, no DB) covering: again flat 5s; hard/good/easy first-time (null last_reviewed_at) floor-only; hard/good/easy repeat review where 2*elapsed exceeds floor; hard/good/easy repeat review where floor exceeds 2*elapsed",
+      "Test the ingestion entrypoint function directly (not via HTTP) against fixture markdown files, including at least one deliberately malformed fixture per named ingestion failure case"
+    ],
+    "reviewer": [
+      "Verify last_reviewed_at and next_due_at written by POST .../review both derive from the single Postgres now() read at the start of the request — not from two separate now() calls and not from Python's local clock",
+      "Verify re-ingestion of an already-ingested essay does not touch flashcard_review_state for existing cards — write a test that grades a card, re-ingests the unchanged source file, and asserts next_due_at is unchanged",
+      "Verify the single-flashcards-fence-per-section rule is enforced (reject files with two flashcards blocks in one section, and reject files with trailing content after the flashcards block)",
+      "Verify GET /flashcards/due?section_id=X with no essay_id returns 400, not a silently-ignored parameter",
+      "Verify DELETE ordering: since essays/sections/flashcards are never deleted by re-ingestion or by any endpoint in Sprint 1, confirm no code path exists that could silently drop rows"
+    ]
+  },
+  "deferred_decisions": [
+    "Whether to add a lightweight `atlas-essaycards ingest-status` or dry-run mode (parse + validate without writing) is left to the implementer's discretion — not required by the draft",
+    "Exact React component decomposition inside ShellEntry.tsx (single file vs. split components) — implementer's choice, following whichever precedent (StorageTracker vs. Calendar) fits the view count better"
+  ],
+  "risks": [
+    {
+      "risk": "Content before the first `##` section heading in the source file is silently discarded (no essay-level intro/body field exists in this data model)",
+      "impact": "If an author writes an introductory paragraph before the first heading expecting it to appear in the reader, it will be silently dropped on every ingestion. This is a deliberate Sprint 1 scope decision (the draft's data model has no field to hold it), not an accidental gap — but it should be called out to the content author."
+    },
+    {
+      "risk": "Deletion/reconciliation of sections or flashcards removed from the source file is explicitly out of scope for Sprint 1 (confirmed, per the draft's request) — re-ingestion never deletes essaycards.essay_sections or essaycards.flashcards rows, even when the corresponding heading/card block is removed from the markdown file",
+      "impact": "If an author deletes a section or a flashcard from the source file and re-ingests, the old row (and, for flashcards, its review state) remains in the database indefinitely: an orphaned flashcard will keep appearing in the due queue and keep accumulating review history for content that no longer exists in the source; an orphaned section will keep appearing in the reader view with its last-ingested body_markdown. There is no cleanup path in Sprint 1 — manual SQL deletion is the only remedy. This is accepted as-is for Sprint 1 per the draft's explicit request, not silently resolved."
+    },
+    {
+      "risk": "The ingestion CLI runs inside the Docker container and needs the source markdown file to be reachable at a container filesystem path",
+      "impact": "If the compose.yml content volume mount is missed or misconfigured, `docker exec ... python -m backend.ingest <path>` will fail with a file-not-found error rather than a domain-level ingestion error. Deferral to application_implementer covers adding the mount."
+    }
+  ],
+  "open_questions": []
+}

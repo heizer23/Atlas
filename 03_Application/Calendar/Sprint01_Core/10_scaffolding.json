@@ -1,0 +1,347 @@
+{
+  "component_name": "calendar",
+  "target_root": "03_Application/Calendar",
+  "directories": [
+    "03_Application/Calendar",
+    "03_Application/Calendar/backend",
+    "03_Application/Calendar/backend/routers",
+    "03_Application/Calendar/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/Calendar/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application factory and ASGI entrypoint",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "fastapi_app",
+          "purpose": "FastAPI application instance with calendar router mounted"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/backend/db.py",
+      "stub_kind": "python_module",
+      "role": "psycopg2 connection pool management — acquire/release lifecycle via psycopg2.pool.ThreadedConnectionPool",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "get_connection",
+          "pattern": "factory",
+          "methods": [],
+          "purpose": "Acquire a psycopg2 connection from the pool; caller must return it via put_connection"
+        },
+        {
+          "kind": "function",
+          "name": "put_connection",
+          "pattern": "factory",
+          "methods": [],
+          "purpose": "Return a psycopg2 connection to the pool after use"
+        },
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "pattern": "factory",
+          "methods": [],
+          "purpose": "Initialize the ThreadedConnectionPool from ATLAS_PG_* env vars; called at startup"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/backend/models.py",
+      "stub_kind": "python_module",
+      "role": "Pydantic request/response models for CalendarEvent CRUD",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "CalendarEventCreate",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "Request body for POST /api/cal/events — all required fields plus optional nullable fields"
+        },
+        {
+          "kind": "class",
+          "name": "CalendarEventPatch",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "Request body for PATCH /api/cal/events/{id} — all fields Optional; uses sentinel UNSET to distinguish omit from explicit None"
+        },
+        {
+          "kind": "class",
+          "name": "CalendarEventRow",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "Internal row shape for a CalendarEvent as returned from the DB"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "UNSET",
+          "purpose": "Sentinel value for CalendarEventPatch — distinguishes omitted fields from explicit None"
+        }
+      ]
+    },
+    {
+      "path": "03_Application/Calendar/backend/repository.py",
+      "stub_kind": "python_module",
+      "role": "CalendarEventRepository — all SQL for calendar_events table via psycopg2 with RealDictCursor",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "CalendarEventRepository",
+          "pattern": "repository",
+          "methods": [
+            {
+              "name": "list_events",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "start: datetime | None", "end: datetime | None"],
+              "returns": "list[CalendarEventRow]",
+              "purpose": "List events ordered by start_at ASC; optionally filtered by start (inclusive) and end (exclusive)"
+            },
+            {
+              "name": "get_by_id",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "event_id: str"],
+              "returns": "CalendarEventRow | None",
+              "purpose": "Fetch a single event by UUID; returns None if not found"
+            },
+            {
+              "name": "create_event",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "data: CalendarEventCreate"],
+              "returns": "CalendarEventRow",
+              "purpose": "Insert a new calendar_event row and return the created record"
+            },
+            {
+              "name": "patch_event",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "event_id: str", "data: CalendarEventPatch"],
+              "returns": "CalendarEventRow | None",
+              "purpose": "Partially update an event; only provided (non-UNSET) fields are included in the SET clause; returns None if event not found"
+            },
+            {
+              "name": "delete_event",
+              "visibility": "public",
+              "args": ["conn: psycopg2.extensions.connection", "event_id: str"],
+              "returns": "bool",
+              "purpose": "Delete an event by ID; returns True if deleted, False if not found"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/backend/mapper.py",
+      "stub_kind": "python_module",
+      "role": "CalendarEventMapper — converts CalendarEventRow records to Dataset response",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "CalendarEventMapper",
+          "pattern": "mapper",
+          "methods": [
+            {
+              "name": "to_dataset",
+              "visibility": "public",
+              "args": ["events: list[CalendarEventRow]"],
+              "returns": "Dataset",
+              "purpose": "Map a list of CalendarEventRow records to a Dataset with full schema declaration and row_actions=['edit','delete']"
+            },
+            {
+              "name": "to_row",
+              "visibility": "public",
+              "args": ["event: CalendarEventRow"],
+              "returns": "dict",
+              "purpose": "Convert a single CalendarEventRow to a Dataset row dict with all declared schema keys"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/backend/routers/calendar.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI router implementing the four /api/cal/events endpoints",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "purpose": "APIRouter instance with prefix /api/cal, tag calendar"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/schema.sql",
+      "stub_kind": "sql",
+      "role": "Runtime schema loaded idempotently at startup — copied from 10_schema.sql at sprint-close. Contains CREATE TABLE IF NOT EXISTS for calendar_events.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/run_local.py",
+      "stub_kind": "python_module",
+      "role": "Local development entrypoint — starts uvicorn on CALENDAR_APP_PORT (default 8023)",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/tests/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty init to make tests a package",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/tests/conftest.py",
+      "stub_kind": "python_module",
+      "role": "Pytest fixtures: async test client, atlas_test DB pool, fixture loader (truncate calendar_events then load fixtures.sql)",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "client",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Async httpx TestClient wrapping the FastAPI app, session-scoped"
+        },
+        {
+          "kind": "function",
+          "name": "db_pool",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "psycopg2 connection to atlas_test DB (RealDictCursor), function-scoped"
+        },
+        {
+          "kind": "function",
+          "name": "load_fixtures",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Function-scoped autouse fixture: truncates calendar_events and loads tests/fixtures.sql before each test"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/tests/fixtures.sql",
+      "stub_kind": "sql",
+      "role": "INSERT statements for test CalendarEvent fixtures: standalone block, task-linked block, personal block",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/tests/test_calendar.py",
+      "stub_kind": "python_module",
+      "role": "Pytest test functions mapping to test spec scenarios",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_list_events_returns_dataset",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: List events returns Dataset"
+        },
+        {
+          "kind": "function",
+          "name": "test_list_events_empty",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: List events when no events exist returns empty Dataset"
+        },
+        {
+          "kind": "function",
+          "name": "test_create_standalone_event",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Create standalone calendar block"
+        },
+        {
+          "kind": "function",
+          "name": "test_create_task_linked_event",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Create calendar block linked to a task"
+        },
+        {
+          "kind": "function",
+          "name": "test_create_event_start_after_end_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Create event where start_at >= end_at is rejected"
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_event_updates_times",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: PATCH updates start_at and end_at"
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_event_omit_preserves_fields",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: PATCH with omitted fields leaves them unchanged"
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_event_null_clears_notes",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: PATCH with explicit null clears notes field"
+        },
+        {
+          "kind": "function",
+          "name": "test_delete_event_success",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Delete event returns empty Dataset"
+        },
+        {
+          "kind": "function",
+          "name": "test_delete_event_not_found",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Delete non-existent event returns 404 ApiError"
+        },
+        {
+          "kind": "function",
+          "name": "test_delete_does_not_affect_task",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Delete task-linked event does not touch task (task_id stored as plain string, no cascade)"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/src/ShellEntry.tsx",
+      "stub_kind": "tsx_module",
+      "role": "Calendar application root component — FullCalendar week/day view with event CRUD",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "default",
+          "pattern": "react_component",
+          "methods": [],
+          "purpose": "Default export: renders FullCalendar within Routes, handles fetch/create/patch/delete lifecycle"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/Calendar/src/shellConfig.ts",
+      "stub_kind": "ts_module",
+      "role": "Atlas Shell registration — registers Calendar app with AppRegistry",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

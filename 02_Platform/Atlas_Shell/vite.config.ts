@@ -26,6 +26,12 @@ export default defineConfig({
       'react-dom':      path.resolve(__dirname, 'node_modules/react-dom'),
       'react-router-dom': path.resolve(__dirname, 'node_modules/react-router-dom'),
       'recharts':       path.resolve(__dirname, 'node_modules/recharts'),
+      '@fullcalendar/react':        path.resolve(__dirname, 'node_modules/@fullcalendar/react'),
+      '@fullcalendar/core':         path.resolve(__dirname, 'node_modules/@fullcalendar/core'),
+      '@fullcalendar/daygrid':      path.resolve(__dirname, 'node_modules/@fullcalendar/daygrid'),
+      '@fullcalendar/timegrid':     path.resolve(__dirname, 'node_modules/@fullcalendar/timegrid'),
+      '@fullcalendar/interaction':  path.resolve(__dirname, 'node_modules/@fullcalendar/interaction'),
+      'react-markdown':  path.resolve(__dirname, 'node_modules/react-markdown'),
     },
   },
   server: {
@@ -43,6 +49,8 @@ export default defineConfig({
       '/api/linking':        { target: 'http://localhost:8040', changeOrigin: true },
       '/api/series':         { target: 'http://localhost:8014', changeOrigin: true },
       '/api/batch/series':   { target: 'http://localhost:8014', changeOrigin: true },
+      '/api/cal':            { target: 'http://localhost:8023', changeOrigin: true },
+      '/api/essaycards':     { target: 'http://localhost:8024', changeOrigin: true },
     },
   },
   test: {

@@ -218,3 +218,37 @@ services:
       ATLAS_PG_HOST:     atlas-postgres
     networks:
       - atlas-net
+
+  calendar-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/Calendar/Dockerfile
+    container_name: atlas-calendar-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9023:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  essaycards-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/EssayCards/Dockerfile
+    container_name: atlas-essaycards-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9024:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net

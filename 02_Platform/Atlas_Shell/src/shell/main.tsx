@@ -44,6 +44,8 @@ import '../../../../03_Application/Chronicle/src/shellConfig';
 import '../../../../03_Application/NumericSeries/src/shellConfig';
 import '../../../../03_Application/StorageTracker/src/shellConfig';
 import '../../../../03_Application/PersonalDevelopment/frontend/shellConfig';
+import '../../../../03_Application/Calendar/src/shellConfig';
+import '../../../../03_Application/EssayCards/src/shellConfig';
 
 // ─────────────────────────────────────────────────────────────────────────────
 

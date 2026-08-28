@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-04-30 14:09 UTC
+> Last updated: 2026-08-28 13:12 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -203,6 +203,25 @@ GET /health — liveness check, returns {status: ok}
 
 ## 03 Application
 
+### Calendar
+
+**Summary:** Atlas-owned timeblocking calendar application: users create, edit, move, and delete calendar blocks, optionally linked to TaskTracker tasks, persisted in Postgres.
+
+| | |
+|---|---|
+| Container | `atlas-calendar` |
+| Host port | `localhost:8023` |
+| Network | atlas-net |
+| URL prefix | `/api` |
+
+**Endpoints:**
+```
+GET /api/cal/events returns Dataset of events
+POST /api/cal/events creates a new CalendarEvent, returns Dataset (single row)
+PATCH /api/cal/events/{event_id} partially updates a CalendarEvent, returns Dataset (single row)
+DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
+```
+
 ### Chronicle ⚠️
 
 **Summary:** Append-only log / journal application. Stores timestamped entries.
@@ -216,6 +235,26 @@ GET /health — liveness check, returns {status: ok}
 
 **Caller notes:**
 - No 00_architecture yet — stub only.
+
+### EssayCards
+
+**Summary:** Long-form essay reader paired with spaced-repetition flashcards: essays are ingested via a markdown CLI or a JSON HTTP endpoint — both sharing one upsert core — into ordered sections, each section owns flashcards that link back to the passage that taught them, and a due-queue review loop schedules re-review using a deterministic interval algorithm.
+
+| | |
+|---|---|
+| Container | `atlas-essaycards` |
+| Host port | `localhost:8024` |
+| Network | atlas-net |
+| URL prefix | `/api` |
+
+**Endpoints:**
+```
+GET /api/essaycards/essays — list all ingested essays; no params; returns Dataset ordered by created_at asc
+GET /api/essaycards/essays/{essay_id} — single essay with its ordered sections embedded; returns Dataset (single row); 404 ApiError if not found
+GET /api/essaycards/flashcards/due — due flashcards, optionally scoped to an essay or a section within an essay; returns Dataset ordered by next_due_at asc
+POST /api/essaycards/flashcards/{flashcard_id}/review — grade a card and persist its next scheduling state; mutation endpoint, returns typed record on success
+POST /api/essaycards/essays/ingest — accepts one JSON payload (title, slug, sections[].{heading, anchor_slug, body_markdown, cards[].{id,q,a}}); creates the essay if slug is new, upserts sections/cards onto an existing essay if slug already exists; calls the same shared upsert core (backend.ingest.upsert_document) as the markdown CLI path; mutation endpoint, returns a typed record on success (200), ApiError on any validation failure (400)
+```
 
 ### FoodTracker ⚠️
 

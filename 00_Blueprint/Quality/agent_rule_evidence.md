@@ -457,3 +457,105 @@ severity: major
 recurrence_hint: "First observed — pattern: designer evaluates multiple implementation options inline within internal_flow rather than resolving to one approach before writing the artifact"
 linked_immediate_artifact: 03_Application/FoodTracker/Sprint08_UI_Update/11_design_review.md
 ---
+
+---
+entry_id: EVD-2026-05-07-001
+date: 2026-05-07
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: Calendar
+sprint: Sprint01_Core
+pattern_name: dependency_driver_inconsistency
+short_description: Design introduced asyncpg (async Postgres driver) for a new application while every other Atlas application uses psycopg2 — no justification given, creating a codebase inconsistency.
+evidence: "10_architecture.json §dependencies.external_required: asyncpg listed as required; all 03_Application components use psycopg2 (grep confirms 40+ files)"
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern: designer selects a technically-valid but non-canonical dependency without checking the established codebase pattern"
+linked_immediate_artifact: 03_Application/Calendar/Sprint01_Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-27-001
+date: 2026-08-27
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint01_Core
+pattern_name: mutation_error_shape_bypass_on_malformed_body
+short_description: Mutation endpoint's manual grade-value validation only covers the wrong-value case; a missing or wrong-typed body field triggers framework-level RequestValidationError, which the installed exception handler does not convert to ApiError, bypassing the R-CON-BP-04 error-envelope contract.
+evidence: "10_architecture.json §interfaces.exposed_surfaces (POST .../review) and 10_scaffolding.json backend/routers/flashcards.py ReviewRequest: 'grade: str, deliberately not a Literal/enum so an invalid value is validated manually in the handler' — install_exception_handlers (02_Platform/packages/platform_errorhandling/logFastapi.py) only registers a handler for the generic Exception type, not RequestValidationError"
+likely_root_cause: spec_ambiguity
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — pattern: designer validates the anticipated bad-value input state but does not trace the full input-state space against which validation layer (Pydantic vs. handler) actually processes each state"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint01_Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-27-002
+date: 2026-08-27
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint01_Core
+pattern_name: stale_dependency_path_reference
+short_description: architecture.json references a platform package via two different paths in the same document — one correct (matches dependencies.internal_required and actual repo layout), one stale/non-existent (matches an outdated reference also present in root CLAUDE.md).
+evidence: "10_architecture.json §interfaces.consumes: 'platform_errorhandling from 02_Platform/03_ErrorHandling/' (path does not exist) vs §dependencies.internal_required: '02_Platform/packages/platform_errorhandling' (actual path, confirmed by filesystem search and StorageTracker's real import)"
+likely_root_cause: definition_quality
+candidate_response: rule
+severity: major
+recurrence_hint: "First observed — pattern: designer copied a stale path from root CLAUDE.md's Repository References section rather than verifying against the actual package location"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint01_Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-28-001
+date: 2026-08-28
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint01_Core
+pattern_name: nested_list_field_outside_columnschema
+short_description: Resolved the design review's open uncertainty about the essay-detail Dataset's nested `sections` field by embedding it as a plain list-valued key on the single returned row, omitted from ESSAY_SCHEMA (ColumnSchema has no array/object ColumnType) — following the exact precedent already established by StorageTracker's item-detail `history` field.
+evidence: "13_design_review.md §Open Uncertainties #1: 'No explicit ColumnSchema for the essay-detail Dataset's nested sections field ... Round 1 left this to the implementer (StorageTracker history-field precedent) ... Suggested owner: Implementer.' Implemented in backend/routers/essays.py get_essay(): row[\"sections\"] = [...] is set on the dict before constructing Dataset(**{\"schema\": ESSAY_SCHEMA}, rows=[row]) — sections is not listed in ESSAY_SCHEMA, mirroring StorageTracker/backend/routers/items.py get_item()'s row[\"history\"] = history."
+likely_root_cause: definition_quality
+candidate_response: design_template
+severity: major
+recurrence_hint: "Also seen in StorageTracker Sprint01/02 (history field) and Calendar — recurring gap: platform_contracts.ColumnSchema/ColumnType has no representation for nested/embedded list fields on a Dataset row, so every app that embeds detail sub-rows must independently decide to omit them from schema rather than following a documented convention"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint01_Core/13_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-28-002
+date: 2026-08-28
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint02_JsonIngestion
+pattern_name: unspecified_string_normalization_left_to_implementer
+short_description: Resolved the design review's non-blocking "Recommended Improvement" about title/slug/body_markdown whitespace normalization by making POST /essays/ingest strip title, slug, heading, anchor_slug, and card id (matching the markdown CLI path's effective behavior — front-matter title/slug are `.strip()`ped, anchor_slug/card_key can carry no whitespace from their extraction source) while leaving body_markdown, q, and a stored verbatim (matching the markdown path, which never strips question/answer text).
+evidence: "11_design_review.md §Recommended Improvements #1: 'Specify ... whether title and body_markdown are trimmed before being written into doc, and whether slug/anchor_slug/card id are trimmed before the regex is applied ... currently unaddressed by both 10_architecture.json and 10_scaffolding.json.' Implemented in backend/routers/essays.py::_validate_ingest_body() with an inline comment documenting the chosen split; verdict was APPROVED with this left open as a non-blocking improvement, so no design artifact update was required before implementation."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint02_JsonIngestion/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-28-003
+date: 2026-08-28
+source_agent: claude (main session, acting as implementer)
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint02_JsonIngestion
+pattern_name: post_tests_passing_direct_ux_fixes_outside_agent_pipeline
+short_description: Three UX fixes were applied directly to IngestView (src/ShellEntry.tsx) after Sprint02 had already reached TESTS_PASSING, in response to problems the human found during the required manual pass on the sprint's [UI — manual] scenarios — done by the coordinating session directly (Edit tool) rather than by re-invoking sprint_implement, since each fix was small, frontend-only, and did not touch the approved API contract, schema, or any tested backend behavior.
+evidence: "User manual-testing feedback, in order: (1) 'the stub json should explain exactly how the json needs to be filled so chatgpt can fill it' -> added STUB_PROMPT (copy-to-clipboard fill-in prompt) and clipboard copy/paste buttons; (2) 'i still see \"title\": \"...\"' -> discovered the textarea's separate placeholder prop had never been updated to match, added self-documenting PLACEHOLDER_JSON; (3) JSON POST failed with unescaped internal quotes from LLM-generated content -> added an explicit escaping rule + a worked example demonstrating \\\" to STUB_PROMPT. None of these changed backend/routers/essays.py, 10_architecture.json, or 10_schema.sql; all 46 existing tests were unaffected (frontend-only, no new automated coverage added for the clipboard buttons themselves, which remain untested browser-API interactions)."
+likely_root_cause: none
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — first EssayCards sprint where the human's own manual-UI-testing pass (required by the [UI — manual] convention) surfaced fixable issues before close, rather than just confirming behavior"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint02_JsonIngestion/99_sprint_log.md
+---

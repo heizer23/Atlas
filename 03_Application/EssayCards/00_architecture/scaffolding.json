@@ -1,0 +1,651 @@
+{
+  "component_name": "essaycards",
+  "target_root": "03_Application/EssayCards",
+  "directories": [
+    "03_Application/EssayCards",
+    "03_Application/EssayCards/backend",
+    "03_Application/EssayCards/backend/routers",
+    "03_Application/EssayCards/src",
+    "03_Application/EssayCards/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/EssayCards/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty package marker",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management — same pattern as StorageTracker/Calendar: build DATABASE_URL from ATLAS_PG_* or DATABASE_URL env var, SimpleConnectionPool(minconn=1, maxconn=5, RealDictCursor), get_db() context manager, init_schema() executes schema.sql idempotently. Unchanged this sprint.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "pattern": "factory",
+          "methods": [],
+          "purpose": "Initialize the module-level psycopg2 SimpleConnectionPool from ATLAS_PG_* / DATABASE_URL env vars"
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "pattern": "factory",
+          "methods": [],
+          "purpose": "Read schema.sql relative to this module and execute it idempotently against the connected database"
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "pattern": "factory",
+          "methods": [],
+          "purpose": "Context manager yielding a pooled connection; rolls back on exception, always returns the connection to the pool"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/backend/scheduling.py",
+      "stub_kind": "python_module",
+      "role": "Pure spaced-repetition scheduling logic — independently unit-testable, no DB or HTTP dependency. Unchanged this sprint.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "VALID_GRADES",
+          "pattern": "constant",
+          "purpose": "frozenset/tuple of the four accepted grade values: again, hard, good, easy"
+        },
+        {
+          "kind": "function",
+          "name": "compute_next_due_at",
+          "pattern": "validator",
+          "methods": [
+            {
+              "name": "compute_next_due_at",
+              "visibility": "public",
+              "args": [
+                "grade: str",
+                "last_reviewed_at: datetime | None",
+                "now: datetime"
+              ],
+              "returns": "datetime",
+              "purpose": "Implements the exact scheduling formula from 10_architecture.json contracts.invariants: again -> now + 5s flat; hard/good/easy -> now + max(floor, 2*elapsed) where elapsed is null-safe against a never-reviewed card, using the fixed floors 1 minute / 20 minutes / 1 day"
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/backend/ingest.py",
+      "stub_kind": "python_module",
+      "role": "One-shot markdown ingestion (CLI entrypoint plus a directly-callable function for tests) PLUS the shared upsert core used by both the markdown CLI path and the new JSON API path. Implements the markdown grammar from 10_architecture.json internal_flow steps 2 (parsing, unchanged) and the shared transactional upsert from step 3 (extracted this sprint into upsert_document, called from both ingest() and the new POST /essays/ingest handler in routers/essays.py). This must be a pure refactor of step 3 — see 10_architecture.json contracts.invariants for the regression requirement (Sprint01's 36 tests must pass unchanged).",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "IngestionError",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "Raised for any parse/validation failure before a database write is attempted; carries a human-readable message citing the offending line, section, or card. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "ingest",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "ingest",
+              "visibility": "public",
+              "args": [
+                "path: str",
+                "conn: psycopg2.extensions.connection"
+              ],
+              "returns": "IngestSummary",
+              "purpose": "[CHANGED] Now a thin wrapper: reads the file at path, parses it via _parse_document (unchanged), then delegates the transactional upsert to upsert_document(conn, doc). Raises IngestionError on any validation failure before touching the database. Callable directly from tests without shelling out. Behavior must be identical to Sprint01 — only the internal call structure changed."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "upsert_document",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "upsert_document",
+              "visibility": "public",
+              "args": [
+                "conn: psycopg2.extensions.connection",
+                "doc: dict"
+              ],
+              "returns": "IngestSummary",
+              "purpose": "[NEW] The shared upsert core, extracted this sprint from what was previously inline inside ingest(). Given a doc dict shaped {title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]}, opens one transaction on conn and upserts the essay (keyed by slug), each section (keyed by essay_id+anchor_slug), and each card (keyed by essay_id+card_key) using the exact SQL already implemented in Sprint01's ingest() (ON CONFLICT ... DO UPDATE, was_inserted via xmax=0, flashcard_review_state row created only when was_inserted is true). Commits on success; rolls back and re-raises on any database error. Called by ingest() (markdown/CLI path) and by the new POST /essays/ingest handler (JSON/API path) — the single place all essaycards upsert SQL lives; must not be duplicated in routers/essays.py."
+            }
+          ]
+        },
+        {
+          "kind": "class",
+          "name": "IngestSummary",
+          "pattern": "data_model",
+          "methods": [],
+          "purpose": "[CHANGED] Return value of ingest()/upsert_document(): now also carries essay_id (str, the upserted essay's id) in addition to the existing essay_created (bool) and sections_created/sections_updated/flashcards_created/flashcards_updated (int) fields. essay_id is populated by upsert_document from the essay upsert's RETURNING id, so the JSON API response can include it without a second query. Adding this field must not change any existing attribute's meaning or Sprint01 test assertions."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_parse_front_matter",
+          "purpose": "Extract and yaml.safe_load the leading '---' delimited front matter block; requires non-empty title and slug. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_split_sections",
+          "purpose": "Scan body lines for `^##\\s+(.+?)\\s*\\{#([a-zA-Z0-9_-]+)\\}\\s*$`; returns ordered (heading, anchor_slug, content) tuples; raises IngestionError on a `##` line missing the anchor suffix. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_split_body_and_cards",
+          "purpose": "Given one section's raw content, locate at most one ```flashcards fenced block; returns (body_markdown, cards_yaml_text); raises IngestionError on multiple fences or trailing content after the fence. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_parse_cards_yaml",
+          "purpose": "yaml.safe_load the fenced content, validate top-level `cards` list, validate each entry has non-empty id/q/a. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_validate_uniqueness",
+          "purpose": "Raise IngestionError if the same anchor_slug appears twice across sections, or the same card id (card_key) appears twice across the whole file. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_upsert_essay",
+          "purpose": "INSERT ... ON CONFLICT (slug) DO UPDATE; returns essay id. Unchanged this sprint; now called from upsert_document instead of directly from ingest()."
+        },
+        {
+          "kind": "function",
+          "name": "_upsert_section",
+          "purpose": "INSERT ... ON CONFLICT (essay_id, anchor_slug) DO UPDATE; returns section id. Unchanged this sprint; now called from upsert_document instead of directly from ingest()."
+        },
+        {
+          "kind": "function",
+          "name": "_upsert_flashcard",
+          "purpose": "INSERT ... ON CONFLICT (essay_id, card_key) DO UPDATE ... RETURNING id, created_at, (xmax = 0) AS was_inserted; if was_inserted, also inserts the matching flashcard_review_state row with last_reviewed_at=null, next_due_at=created_at. Unchanged this sprint; now called from upsert_document instead of directly from ingest()."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty package marker",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/essays.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] GET /essays and GET /essays/{essay_id} (unchanged from Sprint01) PLUS the new POST /ingest endpoint. POST /ingest reads the raw Starlette Request body manually (no Pydantic model), structurally validates it (10_architecture.json internal_flow step 8), runs the one DB-dependent collision check when the essay already exists (step 9), then calls backend.ingest.upsert_document(conn, doc) — never duplicates upsert SQL locally. Route handler functions (list_essays, get_essay, ingest_essay) are not individually enumerated below, per this scaffold's existing convention (see flashcards.py) — only the router constant and private helpers are.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "purpose": "APIRouter(prefix='/essays', tags=['essays']) — included by main.py under /api/essaycards. Now also carries POST /ingest in addition to Sprint01's GET '' and GET '/{essay_id}'."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "ESSAY_SCHEMA",
+          "purpose": "ColumnSchema list for the essay list Dataset: id, title, slug. Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_row_to_dict",
+          "purpose": "Convert a psycopg2 RealDictRow essay row to a JSON-serializable dict (uuid -> str, datetime -> isoformat). Unchanged this sprint."
+        },
+        {
+          "kind": "function",
+          "name": "_section_row_to_dict",
+          "purpose": "Convert a psycopg2 RealDictRow section row to a JSON-serializable dict for embedding under 'sections'. Unchanged this sprint."
+        },
+        {
+          "kind": "constant",
+          "name": "_SLUG_LIKE_RE",
+          "purpose": "[NEW] Compiled regex ^[a-zA-Z0-9_-]+$ — shared format check for the payload's slug, every section's anchor_slug, and every card's id."
+        },
+        {
+          "kind": "function",
+          "name": "_validate_ingest_body",
+          "purpose": "[NEW] Given the raw parsed JSON body (Any), performs the full structural validation described in 10_architecture.json internal_flow step 8 and returns (doc, None) on success or (None, JSONResponse) with an ApiError VALIDATION_ERROR on the first violation found. Builds the doc dict ({title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]}) with order_index assigned from array position and id/q/a renamed to card_key/question/answer. Never touches the database."
+        },
+        {
+          "kind": "function",
+          "name": "_check_card_section_collisions",
+          "purpose": "[NEW] Given (cur, existing_essay_id: str, doc: dict), queries existing flashcards for existing_essay_id whose card_key appears in doc's incoming cards, joined to their current section's anchor_slug. Returns a JSONResponse ApiError VALIDATION_ERROR (naming the colliding card_key and both anchor_slugs) if any existing card_key is attached to a different anchor_slug than the one it appears under in doc; returns None if no collision. Must be called, and must return None, before backend.ingest.upsert_document is invoked."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/flashcards.py",
+      "stub_kind": "python_module",
+      "role": "GET /flashcards/due and POST /flashcards/{flashcard_id}/review. Unchanged this sprint. The review handler's manual-validation pattern (raw Request, no Pydantic body model) is the precedent followed by the new POST /essays/ingest handler in essays.py.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "purpose": "APIRouter(prefix='/flashcards', tags=['flashcards']) — included by main.py under /api/essaycards"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "DUE_SCHEMA",
+          "purpose": "ColumnSchema list for the due-flashcards Dataset: id, flashcard_id, question, answer, essay_id, section_id, anchor_slug, next_due_at"
+        },
+        {
+          "kind": "function",
+          "name": "_due_row_to_dict",
+          "purpose": "Convert a joined flashcard+review_state+section row to a JSON-serializable dict, including both 'id' and 'flashcard_id' set to the same value for Dataset row-id compliance"
+        },
+        {
+          "kind": "function",
+          "name": "_parse_review_grade",
+          "purpose": "Given the raw request body (parsed as JSON, or None/invalid on parse failure), returns the validated grade string or raises an ApiError-producing VALIDATION_ERROR response for any invalid shape: unparsable JSON, missing grade key, non-string grade, or a grade outside backend.scheduling.VALID_GRADES"
+        }
+      ]
+    },
+    {
+      "path": "03_Application/EssayCards/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entry point. Unchanged this sprint — the new POST /ingest route is registered on the existing essays.router instance, already included at prefix /api/essaycards; no new router to include, no new middleware.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "fastapi_app",
+          "purpose": "FastAPI instance with CORS, exception handlers, request timing installed, and essays.router + flashcards.router both mounted at prefix /api/essaycards; on startup calls init_pool() then init_schema()"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/schema.sql",
+      "stub_kind": "sql",
+      "role": "Canonical runtime schema DDL. Unchanged this sprint — no new tables/columns/constraints needed for JSON ingestion; reuses essays/essay_sections/flashcards/flashcard_review_state exactly as defined in Sprint01_Core/10_schema.sql.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/pyproject.toml",
+      "stub_kind": "config",
+      "role": "Python project manifest. Unchanged this sprint — no new dependencies.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/Dockerfile",
+      "stub_kind": "config",
+      "role": "Container image. Unchanged this sprint.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/compose.yml",
+      "stub_kind": "config",
+      "role": "Docker Compose service definition. Unchanged this sprint.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/run_local.py",
+      "stub_kind": "python_module",
+      "role": "Local development entrypoint. Unchanged this sprint.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/CLAUDE.md",
+      "stub_kind": "doc",
+      "role": "App-local guidance for Claude Code. Implementer should add a short note about the new JSON ingestion endpoint and the shared upsert core, following the existing doc's style; not architecturally required.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/src/ShellEntry.tsx",
+      "stub_kind": "tsx_module",
+      "role": "[CHANGED] React entry point registered with Atlas Shell — essay list (unchanged, already existed), reader view (unchanged), review session view (unchanged), PLUS a new IngestView (this sprint) for pasting a JSON payload and submitting it to POST /essaycards/essays/ingest.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "default",
+          "pattern": "react_component",
+          "methods": [],
+          "purpose": "Default export: Routes wiring for essay list (/essaycards), reader (/essaycards/essays/:id), review session (/essaycards/review), and [NEW] the ingest view (/essaycards/ingest). Internal view components (EssayListView, ReaderView, ReviewSessionView, and the new IngestView) are not individually enumerated here, per this scaffold's existing convention — only the default export is a public object."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/src/shellConfig.ts",
+      "stub_kind": "ts_module",
+      "role": "[CHANGED] Atlas Shell registration — registers EssayCards with AppRegistry as a side-effect, imported only from 02_Platform/Atlas_Shell/src/shell/main.tsx per the shell's consumer pattern. Adds a third nav entry ('Add / Update Essay', path /essaycards/ingest) to both mobilePrimaryNav and desktopNav, alongside the existing 'Essays' and 'Due for review' entries.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty init to make tests a package",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/conftest.py",
+      "stub_kind": "python_module",
+      "role": "Pytest fixtures. Unchanged this sprint — the existing client fixture (Starlette TestClient) already supports POST requests, used unchanged by the new test_ingest_endpoint.py.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "db_conn",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Session-scoped raw psycopg2 connection to atlas_test for schema setup and fixture loading"
+        },
+        {
+          "kind": "function",
+          "name": "setup_schema",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Session-scoped autouse fixture executing schema.sql against atlas_test"
+        },
+        {
+          "kind": "function",
+          "name": "clean_tables",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Function-scoped autouse fixture: truncate essaycards.essays cascade, reload tests/fixtures.sql"
+        },
+        {
+          "kind": "function",
+          "name": "app",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Session-scoped FastAPI app instance with the pool initialised against atlas_test"
+        },
+        {
+          "kind": "function",
+          "name": "client",
+          "pattern": "pytest_fixture",
+          "methods": [],
+          "purpose": "Starlette TestClient wrapping app"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/fixtures.sql",
+      "stub_kind": "sql",
+      "role": "INSERT statements for test essays/sections/flashcards/review_state. Unchanged this sprint — the existing fixture set (essay slug 'origins-of-long-form-formats' with sections 'origins'/'structure' and cards fc-origins-1/2/3, fc-not-due, plus essay-b/essay-c) is sufficient to exercise every new scenario in 10_test_spec.md, including the card-id/different-section collision case (fc-origins-1 lives under section 'origins'; a test payload referencing it under section 'structure' triggers the collision). New-essay-creation scenarios use a brand-new slug supplied by the test itself and need no fixture row.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_essays.py",
+      "stub_kind": "python_module",
+      "role": "Pytest tests for GET /essays and GET /essays/{essay_id}. Unchanged this sprint.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_list_essays_returns_dataset",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: List essays returns Dataset"
+        },
+        {
+          "kind": "function",
+          "name": "test_list_essays_empty",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: List essays when none ingested returns empty Dataset"
+        },
+        {
+          "kind": "function",
+          "name": "test_essay_detail_returns_ordered_sections",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Essay detail returns sections ordered by order_index with body_markdown"
+        },
+        {
+          "kind": "function",
+          "name": "test_essay_detail_not_found",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Essay detail for unknown essay_id returns 404"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_flashcards.py",
+      "stub_kind": "python_module",
+      "role": "Pytest tests for GET /flashcards/due and POST /flashcards/{id}/review. Unchanged this sprint.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_due_no_params_returns_system_wide",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Due flashcards with no params returns all due cards system-wide ordered by next_due_at asc"
+        },
+        {
+          "kind": "function",
+          "name": "test_due_scoped_to_essay",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Due flashcards scoped to essay_id"
+        },
+        {
+          "kind": "function",
+          "name": "test_due_scoped_to_section",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Due flashcards scoped to essay_id and section_id"
+        },
+        {
+          "kind": "function",
+          "name": "test_due_section_without_essay_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: section_id without essay_id is rejected"
+        },
+        {
+          "kind": "function",
+          "name": "test_due_excludes_not_yet_due_cards",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: A card with next_due_at in the future is excluded from the due queue"
+        },
+        {
+          "kind": "function",
+          "name": "test_due_empty_result",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Due flashcards returns empty Dataset when nothing is due for the given scope"
+        },
+        {
+          "kind": "function",
+          "name": "test_review_again_schedules_five_seconds",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Grading again schedules next_due_at five seconds out, flat"
+        },
+        {
+          "kind": "function",
+          "name": "test_review_good_first_time_uses_floor",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Grading good on a never-reviewed card uses the 20-minute floor"
+        },
+        {
+          "kind": "function",
+          "name": "test_review_good_repeat_uses_doubled_elapsed",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Grading good again after a prior review uses max(floor, 2*elapsed)"
+        },
+        {
+          "kind": "function",
+          "name": "test_review_invalid_grade_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: An invalid grade value is rejected with VALIDATION_ERROR"
+        },
+        {
+          "kind": "function",
+          "name": "test_review_unknown_flashcard_not_found",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Reviewing an unknown flashcard_id returns 404"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_ingest.py",
+      "stub_kind": "python_module",
+      "role": "Pytest tests calling backend.ingest.ingest() directly against fixture markdown files (no HTTP). Unchanged this sprint — these are the regression check for the upsert_document extraction; no test-file edits expected.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_ingest_creates_essay_sections_and_cards",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingesting a well-formed markdown file creates the essay, its sections, and its flashcards, each new flashcard due immediately"
+        },
+        {
+          "kind": "function",
+          "name": "test_reingest_preserves_review_state",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Re-ingesting an unchanged file after a card has been graded does not reset that card's review state"
+        },
+        {
+          "kind": "function",
+          "name": "test_reingest_updates_changed_text_only",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Re-ingesting a file with edited question/answer text updates only the text, not review state"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_missing_anchor_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: A ## heading missing the {#anchor} suffix aborts ingestion with no rows written"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_malformed_flashcards_yaml_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: A flashcards block missing a required id/q/a key aborts ingestion with no rows written"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_multiple_flashcards_blocks_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: A section with two flashcards fenced blocks aborts ingestion"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_duplicate_card_key_rejected",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Two flashcards sharing the same id within one file aborts ingestion"
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_ingest_endpoint.py",
+      "stub_kind": "python_module",
+      "role": "[NEW] Pytest tests for POST /api/essaycards/essays/ingest (HTTP-level, via the TestClient) — distinct from test_ingest.py, which tests backend.ingest.ingest() directly against markdown files and is unaffected by this sprint.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_ingest_json_creates_new_essay",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest creates a new essay via JSON"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_upserts_onto_existing_essay_preserves_review_state",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest upserts onto an existing essay by slug and does not disturb unrelated flashcard_review_state rows"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_order_index_follows_payload_array_order",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: order_index is derived from payload array position"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_malformed_payload_writes_nothing",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects a malformed payload before any write (all-or-nothing rollback case)"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_duplicate_anchor_slug_in_payload",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects duplicate anchor_slug within payload"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_duplicate_card_id_in_payload",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects duplicate card id within payload"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_card_id_collision_with_different_existing_section",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects a card id colliding with an existing card in a different section"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_unparsable_json_body",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects an unparsable JSON body"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_missing_required_top_level_field",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects a payload missing a required top-level field"
+        },
+        {
+          "kind": "function",
+          "name": "test_ingest_json_rejects_empty_sections_array",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Ingest rejects an empty sections array"
+        }
+      ],
+      "private_objects": []
+    }
+  ]
+}

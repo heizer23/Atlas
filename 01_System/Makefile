@@ -319,6 +319,68 @@ app-reboot:
 # endregion
 
 
+# region --- Application: Calendar
+CAL_APP_DIR=../03_Application/Calendar
+
+CAL_APP_COMPOSE=docker compose \
+	-f $(CAL_APP_DIR)/compose.yml \
+	$(ENV_FILES)
+
+cal-app-build:
+	$(CAL_APP_COMPOSE) build
+
+cal-app-up:
+	$(CAL_APP_COMPOSE) up -d
+
+cal-app-down:
+	$(CAL_APP_COMPOSE) down
+
+cal-app-logs:
+	$(CAL_APP_COMPOSE) logs -f
+
+cal-app-reboot:
+	$(CAL_APP_COMPOSE) down
+	$(CAL_APP_COMPOSE) up -d
+
+cal-app-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(CAL_APP_DIR)/00_architecture/schema.sql
+
+# endregion
+
+
+# region --- Application: EssayCards
+ESSAYCARDS_DIR=../03_Application/EssayCards
+
+ESSAYCARDS_COMPOSE=docker compose \
+	-f $(ESSAYCARDS_DIR)/compose.yml \
+	$(ENV_FILES)
+
+essaycards-build:
+	$(ESSAYCARDS_COMPOSE) build
+
+essaycards-up:
+	$(ESSAYCARDS_COMPOSE) up -d
+
+essaycards-down:
+	$(ESSAYCARDS_COMPOSE) down
+
+essaycards-logs:
+	$(ESSAYCARDS_COMPOSE) logs -f
+
+essaycards-reboot:
+	$(ESSAYCARDS_COMPOSE) down
+	$(ESSAYCARDS_COMPOSE) up -d
+
+essaycards-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(ESSAYCARDS_DIR)/00_architecture/schema.sql
+
+# endregion
+
+
 # region --- Platform: Notifications
 NOTIF_DIR=../02_Platform/Notifications
 
@@ -628,6 +690,8 @@ net-connect:
 	@docker network connect atlas-net atlas-preference-store  2>/dev/null || true
 	@docker network connect atlas-net atlas-numeric-series    2>/dev/null || true
 	@docker network connect atlas-net atlas-storagetracker    2>/dev/null || true
+	@docker network connect atlas-net atlas-calendar          2>/dev/null || true
+	@docker network connect atlas-net atlas-essaycards        2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -656,6 +720,10 @@ up:
 	$(MAKE) numeric-build    numeric-up
 	$(MAKE) storage-schema
 	$(MAKE) storage-build    storage-up
+	$(MAKE) cal-app-schema
+	$(MAKE) cal-app-build    cal-app-up
+	$(MAKE) essaycards-schema
+	$(MAKE) essaycards-build essaycards-up
 	$(MAKE) cloudflared-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
@@ -665,10 +733,12 @@ up:
 down:
 	-$(MAKE) shell-down
 	-$(MAKE) cloudflared-down
+	-$(MAKE) essaycards-down
 	-$(MAKE) numeric-down
 	-$(MAKE) linking-down
 	-$(MAKE) pref-down
 	-$(MAKE) label-down
+	-$(MAKE) cal-app-down
 	-$(MAKE) calendar-down
 	-$(MAKE) notif-down
 	-$(MAKE) chronicle-down

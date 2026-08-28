@@ -1,0 +1,420 @@
+{
+  "component_name": "essaycards",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Long-form essay reader paired with spaced-repetition flashcards: essays are ingested via a markdown CLI or a JSON HTTP endpoint — both sharing one upsert core — into ordered sections, each section owns flashcards that link back to the passage that taught them, and a due-queue review loop schedules re-review using a deterministic interval algorithm.",
+  "classification": {
+    "why_application": "Owns the essaycards schema (essays, sections, flashcards, review state), owns both ingestion grammars (markdown CLI and JSON API, sharing one upsert core) and their upsert-by-stable-key semantics, and owns the spaced-repetition scheduling algorithm — all essay-content-specific and review-specific domain behavior, not reusable technical infrastructure.",
+    "non_goals": [
+      "Rich/structured in-app editing UI for essay text or flashcards (forms, WYSIWYG, inline field editing) — the new 'Add / Update Essay' view is a raw JSON-paste textarea only, not a structured editor",
+      "Multiple essays / topic library UI",
+      "User accounts / multi-user review state",
+      "Typed-answer grading (flip-and-self-assess only, not text matching)",
+      "Review statistics, streaks, retention graphs",
+      "Notifications/reminders when cards become due",
+      "Offline support",
+      "Uploading/editing markdown files through the UI (the CLI markdown path remains file-based and unchanged)",
+      "Deleting essays, sections, or flashcards via the JSON ingest endpoint or its UI",
+      "Reconciliation of sections/cards present in the DB but omitted from a given JSON ingest payload — same accepted gap as the markdown path (see risks)",
+      "Authentication on the new JSON ingest endpoint — follows the existing repo-wide convention of no per-app auth layer, bound to 127.0.0.1 behind the shell (see risks — R-OPS-BP-02 flagged explicitly by the draft)",
+      "Full multi-essay reader experience (topic switcher, essay metadata editing, etc.) beyond the minimal list/picker that already exists"
+    ],
+    "not_platform": "The markdown and JSON ingestion grammars (sharing one upsert core), the essay/section/flashcard domain model, and the spaced-repetition scheduling formula are meaningful only within this application. No other Atlas application ingests essay content or schedules flashcard review; nothing here is a generic reusable primitive — the manual JSON-body validation added this sprint is app-specific payload validation (essay/section/flashcard shape), not a generic request-validation platform capability, so it stays in this router, not in platform_errorhandling."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via ATLAS_PG_* or DATABASE_URL env vars",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/packages/platform_errorhandling/ — api_error helper, exception handlers, request timing, structured logging",
+      "A markdown source file provided by the user on the local filesystem, mounted into the container for the ingestion CLI to read (markdown CLI path only, unchanged this sprint)"
+    ],
+    "provides": [
+      "GET /api/essaycards/essays — list all ingested essays; no params; returns Dataset ordered by created_at asc",
+      "GET /api/essaycards/essays/{essay_id} — single essay with its ordered sections embedded; returns Dataset (single row); 404 ApiError if not found",
+      "GET /api/essaycards/flashcards/due — due flashcards, optionally scoped to an essay or a section within an essay; returns Dataset ordered by next_due_at asc",
+      "POST /api/essaycards/flashcards/{flashcard_id}/review — grade a card and persist its next scheduling state; mutation endpoint, returns typed record on success",
+      "POST /api/essaycards/essays/ingest — accepts one JSON payload (title, slug, sections[].{heading, anchor_slug, body_markdown, cards[].{id,q,a}}); creates the essay if slug is new, upserts sections/cards onto an existing essay if slug already exists; calls the same shared upsert core (backend.ingest.upsert_document) as the markdown CLI path; mutation endpoint, returns a typed record on success (200), ApiError on any validation failure (400)"
+    ],
+    "invariants": [
+      "All read endpoints (GET) return Dataset per R-CON-BP-04",
+      "essays.slug is unique; essay_sections.(essay_id, anchor_slug) is unique; flashcards.(essay_id, card_key) is unique — these are exactly the three upsert keys defined by the ingestion contract, shared by both entry points",
+      "anchor_slug is always author-assigned (from the markdown `{#slug}` heading suffix, or the JSON payload's anchor_slug field) — no code path derives an anchor from heading text",
+      "card_key is always the author-assigned id (from the markdown source file or the JSON payload's card id field) — no code path generates ids",
+      "Re-ingestion of an existing flashcard (matched by card_key) updates question, answer, and section_id only; flashcard_review_state.last_reviewed_at and next_due_at are never modified by re-ingestion, via either entry point",
+      "A newly ingested flashcard (no prior row with that card_key) gets flashcard_review_state.last_reviewed_at = null and next_due_at = the flashcard row's created_at, making it due immediately, via either entry point",
+      "Ingestion is fully transactional for both entry points: parsing/validation happens entirely before any database write; if any validation error occurs, no rows are inserted or updated for that ingestion run. Both the markdown CLI path (backend.ingest.ingest) and the JSON API path (POST /essays/ingest) delegate their database writes to the single shared backend.ingest.upsert_document(conn, doc) function — see the new invariants below for the exact module boundary.",
+      "'Due' is defined as next_due_at <= now(), where now() is evaluated by Postgres at query time (single time-authority; see R-CON-AL-06 note below)",
+      "The four grade values are exactly: again, hard, good, easy — no other value is accepted",
+      "POST .../review reads and validates the request body manually against the raw parsed JSON (grade must be present and be a string in {again, hard, good, easy}) instead of relying on a Pydantic-enforced required field. Every invalid-body shape — missing grade, non-string grade, out-of-set grade, or an unparsable JSON body — is caught by application code and returned as ApiError with error.code=VALIDATION_ERROR (400); FastAPI's default RequestValidationError 422 shape is never produced by this endpoint, per R-CON-BP-04",
+      "Grading always sets last_reviewed_at to the request-handling instant, for every grade including again",
+      "For grade=again: next_due_at = now + 5 seconds, flat — the floor/doubling formula does not apply to again",
+      "For grade in {hard, good, easy}: floor is 1 minute / 20 minutes / 1 day respectively; elapsed = null if last_reviewed_at was null else (now - last_reviewed_at); interval = floor if elapsed is null else max(floor, 2 * elapsed); next_due_at = now + interval",
+      "R-CON-AL-06 time authority: the single authoritative 'now' for a review request is read once from Postgres (`select now()`) at the start of the review transaction, then reused as both the persisted last_reviewed_at value and the base for computing next_due_at — the client never sends a timestamp and the app server's local clock is never used, avoiding drift between the due-boundary check and the scheduling arithmetic",
+      "R-CON-AL-04/05 (partial update / null-vs-omit semantics) do not apply to POST .../review: it takes one required field (grade) with no nullable/omittable fields. They also do not apply to POST .../essays/ingest in the PATCH sense — ingest is additive/upsert-only, never a partial field-clear; see the new partial-update invariant below for its specific (different) semantics",
+      "Section body_markdown excludes the trailing flashcards fence — see 'Markdown ingestion grammar' below for the exact extraction rule (markdown path only)",
+      "Content appearing in the source markdown file before the first `##` section heading is discarded — there is no essay-level intro/body field in this schema; only sections carry markdown content. This is an explicit design decision (not a bug) — see risks. The JSON payload has no equivalent 'content before first section' concept since it has no notion of heading order outside the sections array.",
+      "If GET /flashcards/due is called with section_id set and essay_id omitted, this is rejected as VALIDATION_ERROR (section_id requires essay_id, per the draft's stated allowed combinations)",
+      "If GET /flashcards/due is called with an essay_id/section_id combination where the section does not actually belong to that essay, the query returns zero rows (not an error) — the WHERE clause ANDs both filters against the flashcard row's own essay_id and section_id columns",
+      "Both ingestion entry points parse their respective source format into the same in-memory `doc` shape — {title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]} — and then call the single shared backend.ingest.upsert_document(conn, doc) function for all database writes. The SQL upsert logic (ON CONFLICT clauses, transaction handling, the was_inserted/flashcard_review_state-creation rule) exists in exactly one place in the codebase and is never duplicated between the CLI and API paths.",
+      "backend.ingest.upsert_document(conn, doc) is a pure extraction of the transactional block that was previously inline inside ingest(): identical SQL text, identical commit/rollback ordering, identical was_inserted / flashcard_review_state-creation rule. Sprint01's 36 existing tests (test_essays.py, test_flashcards.py, test_ingest.py) are the regression check for this refactor and must pass unchanged with no test-file modifications — this resolves 00_draft.md's first Open Design Question.",
+      "POST /api/essaycards/essays/ingest must not use a Pydantic request-body model. The entire JSON body is read via the raw Starlette Request and validated manually by application code, so every invalid shape (unparsable JSON, non-object body, missing/empty/malformed title or slug, missing or empty sections array, malformed section or card fields, in-payload duplicate anchor_slug or card id, a card id colliding with an existing card in a different section) returns ApiError with error.code=VALIDATION_ERROR (400); FastAPI's default RequestValidationError 422 shape is never produced by this endpoint, following the precedent already set by POST .../review in Sprint01.",
+      "All structural and semantic validation of an ingest JSON payload completes before any database write is attempted — the same all-or-nothing guarantee as the markdown path. If any section or card in the payload is invalid, or a card id collides with an existing card in a different section of the same essay, the entire request is rejected and zero rows are written. This resolves 00_draft.md's second Open Design Question: yes, this case gets dedicated 10_test_spec.md scenarios (see 'Ingest — rejects a malformed payload before any write').",
+      "order_index for each section in a JSON ingest payload is derived from its 0-based position in the payload's `sections` array — there is no explicit order_index field in the JSON payload. Re-ingesting with a different section order updates existing sections' order_index to match, identical to how order-of-appearance drives order_index in the markdown path.",
+      "A card id (card_key) that already exists in the database for an essay but is attached to a section other than the one it appears under in the incoming JSON payload is rejected as VALIDATION_ERROR before any write. This is intentionally stricter than the markdown CLI path, which silently allows a re-ingested card to move to a different section (ON CONFLICT (essay_id, card_key) DO UPDATE ... SET section_id = excluded.section_id, unchanged this sprint). This is a deliberate, explicitly-specified difference in the JSON endpoint's pre-write validation layer only — the shared upsert core's SQL behavior is identical for both paths and is not itself made stricter. See risks for the asymmetry this creates.",
+      "Partial update semantics for the JSON endpoint are identical to the markdown CLI path: sections/cards that exist in the DB for an essay but are omitted from the ingest payload are left untouched (not deleted, not modified). A resubmitted flashcard's q/a text updates in place but its flashcard_review_state (last_reviewed_at, next_due_at) is never touched by ingestion via either path. There is no wholesale-replace mode for either path."
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — POST .../review with a grade outside {again, hard, good, easy}, including a missing grade field, a non-string grade value, or an unparsable JSON body (all validated manually against the raw request body, never via Pydantic required-field enforcement), or GET /flashcards/due with section_id but no essay_id — 400 ApiError",
+      "NOT_FOUND — GET /essays/{essay_id} with unknown id, or POST .../review with unknown flashcard_id — 404 ApiError",
+      "INGESTION_ERROR — the one-shot CLI ingestion script exits non-zero and writes nothing to the database when: YAML front matter is missing or unparsable; title or slug is missing from front matter; a `##` heading lacks the required `{#slug}` anchor suffix; a section contains more than one ```flashcards fenced block; a section has non-blank content after its ```flashcards fenced block; the ```flashcards block is not valid YAML or is missing the top-level `cards` key; any card entry is missing id, q, or a; the same anchor_slug appears twice in one file; the same card id (card_key) appears twice in one file. This is a CLI-local failure mode, not an HTTP response — it has no ApiError shape because ingestion via this path has no HTTP surface.",
+      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during a request — startup logs the error and continues; requests fail until the database is reachable",
+      "VALIDATION_ERROR — POST /api/essaycards/essays/ingest with: an unparsable JSON body; a non-object body; a missing, empty, or non-string title; a missing, empty, non-string, or malformed (not matching ^[a-zA-Z0-9_-]+$) slug; a missing or empty sections array; a section missing heading/anchor_slug/body_markdown, or with a malformed anchor_slug, or with cards not a list; a card missing id/q/a, or with a malformed id; a duplicate anchor_slug across sections in the payload; a duplicate card id across the payload; or a card id that already exists in the database for this essay under a different section than the one it appears under in the payload — 400 ApiError, no database write attempted in any of these cases"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool (minconn=1, maxconn=5) via get_db() context manager — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/packages/platform_errorhandling/",
+      "PyYAML (yaml.safe_load) — used only by the ingestion CLI (markdown path), never by the HTTP API",
+      "Starlette Request.json() — used only by the new POST /essays/ingest handler to read and manually parse the raw JSON body; PyYAML remains markdown-CLI-only and is unaffected by this sprint"
+    ],
+    "provides": [
+      "HTTP API mounted at /api/essaycards (FastAPI, uvicorn)",
+      "CORS: allow_origin_regex=http://localhost:\\d+ — all localhost ports during development",
+      "Allowed methods: GET, POST",
+      "backend.ingest — a CLI entrypoint (python -m backend.ingest <path>), not an HTTP surface, run manually by the user after editing the source markdown file",
+      "POST /api/essaycards/essays/ingest — JSON ingestion HTTP endpoint, registered on the existing essays.router, sharing backend.ingest.upsert_document with the markdown CLI path (see contracts.invariants)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays",
+        "purpose": "List all ingested essays.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {},
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — no parameters",
+          "ordering": "created_at asc",
+          "grouping": "none",
+          "time_basis": "n/a — no time filter",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "valid — Dataset with rows=[] when no essay has been ingested; UI shows an empty state, not an error",
+          "zero_fill_behavior": "not applicable — flat list, not a time series"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}",
+        "purpose": "Return one essay and its ordered sections, embedded on the single returned row.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "essay_id": "path param, uuid, required"
+        },
+        "query_behavior": {
+          "supported_parameters": "essay_id (path)",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — single required path param",
+          "ordering": "embedded sections ordered by order_index asc",
+          "grouping": "none",
+          "time_basis": "n/a",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "404 ApiError if essay_id does not exist; an essay with zero sections is valid and returns sections: []",
+          "zero_fill_behavior": "not applicable"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/due",
+        "purpose": "List due flashcards, optionally scoped to one essay or one section within an essay.",
+        "ui_contract": "Dataset | ApiError",
+        "params": {
+          "essay_id": "optional, uuid",
+          "section_id": "optional, uuid, requires essay_id to also be present"
+        },
+        "query_behavior": {
+          "supported_parameters": "essay_id (optional), section_id (optional, requires essay_id)",
+          "defaults": "neither param given -> all due cards system-wide",
+          "allowed_combinations": "{}: system-wide; {essay_id}: due cards in that essay; {essay_id, section_id}: due cards in that section only. {section_id only} is rejected with VALIDATION_ERROR.",
+          "ordering": "next_due_at asc (most overdue first)",
+          "grouping": "none",
+          "time_basis": "server time — 'due' means next_due_at <= now(), where now() is evaluated by Postgres at query execution time",
+          "boundary_construction": "WHERE next_due_at <= now() [AND essay_id = :essay_id] [AND section_id = :section_id]",
+          "empty_result_behavior": "valid — Dataset with rows=[] when nothing is due for the given scope",
+          "zero_fill_behavior": "not applicable — flat list, not a time series"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/flashcards/{flashcard_id}/review",
+        "purpose": "Grade a flashcard and persist its updated review-scheduling state using the spaced-repetition formula.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record { flashcard_id, last_reviewed_at, next_due_at } on success (200), ApiError on failure",
+        "params": {
+          "flashcard_id": "path param, uuid, required"
+        },
+        "body": {
+          "grade": "one of again | hard | good | easy, required. Parsed and validated manually by the handler from the raw JSON request body (not a Pydantic-required field), so every invalid shape — missing grade, non-string grade, out-of-set grade, or unparsable JSON — is caught by application code and returned as ApiError with error.code=VALIDATION_ERROR (400), never FastAPI's default RequestValidationError 422 shape"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/essays/ingest",
+        "purpose": "Create a new essay (if slug is new) or upsert sections/flashcards onto an existing essay (if slug already exists) from a JSON payload, sharing the same upsert core (backend.ingest.upsert_document) as the markdown CLI ingestion path.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record {essay_id, slug, sections_created, sections_updated, cards_created, cards_updated} on success (200), ApiError on any validation failure (400)",
+        "params": {},
+        "body": {
+          "title": "string, required, non-empty",
+          "slug": "string, required, non-empty, matches ^[a-zA-Z0-9_-]+$",
+          "sections": "list, required, at least one entry; each entry: {heading: string required non-empty, anchor_slug: string required matching ^[a-zA-Z0-9_-]+$ and unique within this payload, body_markdown: string required (may be empty string), cards: list required (may be empty)}; each card entry: {id: string required matching ^[a-zA-Z0-9_-]+$ and unique within this essay across existing DB rows plus the incoming payload, q: string required non-empty, a: string required non-empty}. Parsed and validated manually by the handler from the raw JSON request body (not a Pydantic model) — every invalid shape is caught by application code and returned as ApiError with error.code=VALIDATION_ERROR (400), never FastAPI's default RequestValidationError 422 shape"
+        }
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() creates the psycopg2 SimpleConnectionPool. init_schema() reads schema.sql and executes DDL idempotently. Errors are logged; the application continues running (requests fail until Postgres is reachable).",
+      "inputs": [
+        "ATLAS_PG_* or DATABASE_URL env vars",
+        "schema.sql"
+      ],
+      "outputs": [
+        "live connection pool",
+        "essaycards schema with essays, essay_sections, flashcards, flashcard_review_state tables present"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "ingest_parse",
+      "description": "backend/ingest.py reads the file at the given path. Parses YAML front matter delimited by a leading '---' line and the next '---' line (yaml.safe_load); requires non-empty title and slug, else aborts. Scans the remaining body line-by-line for `^##\\s+(.+?)\\s*\\{#([a-zA-Z0-9_-]+)\\}\\s*$` to find section boundaries in order of appearance; any `##` heading line that does not match this pattern aborts ingestion citing the line number and heading text. Content before the first matched section heading is discarded (no essay-level intro field exists). For each section, scans its content for a fenced block opened by a line matching `^```flashcards\\s*$` and closed by the next line matching `^```\\s*$`: zero matches means the section has zero flashcards (body_markdown = full trimmed section content); exactly one match means body_markdown = content before the opening fence (trimmed) and everything after the closing fence must be blank/whitespace-only (else abort); more than one match aborts ('multiple flashcards blocks in one section'). The matched fenced content is parsed as YAML expecting a top-level `cards` list of mappings, each requiring non-empty string keys id, q, a — extra keys are ignored; a missing required key aborts, citing the section anchor_slug and the card's position. Duplicate anchor_slug across sections, or duplicate card id (card_key) across the whole file, aborts ingestion before any database write.",
+      "inputs": [
+        "markdown file at given filesystem path"
+      ],
+      "outputs": [
+        "in-memory parsed structure: {title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]} — or an ingestion abort with a descriptive error and non-zero exit code, no DB writes made"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "ingest_upsert",
+      "description": "[CHANGED] Implemented by the shared backend.ingest.upsert_document(conn, doc) function (extracted this sprint from what was previously inline inside ingest()) — called by both the markdown CLI path (ingest(path, conn), after parsing) and the new JSON API path (POST /essays/ingest, after JSON validation). Opens one database transaction on the given connection. Upserts the essay row keyed by slug (INSERT ... ON CONFLICT (slug) DO UPDATE SET title, updated_at). For each section in doc order, upserts keyed by (essay_id, anchor_slug) (INSERT ... ON CONFLICT DO UPDATE SET heading, order_index, body_markdown, updated_at). For each card, upserts keyed by (essay_id, card_key) (INSERT ... ON CONFLICT DO UPDATE SET question, answer, section_id, updated_at RETURNING id, created_at, (xmax = 0) AS was_inserted). When was_inserted is true, inserts a matching flashcard_review_state row with last_reviewed_at = null and next_due_at = the returned created_at. When was_inserted is false (an existing card was updated), flashcard_review_state is left completely untouched. Commits on success; rolls back the entire transaction on any database error. This is a pure extraction of the previously-inline block — SQL text, transaction handling, and the was_inserted/review-state-creation rule are byte-for-byte unchanged, so Sprint01's existing tests are the regression check for this refactor (no test-file changes expected).",
+      "inputs": [
+        "doc: {title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]} — produced by either _parse_document() (markdown) or the JSON endpoint's manual validator (step 8)",
+        "conn: an open psycopg2 connection"
+      ],
+      "outputs": [
+        "essay, section, and flashcard rows upserted in Postgres; flashcard_review_state rows created only for newly-inserted flashcards; IngestSummary (essay_id, essay_created, sections_created, sections_updated, flashcards_created, flashcards_updated) returned to the caller"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "essays_list",
+      "description": "GET /api/essaycards/essays selects id, title, slug from essaycards.essays ordered by created_at asc. Returns Dataset.",
+      "inputs": [],
+      "outputs": [
+        "Dataset with essay rows"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "essay_detail",
+      "description": "GET /api/essaycards/essays/{essay_id} fetches the essay row (404 ApiError if missing), then fetches all essay_sections for that essay_id ordered by order_index asc, and embeds them as a `sections` list on the single returned row (list of {id, heading, anchor_slug, order_index, body_markdown}). Returns Dataset (single row).",
+      "inputs": [
+        "essay_id path param"
+      ],
+      "outputs": [
+        "Dataset (single row with embedded sections list) | 404 ApiError"
+      ]
+    },
+    {
+      "step": 6,
+      "name": "flashcards_due",
+      "description": "GET /api/essaycards/flashcards/due validates that section_id is not present without essay_id (400 VALIDATION_ERROR if violated). Joins flashcards to flashcard_review_state, filters WHERE next_due_at <= now() plus any provided essay_id/section_id equality filters, orders by next_due_at asc. Returns Dataset with rows {id, flashcard_id, question, answer, essay_id, section_id, anchor_slug, next_due_at} — anchor_slug is denormalized from essay_sections via join so the client can build the 'Jump to passage' link without a second request.",
+      "inputs": [
+        "essay_id query param (optional)",
+        "section_id query param (optional)"
+      ],
+      "outputs": [
+        "Dataset with due flashcard rows | 400 ApiError"
+      ]
+    },
+    {
+      "step": 7,
+      "name": "flashcard_review",
+      "description": "POST /api/essaycards/flashcards/{flashcard_id}/review reads the raw JSON request body directly (not through a Pydantic body model, so FastAPI's automatic RequestValidationError path is never triggered for this endpoint) and validates manually that a `grade` key is present and is a string one of {again, hard, good, easy}; any other shape — missing key, non-string value, out-of-set value, or an unparsable JSON body — returns 400 ApiError with error.code=VALIDATION_ERROR. Opens a transaction; SELECT now() once to obtain the single authoritative instant for this request. Fetches the flashcard's current flashcard_review_state (404 NOT_FOUND if the flashcard_id does not exist). Calls backend.scheduling.compute_next_due_at(grade, last_reviewed_at, now) which implements the exact floor/doubling formula. UPDATEs flashcard_review_state SET last_reviewed_at = now, next_due_at = computed_value, updated_at = now WHERE flashcard_id = :id. Commits. Returns the typed record {flashcard_id, last_reviewed_at, next_due_at}.",
+      "inputs": [
+        "flashcard_id path param",
+        "grade body field"
+      ],
+      "outputs": [
+        "{flashcard_id, last_reviewed_at, next_due_at} (200) | 400 ApiError | 404 ApiError"
+      ]
+    },
+    {
+      "step": 8,
+      "name": "json_ingest_validate",
+      "description": "POST /api/essaycards/essays/ingest reads the raw Starlette Request body (not a Pydantic model) via request.json(); an unparsable body or a non-object (non-dict) body returns ApiError VALIDATION_ERROR immediately, no DB access. The remaining body is validated manually and structurally, in this order: title (must be a non-empty str) -> slug (must be a non-empty str matching ^[a-zA-Z0-9_-]+$) -> sections (must be a non-empty list) -> for each section in order: heading (non-empty str), anchor_slug (non-empty str matching ^[a-zA-Z0-9_-]+$), body_markdown (must be present and a str, may be empty), cards (must be a list, may be empty) -> for each card in order: id (non-empty str matching ^[a-zA-Z0-9_-]+$), q (non-empty str), a (non-empty str) -> in-payload uniqueness of anchor_slug across all sections -> in-payload uniqueness of id across all cards in all sections. The first failure encountered at any step returns ApiError VALIDATION_ERROR with a message/detail identifying the offending field, before any database access is attempted. On success, builds the doc structure ({title, slug, sections: [{heading, anchor_slug, order_index, body_markdown, cards: [{card_key, question, answer}]}]}) with order_index assigned from each section's 0-based position in the sections array, and card_key/question/answer renamed from the payload's id/q/a fields — the exact shape backend.ingest.upsert_document (step 3) expects.",
+      "inputs": [
+        "raw JSON request body"
+      ],
+      "outputs": [
+        "doc structure (same shape _parse_document produces for the markdown path) | ApiError VALIDATION_ERROR, no DB access attempted"
+      ]
+    },
+    {
+      "step": 9,
+      "name": "json_ingest_collision_check_and_upsert",
+      "description": "If an essay with doc['slug'] already exists (looked up by a single SELECT), the handler queries all existing flashcards for that essay whose card_key appears anywhere in the incoming payload, joined to their current section's anchor_slug. If any existing card_key is attached to an anchor_slug different from the one it appears under in the incoming payload, the request is rejected with ApiError VALIDATION_ERROR (no write attempted, per the card-id-collision invariant) — this is the one DB-dependent validation check for this endpoint, and it always runs, on the same connection, before backend.ingest.upsert_document is called. If the essay is new (no existing row for this slug), this check is skipped entirely since no existing cards can collide. If no collision is found, the handler calls backend.ingest.upsert_document(conn, doc) (step 3) on the same connection, then maps the returned IngestSummary to the success response {essay_id, slug, sections_created: summary.sections_created, sections_updated: summary.sections_updated, cards_created: summary.flashcards_created, cards_updated: summary.flashcards_updated}.",
+      "inputs": [
+        "doc from step 8",
+        "conn: an open psycopg2 connection (from get_db())"
+      ],
+      "outputs": [
+        "{essay_id, slug, sections_created, sections_updated, cards_created, cards_updated} (200) | ApiError VALIDATION_ERROR (400), no DB write in the error case"
+      ]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "02_Platform/Postgres",
+        "role": "Shared Postgres instance — EssayCards owns the essaycards schema within it"
+      },
+      {
+        "component": "02_Platform/packages/platform_contracts",
+        "role": "Dataset, DatasetMeta, ColumnSchema — used in all read endpoint responses"
+      },
+      {
+        "component": "02_Platform/packages/platform_errorhandling",
+        "role": "api_error helper, exception handlers, request timing, structured logging"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {
+        "name": "fastapi",
+        "role": "HTTP framework",
+        "reuse_existing": true
+      },
+      {
+        "name": "uvicorn",
+        "role": "ASGI server",
+        "reuse_existing": true
+      },
+      {
+        "name": "psycopg2-binary",
+        "role": "Postgres driver",
+        "reuse_existing": true
+      },
+      {
+        "name": "pydantic",
+        "role": "Only used for platform_contracts' Dataset/ColumnSchema/DatasetMeta models — never for request-body validation on mutation endpoints in this component",
+        "reuse_existing": true
+      },
+      {
+        "name": "pyyaml",
+        "role": "Parses YAML front matter and the fenced flashcards block during markdown ingestion — CLI path only, unaffected by this sprint",
+        "reuse_existing": true
+      },
+      {
+        "name": "pytest",
+        "role": "Backend test runner",
+        "reuse_existing": true
+      },
+      {
+        "name": "httpx",
+        "role": "Test client (via pytest + ASGI transport)",
+        "reuse_existing": true
+      },
+      {
+        "name": "react-markdown",
+        "role": "Renders section body_markdown as HTML in the reader view",
+        "reuse_existing": true
+      }
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling Postgres directly",
+      "Re-implementing platform_contracts or platform_errorhandling locally",
+      "Auto-generating anchor_slug or card_key from content — both must be author-assigned and read verbatim from the source (markdown file or JSON payload)",
+      "Duplicating the essay/section/flashcard upsert SQL between the markdown CLI path and the JSON API path — both must call backend.ingest.upsert_document(conn, doc), the single shared core",
+      "Using a Pydantic request-body model for POST /essays/ingest — the body must be read via the raw Starlette Request and validated manually, per R-CON-BP-04 and the Sprint01 POST .../review precedent",
+      "Deleting or reconciling rows omitted from an ingest payload via the new endpoint or its UI — out of scope for both entry points"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "03_Application/EssayCards/schema.sql (canonical runtime path, established at Sprint01 close) — unchanged this sprint; no new 10_schema.sql is produced, per 00_draft.md's Data Model section confirming full reuse of essays/essay_sections/flashcards/flashcard_review_state exactly as defined in Sprint01_Core/10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "IMPORTANT — the essay list/picker requested in 00_draft.md's Scope is already implemented (EssayListView at route /essaycards, wired via GET /api/essaycards/essays, links into the reader) as part of the actual Sprint01 build. Do not build a new list view. No changes are needed to src/ShellEntry.tsx's EssayListView or its route for this sprint.",
+      "Refactor backend/ingest.py: extract upsert_document(conn, doc: dict) -> IngestSummary containing exactly the current DB-write block from ingest() (the try/with conn.cursor()/commit/except-rollback block). ingest(path, conn) becomes a thin wrapper: read file -> _parse_document(text) -> upsert_document(conn, doc). Add an `essay_id: str = \"\"` field to the IngestSummary dataclass, populated by upsert_document from the essay upsert's returned id. This must be a pure refactor — no SQL text changes, no reordering of commit/rollback, no behavior change to the CLI path. Sprint01's 36 existing tests (test_essays.py, test_flashcards.py, test_ingest.py) are the regression check and must pass unchanged with zero test-file edits.",
+      "Implement POST /ingest on the existing backend/routers/essays.py router (adds to the file that already has GET '' and GET '/{essay_id}'). Read the raw Starlette Request body manually (no Pydantic body model). Implement the structural validator described in internal_flow step 8 (title/slug/sections/cards, in-payload uniqueness) as a private helper returning (doc, None) or (None, api_error(...)). Implement the DB collision check described in internal_flow step 9 as a private helper taking (cur, essay_id, doc) and returning None or api_error(...). On success, call backend.ingest.upsert_document(conn, doc) and map its IngestSummary to the response shape {essay_id, slug, sections_created, sections_updated, cards_created, cards_updated} (note the field rename: flashcards_created -> cards_created, flashcards_updated -> cards_updated in the HTTP response only; IngestSummary's internal field names are unchanged).",
+      "No infrastructure changes needed: nginx.conf's existing /api/essaycards location block and vite.config.ts's existing /api/essaycards dev-server proxy entry already cover the new endpoint (whole-prefix reverse proxy, established in Sprint01) — do not add a new location or proxy entry.",
+      "src/ShellEntry.tsx: add a new IngestView component and a new route (e.g. /essaycards/ingest) rendering it. Textarea for the raw JSON payload text plus a submit button. Send the textarea's raw string content directly as the POST body (Content-Type: application/json is already set by apiFetch) — do not JSON.parse/re-stringify client-side; let the backend's manual request.json() parse (or reject) exactly what the user typed. On success (typed record, not ApiError): show the sections_created/sections_updated/cards_created/cards_updated counts and a link to `/essaycards/essays/{essay_id}`. On failure (ApiError): render it with the existing ErrorCard component inline on the page; do not clear the textarea.",
+      "src/shellConfig.ts: add a third nav entry ('Add / Update Essay' or similar label, path /essaycards/ingest) to both mobilePrimaryNav and desktopNav, alongside the existing 'Essays' and 'Due for review' entries.",
+      "No new external dependencies (backend or frontend) — reuses fastapi's Request, the existing apiFetch/ErrorCard platform-ui primitives, and native <textarea>.",
+      "Add tests/test_ingest_endpoint.py per 10_test_spec.md's HTTP-level ingest scenarios (distinct from the existing tests/test_ingest.py, which tests backend.ingest.ingest() directly against markdown fixture files and is unaffected by this sprint)."
+    ],
+    "ui_implementer": [
+      "Implement the IngestView per the application_implementer deferral above — textarea + submit, success summary with counts + reader link, inline ApiError display without clearing the textarea on failure.",
+      "Add the new nav entry per shellConfig.ts deferral above.",
+      "No changes required to the existing Reader, Review Session, or Essay List views."
+    ],
+    "test_writer": [
+      "Map every scenario in 10_test_spec.md to a concrete pytest function in tests/test_ingest_endpoint.py.",
+      "Cover the all-or-nothing rollback case explicitly: a payload with two structurally valid sections and one invalid section (e.g. missing anchor_slug) must return 400 ApiError and result in zero new rows in essaycards.essays/essay_sections/flashcards for that slug — query the DB after the failed request to assert absence, not just the HTTP response.",
+      "Cover the card-id/different-section collision case using the existing fixture data (fc-origins-1, attached to section anchor 'origins' of essay slug 'origins-of-long-form-formats') rather than adding new fixture rows — reuse fixtures.sql as-is.",
+      "Verify re-ingesting an existing essay via JSON (matching an existing slug) does not disturb flashcard_review_state for cards whose q/a text is unchanged, mirroring the existing CLI-path regression test pattern in test_ingest.py."
+    ],
+    "reviewer": [
+      "Verify backend/ingest.py's ingest() function and its private helpers (_parse_front_matter, _split_sections, _split_body_and_cards, _parse_cards_yaml, _validate_uniqueness, _upsert_essay, _upsert_section, _upsert_flashcard) are otherwise untouched — the only change should be the extraction of upsert_document and the essay_id field added to IngestSummary.",
+      "Verify Sprint01's 36 existing tests pass unchanged (no test file edits) after the ingest.py refactor — this is the regression check named in 00_draft.md's first Open Design Question.",
+      "Verify POST /essays/ingest never produces FastAPI's default RequestValidationError 422 shape for any malformed body (missing fields, wrong types, unparsable JSON) — every case must be ApiError VALIDATION_ERROR.",
+      "Verify the card-id/different-section collision check runs, and rejects, before backend.ingest.upsert_document is ever called — confirm via a test that no DB write occurs when a collision is detected.",
+      "Confirm no duplicate essay-list/picker UI work was done — the list view already existed pre-sprint; flag if a second list view or duplicate route was introduced."
+    ]
+  },
+  "deferred_decisions": [
+    "No explicit maximum payload size or maximum sections/cards per ingest request is specified by 00_draft.md; the implementer relies on FastAPI/uvicorn's default request-size handling — no app-level cap is required for this sprint.",
+    "Exact wording/icon for the new 'Add / Update Essay' nav entry label is implementer's choice, following the existing 'Essays' / 'Due for review' label style.",
+    "Whether to add a lightweight `atlas-essaycards ingest-status` or dry-run mode (parse + validate without writing) remains left to the implementer's discretion, unchanged from Sprint01 — not required by this draft either."
+  ],
+  "risks": [
+    {
+      "risk": "Content before the first `##` section heading in a markdown source file is silently discarded (no essay-level intro/body field exists in this data model) — unchanged from Sprint01, applies to the markdown path only; the JSON payload has no equivalent concept to lose.",
+      "impact": "If an author writes an introductory paragraph before the first markdown heading expecting it to appear in the reader, it will be silently dropped on every ingestion. This remains a deliberate scope decision, not an accidental gap."
+    },
+    {
+      "risk": "Deletion/reconciliation of sections or flashcards removed from a source file or JSON payload is explicitly out of scope for this sprint (extends Sprint01's accepted gap to the new JSON path) — neither entry point ever deletes essaycards.essay_sections or essaycards.flashcards rows, even when the corresponding heading/section or card is removed from the source.",
+      "impact": "If an author removes a section or card from either a markdown file or a JSON payload and re-ingests, the old row (and, for flashcards, its review state) remains in the database indefinitely: an orphaned flashcard keeps appearing in the due queue for content no longer in the source; an orphaned section keeps appearing in the reader with its last-ingested body_markdown. There is no cleanup path — manual SQL deletion is the only remedy. Accepted as-is for this sprint, not silently resolved."
+    },
+    {
+      "risk": "The ingestion CLI runs inside the Docker container and needs the source markdown file to be reachable at a container filesystem path — unchanged from Sprint01, markdown path only.",
+      "impact": "If the compose.yml content volume mount is missing or misconfigured, `docker exec ... python -m backend.ingest <path>` fails with a file-not-found error rather than a domain-level ingestion error. Not affected by this sprint's changes."
+    },
+    {
+      "risk": "New this sprint: the JSON ingest endpoint's card-id/different-section collision rejection is intentionally stricter than the markdown CLI path's silent move-on-conflict behavior for the same underlying scenario.",
+      "impact": "A future maintainer reasoning from 'both paths share one upsert core, so they behave identically' will be surprised that a payload the markdown CLI would silently accept (re-ingesting a card under a new section heading) is rejected by the JSON endpoint as VALIDATION_ERROR. This is faithfully implementing 00_draft.md's explicit error condition, not an accidental divergence — but it is a real behavioral asymmetry between the two entry points that lives in the JSON endpoint's pre-write validation layer, not in the shared upsert core itself. Documented here and in contracts.invariants so it is not mistaken for a bug."
+    },
+    {
+      "risk": "New this sprint: POST /essays/ingest turns essay/section/flashcard creation from a docker-exec-gated CLI-only operation into an HTTP-reachable one, with no authentication, per R-OPS-BP-02.",
+      "impact": "This is a real increase in reachable write surface compared to Sprint01, even though the endpoint remains bound to 127.0.0.1 behind the shell/internal docker network — the same convention every other Atlas application backend already follows (no per-app auth layer exists anywhere in the repo, confirmed against TaskTracker/Calendar). 00_draft.md explicitly raised this tradeoff and accepted it as consistent with existing repo-wide practice; this design does not introduce a new deviation from that convention, but the tradeoff is carried forward here for visibility rather than silently dropped."
+    }
+  ],
+  "open_questions": []
+}
