@@ -52,6 +52,39 @@ interface DueCardRow {
   next_due_at: string;
 }
 
+interface LastExamination {
+  examined_at: string;
+  score: number;
+  feedback: string | null;
+}
+
+interface ExaminationPackageSection {
+  section_id: string;
+  anchor_slug: string;
+  heading: string;
+  body_markdown: string;
+  section_version: string;
+  flashcards: { id: string; q: string; a: string }[];
+  last_examination: LastExamination | null;
+}
+
+interface ExaminationPackage {
+  essay_id: string;
+  essay_slug: string;
+  essay_title: string;
+  sections: ExaminationPackageSection[];
+}
+
+interface SectionExaminationRow {
+  id: string;
+  examined_at: string;
+  score: number;
+  question: string;
+  answer_transcript: string;
+  feedback: string | null;
+  section_version_at: string;
+}
+
 interface Dataset<T> {
   meta: { object_type: string; total: number };
   rows: T[];
@@ -79,6 +112,60 @@ const primaryBtnStyle: React.CSSProperties = {
   borderColor: 'transparent',
 };
 
+// ── Oral examination prompt ──────────────────────────────────────────────────
+//
+// Copied to the clipboard together with the fetched examination package (see
+// ReaderView's handleExportForExamination). Self-contained: a ChatGPT
+// conversation with zero prior knowledge of this app can conduct the exam and
+// produce a reply that POST /examinations/import accepts unmodified. Every
+// output field named below must stay in sync with backend/examinations.py's
+// validate_import_body().
+
+const EXAM_PROMPT_INTRO = `You are conducting an oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and its sections.
+
+GOAL: test whether I actually understand the ideas in each section — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
+
+PROCESS:
+- Examine each section in "sections" one at a time (skip a section only if I ask you to).
+- If a section's "last_examination" is present, use its "score" and "examined_at" to calibrate: a recent score of 3+ means you can move faster and probe for depth beyond the original text; no last_examination, or a low score, means start from the fundamentals.
+- Ask follow-up questions until you can confidently assess my understanding, then move on — this is a conversation, not a fixed quiz.
+- I will answer by typing or by pasting a transcript of a spoken answer.
+
+SCORING (0-6, per section, for my demonstrated understanding — not the essay's quality):
+  0-2: insufficient / fragmentary — needs active study
+  3:   functional understanding — good enough for now, ready to move on
+  4:   strong understanding
+  5:   deep/integrated understanding
+  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently
+A score of 3 is a legitimate, successful stopping point — do not withhold it hoping I reach a higher score later.
+
+WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+
+{
+  "results": [
+    {
+      "essay_slug": "copy verbatim from the package's essay_slug",
+      "section_anchor_slug": "copy verbatim from this section's anchor_slug",
+      "section_version": "copy verbatim from this section's section_version",
+      "examined_at": "today's date/time in ISO-8601, e.g. 2026-08-28T14:30:00Z",
+      "question": "a summary of what you asked/covered for this section (can be multiple questions, written as one text block)",
+      "answer_transcript": "a summary or verbatim transcript of my answer(s) for this section",
+      "score": 0,
+      "feedback": "one or two sentences of feedback, e.g. \\"Good enough for now — revisit in ~6 months.\\" (optional, use null to omit)"
+    }
+  ]
+}
+
+Include one object per section actually examined. Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
+
+Here is the examination package:
+
+`;
+
+function buildExamClipboardText(pkg: ExaminationPackage): string {
+  return EXAM_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
 // ── Essay List View ───────────────────────────────────────────────────────────
 
 function EssayListView() {
@@ -104,9 +191,14 @@ function EssayListView() {
     <div style={pageStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Essays</h2>
-        <button style={primaryBtnStyle} onClick={() => navigate('/essaycards/review')}>
-          Due for review
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={btnStyle} onClick={() => navigate('/essaycards/examinations/import')}>
+            Import exam results
+          </button>
+          <button style={primaryBtnStyle} onClick={() => navigate('/essaycards/review')}>
+            Due for review
+          </button>
+        </div>
       </div>
 
       {loading && <Skeleton />}
@@ -147,6 +239,8 @@ function ReaderView() {
   const [essay, setEssay] = useState<EssayDetailRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -172,15 +266,42 @@ function ReaderView() {
     }
   }, [loading, essay, location.hash]);
 
+  const handleExportForExamination = async () => {
+    if (!essay) return;
+    setExporting(true);
+    setExportMsg(null);
+    const res = await apiFetch<ExaminationPackage>(`/essaycards/essays/${essay.id}/examination-package`);
+    setExporting(false);
+    if (isApiError(res)) {
+      setExportMsg(`Export failed: ${res.error.message}`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(buildExamClipboardText(res));
+      setExportMsg(
+        'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply into ' +
+        '"Import exam results" (from the essay list) to store the results.'
+      );
+    } catch {
+      setExportMsg('Could not access the clipboard — check browser permissions.');
+    }
+  };
+
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
   if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
   if (!essay) return <div style={pageStyle}>Essay not found.</div>;
 
   return (
     <div style={pageStyle}>
-      <button style={{ ...btnStyle, marginBottom: 12 }} onClick={() => navigate('/essaycards')}>
-        ← All essays
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <button style={btnStyle} onClick={() => navigate('/essaycards')}>
+          ← All essays
+        </button>
+        <button style={btnStyle} disabled={exporting} onClick={handleExportForExamination}>
+          {exporting ? 'Preparing…' : 'Export for examination'}
+        </button>
+      </div>
+      {exportMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{exportMsg}</div>}
       <h1 style={{ marginBottom: 24 }}>{essay.title}</h1>
 
       {essay.sections.length === 0 && (
@@ -193,14 +314,77 @@ function ReaderView() {
           <div className="essaycards-section-body">
             <ReactMarkdown>{section.body_markdown}</ReactMarkdown>
           </div>
-          <button
-            style={btnStyle}
-            onClick={() => navigate(`/essaycards/review?essay_id=${essay.id}&section_id=${section.id}`)}
-          >
-            Review this section
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              style={btnStyle}
+              onClick={() => navigate(`/essaycards/review?essay_id=${essay.id}&section_id=${section.id}`)}
+            >
+              Review this section
+            </button>
+          </div>
+          <SectionExaminationHistory sectionId={section.id} />
         </section>
       ))}
+    </div>
+  );
+}
+
+// ── Section Examination History ────────────────────────────────────────────────
+//
+// Collapsed by default, fetched on first expand — a plain reverse-chronological
+// list of stored results (date/score/feedback). Deliberately not a chart or
+// trend analysis — that stays out of scope for now.
+
+function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [rows, setRows] = useState<SectionExaminationRow[]>([]);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const handleToggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) {
+      const res = await apiFetch<Dataset<SectionExaminationRow>>(`/essaycards/sections/${sectionId}/examinations`);
+      if (isApiError(res)) {
+        setError(res);
+      } else {
+        setRows(res.rows);
+      }
+      setLoaded(true);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button style={{ ...btnStyle, fontSize: 12 }} onClick={handleToggle}>
+        {open ? '▾' : '▸'} Examination history{loaded ? ` (${rows.length})` : ''}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {error && <ErrorCard error={error} />}
+          {loaded && !error && rows.length === 0 && (
+            <div style={{ color: '#888', fontSize: 13 }}>Not examined yet.</div>
+          )}
+          {rows.map(r => (
+            <div
+              key={r.id}
+              style={{
+                padding: 8,
+                borderRadius: 6,
+                border: '1px solid #e0e0e0',
+                marginBottom: 6,
+                fontSize: 13,
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {new Date(r.examined_at).toLocaleDateString()} — score {r.score}/6
+              </div>
+              {r.feedback && <div style={{ color: '#555', marginTop: 4 }}>{r.feedback}</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -548,6 +732,128 @@ function IngestView() {
   );
 }
 
+// ── Import Examinations View ───────────────────────────────────────────────────
+
+interface ImportSummary {
+  imported: number;
+  results: { id: string; essay_id: string; section_id: string; examined_at: string; score: number }[];
+}
+
+const EXAM_RESULT_PLACEHOLDER_JSON = `{
+  "results": [
+    {
+      "essay_slug": "the essay's slug, from the examination package",
+      "section_anchor_slug": "the section's anchor_slug, from the examination package",
+      "section_version": "copied verbatim from the section's section_version in the package",
+      "examined_at": "2026-08-28T14:30:00Z",
+      "question": "summary of what was asked",
+      "answer_transcript": "summary or transcript of the answer given",
+      "score": 3,
+      "feedback": "optional — one or two sentences, or omit/null"
+    }
+  ]
+}`;
+
+function ImportExaminationsView() {
+  const navigate = useNavigate();
+  const [text, setText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [result, setResult] = useState<ImportSummary | null>(null);
+  const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const clip = await navigator.clipboard.readText();
+      setText(clip);
+      setClipboardMsg(null);
+    } catch {
+      setClipboardMsg('Could not read the clipboard — check browser permissions, or paste manually (Ctrl/Cmd+V) into the box below.');
+    }
+  };
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setError(null);
+    setResult(null);
+    // Send the textarea's raw string content directly — let the backend's
+    // manual request.json() parse (or reject) exactly what was pasted.
+    const res = await apiFetch<ImportSummary>('/essaycards/examinations/import', {
+      method: 'POST',
+      body: text,
+    });
+    setSubmitting(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    setResult(res);
+  };
+
+  return (
+    <div style={pageStyle}>
+      <button style={{ ...btnStyle, marginBottom: 12 }} onClick={() => navigate('/essaycards')}>
+        ← All essays
+      </button>
+      <h2 style={{ marginTop: 0 }}>Import Exam Results</h2>
+      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+        Paste ChatGPT's JSON reply from an oral examination (started with "Export for examination" on an
+        essay's page). Each result is stored as a new historical record — importing never overwrites a
+        previous examination, so re-examining a section months later just adds another entry.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
+      </div>
+      {clipboardMsg && (
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+      )}
+
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        rows={16}
+        style={{
+          width: '100%',
+          fontFamily: 'monospace',
+          fontSize: 13,
+          padding: 8,
+          boxSizing: 'border-box',
+          border: '1px solid #ccc',
+          borderRadius: 6,
+        }}
+        placeholder={EXAM_RESULT_PLACEHOLDER_JSON}
+      />
+
+      <div style={{ marginTop: 12 }}>
+        <button style={primaryBtnStyle} disabled={submitting || !text.trim()} onClick={handleSubmit}>
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ marginTop: 16 }}>
+          <ErrorCard error={error} />
+        </div>
+      )}
+
+      {result && (
+        <div style={{
+          marginTop: 16,
+          padding: 12,
+          borderRadius: 8,
+          border: '1px solid #e0e0e0',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Import succeeded</div>
+          <div style={{ fontSize: 13, color: '#555' }}>
+            {result.imported} examination result{result.imported === 1 ? '' : 's'} stored.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function EssayCardsApp() {
@@ -557,6 +863,7 @@ export default function EssayCardsApp() {
       <Route path="/essays/:id" element={<ReaderView />} />
       <Route path="/review" element={<ReviewSessionView />} />
       <Route path="/ingest" element={<IngestView />} />
+      <Route path="/examinations/import" element={<ImportExaminationsView />} />
     </Routes>
   );
 }

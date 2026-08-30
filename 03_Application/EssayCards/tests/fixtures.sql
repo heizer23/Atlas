@@ -41,3 +41,18 @@ INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, n
   ('fc000004-0000-0000-0000-000000000004', null,                            now() + interval '1 hour'),
   ('fc000005-0000-0000-0000-000000000005', null,                            now() - interval '2 minutes'),
   ('fc000006-0000-0000-0000-000000000006', null,                            now() + interval '1 hour');
+
+-- ── Section examinations ─────────────────────────────────────────────────────
+-- Two prior sittings for essay A / section "origins" (se-origins-1 older,
+-- se-origins-2 newer — export's last_examination and the history endpoint's
+-- "most recent first" ordering should both surface se-origins-2). Essay A /
+-- section "structure" has zero examinations on purpose, to exercise the
+-- never-examined / empty-history / null last_examination paths.
+INSERT INTO essaycards.section_examinations
+  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, feedback) VALUES
+  ('5e000001-0000-0000-0000-000000000001', 'ea000001-0000-0000-0000-000000000001', 'ec000001-0000-0000-0000-000000000001',
+    (select updated_at from essaycards.essay_sections where id = 'ec000001-0000-0000-0000-000000000001'),
+    now() - interval '30 days', 'Explain the origins of the format.', 'It emerged gradually from earlier forms.', 3, 'Good enough for now.'),
+  ('5e000002-0000-0000-0000-000000000002', 'ea000001-0000-0000-0000-000000000001', 'ec000001-0000-0000-0000-000000000001',
+    (select updated_at from essaycards.essay_sections where id = 'ec000001-0000-0000-0000-000000000001'),
+    now() - interval '2 days', 'Explain the origins again, in more depth.', 'A more developed account connecting it to related material.', 4, 'Clear improvement since last time.');

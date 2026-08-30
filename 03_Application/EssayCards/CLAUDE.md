@@ -56,11 +56,38 @@ shape (missing key, wrong type, out-of-set value, unparsable JSON) returns
 ApiError VALIDATION_ERROR (400) instead of FastAPI's default 422 shape. See
 `Sprint01_Core/10_architecture.json` §contracts.invariants.
 
+## Oral examinations
+Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —
+that id is reused as-is for examination history; no separate section-id scheme was
+introduced. "Version" of a section is `essay_sections.updated_at`, snapshotted into
+`section_examinations.section_version_at` at export time — not a separate counter.
+"Current understanding" of a section is never stored; it is always the latest row in
+`essaycards.section_examinations` for that section_id.
+
+Round trip: `GET /api/essaycards/essays/{id}/examination-package` builds a
+self-contained JSON package (essay + sections + flashcards + each section's derived
+last examination) for pasting into ChatGPT — copied to the clipboard by the "Export
+for examination" button in ReaderView, together with the scoring-rubric prompt in
+`EXAM_PROMPT_INTRO` (src/ShellEntry.tsx). ChatGPT's JSON reply is pasted into
+`ImportExaminationsView` (`/essaycards/examinations/import`) and posted to
+`POST /api/essaycards/examinations/import`, which resolves each result's
+`essay_slug`/`section_anchor_slug` and inserts a new row — never updates or deletes
+an existing one. Same validate-everything-before-any-write pattern as
+`/essays/ingest`; `NOT_FOUND` if a slug pair doesn't resolve, `VALIDATION_ERROR` for
+any structural problem, all-or-nothing across the whole batch.
+
+The export endpoint is a GET that returns a bespoke JSON body rather than a Dataset —
+a deliberate R-CON-BP-04 exemption (see backend/routers/examinations.py module
+docstring): it's copied to the clipboard for an external LLM, not rendered by a
+Dataset-consuming UI component. `GET /sections/{id}/examinations` (the plain history
+list shown under each section in ReaderView) IS real UI-visible tabular data and
+returns a proper Dataset.
+
 ## Port
 EssayCards backend runs on host port 8024 (container port 8000).
 
 ## Schema
 essaycards schema in the shared Atlas Postgres instance.
 Tables: essaycards.essays, essaycards.essay_sections, essaycards.flashcards,
-essaycards.flashcard_review_state.
+essaycards.flashcard_review_state, essaycards.section_examinations (append-only).
 Schema initialized idempotently at startup from schema.sql.
