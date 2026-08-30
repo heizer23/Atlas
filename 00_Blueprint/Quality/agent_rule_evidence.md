@@ -559,3 +559,105 @@ severity: major
 recurrence_hint: "First observed — first EssayCards sprint where the human's own manual-UI-testing pass (required by the [UI — manual] convention) surfaced fixable issues before close, rather than just confirming behavior"
 linked_immediate_artifact: 03_Application/EssayCards/Sprint02_JsonIngestion/99_sprint_log.md
 ---
+
+---
+entry_id: EVD-2026-08-30-001
+date: 2026-08-30
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint03_Images
+pattern_name: incomplete_failure_branch_contract
+short_description: The image-scan design fully specifies the happy path but leaves the per-file failure branch under-contracted — the skipped[].reason enum differs across architecture/scaffold/flow, and the per-file transaction/savepoint boundary that continue-on-failure and intra-scan slug-collision resolution depend on is never stated.
+evidence: "10_architecture.json exposed_surfaces POST /images/scan reason set 'not-an-image'|'format-mismatch'|'gif-too-large'|'too-large' vs internal_flow step 10(f) \"record skipped('error')\" and scaffolding SkippedFile adding 'error'; internal_flow step 10 says \"on INSERT failure unlink the file and record skipped('error') ... and continue\" with no commit/SAVEPOINT boundary, incompatible with psycopg2 whole-transaction abort and with 10_test_spec.md \"Scan resolves a slug collision\" for two never-before-seen files."
+likely_root_cause: agent_gap
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint03_Images/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-30-002
+date: 2026-08-30
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint03_Images
+pattern_name: deferral_contradicts_fixed_decision
+short_description: The correction that fixed the per-file transaction boundary hard-asserted "commit that file's row before moving to the next file" in internal_flow and the invariant, but left deferred_decisions item 4 still offering "a single commit after the batch" as an implementer choice — the deferral now contradicts the constraint it defers to.
+evidence: "10_architecture.json deferred_decisions item 4 'per-file SAVEPOINTs with a single commit after the batch, vs. an explicit commit after each file ... is the implementer's choice, as long as the internal_flow step 10 boundary holds' vs internal_flow step 10(f) 'RELEASE the SAVEPOINT and commit that file's row before moving to the next file' and the [NEW] invariant 'that row is committed before the next file ... because prior in-scan imports are already committed, _resolve_slug sees their slugs'."
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "Also seen in EVD-2026-08-30-001 (same sprint/design area — failure-branch and transaction-boundary contract left under-specified); this pass: correction resolved the boundary but did not sweep the pre-correction deferral that referenced it"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint03_Images/13_design_review.md
+---
+
+---
+entry_id: EVD-2026-08-30-003
+date: 2026-08-30
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint03_Images
+pattern_name: new_backend_dependency_requires_test_image_rebuild
+short_description: Sprint03 adds Pillow to pyproject.toml; the shared Dockerfile installs it, but the already-running atlas-essaycards and atlas-essaycards-test images predate the dependency, so both were rebuilt during implementation rather than left for the test-runner stage (which only docker-execs pytest, it does not rebuild).
+evidence: "pyproject.toml dependencies += 'Pillow>=10'; 01_System/test/compose.test.yml essaycards-test builds from 03_Application/EssayCards/Dockerfile which runs 'pip install -e \".[dev]\"'. Implementer ran 'make essaycards-up' (config.env + secrets.env) and 'docker compose -f 01_System/test/compose.test.yml build essaycards-test'. Verified in-container: PIL 12.3.0, scan_staging downscales 2600x1300 -> 2000x1000, skips non-image + oversized GIF, per-file commit works."
+likely_root_cause: none
+candidate_response: none
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint03_Images/10_scaffolding.json
+---
+
+---
+entry_id: EVD-2026-08-30-004
+date: 2026-08-30
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint03_Images
+pattern_name: implicit_psycopg2_begin_not_reliable_before_savepoint
+short_description: scan_staging issued the per-file "SAVEPOINT import_one" assuming psycopg2's implicit BEGIN had already opened a transaction, but under the FastAPI run_in_threadpool request path the pooled connection was still IDLE, so SAVEPOINT raised NoActiveSqlTransaction (500) and broke 5 of 11 Sprint03 scan/get-image scenarios. Fix loop 1 added a _ensure_in_transaction(conn, cur) guard (issues "begin" only when conn.info.transaction_status == TRANSACTION_STATUS_IDLE) immediately before the SAVEPOINT, plus a trailing conn.rollback() at the end of scan_staging to return the pooled connection clean after the idempotency probes. Per-file SAVEPOINT/RELEASE/commit and ROLLBACK-TO-SAVEPOINT boundary from internal_flow step 10(f) is unchanged; no batch commit introduced.
+evidence: "backend/import_images.py:262 cur.execute('savepoint import_one') -> psycopg2.errors.NoActiveSqlTransaction: SAVEPOINT can only be used in transaction blocks (50_test_report.md Failure Analysis 1). Other EssayCards modules (backend/ingest.py:101, backend/routers/examinations.py:96, backend/routers/flashcards.py:177) only ever call conn.commit()/conn.rollback() and never issue SAVEPOINT as the first statement, so none of them exposed this gap."
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — specific to a module whose first DB statement in a unit of work is SAVEPOINT rather than DML; other EssayCards routers are not affected"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint03_Images/50_test_report.md
+---
+
+---
+entry_id: EVD-2026-08-30-005
+date: 2026-08-30
+source_agent: direct_implementer
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint04_ImageUpload
+pattern_name: bytes_first_core_drops_declared_extension_cross_check
+short_description: Refactoring the Sprint03 per-file import into the bytes-first core process_image_bytes(conn, *, source_filename, raw, images_dir, save_original_dir=None) removed the staging path's declared-extension-vs-sniffed-format cross-check for VALID raster files. _process_image now takes ext as optional (None on the upload path, since a paste has no trusted extension); scan_staging keeps a filename-extension ACCEPT_EXTS pre-gate (so a .txt is still 'not-an-image' with no decode) but a staged file whose extension is in the accept list yet disagrees with a still-decodable format (e.g. photo.png containing JPEG bytes) is now imported as its real format instead of skipped 'format-mismatch'. No Sprint03 test covers that case (the collision test uses two real PNGs); all 11 Sprint03 scenarios pass unchanged. The 'format-mismatch' reason is still emitted by the upload endpoint for a detected SVG.
+evidence: "backend/import_images.py _process_image: 'if ext is not None and fmt not in _EXT_TO_FORMATS.get(ext, set()): return \"format-mismatch\"'. scan_staging now calls process_image_bytes(..., save_original_dir=None) per file after an ACCEPT_EXTS suffix pre-gate; the draft (00_draft.md 'backend/import_images.py — refactor the per-file core to take bytes') specifies exactly this signature and 'ext from the sniffed format, not the filename'. docker exec atlas-essaycards-test pytest tests/test_images.py -v -> 18 passed (11 Sprint03 + 7 new)."
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — inherent to moving from a filename-trusting staging importer to a sniff-only bytes core; acceptable because the sniffed format is authoritative and the mismatch branch guarded an untested corner"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint04_ImageUpload/00_draft.md
+---
+
+---
+entry_id: EVD-2026-08-30-006
+date: 2026-08-30
+source_agent: direct_implementer
+run_type: execution_issue
+component: EssayCards
+sprint: Sprint04_ImageUpload
+pattern_name: preexisting_time_dependent_examinations_test_fails_on_current_date
+short_description: Full-suite run (pytest tests/ -q) shows 1 failure unrelated to Sprint04 — test_examinations.py::test_import_stores_new_result_without_overwriting_history. The test posts an examination with hardcoded examined_at '2026-08-28T14:30:00Z' and asserts it sorts newest-first, but fixtures.sql inserts a section_examinations row at 'now() - interval 2 days'; on the current date (2026-08-30) that fixture row resolves to ~2026-08-28T15:27Z, i.e. newer than the hardcoded payload, so rows[0].score is 4 not 5. No Sprint04 code path touches examinations. tests/test_images.py is 18/18 green.
+evidence: "pytest tests/ -q -> '1 failed, 80 passed'; failure at tests/test_examinations.py:103 'assert 4 == 5  # most recent first'. Fixture: tests/fixtures.sql se-origins-2 examined_at = now() - interval '2 days'. Payload: tests/test_examinations.py examined_at '2026-08-28T14:30:00Z'."
+likely_root_cause: definition_quality
+candidate_response: none
+severity: major
+recurrence_hint: "First observed by this agent; will recur whenever the wall clock is within ~2 days of the 2026-08-28 hardcoded timestamp — a TaskTracker/EssayCards fixture-vs-hardcoded-date smell"
+linked_immediate_artifact: 03_Application/EssayCards/tests/test_examinations.py
+---

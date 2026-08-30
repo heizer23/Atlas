@@ -56,3 +56,16 @@ INSERT INTO essaycards.section_examinations
   ('5e000002-0000-0000-0000-000000000002', 'ea000001-0000-0000-0000-000000000001', 'ec000001-0000-0000-0000-000000000001',
     (select updated_at from essaycards.essay_sections where id = 'ec000001-0000-0000-0000-000000000001'),
     now() - interval '2 days', 'Explain the origins again, in more depth.', 'A more developed account connecting it to related material.', 4, 'Clear improvement since last time.');
+
+-- ── Images (Sprint03_Images) ─────────────────────────────────────────────────
+-- fix-img-alpha: the OLDER row. No matching file is placed in the (tmp) images
+--   directory by tests, so GET /images/fix-img-alpha exercises the
+--   row-present / file-missing -> 404 path.
+-- fix-img-beta:  the NEWER row. GET /api/essaycards/images must list
+--   fix-img-beta before fix-img-alpha (created_at desc).
+INSERT INTO essaycards.images
+  (slug, stored_filename, content_type, byte_size, width, height, source_sha256, source_filename, created_at) VALUES
+  ('fix-img-alpha', 'fix-img-alpha.png', 'image/png',  1024, 100,  80,
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01', 'alpha.png', now() - interval '2 hours'),
+  ('fix-img-beta',  'fix-img-beta.jpg',  'image/jpeg', 2048, 200, 150,
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02', 'beta.jpg',  now() - interval '1 hour');

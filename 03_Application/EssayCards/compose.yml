@@ -16,6 +16,8 @@ services:
     volumes:
       - ${DATA_ROOT}/essaycards/logs:/app/logs
       - ${DATA_ROOT}/essaycards/content:/app/content:ro
+      - ${DATA_ROOT}/essaycards/staging:/app/staging:ro
+      - ${DATA_ROOT}/essaycards/images:/app/images
     networks:
       - atlas-net
 

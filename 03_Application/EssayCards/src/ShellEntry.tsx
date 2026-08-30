@@ -13,7 +13,7 @@
  * is exhausted; it does not live-poll for newly-due cards mid-session."
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
@@ -112,6 +112,12 @@ const primaryBtnStyle: React.CSSProperties = {
   borderColor: 'transparent',
 };
 
+// Rendered once by the root component. Keeps a Markdown image inside the
+// reading column / review card from overflowing. CSS-only per
+// Sprint03_Images/10_architecture.json — no custom img component.
+const ESSAYCARDS_IMG_CSS =
+  '.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto; }';
+
 // ── Oral examination prompt ──────────────────────────────────────────────────
 //
 // Copied to the clipboard together with the fetched examination package (see
@@ -192,6 +198,9 @@ function EssayListView() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Essays</h2>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button style={btnStyle} onClick={() => navigate('/essaycards/images')}>
+            Images
+          </button>
           <button style={btnStyle} onClick={() => navigate('/essaycards/examinations/import')}>
             Import exam results
           </button>
@@ -468,18 +477,20 @@ function ReviewSessionView() {
         Card {index + 1} of {queue.length}
       </div>
 
-      <div style={{
+      <div className="essaycards-review-card" style={{
         padding: 20,
         borderRadius: 8,
         border: '1px solid #e0e0e0',
         marginBottom: 16,
         minHeight: 100,
       }}>
-        <div style={{ fontWeight: 600 }}>{current.question}</div>
+        <div style={{ fontWeight: 600 }}>
+          <ReactMarkdown>{current.question}</ReactMarkdown>
+        </div>
         {flipped && (
           <>
             <div style={{ borderTop: '1px solid #e0e0e0', paddingTop: 12, marginTop: 12 }}>
-              {current.answer}
+              <ReactMarkdown>{current.answer}</ReactMarkdown>
             </div>
             <button
               style={{ ...btnStyle, marginTop: 12 }}
@@ -525,7 +536,7 @@ Fill in the template below. Every value is an instruction describing what belong
     {
       "heading": "this section's display heading, e.g. \\"The Economic Causes\\"",
       "anchor_slug": "a url-safe stable id for this section, unique within the essay, e.g. economic-causes — used for \\"jump to passage\\" links, so keep it short and don't rename it on a later update",
-      "body_markdown": "the ACTUAL essay text for this section, written in Markdown, roughly 300-600 words ('about one page') — this is what the reader reads. Do not summarize; write the real prose. Flashcards are NOT marked inline in this text (that inline-fence convention is only used by this app's separate offline markdown-file ingestion path, not this JSON format) — flashcards go in the sibling 'cards' list below instead.",
+      "body_markdown": "the ACTUAL essay text for this section, written in Markdown, roughly 300-600 words ('about one page') — this is what the reader reads. Do not summarize; write the real prose. Flashcards are NOT marked inline in this text (that inline-fence convention is only used by this app's separate offline markdown-file ingestion path, not this JSON format) — flashcards go in the sibling 'cards' list below instead. You may embed images as Markdown image references here — see the Images rule below.",
       "cards": [
         {
           "id": "a url-safe stable id for this card, UNIQUE ACROSS THE WHOLE ESSAY (not just this section) — e.g. economic-causes-1",
@@ -544,6 +555,10 @@ Rules that don't fit cleanly inline above:
 - The order of the "sections" array IS the reading order (there is no separate order field); same for the order you list "cards" within a section.
 - This is an upsert, never a wholesale replace: if you're updating an existing essay, sections/cards you omit from the payload are left untouched, not deleted.
 - Repeat the section object for every section of the essay — a real essay should have several sections, not just one.
+- Images. To place an image, write a standard Markdown image reference ![short alt text](/api/essaycards/images/SLUG) on its own line (a blank line before and after) inside a body_markdown value, or inline inside a card "q" or "a". SLUG must be one of the slugs under "Available images" below. The ingest endpoint does NOT validate image references — an invented or misspelled slug silently renders as a broken image, so use only the slugs listed. Add an image only where it genuinely illustrates the adjacent prose, and keep the alt text short. If "Available images" is empty, do not write any image references.
+
+Available images (slug — what it depicts):
+- (none yet — before using this prompt, replace this line with one entry per imported image, e.g. "denarius-debasement-chart — line chart of the denarius's silver content, 0-270 AD". Leave empty to use no images.)
 
 Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell" — do not reuse this content, it's here only to show the pattern):
 
@@ -554,7 +569,7 @@ Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell
     {
       "heading": "The Economic Causes",
       "anchor_slug": "economic-causes",
-      "body_markdown": "By the 3rd century, Rome's currency had been debased so many times that contemporaries spoke of a \\"debasement crisis\\" eroding trust in coinage across the empire. Tax revenue fell as trade contracted, while the cost of defending an ever-longer frontier kept rising...",
+      "body_markdown": "By the 3rd century, Rome's currency had been debased so many times that contemporaries spoke of a \\"debasement crisis\\" eroding trust in coinage across the empire.\\n\\n![Silver content of the denarius, 0-270 AD](/api/essaycards/images/denarius-debasement-chart)\\n\\nTax revenue fell as trade contracted, while the cost of defending an ever-longer frontier kept rising...",
       "cards": [
         { "id": "economic-causes-1", "q": "What did contemporaries call the currency problem of the 3rd century?", "a": "The \\"debasement crisis\\" — repeated debasement of the currency, which drove inflation." },
         { "id": "economic-causes-2", "q": "Why did tax revenue decline even as military costs rose?", "a": "Trade contracted, shrinking the tax base, while frontier defense grew more expensive." }
@@ -854,16 +869,300 @@ function ImportExaminationsView() {
   );
 }
 
+// ── Images View ───────────────────────────────────────────────────────────────
+//
+// Two ways to add an image, both funnelling through the same import core:
+//   1. Scan the server-side staging folder (POST /images/scan).
+//   2. Add from the browser — paste (Ctrl/Cmd-V), drop onto the drop zone, or
+//      pick a file — POST /images/upload per file, then re-list.
+
+interface ImageRow {
+  slug: string;
+  source_filename: string;
+  content_type: string;
+  byte_size: number;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+  url: string;
+}
+
+interface ScanReport {
+  imported: {
+    slug: string;
+    source_filename: string;
+    url: string;
+    width: number | null;
+    height: number | null;
+    byte_size: number;
+  }[];
+  unchanged: number;
+  skipped: { filename: string; reason: string }[];
+}
+
+const GENERIC_PASTE_NAME_RE = /^image\.(png|jpe?g|gif|webp)$/i;
+
+function ImagesView() {
+  const navigate = useNavigate();
+  const [images, setImages] = useState<ImageRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [report, setReport] = useState<ScanReport | null>(null);
+  const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadImages = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<Dataset<ImageRow>>('/essaycards/images');
+    setLoading(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    setError(null);
+    setImages(res.rows);
+  }, []);
+
+  useEffect(() => { loadImages(); }, [loadImages]);
+
+  const handleScan = async () => {
+    setScanning(true);
+    setError(null);
+    setReport(null);
+    const res = await apiFetch<ScanReport>('/essaycards/images/scan', { method: 'POST' });
+    setScanning(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    setReport(res);
+    loadImages();
+  };
+
+  // POST each image to /images/upload sequentially (volume is tiny; sequential
+  // keeps error reporting simple), then re-list and show the same
+  // imported / unchanged / skipped block the scan button uses. apiFetch forces
+  // a JSON Content-Type, so multipart goes through a raw fetch.
+  const uploadFiles = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    setUploading(true);
+    setError(null);
+    setReport(null);
+    const agg: ScanReport = { imported: [], unchanged: 0, skipped: [] };
+
+    for (const file of imageFiles) {
+      const meaningful = !!file.name && !GENERIC_PASTE_NAME_RE.test(file.name);
+      const name = meaningful ? file.name : 'pasted-image';
+      const fd = new FormData();
+      fd.append('file', file, name);
+      fd.append('filename', name);
+      try {
+        const res = await fetch('/api/essaycards/images/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) {
+          const reason = data?.error?.detail?.reason || data?.error?.code || `HTTP ${res.status}`;
+          agg.skipped.push({ filename: name, reason });
+        } else if (data.unchanged) {
+          agg.unchanged += 1;
+        } else {
+          agg.imported.push({
+            slug: data.slug,
+            source_filename: data.source_filename,
+            url: data.url,
+            width: data.width,
+            height: data.height,
+            byte_size: data.byte_size,
+          });
+        }
+      } catch (e) {
+        agg.skipped.push({ filename: name, reason: String(e) });
+      }
+    }
+
+    setUploading(false);
+    setReport(agg);
+    loadImages();
+  }, [loadImages]);
+
+  // Catch Ctrl/Cmd-V anywhere on the Images view (a plain div is not a reliable
+  // paste target on its own).
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData ? Array.from(e.clipboardData.files) : [];
+      const imgs = files.filter(f => f.type.startsWith('image/'));
+      if (imgs.length > 0) {
+        e.preventDefault();
+        uploadFiles(imgs);
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [uploadFiles]);
+
+  const handleContainerPaste = (e: React.ClipboardEvent) => {
+    const imgs = Array.from(e.clipboardData.files).filter(f => f.type.startsWith('image/'));
+    if (imgs.length > 0) {
+      e.preventDefault();
+      uploadFiles(imgs);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    uploadFiles(Array.from(e.dataTransfer.files));
+  };
+
+  const handleCopy = async (slug: string) => {
+    try {
+      await navigator.clipboard.writeText(`![](/api/essaycards/images/${slug})`);
+      setCopiedSlug(slug);
+      setTimeout(() => setCopiedSlug(null), 1500);
+    } catch {
+      setCopiedSlug(null);
+    }
+  };
+
+  const busy = scanning || uploading;
+
+  return (
+    <div style={pageStyle} onPaste={handleContainerPaste}>
+      <button style={{ ...btnStyle, marginBottom: 12 }} onClick={() => navigate('/essaycards')}>
+        ← All essays
+      </button>
+      <h2 style={{ marginTop: 0 }}>Images</h2>
+      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+        Add an image by pasting (Ctrl/Cmd-V), dropping a file below, or picking one —
+        or drop files into the server staging folder
+        (<code>{'${DATA_ROOT}'}/essaycards/staging</code>) and scan. Reference an
+        imported image in essay or card text as ordinary Markdown:{' '}
+        <code>![](/api/essaycards/images/&lt;slug&gt;)</code>. Keep your originals —
+        the processed images folder (and the <code>originals/</code> upload archive)
+        is never backed up automatically.
+      </div>
+
+      <div
+        onDragOver={e => { e.preventDefault(); setDragActive(true); }}
+        onDragLeave={e => { e.preventDefault(); setDragActive(false); }}
+        onDrop={handleDrop}
+        style={{
+          border: `2px dashed ${dragActive ? '#4a90d9' : '#c0c0c0'}`,
+          background: dragActive ? '#eef5fc' : '#fafafa',
+          borderRadius: 8,
+          padding: 20,
+          textAlign: 'center',
+          color: '#666',
+          fontSize: 13,
+          marginBottom: 12,
+        }}
+      >
+        {uploading ? 'Uploading…' : 'Paste or drop an image here'}
+        <div style={{ marginTop: 8 }}>
+          <button style={btnStyle} disabled={busy} onClick={() => fileInputRef.current?.click()}>
+            Choose file…
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={e => {
+            if (e.target.files) uploadFiles(Array.from(e.target.files));
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      <button style={primaryBtnStyle} disabled={busy} onClick={handleScan}>
+        {scanning ? 'Scanning…' : 'Scan staging folder'}
+      </button>
+
+      {error && <div style={{ marginTop: 16 }}><ErrorCard error={error} /></div>}
+
+      {report && (
+        <div style={{
+          marginTop: 16,
+          padding: 12,
+          borderRadius: 8,
+          border: '1px solid #e0e0e0',
+          fontSize: 13,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Import complete</div>
+          <div>Imported: {report.imported.length}</div>
+          {report.imported.map(i => (
+            <div key={i.slug} style={{ color: '#555' }}>+ {i.source_filename} → {i.slug}</div>
+          ))}
+          <div style={{ marginTop: 4 }}>Unchanged: {report.unchanged}</div>
+          {report.skipped.length > 0 && (
+            <>
+              <div style={{ marginTop: 4 }}>Skipped: {report.skipped.length}</div>
+              {report.skipped.map((s, idx) => (
+                <div key={idx} style={{ color: '#a00' }}>– {s.filename} ({s.reason})</div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      <h3 style={{ marginTop: 24 }}>Imported images</h3>
+      {loading && <Skeleton />}
+      {!loading && images.length === 0 && (
+        <div style={{ color: '#888', fontSize: 14 }}>No images imported yet.</div>
+      )}
+      {!loading && images.map(img => (
+        <div
+          key={img.slug}
+          style={{
+            display: 'flex',
+            gap: 12,
+            padding: 12,
+            border: '1px solid #e0e0e0',
+            borderRadius: 8,
+            marginBottom: 8,
+            alignItems: 'center',
+          }}
+        >
+          <img
+            src={img.url}
+            alt={img.source_filename}
+            style={{ width: 96, height: 96, objectFit: 'contain', flexShrink: 0, background: '#f5f5f5' }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>{img.source_filename}</div>
+            <div style={{ fontSize: 12, color: '#888' }}>
+              {img.width ?? '?'}×{img.height ?? '?'} · {(img.byte_size / 1024).toFixed(0)} KB · {img.slug}
+            </div>
+          </div>
+          <button style={btnStyle} onClick={() => handleCopy(img.slug)}>
+            {copiedSlug === img.slug ? 'Copied' : 'Copy Markdown'}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function EssayCardsApp() {
   return (
-    <Routes>
-      <Route path="/" element={<EssayListView />} />
-      <Route path="/essays/:id" element={<ReaderView />} />
-      <Route path="/review" element={<ReviewSessionView />} />
-      <Route path="/ingest" element={<IngestView />} />
-      <Route path="/examinations/import" element={<ImportExaminationsView />} />
-    </Routes>
+    <>
+      <style>{ESSAYCARDS_IMG_CSS}</style>
+      <Routes>
+        <Route path="/" element={<EssayListView />} />
+        <Route path="/essays/:id" element={<ReaderView />} />
+        <Route path="/review" element={<ReviewSessionView />} />
+        <Route path="/ingest" element={<IngestView />} />
+        <Route path="/examinations/import" element={<ImportExaminationsView />} />
+        <Route path="/images" element={<ImagesView />} />
+      </Routes>
+    </>
   );
 }

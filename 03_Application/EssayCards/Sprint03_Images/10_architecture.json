@@ -1,0 +1,434 @@
+{
+  "sprint_note": "Adds a staging-folder image import pipeline (backend/import_images.py: shared core + CLI) and three endpoints on a new images router — POST /images/scan (mutation, typed report), GET /images/{slug} (plain FileResponse, immutable cache, R-CON-BP-04 exempt), GET /images (Dataset) — plus a new essaycards.images table, an Images view, and ReactMarkdown rendering of flashcard q/a so card images work.",
+  "component_name": "essaycards",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Long-form essay reader paired with spaced-repetition flashcards: essays are ingested via a markdown CLI or a JSON HTTP endpoint (one shared upsert core) into ordered sections that own flashcards, a due-queue review loop schedules re-review, and images dropped into a server staging folder are batch-imported into web-ready assets referenced as ordinary Markdown in essay and card text.",
+  "classification": {
+    "why_application": "Owns the essaycards schema (essays, sections, flashcards, review state, and now images), owns both ingestion grammars and their upsert-by-stable-key semantics, owns the spaced-repetition scheduling algorithm, and — new this sprint — owns the staging-to-web image import pipeline: the accept list, the downscale/re-encode/metadata-strip rules, the filename-derived slug scheme, and the source_sha256 idempotency key. All of this is essaycards-content-specific behavior, not reusable technical infrastructure.",
+    "non_goals": [
+      "Rich/structured in-app editing UI for essay text or flashcards (forms, WYSIWYG, inline field editing) — the 'Add / Update Essay' view is a raw JSON-paste textarea only",
+      "Multiple essays / topic library UI",
+      "User accounts / multi-user review state",
+      "Typed-answer grading (flip-and-self-assess only, not text matching)",
+      "Review statistics, streaks, retention graphs",
+      "Notifications/reminders when cards become due",
+      "Offline support",
+      "Uploading/editing markdown files through the UI (the CLI markdown path remains file-based and unchanged)",
+      "Deleting essays, sections, or flashcards via the JSON ingest endpoint or its UI",
+      "Reconciliation of sections/cards present in the DB but omitted from a given JSON ingest payload — same accepted gap as the markdown path (see risks)",
+      "Authentication on any endpoint — follows the existing repo-wide convention of no per-app auth layer, bound to 127.0.0.1 behind the shell (see risks — R-OPS-BP-02 flagged explicitly by the draft)",
+      "Full multi-essay reader experience (topic switcher, essay metadata editing, etc.) beyond the minimal list/picker that already exists",
+      "[NEW] In-app / HTTP upload of image bytes — files arrive via the staging folder only",
+      "[NEW] Deleting images or cleanup of unreferenced images — an image row + its /app/images file is never removed by this sprint; no delete tooling",
+      "[NEW] Re-processing already-imported images when MAX_EDGE / JPEG_QUALITY / MAX_BYTES change — import is keyed on source_sha256; a once-imported file is never touched again",
+      "[NEW] SVG (image/svg+xml is a stored-XSS vector, R-OPS-BP-02), HEIC/HEIF, animated-GIF resizing, RAW formats, PDF",
+      "[NEW] EXIF-based auto-rotation beyond Pillow's ImageOps.exif_transpose in the normalize step",
+      "[NEW] A rich-text image picker, drag-and-drop, or in-browser upload in the Images view — it only triggers a rescan and lets the user copy a Markdown snippet",
+      "[NEW] Backing up /app/images — it is reproducible-from-staging cache-like state (resolved Q2); adding a DATA_ROOT archive is a separate platform concern"
+    ],
+    "not_platform": "The image import pipeline is inlined for essaycards' own content workflow: it is keyed to the essaycards.images table and the /api/essaycards/images URL space, its accept list and normalization rules exist to serve the 720px reading column, and its slug scheme is derived from author-chosen staged filenames. It is not exposed as a reusable image-processing capability. If another Atlas application later needs image processing, that is the point to extract a platform component — not now. The markdown/JSON ingestion grammars and the scheduling formula likewise remain meaningful only within this application."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via ATLAS_PG_* or DATABASE_URL env vars",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/packages/platform_errorhandling/ — api_error helper, exception handlers, request timing, structured logging",
+      "A markdown source file provided by the user on the local filesystem, mounted into the container for the ingestion CLI to read (markdown CLI path only, unchanged this sprint)",
+      "[NEW] A read-only staging directory mounted at /app/staging (${DATA_ROOT}/essaycards/staging) into which the user drops image files out of band (scp, file share, Syncthing); the app only reads it, never writes or deletes",
+      "[NEW] An app-writable directory mounted at /app/images (${DATA_ROOT}/essaycards/images) holding processed <slug>.<ext> files; owned by EssayCards, NOT covered by the daily pg_dump"
+    ],
+    "provides": [
+      "GET /api/essaycards/essays — list all ingested essays; no params; returns Dataset ordered by created_at asc",
+      "GET /api/essaycards/essays/{essay_id} — single essay with its ordered sections embedded; returns Dataset (single row); 404 ApiError if not found",
+      "GET /api/essaycards/flashcards/due — due flashcards, optionally scoped to an essay or a section within an essay; returns Dataset ordered by next_due_at asc",
+      "POST /api/essaycards/flashcards/{flashcard_id}/review — grade a card and persist its next scheduling state; mutation endpoint, returns typed record on success",
+      "POST /api/essaycards/essays/ingest — accepts one JSON payload (title, slug, sections[].{heading, anchor_slug, body_markdown, cards[].{id,q,a}}); creates the essay if slug is new, upserts sections/cards onto an existing essay if slug already exists; shares backend.ingest.upsert_document with the markdown CLI path; mutation endpoint, returns a typed record on success (200), ApiError on any validation failure (400)",
+      "[NEW] POST /api/essaycards/images/scan — no body; runs the staging import core once and returns a typed report record { imported: [{slug, source_filename, url, width, height, byte_size}], unchanged: <int>, skipped: [{filename, reason}] }; idempotent; ApiError only on infrastructure failure (staging unreadable / images dir unwritable)",
+      "[NEW] GET /api/essaycards/images/{slug} — serves the processed image file with its stored Content-Type and Cache-Control: public, max-age=31536000, immutable; plain FileResponse, deliberately NOT a Dataset (R-CON-BP-04 carve-out, same rationale class as GET /essays/{id}/examination-package); 404 ApiError NOT_FOUND if the slug is unknown or its file is missing on disk",
+      "[NEW] GET /api/essaycards/images — read endpoint; returns a Dataset of image metadata (slug, source_filename, content_type, byte_size, width, height, created_at, url) ordered created_at desc; never returns bytes; empty result valid"
+    ],
+    "invariants": [
+      "All read endpoints (GET) that render UI-visible tabular data return Dataset per R-CON-BP-04. GET /api/essaycards/images/{slug} is the documented exception — a binary asset for an <img> tag, not tabular data (see the images router docstring).",
+      "essays.slug is unique; essay_sections.(essay_id, anchor_slug) is unique; flashcards.(essay_id, card_key) is unique — the three ingestion upsert keys, shared by both entry points",
+      "anchor_slug and card_key are always author-assigned — no code path derives an anchor from heading text or generates card ids",
+      "Re-ingestion of an existing flashcard updates question, answer, and section_id only; flashcard_review_state is never modified by re-ingestion, via either entry point",
+      "A newly ingested flashcard gets flashcard_review_state.last_reviewed_at = null and next_due_at = the flashcard row's created_at (due immediately), via either entry point",
+      "Ingestion is fully transactional for both entry points: parsing/validation happens entirely before any database write; both paths delegate their database writes to the single shared backend.ingest.upsert_document(conn, doc). No change this sprint.",
+      "'Due' is defined as next_due_at <= now(), where now() is evaluated by Postgres at query time (single time-authority)",
+      "The four grade values are exactly: again, hard, good, easy — no other value is accepted",
+      "POST .../review reads and validates the request body manually against the raw parsed JSON; every invalid-body shape returns ApiError VALIDATION_ERROR (400); FastAPI's default 422 shape is never produced by this endpoint",
+      "Grading always sets last_reviewed_at to the request-handling instant; for grade=again next_due_at = now + 5 seconds flat; for grade in {hard, good, easy} interval = floor if never reviewed else max(floor, 2*elapsed) with floors 1 min / 20 min / 1 day; the authoritative 'now' is read once from Postgres per review request",
+      "R-CON-AL-04/05/06 (partial update, null-vs-omit, time authority): review takes one required field with no nullable/omittable fields; ingest is additive/upsert-only with no partial field-clear; images are not an editable record field on any endpoint (see the R-CON-AL-05 note below). No change this sprint.",
+      "Section body_markdown excludes the trailing flashcards fence (markdown path only); content before the first `##` heading in a markdown file is discarded (deliberate, see risks); the JSON payload has no equivalent concept",
+      "GET /flashcards/due with section_id but no essay_id is rejected VALIDATION_ERROR; an essay_id/section_id pair where the section does not belong to that essay returns zero rows, not an error",
+      "Both ingestion entry points build the same in-memory doc shape and call backend.ingest.upsert_document(conn, doc) for all database writes — the upsert SQL exists in exactly one place. No change this sprint.",
+      "POST /essays/ingest must not use a Pydantic request-body model; a card id already in the DB for an essay under a different section than the incoming payload is rejected VALIDATION_ERROR before any write (JSON path only; the markdown CLI path still silently moves such a card). No change this sprint.",
+      "[NEW] backend/import_images.py exposes one shared core, scan_staging(conn, staging_dir=STAGING_DIR, images_dir=IMAGES_DIR) -> ImportReport, called by BOTH the CLI wrapper (python -m backend.import_images) and POST /api/essaycards/images/scan. The staging-scan logic exists in exactly one place; the router never re-implements it.",
+      "[NEW] MAX_EDGE (2000), JPEG_QUALITY (82), and MAX_BYTES (5 * 1024 * 1024) are module-level constants in backend/import_images.py — not config.env entries. MAX_BYTES is one decision shared with the ck_images_byte_size CHECK in 10_schema.sql; the two must change together.",
+      "[NEW] The accept list is .jpg / .jpeg / .png / .gif / .webp (case-insensitive), matched on the staged filename extension. scan_staging iterates /app/staging non-recursively; any entry whose extension is not in the accept list is recorded as a skipped entry with reason 'not-an-image' and does not stop the scan.",
+      "[NEW] For each accepted file: the ORIGINAL staged bytes are hashed with SHA-256 to produce source_sha256 — the idempotency key. If a row with that source_sha256 already exists, the file is counted as 'unchanged' and nothing is written. Re-running the scan after adding one new file processes only that one file.",
+      "[NEW] Per-file resilience: a staged file that Pillow cannot open as a real image of an allowed format, or whose declared extension disagrees with the sniffed format, is recorded as a skipped entry (reason 'not-an-image' or 'format-mismatch') and the scan continues — unlike the all-or-nothing markdown/JSON ingest paths.",
+      "[NEW] Normalize step: ImageOps.exif_transpose is applied; if max(width, height) > MAX_EDGE the image is downscaled preserving aspect ratio with Lanczos resampling; the image is never upscaled. Re-encode by format: JPEG -> progressive, quality=JPEG_QUALITY, all EXIF/metadata dropped; PNG -> re-saved optimized, metadata dropped; WebP -> re-encoded, metadata dropped; GIF -> passed through byte-for-byte ONLY if byte_size <= MAX_BYTES AND max(dimension) <= MAX_EDGE, otherwise skipped with reason 'gif-too-large' (animated-GIF resizing is out of scope). Any result still larger than MAX_BYTES is skipped with reason 'too-large'.",
+      "[NEW] Slug derivation from the original basename: lowercase, drop the extension, collapse every run of characters not in [a-z0-9] to a single '-', trim leading/trailing '-'. An empty result becomes 'image'. If the slug is already taken by a row with a DIFFERENT source_sha256, append '-' followed by the first 6 hex characters of the (new file's) source_sha256. No slug is derived from image content or a sequence.",
+      "[NEW] Per-file import is atomic and independently committed: each file is processed inside its own SAVEPOINT — the processed bytes are written to images_dir/<slug>.<ext>, the essaycards.images row is INSERTed, then the SAVEPOINT is released and that row is committed before the next file. A per-file INSERT failure is rolled back to that file's SAVEPOINT (the just-written file is unlinked and the file is recorded as skipped('error')); it neither aborts the remaining batch nor rolls back already-imported files, and because prior in-scan imports are already committed, _resolve_slug sees their slugs when resolving a later in-scan collision. Metadata rows in Postgres and processed bytes on the /app/images volume are a split durable store (R-CON-BP-03), both halves owned by EssayCards.",
+      "[NEW] essaycards.images.stored_filename is '<slug>.<ext>' relative to images_dir. GET /api/essaycards/images/{slug} builds the served filesystem path from the row's stored_filename — NEVER from the URL slug directly (path-traversal guard, R-OPS-BP-02).",
+      "[NEW] GET /api/essaycards/images/{slug} returns 404 ApiError NOT_FOUND (never 500) in two cases: the slug has no essaycards.images row, or the row exists but images_dir/stored_filename is missing on disk. On success it returns the file bytes with media type = the row's content_type and header Cache-Control: public, max-age=31536000, immutable — a slug's bytes never change; a re-imported different image gets a different slug.",
+      "[NEW] POST /api/essaycards/images/scan returns ApiError ONLY on infrastructure failure — the staging directory is unreadable or the images directory is unwritable (raised as ImportInfraError, mapped to 500 ApiError code IMPORT_INFRA_ERROR). Every per-file problem is a 'skipped' entry in the 200 response, not an error. The endpoint takes no body and is idempotent.",
+      "[NEW] GET /api/essaycards/images returns a Dataset ordered created_at desc; empty is valid (rows: [], meta.total: 0, meta.object_type: 'image'); the response never includes image bytes — metadata plus a computed url ('/api/essaycards/images/<slug>') only.",
+      "[NEW] /app/images is reproducible-from-staging cache-like state: it is not covered by the daily pg_dump and by design nothing else backs it up. The retained staging originals plus a re-run of the scan fully reconstruct both /app/images and the essaycards.images rows. This is stated verbatim in the essaycards.images schema comment (10_schema.sql, R-CON-BP-03) and in a new 'Images' subsection of CLAUDE.md.",
+      "[NEW] ReactMarkdown renders section body_markdown in the reader (unchanged) and, new this sprint, renders flashcard question and answer in the review card. It is used WITHOUT rehype-raw, WITHOUT a urlTransform override, and WITHOUT a custom img component — raw HTML in body_markdown / q / a stays inert and react-markdown v8+ default URI sanitization is relied on and not disabled. Image sizing is CSS-only: `.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto }`.",
+      "[NEW] Image Markdown references (`![alt](/api/essaycards/images/<slug>)`) are ordinary text inside body_markdown / q / a. Neither ingestion path parses or validates them; a reference to a slug that was never imported renders a broken image — the same accepted gap as a bad `#anchor` jump link."
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — POST .../review with an invalid/missing/wrong-typed grade or unparsable body, or GET /flashcards/due with section_id but no essay_id — 400 ApiError",
+      "NOT_FOUND — GET /essays/{essay_id} with unknown id, or POST .../review with unknown flashcard_id — 404 ApiError",
+      "INGESTION_ERROR — the markdown CLI exits non-zero and writes nothing on any grammar/validation failure; CLI-local, no HTTP/ApiError shape",
+      "DATABASE_UNAVAILABLE — Postgres unreachable at startup or during a request — startup logs the error and continues; requests fail until the database is reachable",
+      "VALIDATION_ERROR — POST /api/essaycards/essays/ingest with any structural/semantic payload violation or a card-id/different-section collision — 400 ApiError, no database write attempted",
+      "[NEW] NOT_FOUND — GET /api/essaycards/images/{slug} with an unknown slug, or a slug whose processed file is missing from images_dir — 404 ApiError. Consumers rendering an <img> must tolerate a 404 (broken image) for references to un-imported or drifted slugs.",
+      "[NEW] IMPORT_INFRA_ERROR — POST /api/essaycards/images/scan when the staging directory is unreadable or the images directory is unwritable — 500 ApiError. Per-file image/format problems are NOT this failure mode; they are 'skipped' entries in the 200 report and consumers must display them as such."
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool (minconn=1, maxconn=5) via get_db() context manager — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/packages/platform_errorhandling/",
+      "PyYAML (yaml.safe_load) — used only by the markdown ingestion CLI, never by the HTTP API",
+      "Starlette Request.json() — used by the manual-validation mutation handlers (POST /essays/ingest, POST /flashcards/{id}/review, POST /examinations/import)",
+      "[NEW] Pillow (PIL.Image, PIL.ImageOps) — used only by backend/import_images.py to decode, transpose, downscale, and re-encode staged images",
+      "[NEW] Starlette FileResponse — used only by GET /api/essaycards/images/{slug} to serve a processed image file with an immutable Cache-Control header"
+    ],
+    "provides": [
+      "HTTP API mounted at /api/essaycards (FastAPI, uvicorn)",
+      "CORS: allow_origin_regex=http://localhost:\\d+ — all localhost ports during development",
+      "Allowed methods: GET, POST",
+      "backend.ingest — a markdown-ingestion CLI entrypoint (python -m backend.ingest <path>), not an HTTP surface",
+      "POST /api/essaycards/essays/ingest — JSON ingestion HTTP endpoint on the essays router, sharing backend.ingest.upsert_document with the markdown CLI path",
+      "[NEW] POST /api/essaycards/images/scan, GET /api/essaycards/images/{slug}, GET /api/essaycards/images — a new images router included by main.py at prefix /api/essaycards",
+      "[NEW] backend.import_images — an image-import CLI entrypoint (python -m backend.import_images), sharing scan_staging() with POST /api/essaycards/images/scan"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays",
+        "purpose": "List all ingested essays.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}",
+        "purpose": "Return one essay and its ordered sections, embedded on the single returned row.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/due",
+        "purpose": "List due flashcards, optionally scoped to one essay or one section within an essay.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/flashcards/{flashcard_id}/review",
+        "purpose": "Grade a flashcard and persist its updated review-scheduling state.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record on success (200), ApiError on failure"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/essays/ingest",
+        "purpose": "Create or upsert an essay and its sections/flashcards from a JSON payload, sharing the markdown path's upsert core.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record on success (200), ApiError (400) on validation failure"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/images/scan",
+        "purpose": "Run the staging import core once: process every new file in /app/staging into a web-ready asset under /app/images and INSERT its metadata row; return a per-file report.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; on success (200) returns a typed report record { imported: [{slug: str, source_filename: str, url: str, width: int|null, height: int|null, byte_size: int}], unchanged: int, skipped: [{filename: str, reason: 'not-an-image'|'format-mismatch'|'gif-too-large'|'too-large'|'error'}] }; ApiError (500, code IMPORT_INFRA_ERROR) only when the staging dir is unreadable or the images dir is unwritable",
+        "params": {},
+        "body": "none — the endpoint takes no request body; it is idempotent (only files with an unseen source_sha256 are processed)",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/images/{slug}",
+        "purpose": "Serve the processed image file for a slug, for use as the src of an <img> tag rendered from Markdown.",
+        "ui_contract": "none — NOT a Dataset. Deliberate R-CON-BP-04 carve-out: a binary asset for an <img> tag, on the same rationale class as GET /essays/{id}/examination-package (see backend/routers/examinations.py module docstring). The new images router docstring must state this exemption.",
+        "params": { "slug": "path param, string, required — an essaycards.images primary key" },
+        "responses": "200: file bytes, media type = the row's content_type, header Cache-Control: public, max-age=31536000, immutable (served via Starlette FileResponse, which also covers range requests). 404: ApiError NOT_FOUND when the slug has no row, or the row exists but images_dir/stored_filename is missing on disk. The served path is built from the row's stored_filename, never from the URL slug.",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/images",
+        "purpose": "List imported image metadata for the Images view (thumbnails + Copy-Markdown snippets).",
+        "ui_contract": "Dataset | ApiError",
+        "params": {},
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — no parameters",
+          "ordering": "created_at desc (newest imported first)",
+          "grouping": "none",
+          "time_basis": "server time — created_at is essaycards.images.created_at (Postgres default now() at INSERT)",
+          "boundary_construction": "n/a — no time filter",
+          "empty_result_behavior": "valid — Dataset with rows=[], meta.total=0, meta.object_type='image'; the Images view shows an empty state, not an error",
+          "zero_fill_behavior": "not applicable — flat list, not a time series",
+          "row_shape": "slug, source_filename, content_type, byte_size, width (may be null), height (may be null), created_at (isoformat), url ('/api/essaycards/images/<slug>'). Image bytes are never included."
+        },
+        "change": "new"
+      },
+      {
+        "type": "cli_command",
+        "name": "python -m backend.import_images",
+        "purpose": "Run the same staging import core as POST /images/scan from a shell (docker exec atlas-essaycards python -m backend.import_images); prints a summary of newly imported slugs, the unchanged count, and skipped files with reasons.",
+        "ui_contract": "none — CLI, no HTTP surface",
+        "change": "new"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() creates the psycopg2 SimpleConnectionPool. init_schema() reads schema.sql and executes DDL idempotently (now including essaycards.images and ix_images_created_at). Errors are logged; the application continues running.",
+      "inputs": ["ATLAS_PG_* or DATABASE_URL env vars", "schema.sql"],
+      "outputs": ["live connection pool", "essaycards schema with essays, essay_sections, flashcards, flashcard_review_state, section_examinations, images tables present"]
+    },
+    {
+      "step": 2,
+      "name": "ingest_parse",
+      "description": "backend/ingest.py parses a markdown file into the in-memory doc shape {title, slug, sections:[{heading, anchor_slug, order_index, body_markdown, cards:[{card_key, question, answer}]}]} per the Sprint01 grammar. Unchanged this sprint.",
+      "inputs": ["markdown file at given filesystem path"],
+      "outputs": ["parsed doc structure, or an IngestionError abort with no DB writes"]
+    },
+    {
+      "step": 3,
+      "name": "ingest_upsert",
+      "description": "backend.ingest.upsert_document(conn, doc) opens one transaction and upserts the essay (keyed by slug), each section (keyed by essay_id+anchor_slug), and each card (keyed by essay_id+card_key); a flashcard_review_state row is created only for a newly-inserted card. Called by both ingest() (markdown CLI) and POST /essays/ingest (JSON API). Unchanged this sprint.",
+      "inputs": ["doc structure", "conn: an open psycopg2 connection"],
+      "outputs": ["essay/section/flashcard rows upserted; IngestSummary returned"]
+    },
+    {
+      "step": 4,
+      "name": "essays_list",
+      "description": "GET /api/essaycards/essays selects id, title, slug ordered by created_at asc. Returns Dataset. Unchanged this sprint.",
+      "inputs": [],
+      "outputs": ["Dataset with essay rows"]
+    },
+    {
+      "step": 5,
+      "name": "essay_detail",
+      "description": "GET /api/essaycards/essays/{essay_id} fetches the essay (404 if missing) and embeds its sections ordered by order_index asc. Returns Dataset (single row). Unchanged this sprint.",
+      "inputs": ["essay_id path param"],
+      "outputs": ["Dataset (single row with embedded sections) | 404 ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "flashcards_due",
+      "description": "GET /api/essaycards/flashcards/due validates section_id requires essay_id, joins flashcards to review_state, filters WHERE next_due_at <= now() plus optional scope, orders by next_due_at asc. Returns Dataset. Unchanged this sprint.",
+      "inputs": ["essay_id query param (optional)", "section_id query param (optional)"],
+      "outputs": ["Dataset with due flashcard rows | 400 ApiError"]
+    },
+    {
+      "step": 7,
+      "name": "flashcard_review",
+      "description": "POST /api/essaycards/flashcards/{flashcard_id}/review manually validates grade, reads one Postgres now(), computes next_due_at via backend.scheduling.compute_next_due_at, updates flashcard_review_state. Returns a typed record. Unchanged this sprint.",
+      "inputs": ["flashcard_id path param", "grade body field"],
+      "outputs": ["{flashcard_id, last_reviewed_at, next_due_at} (200) | 400 ApiError | 404 ApiError"]
+    },
+    {
+      "step": 8,
+      "name": "json_ingest_validate",
+      "description": "POST /api/essaycards/essays/ingest reads the raw JSON body, structurally validates title/slug/sections/cards and in-payload uniqueness, and builds the doc shape. First violation -> ApiError VALIDATION_ERROR, no DB access. Unchanged this sprint.",
+      "inputs": ["raw JSON request body"],
+      "outputs": ["doc structure | ApiError VALIDATION_ERROR"]
+    },
+    {
+      "step": 9,
+      "name": "json_ingest_collision_check_and_upsert",
+      "description": "If the essay slug already exists, checks for any incoming card_key attached to a different section than in the DB (-> ApiError VALIDATION_ERROR, no write), then calls backend.ingest.upsert_document and maps IngestSummary to the response. Unchanged this sprint.",
+      "inputs": ["doc from step 8", "conn: an open psycopg2 connection"],
+      "outputs": ["{essay_id, slug, sections_created, sections_updated, cards_created, cards_updated} (200) | ApiError VALIDATION_ERROR (400)"]
+    },
+    {
+      "step": 10,
+      "name": "image_scan_core",
+      "description": "backend.import_images.scan_staging(conn, staging_dir=STAGING_DIR, images_dir=IMAGES_DIR) -> ImportReport. Lists staging_dir non-recursively; if staging_dir cannot be listed, or images_dir is not writable, raises ImportInfraError. For each entry: (a) if the extension is not in the accept list -> skipped('not-an-image'); (b) read the original bytes, compute source_sha256 (SHA-256); if a row with that source_sha256 exists -> unchanged, continue; (c) open with Pillow — decode failure or extension/format mismatch -> skipped('not-an-image' / 'format-mismatch'); (d) apply ImageOps.exif_transpose; downscale with Lanczos if max(dim) > MAX_EDGE (never upscale); re-encode per format (JPEG progressive q=JPEG_QUALITY metadata-dropped; PNG optimized metadata-dropped; WebP re-encoded metadata-dropped; GIF byte-for-byte only if byte_size<=MAX_BYTES and max(dim)<=MAX_EDGE else skipped('gif-too-large')); if the result is still > MAX_BYTES -> skipped('too-large'); (e) derive the slug from the basename and resolve a collision against a different source_sha256 by appending '-'+first 6 hex of the hash; (f) open a per-file SAVEPOINT, write the processed bytes to images_dir/<slug>.<ext>, then INSERT the essaycards.images row (slug, stored_filename, content_type, byte_size, width, height, source_sha256, source_filename); on a successful INSERT RELEASE the SAVEPOINT and commit that file's row before moving to the next file, so already-imported files are never rolled back by a later per-file failure and their slugs are visible to _resolve_slug for subsequent files in the same scan; on INSERT failure ROLLBACK TO the SAVEPOINT (psycopg2 otherwise leaves the whole transaction aborted and would poison every following file), unlink the just-written file, and record skipped('error') so the batch continues — only a connection-level failure (OperationalError / InterfaceError) is re-raised and surfaces as ImportInfraError. Accumulates imported / unchanged / skipped into the report.",
+      "inputs": ["conn: an open psycopg2 connection", "staging_dir contents (read-only)", "images_dir (writable)"],
+      "outputs": ["ImportReport {imported: [ImportedImage], unchanged: int, skipped: [SkippedFile]} | raises ImportInfraError"],
+      "change": "new"
+    },
+    {
+      "step": 11,
+      "name": "image_scan_endpoint",
+      "description": "POST /api/essaycards/images/scan acquires a connection via get_db(), calls scan_staging(conn). On ImportInfraError -> api_error('IMPORT_INFRA_ERROR', <message>, status=500). Otherwise serializes the ImportReport to the typed report record (imported entries carry a computed url '/api/essaycards/images/<slug>') and returns it with status 200.",
+      "inputs": ["no request body", "get_db() connection"],
+      "outputs": ["typed report record (200) | ApiError IMPORT_INFRA_ERROR (500)"],
+      "change": "new"
+    },
+    {
+      "step": 12,
+      "name": "image_serve",
+      "description": "GET /api/essaycards/images/{slug} SELECTs stored_filename, content_type from essaycards.images WHERE slug = %s. No row -> api_error('NOT_FOUND', ..., status=404). Builds path = images_dir / stored_filename (from the row, not the URL slug). Path missing on disk -> api_error('NOT_FOUND', ..., status=404). Otherwise returns FileResponse(path, media_type=content_type, headers={'Cache-Control': 'public, max-age=31536000, immutable'}).",
+      "inputs": ["slug path param", "images_dir (module-level IMAGES_DIR)"],
+      "outputs": ["FileResponse (200) | ApiError NOT_FOUND (404)"],
+      "change": "new"
+    },
+    {
+      "step": 13,
+      "name": "image_list",
+      "description": "GET /api/essaycards/images SELECTs slug, source_filename, content_type, byte_size, width, height, created_at FROM essaycards.images ORDER BY created_at DESC. Maps each row to a dict adding url='/api/essaycards/images/<slug>' and created_at.isoformat(); wraps them in a Dataset (object_type 'image', schema columns for the listed fields plus url). Empty result -> rows=[], total=0.",
+      "inputs": [],
+      "outputs": ["Dataset with image metadata rows (200)"],
+      "change": "new"
+    },
+    {
+      "step": 14,
+      "name": "image_import_cli",
+      "description": "python -m backend.import_images: init_pool(), get_db() connection, call scan_staging(conn), print a human-readable summary (newly imported filename->slug, unchanged count, skipped filename+reason). On ImportInfraError, print the error to stderr and exit non-zero. Shares scan_staging() with step 11 — no duplicated scan logic.",
+      "inputs": ["/app/staging contents", "/app/images"],
+      "outputs": ["printed summary; non-zero exit on ImportInfraError"],
+      "change": "new"
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — EssayCards owns the essaycards schema within it, including the new images table"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema — used by GET /api/essaycards/images and the other read endpoints"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error helper, exception handlers, request timing, structured logging"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Only used for platform_contracts models — never for request-body validation on mutation endpoints in this component", "reuse_existing": true},
+      {"name": "pyyaml", "role": "Markdown-CLI ingestion only", "reuse_existing": true},
+      {"name": "pytest", "role": "Backend test runner", "reuse_existing": true},
+      {"name": "httpx", "role": "Test client (via pytest + ASGI transport)", "reuse_existing": true},
+      {"name": "react-markdown", "role": "Renders section body_markdown (reader) and — new this sprint — flashcard q/a in the review card; already a shell dependency, no version change", "reuse_existing": true},
+      {"name": "Pillow", "role": "[NEW] Decode, exif_transpose, downscale (Lanczos), and re-encode staged images in backend/import_images.py. Pillow ships manylinux wheels bundling libjpeg/zlib/libwebp; the python:3.12-slim base needs no extra system packages. No pillow-heif.", "reuse_existing": false}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling Postgres directly",
+      "Re-implementing platform_contracts or platform_errorhandling locally",
+      "Auto-generating anchor_slug or card_key from content — both must be author-assigned",
+      "Duplicating the essay/section/flashcard upsert SQL between the markdown CLI path and the JSON API path — both must call backend.ingest.upsert_document",
+      "Using a Pydantic request-body model for POST /essays/ingest — the body is read via the raw Starlette Request and validated manually",
+      "Deleting or reconciling rows omitted from an ingest payload",
+      "[NEW] Re-implementing the staging scan inside backend/routers/images.py — the router must call backend.import_images.scan_staging(); the scan logic lives in exactly one place",
+      "[NEW] Building the GET /images/{slug} filesystem path from the URL slug directly — it must be derived from the essaycards.images row's stored_filename (path-traversal guard, R-OPS-BP-02)",
+      "[NEW] Writing to or deleting from /app/staging — it is mounted read-only; the app only reads it",
+      "[NEW] Accepting image bytes over HTTP (an upload endpoint) — images arrive only via the staging folder",
+      "[NEW] Adding rehype-raw, a urlTransform override, or a custom img component to ReactMarkdown — image sizing is CSS-only",
+      "[NEW] Re-processing or deleting already-imported images (keyed on source_sha256; no delete tooling this sprint)",
+      "[NEW] Moving MAX_EDGE / JPEG_QUALITY / MAX_BYTES into config.env — they are module-level constants in backend/import_images.py",
+      "[NEW] Accepting image/svg+xml (stored-XSS vector, R-OPS-BP-02), HEIC/HEIF, or animated-GIF resizing",
+      "[NEW] Treating essaycards.images as a cross-application contract or exposing it as a shared view — it is private application state"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres + file",
+    "ownership": "private_application_state",
+    "notes": "Sprint03 adds essaycards.images (private Postgres table) plus processed image bytes as <slug>.<ext> files under images_dir (${DATA_ROOT}/essaycards/images) — a split durable store per R-CON-BP-03, both halves owned by EssayCards. The file half is reproducible-from-staging and is deliberately not backed up (resolved Q2). 10_schema.sql is this sprint's schema artifact and is already written (full schema including essaycards.images + ix_images_created_at); the implementer must fold the essaycards.images table and ix_images_created_at index into the canonical runtime schema at 03_Application/EssayCards/schema.sql, which is the single path loaded idempotently at startup and by the test conftest (R-CON-BP-07)."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement backend/import_images.py structured like backend/ingest.py: module constants STAGING_DIR (/app/staging), IMAGES_DIR (/app/images), MAX_EDGE=2000, JPEG_QUALITY=82, MAX_BYTES=5*1024*1024, ACCEPT_EXTS={'.jpg','.jpeg','.png','.gif','.webp'}; dataclasses ImportReport / ImportedImage / SkippedFile; exception ImportInfraError; public scan_staging(conn, staging_dir=STAGING_DIR, images_dir=IMAGES_DIR) -> ImportReport implementing internal_flow step 10 exactly; private helpers _slugify, _resolve_slug, _process_image, _sha256, _import_one; and a `_main()` CLI wrapper registered under `if __name__ == '__main__'` plus `python -m backend.import_images` support (see backend/ingest.py::_main for the pattern).",
+      "Implement backend/routers/images.py: APIRouter(prefix='/images', tags=['images']); a module docstring stating the GET /images/{slug} R-CON-BP-04 exemption (binary asset, same rationale class as backend/routers/examinations.py's export endpoint); POST '/scan' (calls scan_staging, maps ImportInfraError -> api_error('IMPORT_INFRA_ERROR', ..., status=500), else 200 typed report with per-entry url); GET '/{slug}' (SELECT by slug -> 404 ApiError NOT_FOUND if no row; path from row.stored_filename under IMAGES_DIR -> 404 ApiError NOT_FOUND if the file is missing; else FileResponse with media_type=row.content_type and Cache-Control: public, max-age=31536000, immutable); GET '' (Dataset ordered created_at desc, empty valid, url computed per row, bytes never returned). Use response_model=None on the FileResponse route.",
+      "Wire the images router into backend/main.py: `from backend.routers import ... images` and `app.include_router(images.router, prefix='/api/essaycards')`, alongside the existing essays/flashcards/examinations includes.",
+      "compose.yml: add two volume mounts on the essaycards service — `${DATA_ROOT}/essaycards/staging:/app/staging:ro` and `${DATA_ROOT}/essaycards/images:/app/images`.",
+      "pyproject.toml: add `Pillow>=10` to [project].dependencies. No pillow-heif. No Dockerfile change expected (manylinux wheels on python:3.12-slim).",
+      "Fold the essaycards.images table and ix_images_created_at index (verbatim from 10_schema.sql, including the R-CON-BP-03 / staging-originals comment) into the canonical runtime 03_Application/EssayCards/schema.sql before the closing `commit;`.",
+      "tests/conftest.py: extend clean_tables to also truncate essaycards.images (it has no FK to essays, so `truncate essaycards.essays cascade` does not clear it) — e.g. `truncate essaycards.essays, essaycards.images cascade`.",
+      "tests/fixtures.sql: add two or three essaycards.images rows (ids prefixed `fix-img-`) with known created_at ordering and known stored_filename values, to back the GET /images ordering/empty and GET /images/{slug} unknown-slug and row-exists-file-missing scenarios.",
+      "Add tests/test_images.py per 10_test_spec.md (HTTP-level via the TestClient plus a direct scan_staging call). No changes to test_ingest.py, test_essays.py, test_flashcards.py, test_examinations.py.",
+      "Add an 'Images' subsection to CLAUDE.md: the staging-folder workflow (drop files -> `docker exec atlas-essaycards python -m backend.import_images` or the in-app Scan button -> copy the `![](/api/essaycards/images/<slug>)` snippet into essay/card text), and the explicit line that the user must retain their staging originals because /app/images is rebuilt from them and is never backed up. Also add the image workflow to the existing 'Content ingestion' note (import images first, then reference their slugs)."
+    ],
+    "ui_implementer": [
+      "src/ShellEntry.tsx ReviewSessionView: render `current.question` and `current.answer` through `<ReactMarkdown>` instead of bare text (currently ShellEntry.tsx:478 and :482). Add `className=\"essaycards-review-card\"` to the card container div (currently ShellEntry.tsx:471-477).",
+      "src/ShellEntry.tsx: render a single `<style>{ESSAYCARDS_IMG_CSS}</style>` block (constant `ESSAYCARDS_IMG_CSS = '.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto; }'`) once in the default-exported component that wraps the routes — follow the inline-`<style>` precedent in 03_Application/FoodTracker/src/ReportPage.tsx and 03_Application/NumericSeries/src/SeriesListPage.tsx. Do NOT add rehype-raw, a urlTransform prop, or a custom `components={{ img: ... }}` override.",
+      "src/ShellEntry.tsx: add an ImagesView component and a `/essaycards/images` route. It has (a) a 'Scan staging folder' button -> `apiFetch` POST `/api/essaycards/images/scan` with no body; on ApiError render `<ErrorCard>`; on success render the report — newly imported slugs, the unchanged count, and skipped files with their reason; (b) below, a list fetched from GET `/api/essaycards/images` rendered as thumbnails (`<img src={row.url}>`), each with the original filename, `width x height`, byte size, and a 'Copy Markdown' button that does `navigator.clipboard.writeText('![](' + row.url + ')')`.",
+      "src/ShellEntry.tsx EssayListView: add a button (e.g. 'Images') that navigates to `/essaycards/images`. This is the only entry point to the Images view — do NOT add a shellConfig.ts nav entry (the task explicitly scopes shell registration to the existing src/shellConfig.ts pattern with no new entries).",
+      "After any .tsx/.ts/.css edit: rebuild and redeploy the shell (`npx vite build` in 02_Platform/Atlas_Shell + `docker cp dist/. atlas-shell:/usr/share/nginx/html/`).",
+      "10_test_spec.md has one required `[UI]` scenario (review card renders a Markdown image) and one `[UI - manual]` scenario (Images view Copy-Markdown button). The component has no tests/ui/ Playwright suite today; if that infrastructure is not stood up this sprint, the `[UI]` scenario is recorded as untested (not passing) per R-PRO-BP-01 section 10, and the `[UI - manual]` scenario is verified by hand."
+    ],
+    "test_writer": [
+      "Map every scenario in 10_test_spec.md to a concrete pytest function in tests/test_images.py.",
+      "For scan scenarios: monkeypatch backend.import_images.STAGING_DIR and IMAGES_DIR (and the images router's IMAGES_DIR reference) to pytest tmp_path directories; write small Pillow-generated fixtures into the tmp staging dir (an oversized JPEG > 2000px, an in-bounds PNG, a non-image `.txt`, optionally an oversized GIF); call POST /api/essaycards/images/scan (or scan_staging directly) and assert the imported/unchanged/skipped breakdown, that oversized images are downscaled to <= MAX_EDGE, and that a second identical scan reports everything as `unchanged` (source_sha256 idempotency).",
+      "Cover slug collision: two staged files with the same basename but different bytes -> the second slug gets the `-<6hex>` suffix.",
+      "Cover GET /api/essaycards/images: ordering created_at desc, empty-DB returns rows=[] total=0, and that no `content`/bytes field appears in any row.",
+      "Cover GET /api/essaycards/images/{slug}: 200 returns the bytes with the stored content_type and `Cache-Control: public, max-age=31536000, immutable`; 404 ApiError NOT_FOUND for an unknown slug; 404 ApiError NOT_FOUND (not 500) for a fixture row whose file is absent from the tmp images dir.",
+      "Cover POST /api/essaycards/images/scan infra failure: point STAGING_DIR at a non-existent path (or a non-readable one) and assert a 500 ApiError with code IMPORT_INFRA_ERROR, not a partial 200."
+    ],
+    "reviewer": [
+      "Verify GET /api/essaycards/images/{slug} builds the served path from the essaycards.images row's stored_filename, never from the URL slug (path-traversal guard).",
+      "Verify GET /api/essaycards/images/{slug} returns 404 ApiError (not 500) when the row exists but the file is missing.",
+      "Verify scan_staging is per-file resilient: a non-image or corrupt file yields a `skipped` entry and the scan still processes the rest; only a genuine infra failure (staging unreadable / images dir unwritable) yields an ApiError from POST /images/scan.",
+      "Verify the router calls backend.import_images.scan_staging() and does not re-implement the scan; verify MAX_EDGE / JPEG_QUALITY / MAX_BYTES stay module constants in backend/import_images.py and are not read from config.env.",
+      "Verify no rehype-raw / urlTransform / custom img component was added to ReactMarkdown; image sizing is the CSS-only rule under .essaycards-section-body img and .essaycards-review-card img.",
+      "Verify the essaycards.images schema comment and the CLAUDE.md 'Images' subsection both state that the user must retain staging originals and that /app/images is not backed up.",
+      "Verify tests/conftest.py clears essaycards.images between tests so image tests are isolated.",
+      "Verify /app/staging is never written or deleted by any code path."
+    ]
+  },
+  "deferred_decisions": [
+    "Exact Pillow re-encode parameters (PNG compress_level, WebP method/quality, JPEG subsampling) are the implementer's choice within the fixed constraints: all metadata dropped and the result <= MAX_BYTES.",
+    "Whether GET /api/essaycards/images should paginate — not required this sprint (personal corpus, unfiltered newest-first list).",
+    "How the images router obtains its on-disk directory for GET /images/{slug} (import IMAGES_DIR from backend.import_images and monkeypatch in tests, vs. a small settings indirection) — implementer's choice, as long as tests can point it at a tmp dir.",
+    "The per-file import loop's transaction shape is fixed, not deferred: one SAVEPOINT per file; on a successful INSERT the loop RELEASEs that SAVEPOINT and commits that file's row before moving to the next file; on an INSERT failure it does ROLLBACK TO that file's SAVEPOINT, unlinks the just-written file, records skipped('error'), and continues the batch; a connection-level failure (OperationalError / InterfaceError) is re-raised and surfaces as ImportInfraError. This is exactly the boundary stated in internal_flow step 10(f) and the [NEW] per-file-atomicity invariant. A wholesale staging-dir-unreadable / images-dir-unwritable failure raising ImportInfraError remains mandatory. No 'single commit after the batch' alternative is permitted. The only thing left to the implementer is the psycopg2 call style used to issue the SAVEPOINT / RELEASE / ROLLBACK TO statements (raw SQL via cursor.execute vs. a helper), which must not change this observable boundary.",
+    "Label and placement of the 'Images' button on the essay list — implementer's choice, following the existing button style."
+  ],
+  "risks": [
+    {
+      "risk": "Content before the first `##` heading in a markdown source file is silently discarded (markdown path only) — unchanged from Sprint01.",
+      "impact": "An introductory paragraph before the first heading is dropped on every ingestion. Deliberate scope decision, not a bug."
+    },
+    {
+      "risk": "Neither ingestion path deletes rows for sections/cards removed from a source — unchanged accepted gap from Sprint01/02.",
+      "impact": "Orphaned sections/flashcards persist; manual SQL is the only cleanup. Accepted as-is."
+    },
+    {
+      "risk": "/app/images is deliberately not backed up (resolved Q2) and nothing else backs it up.",
+      "impact": "If the user loses both /app/images and their staging originals, imported images are unrecoverable and every `![](/api/essaycards/images/<slug>)` reference renders as a broken image. Mitigation is user discipline (retain staging originals), stated in the schema comment and CLAUDE.md. A Postgres restore from a pg_dump brings back the essaycards.images rows but not the files, producing 404s until a re-scan of the retained staging folder."
+    },
+    {
+      "risk": "Row/file drift: an essaycards.images row can exist without its /app/images file (failed unlink, manual file deletion, DB dump restored without the volume).",
+      "impact": "GET /images/{slug} degrades to 404 rather than 500, and the Images list still shows the row (with a broken thumbnail). There is no reconciliation tooling this sprint."
+    },
+    {
+      "risk": "POST /api/essaycards/images/scan adds an HTTP-reachable trigger for a filesystem+DB operation (R-OPS-BP-02).",
+      "impact": "The service is already bound to 127.0.0.1 behind the shell; the endpoint accepts no bytes over HTTP, reads a read-only mount, and writes only to the app's own images dir. The added attack surface is 'can cause a rescan', not 'can inject content'. Consistent with the repo-wide no-per-app-auth convention; no new deviation introduced."
+    },
+    {
+      "risk": "Pillow decode of a maliciously crafted image could consume large memory (decompression bomb).",
+      "impact": "Pillow's default MAX_IMAGE_PIXELS guard is active and staging is a user-managed local folder rather than an untrusted upload path, so residual risk is low. Noted for the reviewer; no extra guard added this sprint."
+    },
+    {
+      "risk": "The seed baseline (00_architecture/architecture.json and scaffolding.json) predates the merged-but-unclosed oral-examinations work that is live in the code (backend/routers/examinations.py, backend/examinations.py, essaycards.section_examinations, tests/test_examinations.py, CLAUDE.md 'Oral examinations'), and there is no closed sprint folder for it.",
+      "impact": "This Sprint03 design layers only image changes onto that baseline. The examination surfaces are real in the running service and in the developer reference but are only lightly represented in these artifacts (main.py include, router-precedent references). /sprint-close must regenerate 00_architecture/ from a state that includes BOTH the examinations work and this sprint's images work, or the developer reference will keep understating the API surface. Surfaced per R-OPS-BP-01, not silently normalized."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Confirm /sprint-close will regenerate 00_architecture/ (and atlas_dev_ref.md) from the combined oral-examinations + Sprint03-images state, since the examinations component currently has no closed sprint folder and is absent from the seed baseline.",
+      "owner": "architecture"
+    },
+    {
+      "question": "The -test container has no /app/images or /app/staging bind mount. Confirm the test strategy is to monkeypatch backend.import_images.STAGING_DIR / IMAGES_DIR (and the images router's directory reference) to pytest tmp_path dirs, and that no compose change is needed for the -test service.",
+      "owner": "implementer"
+    }
+  ]
+}
