@@ -89,4 +89,43 @@ create index if not exists ix_section_examinations_section_examined
 create index if not exists ix_section_examinations_essay
     on essaycards.section_examinations(essay_id);
 
+-- ── Sprint06_FlashcardExploration ───────────────────────────────────────────
+-- Outcome of exploring a single flashcard with ChatGPT. The returned JSON is
+-- transport only and is decomposed into these relational rows on import.
+-- flashcard_discussions: one row per completed exploration, with pre-edit
+-- snapshots of the live card. flashcard_revisions: one row per question/answer
+-- edit, storing both old and new values of both fields plus a mandatory reason;
+-- historical values live only here so an edited-away question never reappears
+-- in GET /flashcards/due.
+create table if not exists essaycards.flashcard_discussions (
+    id                   uuid        primary key default gen_random_uuid(),
+    card_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
+    section_id_at_time   uuid        not null references essaycards.essay_sections(id) on delete cascade,
+    question_at_time     text        not null,
+    answer_at_time       text        not null,
+    exploration_question text        not null,
+    discussion_summary   text        not null,
+    resolution           text        not null,
+    knowledge_gap        text,
+    created_at           timestamptz not null default now()
+);
+
+create index if not exists ix_flashcard_discussions_card
+    on essaycards.flashcard_discussions(card_id, created_at desc);
+
+create table if not exists essaycards.flashcard_revisions (
+    id                   uuid        primary key default gen_random_uuid(),
+    card_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
+    source_discussion_id uuid        references essaycards.flashcard_discussions(id) on delete set null,
+    old_question         text        not null,
+    new_question         text        not null,
+    old_answer           text        not null,
+    new_answer           text        not null,
+    reason               text        not null,
+    changed_at           timestamptz not null default now()
+);
+
+create index if not exists ix_flashcard_revisions_card
+    on essaycards.flashcard_revisions(card_id, changed_at desc);
+
 commit;

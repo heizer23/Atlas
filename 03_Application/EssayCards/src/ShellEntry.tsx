@@ -105,6 +105,61 @@ interface SectionExaminationRow {
   section_version_at: string;
 }
 
+// ── Flashcard exploration (Sprint06) ────────────────────────────────────────
+
+interface ExplorationPackage {
+  export_version: number;
+  card: {
+    card_id: string;
+    card_key: string;
+    essay_slug: string;
+    essay_title: string;
+    section_id: string;
+    section_anchor_slug: string;
+    section_heading: string;
+    question: string;
+    answer: string;
+  };
+  context: { section_body_markdown: string };
+}
+
+interface ExplorePreview {
+  save_discussion: {
+    card_id: string;
+    card_key: string;
+    exploration_question: string;
+    discussion_summary: string;
+    resolution: string;
+    knowledge_gap: string | null;
+    snapshot: { question_at_time: string; answer_at_time: string; section_id_at_time: string };
+  };
+  update_card: {
+    card_id: string;
+    card_key: string;
+    changed_fields: string[];
+    old: { question: string; answer: string };
+    new: { question: string; answer: string };
+    reason: string;
+  }[];
+  create_card: {
+    section_id: string;
+    section_anchor_slug: string;
+    essay_id: string;
+    question: string;
+    answer: string;
+    card_key: string;
+  }[];
+}
+
+interface ExploreImportResult {
+  dry_run: boolean;
+  applied: boolean;
+  discussion_id?: string;
+  revisions?: { id: string; card_id: string; card_key: string; changed_fields: string[] }[];
+  created_cards?: { id: string; card_key: string; section_id: string; section_anchor_slug: string }[];
+  preview: ExplorePreview;
+}
+
 interface Dataset<T> {
   meta: { object_type: string; total: number };
   rows: T[];
@@ -282,6 +337,70 @@ function buildExamClipboardText(pkg: ExaminationPackage): string {
   return EXAM_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
 }
 
+// ── Flashcard exploration prompt (Sprint06) ─────────────────────────────────
+//
+// Copied to the clipboard with the exploration package by the "Explore" button
+// on the revealed answer in ReviewSessionView. Deliberately action-neutral: the
+// user does not decide up front whether the problem is their own
+// misunderstanding, a bad question, a wrong answer, or a missing distinction —
+// that emerges from the ChatGPT discussion. Every field named here must stay in
+// sync with backend/exploration.py::validate_import_body.
+
+const EXPLORE_PROMPT_INTRO = `This is an EssayCards flashcard exploration package.
+
+Use the card and source context below as authoritative local context. "card.answer" is the current canonical answer; "context.section_body_markdown" is the essay section the card was written from (EssayCards has no finer-grained paragraph link, so the whole section is the context).
+
+I will now discuss this question with you naturally. I may have misunderstood the underlying concept, the question or answer may be poorly formulated, or the discussion may reveal another distinction worth its own card. Do NOT decide in advance which of these is the case — let it emerge from the conversation.
+
+When I explicitly ask you to return the result for EssayCards, reply with ONLY a single valid JSON object — no markdown code fences, no commentary before or after — of this shape:
+
+{
+  "actions": [ ... ]
+}
+
+Supported actions:
+
+1. save_discussion — ALWAYS include exactly one whenever you return a result, so the useful outcome is retained.
+{
+  "type": "save_discussion",
+  "card_id": "copy verbatim from card.card_id below",
+  "discussion": {
+    "exploration_question": "what I was actually trying to understand or investigate",
+    "discussion_summary": "a compact summary of the useful substance of the conversation — distil it; do NOT paste the transcript or keep conversational filler",
+    "resolution": "the main conclusion or distinction we reached",
+    "knowledge_gap": "what I had misunderstood, conflated or found unclear — or null if my understanding was fine and the card itself was the problem"
+  }
+}
+
+2. update_card — add ONLY if the live flashcard should actually change.
+{
+  "type": "update_card",
+  "card_id": "copy verbatim from card.card_id below",
+  "changes": { "question": "improved wording", "answer": "improved answer" },
+  "reason": "why the change is warranted — MANDATORY; kept as evidence about what makes a flashcard question good or bad"
+}
+Put only the field(s) that should change inside "changes" — "question", "answer", or both. An omitted field is left untouched.
+
+3. create_card — add when the discussion exposes a separate idea worth testing on its own.
+{
+  "type": "create_card",
+  "section_id": "the target section id — by default card.section_id below, unless the discussion clearly belongs elsewhere",
+  "section_anchor_slug": "that section's anchor slug, for validation — card.section_anchor_slug by default",
+  "question": "the new flashcard question",
+  "answer": "the new flashcard answer"
+}
+Do NOT include a "reason" for create_card — a new card is created like any other.
+
+You may return several actions together (e.g. save_discussion + update_card + create_card) when one conversation had several outcomes. Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the exploration package:
+
+`;
+
+function buildExploreClipboardText(pkg: ExplorationPackage): string {
+  return EXPLORE_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
 // ── Essay List View ───────────────────────────────────────────────────────────
 
 function EssayListView() {
@@ -313,6 +432,9 @@ function EssayListView() {
           </button>
           <button style={btnStyle} onClick={() => navigate('/essaycards/examinations/import')}>
             Import exam results
+          </button>
+          <button style={btnStyle} onClick={() => navigate('/essaycards/explore/import')}>
+            Import exploration
           </button>
           <button style={primaryBtnStyle} onClick={() => navigate('/essaycards/review')}>
             Due for review
@@ -707,6 +829,11 @@ function ReviewSessionView() {
   // for the diagnostics frame.
   const [relearning, setRelearning] = useState<RelearnItem[]>([]);
   const [lastNewIntervalSec, setLastNewIntervalSec] = useState<number | null>(null);
+  // Sprint06 — "Explore" export on the revealed answer. Read-only: fetches the
+  // exploration package and copies it (plus the ChatGPT prompt) to the
+  // clipboard; touches no review/scheduling state.
+  const [exploring, setExploring] = useState(false);
+  const [exploreMsg, setExploreMsg] = useState<string | null>(null);
 
   // Fetch the due queue exactly once at session start — deliberately not a
   // dependency-driven re-fetch loop (see file header note).
@@ -745,6 +872,26 @@ function ReviewSessionView() {
   const current = relearnCard?.card ?? mainCard;
   const showingRelearn = current != null && current === relearnCard?.card;
 
+  const handleExplore = async () => {
+    if (!current || exploring) return;
+    setExploring(true);
+    setExploreMsg(null);
+    const res = await apiFetch<ExplorationPackage>(
+      `/essaycards/flashcards/${current.flashcard_id}/exploration-package`,
+    );
+    setExploring(false);
+    if (isApiError(res)) {
+      setExploreMsg(`Export failed: ${res.error.message}`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(buildExploreClipboardText(res));
+      setExploreMsg('Copied for ChatGPT');
+    } catch {
+      setExploreMsg('Could not access the clipboard — check browser permissions.');
+    }
+  };
+
   const handleGrade = async (grade: Grade) => {
     if (!current || grading) return;
     const card = current;
@@ -766,6 +913,7 @@ function ReviewSessionView() {
     setSessionForecast(f => ({ ...f, [key]: (f[key] ?? 0) + 1 }));
     setReviewedCount(n => n + 1);
     setFlipped(false);
+    setExploreMsg(null);
     setStatsRefresh(n => n + 1);
 
     // Breather before a failed card returns: one fresh card if we're still in
@@ -851,6 +999,18 @@ function ReviewSessionView() {
             >
               Jump to passage →
             </button>
+            <button
+              style={{ ...jumpBtnStyle, marginLeft: 20 }}
+              disabled={exploring}
+              onClick={handleExplore}
+            >
+              {exploring ? 'Preparing…' : 'Explore'}
+            </button>
+            {exploreMsg && (
+              <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>
+                {exploreMsg}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -1243,6 +1403,232 @@ function ImportExaminationsView() {
   );
 }
 
+// ── Explore Import View (Sprint06) ───────────────────────────────────────────
+//
+// Paste ChatGPT's JSON reply from a flashcard exploration. Two server round
+// trips: first ?dry_run=true to get a preview (nothing written), then — only
+// after the user confirms — the same body without the flag to apply it
+// atomically. The pasted text is sent verbatim as the POST body (no client-side
+// JSON.parse), same as IngestView / ImportExaminationsView. A rejected import
+// returns a complete, copy-pasteable description in error.message.
+
+const EXPLORE_RESULT_PLACEHOLDER_JSON = `{
+  "actions": [
+    {
+      "type": "save_discussion",
+      "card_id": "the card_id from the exploration package",
+      "discussion": {
+        "exploration_question": "what I was trying to understand",
+        "discussion_summary": "compact summary of the useful substance",
+        "resolution": "the main conclusion or distinction reached",
+        "knowledge_gap": "what I had misunderstood — or null"
+      }
+    }
+  ]
+}`;
+
+function ExploreImportView() {
+  const navigate = useNavigate();
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [preview, setPreview] = useState<ExplorePreview | null>(null);
+  const [applied, setApplied] = useState<ExploreImportResult | null>(null);
+  const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
+  const [errorCopied, setErrorCopied] = useState(false);
+
+  const IMPORT_PATH = '/essaycards/flashcards/exploration/import';
+
+  const onTextChange = (value: string) => {
+    setText(value);
+    // A stale preview must never be applyable against edited text.
+    setPreview(null);
+    setApplied(null);
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const clip = await navigator.clipboard.readText();
+      onTextChange(clip);
+      setClipboardMsg(null);
+    } catch {
+      setClipboardMsg('Could not read the clipboard — check browser permissions, or paste manually (Ctrl/Cmd+V) into the box below.');
+    }
+  };
+
+  const handlePreview = async () => {
+    setBusy(true);
+    setError(null);
+    setApplied(null);
+    setPreview(null);
+    const res = await apiFetch<ExploreImportResult>(`${IMPORT_PATH}?dry_run=true`, {
+      method: 'POST',
+      body: text,
+    });
+    setBusy(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    setPreview(res.preview);
+  };
+
+  const handleApply = async () => {
+    setBusy(true);
+    setError(null);
+    const res = await apiFetch<ExploreImportResult>(IMPORT_PATH, {
+      method: 'POST',
+      body: text,
+    });
+    setBusy(false);
+    if (isApiError(res)) {
+      setError(res);
+      setPreview(null);
+      return;
+    }
+    setApplied(res);
+    setPreview(null);
+  };
+
+  const handleCopyError = async () => {
+    if (!error) return;
+    try {
+      await navigator.clipboard.writeText(error.error.message);
+      setErrorCopied(true);
+      setTimeout(() => setErrorCopied(false), 1500);
+    } catch {
+      setErrorCopied(false);
+    }
+  };
+
+  return (
+    <div style={pageStyle}>
+      <button style={{ ...btnStyle, marginBottom: 12 }} onClick={() => navigate('/essaycards')}>
+        ← All essays
+      </button>
+      <h2 style={{ marginTop: 0 }}>Import Exploration Result</h2>
+      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+        Paste ChatGPT's JSON reply from a flashcard exploration (started with
+        <strong> Explore </strong> on a revealed answer during review). You'll see
+        a preview of exactly what will change; nothing is written until you
+        confirm. The discussion is always saved; a card is updated or created only
+        if the reply asks for it.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
+      </div>
+      {clipboardMsg && (
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+      )}
+
+      <textarea
+        value={text}
+        onChange={e => onTextChange(e.target.value)}
+        rows={16}
+        style={{
+          width: '100%',
+          fontFamily: 'monospace',
+          fontSize: 13,
+          padding: 8,
+          boxSizing: 'border-box',
+          border: '1px solid #ccc',
+          borderRadius: 6,
+        }}
+        placeholder={EXPLORE_RESULT_PLACEHOLDER_JSON}
+      />
+
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button style={primaryBtnStyle} disabled={busy || !text.trim()} onClick={handlePreview}>
+          {busy && !preview ? 'Checking…' : 'Preview changes'}
+        </button>
+        {preview && (
+          <button style={primaryBtnStyle} disabled={busy} onClick={handleApply}>
+            {busy ? 'Applying…' : 'Apply changes'}
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ marginTop: 16 }}>
+          <ErrorCard error={error} />
+          <button style={{ ...btnStyle, marginTop: 8 }} onClick={handleCopyError}>
+            {errorCopied ? 'Copied' : 'Copy error for ChatGPT'}
+          </button>
+        </div>
+      )}
+
+      {preview && !applied && (
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 13 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>This import will:</div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontWeight: 600 }}>• Save a discussion</div>
+            <div style={{ color: '#555' }}>
+              Card <code>{preview.save_discussion.card_key}</code> — “{preview.save_discussion.exploration_question}”
+            </div>
+            <div style={{ color: '#888', marginTop: 2 }}>
+              Snapshots the card's current question &amp; answer.
+              {preview.save_discussion.knowledge_gap
+                ? ` Knowledge gap: “${preview.save_discussion.knowledge_gap}”.`
+                : ' No knowledge gap recorded.'}
+            </div>
+          </div>
+
+          {preview.update_card.map((u, i) => (
+            <div key={`u${i}`} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 600 }}>
+                • Update card <code>{u.card_key}</code> ({u.changed_fields.join(', ')})
+              </div>
+              {u.changed_fields.includes('question') && (
+                <div style={{ color: '#555' }}>
+                  Question: <s>{u.old.question}</s> → <strong>{u.new.question}</strong>
+                </div>
+              )}
+              {u.changed_fields.includes('answer') && (
+                <div style={{ color: '#555' }}>
+                  Answer: <s>{u.old.answer}</s> → <strong>{u.new.answer}</strong>
+                </div>
+              )}
+              <div style={{ color: '#888', marginTop: 2 }}>
+                Reason (kept in history): “{u.reason}”. The previous version is preserved.
+              </div>
+            </div>
+          ))}
+
+          {preview.create_card.map((c, i) => (
+            <div key={`c${i}`} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 600 }}>
+                • Create a new card in section <code>{c.section_anchor_slug}</code>
+              </div>
+              <div style={{ color: '#555' }}>Q: {c.question}</div>
+              <div style={{ color: '#555' }}>A: {c.answer}</div>
+              <div style={{ color: '#888', marginTop: 2 }}>New card key <code>{c.card_key}</code>.</div>
+            </div>
+          ))}
+
+          {preview.update_card.length === 0 && preview.create_card.length === 0 && (
+            <div style={{ color: '#888' }}>No card changes — the discussion is saved as-is.</div>
+          )}
+        </div>
+      )}
+
+      {applied && (
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 13 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Import applied</div>
+          <div style={{ color: '#555' }}>
+            Discussion saved{applied.revisions && applied.revisions.length > 0
+              ? `, ${applied.revisions.length} card revision${applied.revisions.length === 1 ? '' : 's'} recorded`
+              : ''}{applied.created_cards && applied.created_cards.length > 0
+              ? `, ${applied.created_cards.length} new card${applied.created_cards.length === 1 ? '' : 's'} created`
+              : ''}.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Images View ───────────────────────────────────────────────────────────────
 //
 // Two ways to add an image, both funnelling through the same import core:
@@ -1535,6 +1921,7 @@ export default function EssayCardsApp() {
         <Route path="/review" element={<ReviewSessionView />} />
         <Route path="/ingest" element={<IngestView />} />
         <Route path="/examinations/import" element={<ImportExaminationsView />} />
+        <Route path="/explore/import" element={<ExploreImportView />} />
         <Route path="/images" element={<ImagesView />} />
       </Routes>
     </>

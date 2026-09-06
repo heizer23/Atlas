@@ -221,11 +221,62 @@ Dataset-consuming UI component. `GET /sections/{id}/examinations` (the plain his
 list shown under each section in ReaderView) IS real UI-visible tabular data and
 returns a proper Dataset.
 
+## Flashcard exploration (Sprint06)
+Explore a *single* flashcard with ChatGPT — deliberately action-neutral at export
+time (the user does not pre-decide whether the problem is their own
+misunderstanding, a bad question, a wrong answer, or a missing distinction; that
+emerges from the conversation).
+
+- **Export.** `GET /api/essaycards/flashcards/{flashcard_id}/exploration-package`
+  returns a bespoke JSON blob (`export_version: 1`) — the card (identified by its
+  **uuid** `card_id`, with `card_key` echoed for readability), its essay/section
+  metadata, and `context.section_body_markdown`. EssayCards has **no
+  card→paragraph linkage**; the whole containing section is the finest context
+  available. Same R-CON-BP-04 exemption rationale as `examination-package`. The
+  **Explore** button on the revealed answer in `ReviewSessionView` fetches it and
+  copies it + `EXPLORE_PROMPT_INTRO` (src/ShellEntry.tsx) to the clipboard
+  ("Copied for ChatGPT"). Read-only — never touches review/scheduling state. It
+  sits next to the existing "Jump to passage" control, same `jumpBtnStyle` weight.
+- **Import.** `POST /api/essaycards/flashcards/exploration/import` — raw
+  `request.json()`, `{"actions": [...]}` (a bare single action object is also
+  accepted). `?dry_run=true` validates + resolves + returns the plan **without
+  writing**; the `ExploreImportView` (`/essaycards/explore/import`, reachable from
+  the essay list) previews that, then re-POSTs without the flag to apply.
+- **Actions.** Exactly one `save_discussion` (required); 0..1 `update_card` per
+  card_id; 0..n `create_card`. `update_card.changes` is whitelisted to
+  `question` / `answer`; `reason` is mandatory and persisted. `create_card` needs
+  `section_id` (+ optional `section_anchor_slug`, validated against it), gets an
+  auto-generated `card_key` (`disc-<8hex>`) and a fresh `flashcard_review_state`
+  row like ingest.
+- **Atomicity & errors.** The whole import is one transaction — any failure rolls
+  back every action, including the discussion. A rejected import returns a
+  complete, copy-pasteable `error.message` ("EssayCards could not import … Nothing
+  was saved. Fix the JSON and send the complete … package again."); the import
+  view has a **Copy error for ChatGPT** button.
+- **Persistence.** `flashcard_discussions` (one row per exploration;
+  `question_at_time` / `answer_at_time` / `section_id_at_time` snapshotted from the
+  live card *before* any `update_card` from the same import; `knowledge_gap`
+  nullable) and `flashcard_revisions` (one row per Q/A edit; both old+new of both
+  fields always stored; mandatory `reason`; `source_discussion_id` links the edit
+  to its discussion). Historical question/answer text lives **only** in
+  `flashcard_revisions` — `flashcards` always holds just the current version, so an
+  edited-away question never reappears in `GET /flashcards/due`. The returned JSON
+  is transport only; it is decomposed into these rows and never stored verbatim.
+- Backend: `backend/exploration.py` (build/validate/plan/execute) +
+  `backend/routers/exploration.py` (registered after `flashcards.router`).
+
 ## Port
 EssayCards backend runs on host port 8024 (container port 8000).
 
 ## Schema
 essaycards schema in the shared Atlas Postgres instance.
 Tables: essaycards.essays, essaycards.essay_sections, essaycards.flashcards,
-essaycards.flashcard_review_state, essaycards.section_examinations (append-only).
+essaycards.flashcard_review_state, essaycards.section_examinations (append-only),
+essaycards.flashcard_discussions, essaycards.flashcard_revisions (Sprint06 —
+flashcard exploration; the app never updates/deletes rows in either).
 Schema initialized idempotently at startup from schema.sql.
+
+`00_architecture/schema.sql` is a design copy that `make essaycards-schema` feeds
+to psql; it is already one sprint stale (missing `essaycards.images`). The
+canonical runtime schema is `03_Application/EssayCards/schema.sql` (per
+architecture.json), applied by `init_schema()` at startup and by conftest.

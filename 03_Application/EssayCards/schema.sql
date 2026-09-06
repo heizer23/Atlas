@@ -132,4 +132,57 @@ create table if not exists essaycards.images (
 create index if not exists ix_images_created_at
     on essaycards.images(created_at desc);
 
+-- ── Sprint06_FlashcardExploration ───────────────────────────────────────────
+--
+-- Two tables recording the outcome of exploring a single flashcard with
+-- ChatGPT (see CLAUDE.md "Flashcard exploration"). The JSON ChatGPT returns is
+-- transport only — it is decomposed into these relational rows on import and is
+-- never stored verbatim.
+--
+-- flashcard_discussions: one row per completed exploration. question_at_time /
+-- answer_at_time / section_id_at_time are snapshots of the live flashcard taken
+-- BEFORE any update_card action from the same import is applied, so the record
+-- still means something after the card is later edited. knowledge_gap is null
+-- when the discussion concluded the user's understanding was fine and only the
+-- card wording was at fault. The app never updates or deletes a row here.
+--
+-- flashcard_revisions: one row per question/answer edit. Both the old and the
+-- new value of BOTH fields are always stored (old_answer == new_answer when
+-- only the question changed, and vice versa). reason is mandatory and retained
+-- as evidence about what makes a flashcard question good or bad.
+-- source_discussion_id links the edit to the discussion that motivated it.
+-- Historical values live ONLY here — essaycards.flashcards always holds just
+-- the current version used for review, so an edited-away question can never
+-- reappear in the GET /flashcards/due queue.
+create table if not exists essaycards.flashcard_discussions (
+    id                   uuid        primary key default gen_random_uuid(),
+    card_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
+    section_id_at_time   uuid        not null references essaycards.essay_sections(id) on delete cascade,
+    question_at_time     text        not null,
+    answer_at_time       text        not null,
+    exploration_question text        not null,
+    discussion_summary   text        not null,
+    resolution           text        not null,
+    knowledge_gap        text,
+    created_at           timestamptz not null default now()
+);
+
+create index if not exists ix_flashcard_discussions_card
+    on essaycards.flashcard_discussions(card_id, created_at desc);
+
+create table if not exists essaycards.flashcard_revisions (
+    id                   uuid        primary key default gen_random_uuid(),
+    card_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
+    source_discussion_id uuid        references essaycards.flashcard_discussions(id) on delete set null,
+    old_question         text        not null,
+    new_question         text        not null,
+    old_answer           text        not null,
+    new_answer           text        not null,
+    reason               text        not null,
+    changed_at           timestamptz not null default now()
+);
+
+create index if not exists ix_flashcard_revisions_card
+    on essaycards.flashcard_revisions(card_id, changed_at desc);
+
 commit;

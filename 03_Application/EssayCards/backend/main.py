@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
-from backend.routers import essays, examinations, flashcards, images
+from backend.routers import essays, examinations, exploration, flashcards, images
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.performance import install_request_timing
@@ -27,6 +27,8 @@ install_exception_handlers(app)
 install_request_timing(app)
 app.include_router(essays.router, prefix="/api/essaycards")
 app.include_router(flashcards.router, prefix="/api/essaycards")
+# Registered after flashcards.router — see backend/routers/exploration.py docstring.
+app.include_router(exploration.router, prefix="/api/essaycards")
 app.include_router(examinations.router, prefix="/api/essaycards")
 app.include_router(images.router, prefix="/api/essaycards")
 
