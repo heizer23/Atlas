@@ -91,8 +91,38 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
     {essay_id, section_id} due cards in that section only. {section_id} alone
     is rejected with VALIDATION_ERROR.
 
-    'Due' = next_due_at <= now(), evaluated by Postgres at query time.
-    Ordered by next_due_at asc (most overdue first). Empty result is valid.
+    Eligibility: next_due_at <= now(), evaluated by Postgres at query time
+    (R-CON-AL-06 — single server-clock authority; the client never sends a
+    time). Empty result is valid.
+
+    Ordering (R-CON-AL-01) — eligible cards fall into two categories and
+    category RECENT is returned entirely before category BACKLOG:
+
+      RECENT  — last_reviewed_at >= now() - interval '24 hours'.
+                A rolling 24-hour window off the same now(); NOT a calendar
+                day, so the local midnight boundary is irrelevant. A card with
+                last_reviewed_at IS NULL is never RECENT.
+                Sorted by next_due_at DESC: the card that came due most
+                recently (closest to now) is shown first. A card the user
+                struggled with — pushed a few minutes into the future — thus
+                re-enters near the front of the queue as soon as that short
+                delay elapses. This category serves relearning within one
+                broader learning period.
+
+      BACKLOG — every other eligible card. Sorted by the interval the card is
+                currently scheduled across, (next_due_at - last_reviewed_at),
+                DESC: longest interval first, shortest last. How overdue the
+                card is does NOT affect this order — a mature card only 1
+                minute overdue still precedes an immature card days overdue.
+                A never-reviewed card (last_reviewed_at IS NULL) has interval
+                0 and therefore sorts behind every previously-reviewed backlog
+                card. interval = 0 is how the data model represents a new card
+                (backend/ingest.py seeds last_reviewed_at = null); no separate
+                new-card queue or "block until backlog empty" gate exists or is
+                needed.
+
+    Final tie-breakers, for deterministic paging: next_due_at ASC, then
+    flashcard id ASC.
     """
     if section_id and not essay_id:
         return api_error("VALIDATION_ERROR", "section_id requires essay_id to also be provided")
@@ -117,7 +147,14 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
                 join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
                 join essaycards.essay_sections s on s.id = f.section_id
                 {where}
-                order by frs.next_due_at asc
+                order by
+                    case when frs.last_reviewed_at >= now() - interval '24 hours'
+                         then 0 else 1 end,
+                    case when frs.last_reviewed_at >= now() - interval '24 hours'
+                         then frs.next_due_at end desc nulls last,
+                    coalesce(frs.next_due_at - frs.last_reviewed_at, interval '0') desc,
+                    frs.next_due_at asc,
+                    f.id asc
                 """,
                 params,
             )

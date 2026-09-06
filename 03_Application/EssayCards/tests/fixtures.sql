@@ -71,6 +71,50 @@ INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, n
   ('fc000009-0000-0000-0000-000000000009', null, now() + interval '14 days'),
   ('fc000010-0000-0000-0000-000000000010', null, now() + interval '60 days');
 
+-- ── Review-queue ordering (Sprint05_ReviewQueueOrdering) ─────────────────────
+-- Essay E exercises the two-category ordering of GET /flashcards/due:
+--   RECENT  = last_reviewed_at >= now() - 24h  AND next_due_at <= now()
+--             -> sorted by next_due_at DESC (closest to now first)
+--   BACKLOG = every other eligible card
+--             -> sorted by (next_due_at - last_reviewed_at) DESC (interval
+--                the card is scheduled across; never-reviewed = interval 0 = last)
+-- All nine cards below are eligible (next_due_at <= now()). Expected order:
+--   RECENT : fc-e-recent-23h, fc-e-recent-near, fc-e-recent-far
+--   BACKLOG: fc-e-back-90d, fc-e-back-30d, fc-e-back-25h, fc-e-back-1d,
+--            fc-e-back-20min, fc-e-new
+-- fc-e-recent-23h vs fc-e-back-25h isolate the ROLLING 24h window: both came
+-- due ~90s ago, only last_reviewed_at (23h vs 25h ago) decides the category —
+-- there is no calendar-day / midnight component.
+-- fc-e-back-90d (1h overdue) precedes fc-e-back-1d (1d overdue) precedes
+-- fc-e-back-20min (~3d overdue): interval DESC, the reverse of overdue DESC.
+INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
+  ('ea000005-0000-0000-0000-000000000005', 'Essay E (review-queue ordering)', 'essay-e', now() - interval '120 days', now() - interval '120 days');
+
+INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, anchor_slug, body_markdown) VALUES
+  ('ec000006-0000-0000-0000-000000000006', 'ea000005-0000-0000-0000-000000000005', 0, 'E Section', 'e-section', 'Essay E content.');
+
+INSERT INTO essaycards.flashcards (id, essay_id, section_id, card_key, question, answer) VALUES
+  ('fc000011-0000-0000-0000-000000000011', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-recent-near', 'E q1', 'E a1'),
+  ('fc000012-0000-0000-0000-000000000012', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-recent-far',  'E q2', 'E a2'),
+  ('fc000013-0000-0000-0000-000000000013', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-recent-23h',  'E q3', 'E a3'),
+  ('fc000014-0000-0000-0000-000000000014', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-back-25h',    'E q4', 'E a4'),
+  ('fc000015-0000-0000-0000-000000000015', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-back-90d',    'E q5', 'E a5'),
+  ('fc000016-0000-0000-0000-000000000016', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-back-30d',    'E q6', 'E a6'),
+  ('fc000017-0000-0000-0000-000000000017', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-back-1d',     'E q7', 'E a7'),
+  ('fc000018-0000-0000-0000-000000000018', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-back-20min',  'E q8', 'E a8'),
+  ('fc000019-0000-0000-0000-000000000019', 'ea000005-0000-0000-0000-000000000005', 'ec000006-0000-0000-0000-000000000006', 'fc-e-new',         'E q9', 'E a9');
+
+INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at) VALUES
+  ('fc000011-0000-0000-0000-000000000011', now() - interval '2 hours',                 now() - interval '2 minutes'),
+  ('fc000012-0000-0000-0000-000000000012', now() - interval '3 hours',                 now() - interval '20 minutes'),
+  ('fc000013-0000-0000-0000-000000000013', now() - interval '23 hours',                now() - interval '90 seconds'),
+  ('fc000014-0000-0000-0000-000000000014', now() - interval '25 hours',                now() - interval '90 seconds'),
+  ('fc000015-0000-0000-0000-000000000015', now() - interval '90 days' - interval '1 hour',  now() - interval '1 hour'),
+  ('fc000016-0000-0000-0000-000000000016', now() - interval '32 days',                 now() - interval '2 days'),
+  ('fc000017-0000-0000-0000-000000000017', now() - interval '2 days',                  now() - interval '1 day'),
+  ('fc000018-0000-0000-0000-000000000018', now() - interval '3 days',                  now() - interval '3 days' + interval '20 minutes'),
+  ('fc000019-0000-0000-0000-000000000019', null,                                       now() - interval '5 minutes');
+
 -- ── Section examinations ─────────────────────────────────────────────────────
 -- Two prior sittings for essay A / section "origins" (se-origins-1 older,
 -- se-origins-2 newer — export's last_examination and the history endpoint's

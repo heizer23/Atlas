@@ -14,6 +14,7 @@ cards from every section as they come due over time.
   review loop with floor/doubling SRS scheduling, minimal React reader + review session UI.
 - Sprint 2: `POST /api/essaycards/essays/ingest` JSON ingestion endpoint plus an in-app
   "Add / Update Essay" paste-JSON UI, sharing one upsert core with the markdown CLI path.
+- Sprint 5: two-category ordering for `GET /flashcards/due` (see `## Due-queue ordering`).
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys
@@ -117,6 +118,28 @@ the raw Starlette `Request` and validates `grade` manually so that every invalid
 shape (missing key, wrong type, out-of-set value, unparsable JSON) returns
 ApiError VALIDATION_ERROR (400) instead of FastAPI's default 422 shape. See
 `Sprint01_Core/10_architecture.json` §contracts.invariants.
+
+## Due-queue ordering
+`GET /api/essaycards/flashcards/due` — eligibility is unchanged (`next_due_at <=
+now()`), but eligible cards are returned in two categories, **RECENT entirely
+before BACKLOG** (Sprint05):
+
+- **RECENT** — `last_reviewed_at >= now() - interval '24 hours'` (a rolling
+  window off Postgres `now()`, *not* a calendar day / "reviewed today"; a
+  never-reviewed card is never RECENT). Sorted by `next_due_at` **DESC** —
+  closest-to-now first — so a card the user just pushed a few minutes out
+  re-enters near the front once that delay elapses. Serves relearning.
+- **BACKLOG** — everything else eligible. Sorted by the interval the card is
+  currently scheduled across, `next_due_at - last_reviewed_at`, **DESC**
+  (longest first). Overdue duration is deliberately ignored. A never-reviewed
+  card has interval 0 (`last_reviewed_at IS NULL`, seeded by `ingest.py`) and
+  sorts behind every reviewed backlog card — no separate new-card queue.
+- Tie-breakers: `next_due_at ASC`, then `f.id ASC`.
+
+`last_reviewed_at` (on `flashcard_review_state`, written by `POST .../review`
+from a single `select now()`) is the sole source of truth — EssayCards has no
+per-review history table. All ordering logic is one SQL `ORDER BY` in
+`list_due_flashcards`; the review UI renders `rows` in server order.
 
 ## Queue stats
 `GET /api/essaycards/flashcards/stats` — review-queue forecast. Returns a Dataset of
