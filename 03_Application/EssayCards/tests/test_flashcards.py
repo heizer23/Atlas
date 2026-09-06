@@ -40,7 +40,7 @@ UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
 
 STATS_BUCKET_ORDER = [
     "due_now", "within_10_min", "within_1_day",
-    "within_7_days", "within_30_days", "beyond_30_days",
+    "within_7_days", "within_30_days", "within_90_days", "beyond_90_days",
 ]
 
 
@@ -77,7 +77,8 @@ def test_due_no_params_returns_system_wide(client):
 
     for row in rows:
         assert row["id"] == row["flashcard_id"]
-        for field in ("question", "answer", "essay_id", "section_id", "anchor_slug", "next_due_at"):
+        for field in ("question", "answer", "essay_id", "section_id", "anchor_slug",
+                      "next_due_at", "is_new", "is_recent", "scheduled_interval_seconds"):
             assert field in row
 
 
@@ -262,6 +263,37 @@ def test_due_new_card_available_once_positive_interval_backlog_cleared(client):
     assert order[-1] == FC_E_NEW
 
 
+def test_due_rows_expose_is_new_recent_and_interval(client):
+    """Each /due row carries is_new = (last_reviewed_at IS NULL),
+    is_recent = (last_reviewed_at >= now() - 24h), and
+    scheduled_interval_seconds = epoch(next_due_at - last_reviewed_at).
+
+    Feed the review screen's CURRENT 'New' metric, the recency-selected bold
+    frame, and the diagnostics frame. fc-e-new is never reviewed (is_new, not
+    recent, null interval); fc-e-recent-near was reviewed 2h ago (recent);
+    fc-e-back-25h was reviewed 25h ago (not recent); fc-e-back-1d was last
+    reviewed 2 days ago and is due 1 day ago -> a ~1-day interval.
+    """
+    r = client.get(f"/api/essaycards/flashcards/due?essay_id={ESSAY_E}")
+    assert r.status_code == 200
+    by_id = {row["flashcard_id"]: row for row in r.json()["rows"]}
+    sample = next(iter(by_id.values()))
+    for field in ("is_new", "is_recent", "scheduled_interval_seconds"):
+        assert field in sample
+
+    assert by_id[FC_E_NEW]["is_new"] is True
+    assert by_id[FC_E_NEW]["is_recent"] is False
+    assert by_id[FC_E_NEW]["scheduled_interval_seconds"] is None
+
+    assert by_id[FC_E_RECENT_NEAR]["is_recent"] is True
+    assert by_id[FC_E_RECENT_23H]["is_recent"] is True
+    assert by_id[FC_E_BACK_25H]["is_recent"] is False
+    assert by_id[FC_E_BACK_90D]["is_recent"] is False
+
+    one_day = 24 * 3600
+    assert abs(by_id[FC_E_BACK_1D]["scheduled_interval_seconds"] - one_day) < 3600
+
+
 def test_due_card_with_no_review_row_history_is_never_reviewed(client):
     """Scenario: a card with no answer-history is treated as never reviewed.
 
@@ -350,13 +382,13 @@ def test_review_unknown_flashcard_not_found(client):
 # ── Queue stats ───────────────────────────────────────────────────────────────
 
 def test_stats_system_wide_partitions_all_bands(client):
-    """Scenario: Queue stats — no params returns the six system-wide horizon bands."""
+    """Scenario: Queue stats — no params returns the seven system-wide horizon bands."""
     r = client.get("/api/essaycards/flashcards/stats")
     assert r.status_code == 200
     body = r.json()
 
     assert body["meta"]["object_type"] == "flashcard_queue_stat"
-    assert body["meta"]["total"] == 6
+    assert body["meta"]["total"] == 7
     assert [row["bucket"] for row in body["rows"]] == STATS_BUCKET_ORDER
     for row in body["rows"]:
         for field in ("bucket", "label", "count"):
@@ -369,9 +401,10 @@ def test_stats_system_wide_partitions_all_bands(client):
         "within_1_day": 2,
         "within_7_days": 1,
         "within_30_days": 1,
-        "beyond_30_days": 1,
+        "within_90_days": 1,   # fc-stats-60day
+        "beyond_90_days": 1,   # fc-stats-120day
     }
-    assert sum(counts.values()) == 19  # every scheduled card lands in exactly one band
+    assert sum(counts.values()) == 20  # every scheduled card lands in exactly one band
 
 
 def test_stats_scoped_to_essay(client):
@@ -385,7 +418,8 @@ def test_stats_scoped_to_essay(client):
         "within_1_day": 0,
         "within_7_days": 1,
         "within_30_days": 1,
-        "beyond_30_days": 1,
+        "within_90_days": 1,   # fc-stats-60day
+        "beyond_90_days": 1,   # fc-stats-120day
     }
 
 
@@ -407,10 +441,10 @@ def test_stats_section_without_essay_rejected(client):
 
 
 def test_stats_unknown_scope_is_zero_filled(client):
-    """Scenario: Queue stats — empty scope still returns six zero-filled bands."""
+    """Scenario: Queue stats — empty scope still returns seven zero-filled bands."""
     r = client.get(f"/api/essaycards/flashcards/stats?essay_id={UNKNOWN_ID}")
     assert r.status_code == 200
     body = r.json()
     assert [row["bucket"] for row in body["rows"]] == STATS_BUCKET_ORDER
     assert all(row["count"] == 0 for row in body["rows"])
-    assert body["meta"]["total"] == 6
+    assert body["meta"]["total"] == 7

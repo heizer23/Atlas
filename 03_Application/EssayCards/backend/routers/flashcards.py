@@ -27,12 +27,29 @@ from platform_errorhandling import api_error
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 
 DUE_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="question",    label="Question", type="string", sortable=False, filterable=False),
-    ColumnSchema(key="answer",      label="Answer",   type="string", sortable=False, filterable=False, detail_visible=True),
-    ColumnSchema(key="essay_id",    label="Essay",    type="string", sortable=False, filterable=True),
-    ColumnSchema(key="section_id",  label="Section",  type="string", sortable=False, filterable=True),
-    ColumnSchema(key="anchor_slug", label="Anchor",   type="string", sortable=False, filterable=False),
-    ColumnSchema(key="next_due_at", label="Due",      type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="question",    label="Question", type="string",  sortable=False, filterable=False),
+    ColumnSchema(key="answer",      label="Answer",   type="string",  sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="essay_id",    label="Essay",    type="string",  sortable=False, filterable=True),
+    ColumnSchema(key="section_id",  label="Section",  type="string",  sortable=False, filterable=True),
+    ColumnSchema(key="anchor_slug", label="Anchor",   type="string",  sortable=False, filterable=False),
+    ColumnSchema(key="next_due_at", label="Due",      type="date",    sortable=True,  filterable=False),
+    # is_new == "this card has never been reviewed" (last_reviewed_at IS NULL,
+    # i.e. interval 0). Additive, non-breaking (R-CON-BP-04). Consumed by the
+    # review screen's CURRENT stats block to count new cards in the session.
+    ColumnSchema(key="is_new",      label="New",      type="boolean", sortable=False, filterable=False),
+    # is_recent == the RECENT-vs-BACKLOG category flag: exactly the ordering
+    # predicate last_reviewed_at >= now() - interval '24 hours'. True => this
+    # card was placed ahead of the backlog because it was reviewed within the
+    # rolling 24h window (sorted by next_due_at), not because of its interval.
+    # false for a never-reviewed card. Additive, non-breaking; the review
+    # screen bolds the question frame when true.
+    ColumnSchema(key="is_recent",   label="Recent",   type="boolean", sortable=False, filterable=False),
+    # scheduled_interval_seconds == extract(epoch from next_due_at -
+    # last_reviewed_at) — the interval this card is currently scheduled across,
+    # i.e. the value the BACKLOG ordering sorts on. NULL for a never-reviewed
+    # card. Additive, non-breaking; shown in the review screen's diagnostics
+    # frame ("this card's last interval").
+    ColumnSchema(key="scheduled_interval_seconds", label="Interval (s)", type="number", sortable=False, filterable=False),
 ]
 
 STATS_SCHEMA: list[ColumnSchema] = [
@@ -50,7 +67,8 @@ STATS_BUCKETS: list[tuple[str, str]] = [
     ("within_1_day",   "≤ 1 day"),
     ("within_7_days",  "≤ 7 days"),
     ("within_30_days", "≤ 30 days"),
-    ("beyond_30_days", "> 30 days"),
+    ("within_90_days", "≤ 3 mo"),
+    ("beyond_90_days", "> 3 mo"),
 ]
 
 
@@ -123,6 +141,15 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
 
     Final tie-breakers, for deterministic paging: next_due_at ASC, then
     flashcard id ASC.
+
+    Each row also carries three additive fields (R-CON-BP-04; none affects
+    eligibility or ordering):
+      - is_new (bool) = (last_reviewed_at IS NULL) — never-reviewed / interval-0.
+      - is_recent (bool) = (last_reviewed_at >= now() - interval '24 hours') —
+        the RECENT-vs-BACKLOG category flag (false when is_new).
+      - scheduled_interval_seconds (int | null) = epoch seconds of
+        (next_due_at - last_reviewed_at), the interval the card is currently
+        scheduled across (the BACKLOG sort key). NULL when is_new.
     """
     if section_id and not essay_id:
         return api_error("VALIDATION_ERROR", "section_id requires essay_id to also be provided")
@@ -142,7 +169,12 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
             cur.execute(
                 f"""
                 select f.id as flashcard_id, f.question, f.answer, f.essay_id, f.section_id,
-                       s.anchor_slug, frs.next_due_at
+                       s.anchor_slug, frs.next_due_at,
+                       (frs.last_reviewed_at is null) as is_new,
+                       coalesce(frs.last_reviewed_at >= now() - interval '24 hours', false)
+                           as is_recent,
+                       extract(epoch from (frs.next_due_at - frs.last_reviewed_at))::bigint
+                           as scheduled_interval_seconds
                 from essaycards.flashcards f
                 join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
                 join essaycards.essay_sections s on s.id = f.section_id
@@ -171,7 +203,7 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
 def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = None) -> JSONResponse:
     """
     Review-queue forecast: every flashcard that has a review-state row,
-    partitioned into six non-overlapping horizon bands by next_due_at relative
+    partitioned into seven non-overlapping horizon bands by next_due_at relative
     to now(). Read endpoint -> returns Dataset (R-CON-BP-04).
 
     Parameters (identical scoping rules to GET /flashcards/due):
@@ -182,22 +214,26 @@ def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = 
     No other parameter is accepted. There is no ordering parameter: rows are
     always returned in the fixed near -> far band order of STATS_BUCKETS.
 
-    Time basis: Postgres now(), evaluated once per statement, so all six band
+    Time basis: Postgres now(), evaluated once per statement, so all band
     boundaries are computed against the identical instant (R-CON-AL-06 — same
     server-time authority as GET /flashcards/due). Bands are open on the lower
     edge and closed on the upper edge:
         due_now        : next_due_at <= now()
-        within_10_min  : now()          < next_due_at <= now() + 10 minutes
-        within_1_day   : now() + 10 min < next_due_at <= now() + 1 day
-        within_7_days  : now() + 1 day  < next_due_at <= now() + 7 days
-        within_30_days : now() + 7 days < next_due_at <= now() + 30 days
-        beyond_30_days : next_due_at > now() + 30 days
-    Every review-state row in scope falls into exactly one band; the six counts
-    sum to the total number of scheduled flashcards in scope.
+        within_10_min  : now()           < next_due_at <= now() + 10 minutes
+        within_1_day   : now() + 10 min  < next_due_at <= now() + 1 day
+        within_7_days  : now() + 1 day   < next_due_at <= now() + 7 days
+        within_30_days : now() + 7 days  < next_due_at <= now() + 30 days
+        within_90_days : now() + 30 days < next_due_at <= now() + 90 days
+        beyond_90_days : next_due_at > now() + 90 days
+    Every review-state row in scope falls into exactly one band; the seven
+    counts sum to the total number of scheduled flashcards in scope. The
+    30-/90-day split feeds the review screen's UPCOMING forecast columns
+    (≤3 mo / >3 mo).
 
-    Empty-result behavior: always exactly six rows. An empty scope (or an
-    unknown essay_id) yields six rows with count 0 — the bands are zero-filled,
-    never omitted. meta.total is the row count (always 6), not the card total.
+    Empty-result behavior: always exactly seven rows. An empty scope (or an
+    unknown essay_id) yields seven rows with count 0 — the bands are
+    zero-filled, never omitted. meta.total is the row count (always 7), not the
+    card total.
     """
     if section_id and not essay_id:
         return api_error("VALIDATION_ERROR", "section_id requires essay_id to also be provided")
@@ -232,7 +268,10 @@ def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = 
                     where frs.next_due_at >  now() + interval '7 days'
                       and frs.next_due_at <= now() + interval '30 days')             as within_30_days,
                   count(*) filter (
-                    where frs.next_due_at >  now() + interval '30 days')             as beyond_30_days
+                    where frs.next_due_at >  now() + interval '30 days'
+                      and frs.next_due_at <= now() + interval '90 days')             as within_90_days,
+                  count(*) filter (
+                    where frs.next_due_at >  now() + interval '90 days')             as beyond_90_days
                 from essaycards.flashcard_review_state frs
                 join essaycards.flashcards f on f.id = frs.flashcard_id
                 {where}

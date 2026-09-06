@@ -11,6 +11,11 @@
  * held in local state for the whole session — no mid-session re-fetch, per
  * 00_draft.md "Session ends when the due queue (as loaded at session start)
  * is exhausted; it does not live-poll for newly-due cards mid-session."
+ *
+ * Exception (Sprint05c): a card graded `again` is re-queued client-side into
+ * an in-session relearning sub-queue (RelearnItem) and shown again near the
+ * front, after a one-card breather. This is pure local state — still no
+ * re-fetch and no live-poll of the server.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -49,6 +54,15 @@ interface DueCardRow {
   essay_id: string;
   section_id: string;
   anchor_slug: string;
+  next_due_at: string;
+  is_new: boolean;
+  is_recent: boolean;
+  scheduled_interval_seconds: number | null;
+}
+
+interface ReviewResult {
+  flashcard_id: string;
+  last_reviewed_at: string;
   next_due_at: string;
 }
 
@@ -117,6 +131,96 @@ const primaryBtnStyle: React.CSSProperties = {
   color: '#fff',
   borderColor: 'transparent',
 };
+
+// ── Review screen (Sprint05b redesign) — Material 3 surfaces / tokens ────────
+
+const reviewCardStyle: React.CSSProperties = {
+  background: 'var(--md-sys-color-surface)',
+  border: '1px solid var(--md-sys-color-outline-variant)',
+  borderRadius: 'var(--radius-card, 12px)',
+  padding: 24,
+  margin: '16px 0',
+  minHeight: 140,
+  boxShadow: 'var(--elevation-1)',
+};
+
+// Full-width primary action after reading the question (goal 1).
+const flipBtnStyle: React.CSSProperties = {
+  width: '100%',
+  height: 52,
+  borderRadius: 'var(--radius-button, 20px)',
+  border: 'none',
+  background: 'var(--md-sys-color-primary)',
+  color: 'var(--md-sys-color-on-primary)',
+  fontSize: 15,
+  fontWeight: 600,
+  cursor: 'pointer',
+  margin: '8px 0',
+};
+
+const gradeBtnStyle: React.CSSProperties = {
+  flex: 1,
+  height: 48,
+  borderRadius: 'var(--radius-button, 20px)',
+  border: '1px solid var(--md-sys-color-outline)',
+  background: 'var(--md-sys-color-surface)',
+  color: 'var(--md-sys-color-on-surface)',
+  fontSize: 14,
+  fontWeight: 500,
+  cursor: 'pointer',
+};
+
+const jumpBtnStyle: React.CSSProperties = {
+  ...btnStyle,
+  marginTop: 16,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--md-sys-color-primary)',
+  padding: '4px 0',
+  fontSize: 13,
+};
+
+// UPCOMING forecast columns. Keys/edges mirror the backend /stats forward
+// bands (STATS_BUCKETS minus due_now); `maxIntervalMs` is the closed upper
+// edge used to bucket a card's freshly-scheduled interval client-side for the
+// `Session` row. Last column has no upper edge.
+const FORECAST_COLUMNS: { key: string; label: string; maxIntervalMs: number | null }[] = [
+  { key: 'within_10_min',  label: '≤10m', maxIntervalMs: 10 * 60_000 },
+  { key: 'within_1_day',   label: '<1d',  maxIntervalMs: 24 * 60 * 60_000 },
+  { key: 'within_7_days',  label: '<7d',  maxIntervalMs: 7 * 24 * 60 * 60_000 },
+  { key: 'within_30_days', label: '<30d', maxIntervalMs: 30 * 24 * 60 * 60_000 },
+  { key: 'within_90_days', label: '<3mo', maxIntervalMs: 90 * 24 * 60 * 60_000 },
+  { key: 'beyond_90_days', label: '≥3mo', maxIntervalMs: null },
+];
+
+type Forecast = Record<string, number>;
+
+const emptyForecast = (): Forecast =>
+  Object.fromEntries(FORECAST_COLUMNS.map(c => [c.key, 0]));
+
+// Which UPCOMING column a card scheduled `intervalMs` into the future lands in.
+// `intervalMs` = next_due_at − last_reviewed_at from the review response, i.e.
+// the gap measured from the server's own now() at review time (R-CON-AL-06).
+function forecastKeyForInterval(intervalMs: number): string {
+  for (const col of FORECAST_COLUMNS) {
+    if (col.maxIntervalMs === null || intervalMs <= col.maxIntervalMs) return col.key;
+  }
+  return 'beyond_90_days';
+}
+
+// Compact human interval for the review-screen diagnostics frame.
+function formatInterval(seconds: number | null): string {
+  if (seconds == null) return 'new card';
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 90) return `${s}s`;
+  const m = s / 60;
+  if (m < 90) return `${Math.round(m)}m`;
+  const h = m / 60;
+  if (h < 36) return `${Math.round(h)}h`;
+  const d = h / 24;
+  if (d < 60) return `${Math.round(d)}d`;
+  return `${Math.round(d / 30)}mo`;
+}
 
 // Rendered once by the root component. Keeps a Markdown image inside the
 // reading column / review card from overflowing. CSS-only per
@@ -404,25 +508,78 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
   );
 }
 
-// ── Queue Forecast Panel ──────────────────────────────────────────────────────
+// ── Review Stats Panel ───────────────────────────────────────────────────────
 
-// Compact strip shown at the top of the review screen: how many cards are due
-// now and how the rest of the queue is spread across future horizons. Backed
-// by GET /flashcards/stats, scoped by the same essay_id/section_id as the
-// session. Its own fetch + failure state — a stats failure never blocks the
-// review itself, it just renders nothing. Re-fetches whenever `refreshToken`
-// changes (the session bumps it after each graded card).
-function QueueForecastPanel({
+// One compact Material 3 surface at the top of the review screen holding two
+// labelled sections — CURRENT (immediate queue counts) and UPCOMING (a two-row
+// forecast: `All` = every scheduled card, from GET /flashcards/stats; `Session`
+// = cards rescheduled during this review session, tallied client-side from each
+// review response). Visually secondary to the question card: flat
+// surface-variant, no elevation. The section names sit rotated in a narrow left
+// gutter beside their numbers, not above them, to keep the panel short. A
+// /stats failure only blanks the `All` row — the session numbers still render.
+
+const statMetricLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+  color: 'var(--md-sys-color-on-surface-variant)',
+};
+
+// "CURRENT" / "UPCOMING" rotated to read bottom-to-top in the left gutter.
+const gutterLabelStyle: React.CSSProperties = {
+  writingMode: 'vertical-rl',
+  transform: 'rotate(180deg)',
+  textTransform: 'uppercase',
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: 1.5,
+  color: 'var(--md-sys-color-on-surface-variant)',
+  flexShrink: 0,
+  textAlign: 'center',
+};
+
+function ForecastRow({ label, values }: { label: string; values: (number | null)[] }) {
+  return (
+    <>
+      <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--md-sys-color-on-surface-variant)', paddingRight: 8 }}>
+        {label}
+      </span>
+      {values.map((v, i) => (
+        <span
+          key={i}
+          style={{
+            fontSize: 13,
+            textAlign: 'right',
+            fontVariantNumeric: 'tabular-nums',
+            color: v ? 'var(--md-sys-color-on-surface)' : 'var(--md-sys-color-outline)',
+          }}
+        >
+          {v == null ? '·' : v}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function ReviewStatsPanel({
   essayId,
   sectionId,
   refreshToken,
+  reviewed,
+  backlog,
+  newRemaining,
+  sessionForecast,
 }: {
   essayId: string | null;
   sectionId: string | null;
   refreshToken: number;
+  reviewed: number;
+  backlog: number;
+  newRemaining: number;
+  sessionForecast: Forecast;
 }) {
-  const [rows, setRows] = useState<QueueStatRow[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [stats, setStats] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -432,48 +589,101 @@ function QueueForecastPanel({
       const url = `/essaycards/flashcards/stats${qs.toString() ? `?${qs.toString()}` : ''}`;
       const res = await apiFetch<Dataset<QueueStatRow>>(url);
       if (isApiError(res)) {
-        setFailed(true);
+        setStats(null);
         return;
       }
-      setFailed(false);
-      setRows(res.rows);
+      setStats(Object.fromEntries(res.rows.map(r => [r.bucket, r.count])));
     })();
   }, [essayId, sectionId, refreshToken]);
 
-  if (failed || !rows) return null;
-
-  const total = rows.reduce((n, r) => n + r.count, 0);
+  const metrics: [number, string][] = [
+    [reviewed, 'Session'],
+    [backlog, 'Backlog'],
+    [newRemaining, 'New'],
+  ];
+  const allRow = FORECAST_COLUMNS.map(c => (stats ? stats[c.key] ?? 0 : null));
+  const sessionRow = FORECAST_COLUMNS.map(c => sessionForecast[c.key] ?? 0);
 
   return (
     <div
       style={{
-        border: '1px solid #e0e0e0',
-        borderRadius: 8,
-        padding: '8px 12px',
-        marginBottom: 16,
+        background: 'var(--md-sys-color-surface-variant)',
+        borderRadius: 'var(--radius-card, 12px)',
+        padding: 12,
         display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'baseline',
-        gap: '4px 14px',
+        flexDirection: 'column',
+        gap: 12,
       }}
     >
-      <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-        Queue forecast
-      </span>
-      {rows.map(r => (
-        <span
-          key={r.bucket}
-          style={{ fontSize: 12, color: r.bucket === 'due_now' ? 'var(--md-sys-color-primary)' : '#666' }}
-        >
-          <strong style={{ fontSize: 13 }}>{r.count}</strong>&nbsp;{r.label}
-        </span>
-      ))}
-      <span style={{ fontSize: 11, color: '#aaa', marginLeft: 'auto' }}>{total} scheduled</span>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span style={gutterLabelStyle}>Current</span>
+        <div style={{ flex: 1, display: 'flex', gap: 8 }}>
+          {metrics.map(([value, label]) => (
+            <div key={label} style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 500, lineHeight: 1.1, color: 'var(--md-sys-color-on-surface)' }}>
+                {value}
+              </div>
+              <div style={{ ...statMetricLabelStyle, marginTop: 2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span style={gutterLabelStyle}>Upcoming</span>
+        <div style={{ flex: 1, overflowX: 'auto' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `minmax(44px, auto) repeat(${FORECAST_COLUMNS.length}, minmax(34px, 1fr))`,
+              rowGap: 4,
+              columnGap: 8,
+              alignItems: 'baseline',
+              minWidth: 300,
+            }}
+          >
+            <span />
+            {FORECAST_COLUMNS.map(c => (
+              <span
+                key={c.key}
+                style={{ fontSize: 11, textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}
+              >
+                {c.label}
+              </span>
+            ))}
+            <ForecastRow label="All" values={allRow} />
+            <ForecastRow label="Session" values={sessionRow} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Review Session View ───────────────────────────────────────────────────────
+
+// A card graded `again` earlier this session, waiting to be shown again. Held
+// purely client-side (no re-fetch / no live-poll) — `card` is the original
+// queue row with next_due_at / scheduled_interval_seconds patched from the
+// review response. Becomes eligible once `index` reaches `showAfterIndex` (a
+// one-fresh-card breather) or the main queue is exhausted.
+interface RelearnItem {
+  card: DueCardRow;
+  dueAtMs: number;
+  showAfterIndex: number;
+}
+
+const diagFrameStyle: React.CSSProperties = {
+  marginTop: 12,
+  border: '1px solid var(--md-sys-color-outline-variant)',
+  borderRadius: 8,
+  padding: '8px 12px',
+  fontSize: 12,
+  color: 'var(--md-sys-color-on-surface-variant)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+};
 
 function ReviewSessionView() {
   const [searchParams] = useSearchParams();
@@ -488,6 +698,15 @@ function ReviewSessionView() {
   const [error, setError] = useState<ApiError | null>(null);
   const [grading, setGrading] = useState(false);
   const [statsRefresh, setStatsRefresh] = useState(0);
+  const [reviewedCount, setReviewedCount] = useState(0);
+  // UPCOMING `Session` row — histogram of the intervals cards were rescheduled
+  // into during this session. Built purely from review responses.
+  const [sessionForecast, setSessionForecast] = useState<Forecast>(emptyForecast);
+  // In-session relearning sub-queue: cards graded `again` come back near the
+  // front (see RelearnItem). New interval of the most recently graded card,
+  // for the diagnostics frame.
+  const [relearning, setRelearning] = useState<RelearnItem[]>([]);
+  const [lastNewIntervalSec, setLastNewIntervalSec] = useState<number | null>(null);
 
   // Fetch the due queue exactly once at session start — deliberately not a
   // dependency-driven re-fetch loop (see file header note).
@@ -508,16 +727,30 @@ function ReviewSessionView() {
       setQueue(res.rows);
       setIndex(0);
       setFlipped(false);
+      setSessionForecast(emptyForecast());
+      setRelearning([]);
+      setReviewedCount(0);
+      setLastNewIntervalSec(null);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [essayId, sectionId]);
 
-  const current = queue[index] ?? null;
+  // Next card: an eligible relearning card (soonest-due first) preempts the
+  // main queue; otherwise the card at `index`.
+  const eligibleRelearn = relearning
+    .filter(r => index >= r.showAfterIndex || index >= queue.length)
+    .sort((a, b) => a.dueAtMs - b.dueAtMs || a.showAfterIndex - b.showAfterIndex);
+  const relearnCard = eligibleRelearn[0] ?? null;
+  const mainCard = queue[index] ?? null;
+  const current = relearnCard?.card ?? mainCard;
+  const showingRelearn = current != null && current === relearnCard?.card;
 
   const handleGrade = async (grade: Grade) => {
     if (!current || grading) return;
+    const card = current;
+    const fromRelearn = showingRelearn;
     setGrading(true);
-    const res = await apiFetch(`/essaycards/flashcards/${current.flashcard_id}/review`, {
+    const res = await apiFetch<ReviewResult>(`/essaycards/flashcards/${card.flashcard_id}/review`, {
       method: 'POST',
       body: JSON.stringify({ grade }),
     });
@@ -526,24 +759,60 @@ function ReviewSessionView() {
       setError(res as ApiError);
       return;
     }
+
+    const newIntervalSec = (Date.parse(res.next_due_at) - Date.parse(res.last_reviewed_at)) / 1000;
+    setLastNewIntervalSec(newIntervalSec);
+    const key = forecastKeyForInterval(newIntervalSec * 1000);
+    setSessionForecast(f => ({ ...f, [key]: (f[key] ?? 0) + 1 }));
+    setReviewedCount(n => n + 1);
     setFlipped(false);
-    setIndex(i => i + 1);
     setStatsRefresh(n => n + 1);
+
+    // Breather before a failed card returns: one fresh card if we're still in
+    // the main queue, immediate once it's exhausted.
+    const showAfterIndex = index + (fromRelearn ? 1 : 2);
+    const requeued: RelearnItem = {
+      card: {
+        ...card,
+        next_due_at: res.next_due_at,
+        scheduled_interval_seconds: Math.round(newIntervalSec),
+        is_new: false,
+        is_recent: true, // just reviewed -> RECENT category on the next pass
+      },
+      dueAtMs: Date.parse(res.next_due_at),
+      showAfterIndex,
+    };
+    setRelearning(rs => {
+      const rest = rs.filter(r => r.card.flashcard_id !== card.flashcard_id);
+      return grade === 'again' ? [...rest, requeued] : rest;
+    });
+    if (!fromRelearn) setIndex(i => i + 1);
   };
 
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
   if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
 
+  const statsPanel = (
+    <ReviewStatsPanel
+      essayId={essayId}
+      sectionId={sectionId}
+      refreshToken={statsRefresh}
+      reviewed={reviewedCount}
+      backlog={queue.length - index + relearning.length}
+      newRemaining={queue.slice(index).filter(c => c.is_new).length}
+      sessionForecast={sessionForecast}
+    />
+  );
+
   if (!current) {
     return (
       <div style={pageStyle}>
-        <QueueForecastPanel essayId={essayId} sectionId={sectionId} refreshToken={statsRefresh} />
-        <h2>Review session</h2>
-        <div style={{ color: '#888', fontSize: 14 }}>
+        {statsPanel}
+        <div style={{ ...reviewCardStyle, textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)' }}>
           {queue.length === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
         </div>
-        <button style={{ ...btnStyle, marginTop: 12 }} onClick={() => navigate('/essaycards')}>
-          ← All essays
+        <button style={{ ...gradeBtnStyle, width: '100%', flex: 'none' }} onClick={() => navigate('/essaycards')}>
+          Back to all essays
         </button>
       </div>
     );
@@ -551,48 +820,74 @@ function ReviewSessionView() {
 
   return (
     <div style={pageStyle}>
-      <QueueForecastPanel essayId={essayId} sectionId={sectionId} refreshToken={statsRefresh} />
-      <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
-        Card {index + 1} of {queue.length}
-      </div>
+      {statsPanel}
 
-      <div className="essaycards-review-card" style={{
-        padding: 20,
-        borderRadius: 8,
-        border: '1px solid #e0e0e0',
-        marginBottom: 16,
-        minHeight: 100,
-      }}>
-        <div style={{ fontWeight: 600 }}>
+      <div
+        className="essaycards-review-card"
+        style={
+          current.is_recent
+            ? { ...reviewCardStyle, border: '2px solid var(--md-sys-color-primary)' }
+            : reviewCardStyle
+        }
+      >
+        <div className="type-title" style={{ lineHeight: 1.5 }}>
           <ReactMarkdown>{current.question}</ReactMarkdown>
         </div>
         {flipped && (
           <>
-            <div style={{ borderTop: '1px solid #e0e0e0', paddingTop: 12, marginTop: 12 }}>
+            <div
+              style={{
+                borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                paddingTop: 16,
+                marginTop: 16,
+                lineHeight: 1.6,
+              }}
+            >
               <ReactMarkdown>{current.answer}</ReactMarkdown>
             </div>
             <button
-              style={{ ...btnStyle, marginTop: 12 }}
+              style={jumpBtnStyle}
               onClick={() => navigate(`/essaycards/essays/${current.essay_id}#${current.anchor_slug}`)}
             >
-              Jump to passage
+              Jump to passage →
             </button>
           </>
         )}
       </div>
 
-      {!flipped && (
-        <button style={primaryBtnStyle} onClick={() => setFlipped(true)}>Flip</button>
-      )}
-
-      {flipped && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button style={btnStyle} disabled={grading} onClick={() => handleGrade('again')}>Again</button>
-          <button style={btnStyle} disabled={grading} onClick={() => handleGrade('hard')}>Hard</button>
-          <button style={btnStyle} disabled={grading} onClick={() => handleGrade('good')}>Good</button>
-          <button style={btnStyle} disabled={grading} onClick={() => handleGrade('easy')}>Easy</button>
+      {!flipped ? (
+        <button style={flipBtnStyle} onClick={() => setFlipped(true)}>Flip</button>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
+          {(['again', 'hard', 'good', 'easy'] as Grade[]).map(g => (
+            <button key={g} style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade(g)}>
+              {g[0].toUpperCase() + g.slice(1)}
+            </button>
+          ))}
         </div>
       )}
+
+      <div style={diagFrameStyle}>
+        {current.is_recent && (
+          <div style={{ color: 'var(--md-sys-color-primary)', fontWeight: 600 }}>
+            {showingRelearn
+              ? '↩ Failed earlier this session — shown again'
+              : '◆ Selected by recency (reviewed in the last 24 h), not by interval'}
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span>This card — last interval</span>
+          <strong style={{ color: 'var(--md-sys-color-on-surface)', fontVariantNumeric: 'tabular-nums' }}>
+            {formatInterval(current.scheduled_interval_seconds)}
+          </strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span>Last answer — new interval</span>
+          <strong style={{ color: 'var(--md-sys-color-on-surface)', fontVariantNumeric: 'tabular-nums' }}>
+            {lastNewIntervalSec == null ? '—' : formatInterval(lastNewIntervalSec)}
+          </strong>
+        </div>
+      </div>
     </div>
   );
 }

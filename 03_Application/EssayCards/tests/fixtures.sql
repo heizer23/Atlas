@@ -43,16 +43,18 @@ INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, n
   ('fc000006-0000-0000-0000-000000000006', null,                            now() + interval '1 hour');
 
 -- ── Queue-stats horizons (GET /flashcards/stats) ─────────────────────────────
--- Essay D exists only to exercise the six horizon bands of GET
--- /flashcards/stats. Every card here is future-dated, so none appear in the
--- /due queue and none disturb the prior /due test expectations.
---   fc-stats-5min  -> now + 5 minutes  -> within_10_min band
---   fc-stats-3day  -> now + 3 days     -> within_7_days band
---   fc-stats-14day -> now + 14 days    -> within_30_days band
---   fc-stats-60day -> now + 60 days    -> beyond_30_days band
--- Combined with essays A/B (4 cards due now, 2 cards ~1h out) the system-wide
--- forecast is: due_now=4, within_10_min=1, within_1_day=2, within_7_days=1,
--- within_30_days=1, beyond_30_days=1 (sum 10).
+-- Essay D exists only to exercise the horizon bands of GET /flashcards/stats.
+-- Every card here is future-dated, so none appear in the /due queue and none
+-- disturb the prior /due test expectations.
+--   fc-stats-5min   -> now + 5 minutes  -> within_10_min band
+--   fc-stats-3day   -> now + 3 days     -> within_7_days band
+--   fc-stats-14day  -> now + 14 days    -> within_30_days band
+--   fc-stats-60day  -> now + 60 days    -> within_90_days band  (Sprint05a split)
+--   fc-stats-120day -> now + 120 days   -> beyond_90_days band  (Sprint05a split)
+-- Combined with essays A/B (4 cards due now, 2 cards ~1h out) and Essay E's 9
+-- eligible cards the system-wide forecast is: due_now=13, within_10_min=1,
+-- within_1_day=2, within_7_days=1, within_30_days=1, within_90_days=1,
+-- beyond_90_days=1 (sum 20).
 INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
   ('ea000004-0000-0000-0000-000000000004', 'Essay D (stats horizons)', 'essay-d', now() - interval '30 minutes', now() - interval '30 minutes');
 
@@ -60,16 +62,18 @@ INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, ancho
   ('ec000005-0000-0000-0000-000000000005', 'ea000004-0000-0000-0000-000000000004', 0, 'D Section', 'd-section', 'Essay D content.');
 
 INSERT INTO essaycards.flashcards (id, essay_id, section_id, card_key, question, answer) VALUES
-  ('fc000007-0000-0000-0000-000000000007', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-5min',  'D q1', 'D a1'),
-  ('fc000008-0000-0000-0000-000000000008', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-3day',  'D q2', 'D a2'),
-  ('fc000009-0000-0000-0000-000000000009', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-14day', 'D q3', 'D a3'),
-  ('fc000010-0000-0000-0000-000000000010', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-60day', 'D q4', 'D a4');
+  ('fc000007-0000-0000-0000-000000000007', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-5min',   'D q1', 'D a1'),
+  ('fc000008-0000-0000-0000-000000000008', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-3day',   'D q2', 'D a2'),
+  ('fc000009-0000-0000-0000-000000000009', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-14day',  'D q3', 'D a3'),
+  ('fc000010-0000-0000-0000-000000000010', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-60day',  'D q4', 'D a4'),
+  ('fc000020-0000-0000-0000-000000000020', 'ea000004-0000-0000-0000-000000000004', 'ec000005-0000-0000-0000-000000000005', 'fc-stats-120day', 'D q5', 'D a5');
 
 INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at) VALUES
   ('fc000007-0000-0000-0000-000000000007', null, now() + interval '5 minutes'),
   ('fc000008-0000-0000-0000-000000000008', null, now() + interval '3 days'),
   ('fc000009-0000-0000-0000-000000000009', null, now() + interval '14 days'),
-  ('fc000010-0000-0000-0000-000000000010', null, now() + interval '60 days');
+  ('fc000010-0000-0000-0000-000000000010', null, now() + interval '60 days'),
+  ('fc000020-0000-0000-0000-000000000020', null, now() + interval '120 days');
 
 -- ── Review-queue ordering (Sprint05_ReviewQueueOrdering) ─────────────────────
 -- Essay E exercises the two-category ordering of GET /flashcards/due:

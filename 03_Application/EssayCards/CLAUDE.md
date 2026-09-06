@@ -141,16 +141,58 @@ from a single `select now()`) is the sole source of truth — EssayCards has no
 per-review history table. All ordering logic is one SQL `ORDER BY` in
 `list_due_flashcards`; the review UI renders `rows` in server order.
 
+Each `/due` row also carries three additive fields (R-CON-BP-04; none affects
+eligibility or ordering): `is_new` (bool) = `last_reviewed_at IS NULL`;
+`is_recent` (bool) = `last_reviewed_at >= now() - interval '24 hours'` (the
+RECENT-vs-BACKLOG category flag, false when `is_new`); and
+`scheduled_interval_seconds` (int | null) = epoch seconds of `next_due_at −
+last_reviewed_at`, the interval the card is currently scheduled across (the
+BACKLOG sort key; null when `is_new`). All three feed the review screen.
+
 ## Queue stats
 `GET /api/essaycards/flashcards/stats` — review-queue forecast. Returns a Dataset of
-exactly six zero-filled rows partitioning every flashcard that has a review-state row
-into non-overlapping horizon bands by `next_due_at` vs Postgres `now()`: `due_now`,
-`within_10_min`, `within_1_day`, `within_7_days`, `within_30_days`, `beyond_30_days`
-(bands open on the lower edge, closed on the upper; the six counts sum to the total
-scheduled cards in scope). Same `essay_id` / `section_id` scoping rules as
-`GET /flashcards/due` (`section_id` without `essay_id` → `VALIDATION_ERROR`). Rendered
-as the "Queue forecast" strip at the top of the review screen (`QueueForecastPanel` in
-`src/ShellEntry.tsx`), which re-fetches after each graded card.
+exactly **seven** zero-filled rows partitioning every flashcard that has a review-state
+row into non-overlapping horizon bands by `next_due_at` vs Postgres `now()`: `due_now`,
+`within_10_min`, `within_1_day`, `within_7_days`, `within_30_days`, `within_90_days`,
+`beyond_90_days` (bands open on the lower edge, closed on the upper; the seven counts
+sum to the total scheduled cards in scope). The 30-/90-day split feeds the review
+screen's UPCOMING `≤3 mo` / `>3 mo` forecast columns. Same `essay_id` / `section_id`
+scoping rules as `GET /flashcards/due` (`section_id` without `essay_id` →
+`VALIDATION_ERROR`).
+
+## Review screen (`src/ShellEntry.tsx` → `ReviewSessionView` / `ReviewStatsPanel`)
+Material 3 layout, no page header: one flat `surface-variant` stats card, the
+question card (`surface` + `elevation-1`, the dominant element), a full-width
+primary **Flip** button (grade buttons replace it after flip), then a small
+diagnostics frame. The stats card has two sections, their names (`CURRENT` /
+`UPCOMING`) rotated vertically in a left gutter, no divider between them:
+- **CURRENT** — three metric blocks: `Session` (reviews done this session,
+  incl. relearning re-reviews), `Backlog` (main queue remaining + relearning
+  pending), `New` (remaining `is_new` cards in the main queue).
+- **UPCOMING** — a two-row × six-column forecast (`≤10m <1d <7d <30d <3mo ≥3mo`),
+  horizontally scrollable on narrow widths. `All` = live `GET /stats` (the six
+  forward bands, `due_now` omitted). `Session` = client-side tally: each review
+  response gives `next_due_at − last_reviewed_at`, bucketed by the same band
+  edges and counted per session (reset when a new queue loads). No backend
+  state; `FORECAST_COLUMNS` in `ShellEntry.tsx` mirrors the `/stats` band edges.
+
+**Recency-selected bold frame.** The question card gets a **2 px primary
+border** whenever the current card's `is_recent` is true — i.e. it was placed
+ahead of the backlog because it was reviewed within the last 24 h (RECENT
+category, sorted by `next_due_at`), not because of its interval. The
+diagnostics frame under the buttons then shows either "↩ Failed earlier this
+session — shown again" (relearning sub-queue, below) or "◆ Selected by
+recency…", plus the current card's `scheduled_interval_seconds` ("last
+interval" — the BACKLOG sort key) and the new interval the previously-graded
+card landed on.
+
+**In-session relearning (Sprint05c).** The session still loads `/due` once and
+never re-fetches, but a card graded **`again`** is re-queued *client-side* into
+a relearning sub-queue (`RelearnItem`, `is_recent: true`) and shown again near
+the front — after a one-fresh-card breather while the main queue still has
+cards, immediately once it is exhausted. Eligible relearning cards (soonest
+`next_due_at` first) preempt the main queue. Grading it anything but `again`
+drops it from the sub-queue.
 
 ## Oral examinations
 Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —
