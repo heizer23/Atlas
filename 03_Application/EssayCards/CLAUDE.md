@@ -118,6 +118,17 @@ shape (missing key, wrong type, out-of-set value, unparsable JSON) returns
 ApiError VALIDATION_ERROR (400) instead of FastAPI's default 422 shape. See
 `Sprint01_Core/10_architecture.json` §contracts.invariants.
 
+## Queue stats
+`GET /api/essaycards/flashcards/stats` — review-queue forecast. Returns a Dataset of
+exactly six zero-filled rows partitioning every flashcard that has a review-state row
+into non-overlapping horizon bands by `next_due_at` vs Postgres `now()`: `due_now`,
+`within_10_min`, `within_1_day`, `within_7_days`, `within_30_days`, `beyond_30_days`
+(bands open on the lower edge, closed on the upper; the six counts sum to the total
+scheduled cards in scope). Same `essay_id` / `section_id` scoping rules as
+`GET /flashcards/due` (`section_id` without `essay_id` → `VALIDATION_ERROR`). Rendered
+as the "Queue forecast" strip at the top of the review screen (`QueueForecastPanel` in
+`src/ShellEntry.tsx`), which re-fetches after each graded card.
+
 ## Oral examinations
 Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —
 that id is reused as-is for examination history; no separate section-id scheme was

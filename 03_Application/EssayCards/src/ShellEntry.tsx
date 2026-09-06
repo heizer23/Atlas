@@ -52,6 +52,12 @@ interface DueCardRow {
   next_due_at: string;
 }
 
+interface QueueStatRow {
+  bucket: string;
+  label: string;
+  count: number;
+}
+
 interface LastExamination {
   examined_at: string;
   score: number;
@@ -398,6 +404,75 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
   );
 }
 
+// ── Queue Forecast Panel ──────────────────────────────────────────────────────
+
+// Compact strip shown at the top of the review screen: how many cards are due
+// now and how the rest of the queue is spread across future horizons. Backed
+// by GET /flashcards/stats, scoped by the same essay_id/section_id as the
+// session. Its own fetch + failure state — a stats failure never blocks the
+// review itself, it just renders nothing. Re-fetches whenever `refreshToken`
+// changes (the session bumps it after each graded card).
+function QueueForecastPanel({
+  essayId,
+  sectionId,
+  refreshToken,
+}: {
+  essayId: string | null;
+  sectionId: string | null;
+  refreshToken: number;
+}) {
+  const [rows, setRows] = useState<QueueStatRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const qs = new URLSearchParams();
+      if (essayId) qs.set('essay_id', essayId);
+      if (sectionId) qs.set('section_id', sectionId);
+      const url = `/essaycards/flashcards/stats${qs.toString() ? `?${qs.toString()}` : ''}`;
+      const res = await apiFetch<Dataset<QueueStatRow>>(url);
+      if (isApiError(res)) {
+        setFailed(true);
+        return;
+      }
+      setFailed(false);
+      setRows(res.rows);
+    })();
+  }, [essayId, sectionId, refreshToken]);
+
+  if (failed || !rows) return null;
+
+  const total = rows.reduce((n, r) => n + r.count, 0);
+
+  return (
+    <div
+      style={{
+        border: '1px solid #e0e0e0',
+        borderRadius: 8,
+        padding: '8px 12px',
+        marginBottom: 16,
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'baseline',
+        gap: '4px 14px',
+      }}
+    >
+      <span style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+        Queue forecast
+      </span>
+      {rows.map(r => (
+        <span
+          key={r.bucket}
+          style={{ fontSize: 12, color: r.bucket === 'due_now' ? 'var(--md-sys-color-primary)' : '#666' }}
+        >
+          <strong style={{ fontSize: 13 }}>{r.count}</strong>&nbsp;{r.label}
+        </span>
+      ))}
+      <span style={{ fontSize: 11, color: '#aaa', marginLeft: 'auto' }}>{total} scheduled</span>
+    </div>
+  );
+}
+
 // ── Review Session View ───────────────────────────────────────────────────────
 
 function ReviewSessionView() {
@@ -412,6 +487,7 @@ function ReviewSessionView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
   const [grading, setGrading] = useState(false);
+  const [statsRefresh, setStatsRefresh] = useState(0);
 
   // Fetch the due queue exactly once at session start — deliberately not a
   // dependency-driven re-fetch loop (see file header note).
@@ -452,6 +528,7 @@ function ReviewSessionView() {
     }
     setFlipped(false);
     setIndex(i => i + 1);
+    setStatsRefresh(n => n + 1);
   };
 
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
@@ -460,6 +537,7 @@ function ReviewSessionView() {
   if (!current) {
     return (
       <div style={pageStyle}>
+        <QueueForecastPanel essayId={essayId} sectionId={sectionId} refreshToken={statsRefresh} />
         <h2>Review session</h2>
         <div style={{ color: '#888', fontSize: 14 }}>
           {queue.length === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
@@ -473,6 +551,7 @@ function ReviewSessionView() {
 
   return (
     <div style={pageStyle}>
+      <QueueForecastPanel essayId={essayId} sectionId={sectionId} refreshToken={statsRefresh} />
       <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
         Card {index + 1} of {queue.length}
       </div>

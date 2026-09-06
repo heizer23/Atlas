@@ -35,6 +35,24 @@ DUE_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="next_due_at", label="Due",      type="date",   sortable=True,  filterable=False),
 ]
 
+STATS_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="bucket", label="Bucket",  type="string", sortable=False, filterable=False),
+    ColumnSchema(key="label",  label="Horizon", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="count",  label="Cards",   type="number", sortable=False, filterable=False),
+]
+
+# (bucket key, display label) in fixed near -> far order. This list IS the
+# response row order and the set of buckets is closed. `bucket` is the stable
+# machine key; `label` is a short human string for a compact horizontal strip.
+STATS_BUCKETS: list[tuple[str, str]] = [
+    ("due_now",        "Due now"),
+    ("within_10_min",  "≤ 10 min"),
+    ("within_1_day",   "≤ 1 day"),
+    ("within_7_days",  "≤ 7 days"),
+    ("within_30_days", "≤ 30 days"),
+    ("beyond_30_days", "> 30 days"),
+]
+
 
 def _due_row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
@@ -110,6 +128,99 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
                 rows.append(_due_row_to_dict(d))
 
     return _dataset_response(_due_dataset(rows))
+
+
+@router.get("/stats", response_model=None)
+def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = None) -> JSONResponse:
+    """
+    Review-queue forecast: every flashcard that has a review-state row,
+    partitioned into six non-overlapping horizon bands by next_due_at relative
+    to now(). Read endpoint -> returns Dataset (R-CON-BP-04).
+
+    Parameters (identical scoping rules to GET /flashcards/due):
+      - essay_id    optional; restrict to one essay.
+      - section_id  optional; requires essay_id; restrict to one section.
+      - section_id without essay_id      -> VALIDATION_ERROR (400).
+      - no params                        -> system-wide.
+    No other parameter is accepted. There is no ordering parameter: rows are
+    always returned in the fixed near -> far band order of STATS_BUCKETS.
+
+    Time basis: Postgres now(), evaluated once per statement, so all six band
+    boundaries are computed against the identical instant (R-CON-AL-06 — same
+    server-time authority as GET /flashcards/due). Bands are open on the lower
+    edge and closed on the upper edge:
+        due_now        : next_due_at <= now()
+        within_10_min  : now()          < next_due_at <= now() + 10 minutes
+        within_1_day   : now() + 10 min < next_due_at <= now() + 1 day
+        within_7_days  : now() + 1 day  < next_due_at <= now() + 7 days
+        within_30_days : now() + 7 days < next_due_at <= now() + 30 days
+        beyond_30_days : next_due_at > now() + 30 days
+    Every review-state row in scope falls into exactly one band; the six counts
+    sum to the total number of scheduled flashcards in scope.
+
+    Empty-result behavior: always exactly six rows. An empty scope (or an
+    unknown essay_id) yields six rows with count 0 — the bands are zero-filled,
+    never omitted. meta.total is the row count (always 6), not the card total.
+    """
+    if section_id and not essay_id:
+        return api_error("VALIDATION_ERROR", "section_id requires essay_id to also be provided")
+
+    conditions: list[str] = []
+    params: list[Any] = []
+    if essay_id:
+        conditions.append("f.essay_id = %s")
+        params.append(essay_id)
+    if section_id:
+        conditions.append("f.section_id = %s")
+        params.append(section_id)
+    where = ("where " + " and ".join(conditions)) if conditions else ""
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select
+                  count(*) filter (
+                    where frs.next_due_at <= now())                                  as due_now,
+                  count(*) filter (
+                    where frs.next_due_at >  now()
+                      and frs.next_due_at <= now() + interval '10 minutes')          as within_10_min,
+                  count(*) filter (
+                    where frs.next_due_at >  now() + interval '10 minutes'
+                      and frs.next_due_at <= now() + interval '1 day')               as within_1_day,
+                  count(*) filter (
+                    where frs.next_due_at >  now() + interval '1 day'
+                      and frs.next_due_at <= now() + interval '7 days')              as within_7_days,
+                  count(*) filter (
+                    where frs.next_due_at >  now() + interval '7 days'
+                      and frs.next_due_at <= now() + interval '30 days')             as within_30_days,
+                  count(*) filter (
+                    where frs.next_due_at >  now() + interval '30 days')             as beyond_30_days
+                from essaycards.flashcard_review_state frs
+                join essaycards.flashcards f on f.id = frs.flashcard_id
+                {where}
+                """,
+                params,
+            )
+            counts = cur.fetchone()
+
+    rows = [
+        {"bucket": key, "label": label, "count": int(counts[key])}
+        for key, label in STATS_BUCKETS
+    ]
+    dataset = Dataset(
+        meta=DatasetMeta(
+            object_type="flashcard_queue_stat",
+            label="Review Queue Forecast",
+            total=len(rows),
+            page=1,
+            page_size=len(rows),
+            row_actions=[],
+        ),
+        **{"schema": STATS_SCHEMA},
+        rows=rows,
+    )
+    return _dataset_response(dataset)
 
 
 async def _parse_review_grade(request: Request) -> tuple[str | None, JSONResponse | None]:

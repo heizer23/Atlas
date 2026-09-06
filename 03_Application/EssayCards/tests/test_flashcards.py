@@ -20,7 +20,19 @@ FC_ORIGINS_2 = "fc000002-0000-0000-0000-000000000002"  # last_reviewed_at=null, 
 FC_ORIGINS_3 = "fc000003-0000-0000-0000-000000000003"  # last_reviewed_at=60m ago, due
 FC_NOT_DUE   = "fc000004-0000-0000-0000-000000000004"  # next_due_at 1h in the future
 
+ESSAY_D = "ea000004-0000-0000-0000-000000000004"  # stats-horizon essay, all cards future-dated
+SECTION_D1 = "ec000005-0000-0000-0000-000000000005"
+
 UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
+
+STATS_BUCKET_ORDER = [
+    "due_now", "within_10_min", "within_1_day",
+    "within_7_days", "within_30_days", "beyond_30_days",
+]
+
+
+def _stats_counts(rows: list[dict]) -> dict[str, int]:
+    return {row["bucket"]: row["count"] for row in rows}
 
 
 def _parse_ts(s: str) -> datetime:
@@ -159,3 +171,72 @@ def test_review_unknown_flashcard_not_found(client):
     r = client.post(f"/api/essaycards/flashcards/{UNKNOWN_ID}/review", json={"grade": "good"})
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+# ── Queue stats ───────────────────────────────────────────────────────────────
+
+def test_stats_system_wide_partitions_all_bands(client):
+    """Scenario: Queue stats — no params returns the six system-wide horizon bands."""
+    r = client.get("/api/essaycards/flashcards/stats")
+    assert r.status_code == 200
+    body = r.json()
+
+    assert body["meta"]["object_type"] == "flashcard_queue_stat"
+    assert body["meta"]["total"] == 6
+    assert [row["bucket"] for row in body["rows"]] == STATS_BUCKET_ORDER
+    for row in body["rows"]:
+        for field in ("bucket", "label", "count"):
+            assert field in row
+
+    counts = _stats_counts(body["rows"])
+    assert counts == {
+        "due_now": 4,
+        "within_10_min": 1,
+        "within_1_day": 2,
+        "within_7_days": 1,
+        "within_30_days": 1,
+        "beyond_30_days": 1,
+    }
+    assert sum(counts.values()) == 10  # every scheduled card lands in exactly one band
+
+
+def test_stats_scoped_to_essay(client):
+    """Scenario: Queue stats — scoped to a single essay."""
+    r = client.get(f"/api/essaycards/flashcards/stats?essay_id={ESSAY_D}")
+    assert r.status_code == 200
+    counts = _stats_counts(r.json()["rows"])
+    assert counts == {
+        "due_now": 0,
+        "within_10_min": 1,
+        "within_1_day": 0,
+        "within_7_days": 1,
+        "within_30_days": 1,
+        "beyond_30_days": 1,
+    }
+
+
+def test_stats_scoped_to_section(client):
+    """Scenario: Queue stats — scoped to essay and section."""
+    r = client.get(f"/api/essaycards/flashcards/stats?essay_id={ESSAY_A}&section_id={SECTION_A1}")
+    assert r.status_code == 200
+    counts = _stats_counts(r.json()["rows"])
+    # section A1 holds fc-origins-1 and fc-origins-2, both already due
+    assert counts["due_now"] == 2
+    assert sum(counts.values()) == 2
+
+
+def test_stats_section_without_essay_rejected(client):
+    """Scenario: Queue stats — section_id without essay_id is rejected."""
+    r = client.get(f"/api/essaycards/flashcards/stats?section_id={SECTION_A1}")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_stats_unknown_scope_is_zero_filled(client):
+    """Scenario: Queue stats — empty scope still returns six zero-filled bands."""
+    r = client.get(f"/api/essaycards/flashcards/stats?essay_id={UNKNOWN_ID}")
+    assert r.status_code == 200
+    body = r.json()
+    assert [row["bucket"] for row in body["rows"]] == STATS_BUCKET_ORDER
+    assert all(row["count"] == 0 for row in body["rows"])
+    assert body["meta"]["total"] == 6
