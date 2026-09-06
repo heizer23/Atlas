@@ -834,6 +834,9 @@ function ReviewSessionView() {
   // clipboard; touches no review/scheduling state.
   const [exploring, setExploring] = useState(false);
   const [exploreMsg, setExploreMsg] = useState<string | null>(null);
+  // Once the package is on the clipboard, the Explore button becomes an
+  // "Import result" button routing to ExploreImportView — reset on the next card.
+  const [exported, setExported] = useState(false);
 
   // Fetch the due queue exactly once at session start — deliberately not a
   // dependency-driven re-fetch loop (see file header note).
@@ -887,6 +890,7 @@ function ReviewSessionView() {
     try {
       await navigator.clipboard.writeText(buildExploreClipboardText(res));
       setExploreMsg('Copied for ChatGPT');
+      setExported(true);
     } catch {
       setExploreMsg('Could not access the clipboard — check browser permissions.');
     }
@@ -914,6 +918,7 @@ function ReviewSessionView() {
     setReviewedCount(n => n + 1);
     setFlipped(false);
     setExploreMsg(null);
+    setExported(false);
     setStatsRefresh(n => n + 1);
 
     // Breather before a failed card returns: one fresh card if we're still in
@@ -999,13 +1004,22 @@ function ReviewSessionView() {
             >
               Jump to passage →
             </button>
-            <button
-              style={{ ...jumpBtnStyle, marginLeft: 20 }}
-              disabled={exploring}
-              onClick={handleExplore}
-            >
-              {exploring ? 'Preparing…' : 'Explore'}
-            </button>
+            {exported ? (
+              <button
+                style={{ ...jumpBtnStyle, marginLeft: 20 }}
+                onClick={() => navigate('/essaycards/explore/import')}
+              >
+                Import result →
+              </button>
+            ) : (
+              <button
+                style={{ ...jumpBtnStyle, marginLeft: 20 }}
+                disabled={exploring}
+                onClick={handleExplore}
+              >
+                {exploring ? 'Preparing…' : 'Explore'}
+              </button>
+            )}
             {exploreMsg && (
               <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>
                 {exploreMsg}

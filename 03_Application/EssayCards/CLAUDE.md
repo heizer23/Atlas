@@ -236,7 +236,9 @@ emerges from the conversation).
   **Explore** button on the revealed answer in `ReviewSessionView` fetches it and
   copies it + `EXPLORE_PROMPT_INTRO` (src/ShellEntry.tsx) to the clipboard
   ("Copied for ChatGPT"). Read-only — never touches review/scheduling state. It
-  sits next to the existing "Jump to passage" control, same `jumpBtnStyle` weight.
+  sits next to the existing "Jump to passage" control, same `jumpBtnStyle` weight,
+  and after a successful copy becomes an **Import result →** button routing to
+  `ExploreImportView` (reset on the next card).
 - **Import.** `POST /api/essaycards/flashcards/exploration/import` — raw
   `request.json()`, `{"actions": [...]}` (a bare single action object is also
   accepted). `?dry_run=true` validates + resolves + returns the plan **without
