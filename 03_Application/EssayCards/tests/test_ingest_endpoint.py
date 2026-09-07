@@ -316,3 +316,61 @@ def test_ingest_json_rejects_empty_sections_array(client):
     r = client.post(INGEST_URL, json=payload)
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# ── Ingest — category / sort_index overview metadata ──────────────────────────
+
+def _minimal_payload(slug, **extra):
+    return {
+        "title": slug,
+        "slug": slug,
+        "sections": [
+            {"heading": "S", "anchor_slug": f"{slug}-s", "body_markdown": "", "cards": []}
+        ],
+        **extra,
+    }
+
+
+def test_ingest_json_persists_category_and_sort_index(client, db_conn):
+    r = client.post(INGEST_URL, json=_minimal_payload("meta-essay", category="Philosophy", sort_index=3))
+    assert r.status_code == 200
+
+    with db_conn.cursor() as cur:
+        cur.execute("select category, sort_index from essaycards.essays where slug = 'meta-essay'")
+        row = cur.fetchone()
+    assert row["category"] == "Philosophy"
+    assert row["sort_index"] == 3
+
+    listed = next(e for e in client.get("/api/essaycards/essays").json()["rows"] if e["slug"] == "meta-essay")
+    assert (listed["category"], listed["sort_index"]) == ("Philosophy", 3)
+
+
+def test_ingest_json_category_defaults_null_sort_index_defaults_zero(client, db_conn):
+    r = client.post(INGEST_URL, json=_minimal_payload("meta-defaults"))
+    assert r.status_code == 200
+    with db_conn.cursor() as cur:
+        cur.execute("select category, sort_index from essaycards.essays where slug = 'meta-defaults'")
+        row = cur.fetchone()
+    assert row["category"] is None
+    assert row["sort_index"] == 0
+
+
+def test_ingest_json_upsert_updates_category_and_sort_index(client, db_conn):
+    assert client.post(INGEST_URL, json=_minimal_payload("meta-upsert", category="Art", sort_index=1)).status_code == 200
+    assert client.post(INGEST_URL, json=_minimal_payload("meta-upsert", category="History", sort_index=5)).status_code == 200
+    with db_conn.cursor() as cur:
+        cur.execute("select category, sort_index from essaycards.essays where slug = 'meta-upsert'")
+        row = cur.fetchone()
+    assert (row["category"], row["sort_index"]) == ("History", 5)
+
+
+def test_ingest_json_rejects_blank_category(client):
+    r = client.post(INGEST_URL, json=_minimal_payload("meta-blank-cat", category="   "))
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_ingest_json_rejects_non_integer_sort_index(client):
+    r = client.post(INGEST_URL, json=_minimal_payload("meta-bad-sort", sort_index="2"))
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"

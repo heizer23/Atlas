@@ -68,6 +68,32 @@ def test_ingest_creates_essay_sections_and_cards(db_conn):
             assert c["next_due_at"] == c["created_at"]
 
 
+# ── Ingestion — front-matter category / sort_index ───────────────────────────
+
+def test_ingest_reads_category_and_sort_index_from_front_matter(db_conn):
+    ingest(_path("well_formed_categorized.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select category, sort_index from essaycards.essays where slug = 'categorised-essay'"
+        )
+        row = cur.fetchone()
+
+    assert row["category"] == "Philosophy"
+    assert row["sort_index"] == 4
+
+
+def test_ingest_defaults_category_null_sort_index_zero_when_front_matter_omits_them(db_conn):
+    ingest(_path("well_formed.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute("select category, sort_index from essaycards.essays where slug = 'test-essay'")
+        row = cur.fetchone()
+
+    assert row["category"] is None
+    assert row["sort_index"] == 0
+
+
 # ── Ingestion — re-ingesting an unchanged file preserves review state ─────────
 
 def test_reingest_preserves_review_state(db_conn):

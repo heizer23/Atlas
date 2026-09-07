@@ -19,11 +19,47 @@ def test_list_essays_returns_dataset(client):
     assert len(body["rows"]) >= 1
 
     row = body["rows"][0]
-    for field in ("id", "title", "slug"):
+    for field in ("id", "title", "slug", "category", "sort_index"):
         assert field in row
 
+    # All fixture essays are uncategorized (category null, sort_index 0), so the
+    # (category nulls last, sort_index, created_at) ordering falls back to
+    # created_at asc.
     created_ats = [row["created_at"] for row in body["rows"]]
     assert created_ats == sorted(created_ats)
+
+
+def test_list_essays_grouped_by_category_and_sort_index(client):
+    """Essays ingested with category/sort_index come back ordered
+    (category asc nulls last, sort_index asc), which is what the overview page
+    groups on."""
+    def ingest(title, slug, category, sort_index):
+        payload = {
+            "title": title,
+            "slug": slug,
+            "sort_index": sort_index,
+            "sections": [
+                {"heading": "S", "anchor_slug": f"{slug}-s", "body_markdown": "b", "cards": []}
+            ],
+        }
+        if category is not None:
+            payload["category"] = category
+        assert client.post("/api/essaycards/essays/ingest", json=payload).status_code == 200
+
+    ingest("Philo Two", "cat-philo-2", "Philosophy", 2)
+    ingest("Art One", "cat-art-1", "Art", 1)
+    ingest("Philo One", "cat-philo-1", "Philosophy", 1)
+    ingest("Loose", "cat-loose", None, 0)
+
+    rows = client.get("/api/essaycards/essays").json()["rows"]
+    seq = [(r["category"], r["sort_index"], r["slug"]) for r in rows
+           if r["slug"].startswith("cat-")]
+    assert seq == [
+        ("Art", 1, "cat-art-1"),
+        ("Philosophy", 1, "cat-philo-1"),
+        ("Philosophy", 2, "cat-philo-2"),
+        (None, 0, "cat-loose"),
+    ]
 
 
 def test_list_essays_empty(client, db_conn):

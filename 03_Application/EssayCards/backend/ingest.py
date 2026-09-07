@@ -4,7 +4,10 @@ for tests.
 
 Grammar (Sprint01_Core/10_architecture.json §internal_flow steps 2-3):
   - YAML front matter delimited by a leading '---' line and the next '---'
-    line; requires non-empty 'title' and 'slug'.
+    line; requires non-empty 'title' and 'slug'. Optional 'category' (non-empty
+    string, defaults to null) and 'sort_index' (integer, defaults to 0) place
+    the essay in the overview page's category groups and order it within its
+    group.
   - Each '## Heading {#anchor}' line starts a new section, in order of
     appearance. Any '##' heading line missing the '{#anchor}' suffix aborts
     ingestion. Content before the first matched section heading is discarded
@@ -81,7 +84,9 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
     summary = IngestSummary()
     try:
         with conn.cursor() as cur:
-            essay_id, essay_inserted = _upsert_essay(cur, doc["title"], doc["slug"])
+            essay_id, essay_inserted = _upsert_essay(
+                cur, doc["title"], doc["slug"], doc.get("category"), doc.get("sort_index", 0)
+            )
             summary.essay_created = essay_inserted
             summary.essay_id = str(essay_id)
 
@@ -111,7 +116,11 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
 _FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?\n)---\s*\n?", re.DOTALL)
 
 
-def _parse_front_matter(text: str) -> tuple[str, str, str]:
+def _parse_front_matter(text: str) -> tuple[str, str, str | None, int, str]:
+    """Returns (title, slug, category, sort_index, remaining_text).
+
+    category is None when the key is absent; sort_index defaults to 0.
+    """
     m = _FRONT_MATTER_RE.match(text)
     if not m:
         raise IngestionError(
@@ -133,7 +142,17 @@ def _parse_front_matter(text: str) -> tuple[str, str, str]:
     if not isinstance(slug, str) or not slug.strip():
         raise IngestionError("Front matter missing required non-empty 'slug'")
 
-    return title.strip(), slug.strip(), text[m.end():]
+    category = fm.get("category")
+    if category is not None:
+        if not isinstance(category, str) or not category.strip():
+            raise IngestionError("Front matter 'category', if present, must be a non-empty string")
+        category = category.strip()
+
+    sort_index = fm.get("sort_index", 0)
+    if isinstance(sort_index, bool) or not isinstance(sort_index, int):
+        raise IngestionError("Front matter 'sort_index', if present, must be an integer")
+
+    return title.strip(), slug.strip(), category, sort_index, text[m.end():]
 
 
 # ── Section splitting ─────────────────────────────────────────────────────────
@@ -275,7 +294,7 @@ def _validate_uniqueness(sections: list[dict[str, Any]]) -> None:
 # ── Top-level parse ─────────────────────────────────────────────────────────────
 
 def _parse_document(text: str) -> dict[str, Any]:
-    title, slug, body = _parse_front_matter(text)
+    title, slug, category, sort_index, body = _parse_front_matter(text)
     raw_sections = _split_sections(body)
 
     sections: list[dict[str, Any]] = []
@@ -292,21 +311,32 @@ def _parse_document(text: str) -> dict[str, Any]:
 
     _validate_uniqueness(sections)
 
-    return {"title": title, "slug": slug, "sections": sections}
+    return {
+        "title": title,
+        "slug": slug,
+        "category": category,
+        "sort_index": sort_index,
+        "sections": sections,
+    }
 
 
 # ── DB upserts ──────────────────────────────────────────────────────────────────
 
-def _upsert_essay(cur: Any, title: str, slug: str) -> tuple[str, bool]:
+def _upsert_essay(
+    cur: Any, title: str, slug: str, category: str | None, sort_index: int
+) -> tuple[str, bool]:
     cur.execute(
         """
-        insert into essaycards.essays (title, slug)
-        values (%s, %s)
+        insert into essaycards.essays (title, slug, category, sort_index)
+        values (%s, %s, %s, %s)
         on conflict (slug) do update
-            set title = excluded.title, updated_at = now()
+            set title      = excluded.title,
+                category   = excluded.category,
+                sort_index = excluded.sort_index,
+                updated_at = now()
         returning id, (xmax = 0) as was_inserted
         """,
-        (title, slug),
+        (title, slug, category, sort_index),
     )
     row = cur.fetchone()
     return row["id"], row["was_inserted"]

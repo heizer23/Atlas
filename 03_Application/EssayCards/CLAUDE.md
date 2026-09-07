@@ -22,6 +22,26 @@ Essays can be ingested two ways — both upsert by the same stable author-assign
 `backend.ingest.upsert_document(conn, doc)` core, so re-ingestion via either path never
 resets a flashcard's review state.
 
+### Essay overview metadata (`category`, `sort_index`)
+Both ingestion paths accept two optional essay-level fields — front-matter keys for the
+markdown CLI, top-level JSON keys for the API:
+- `category` — free text, no fixed set, no lookup table (an essay has at most one). It is
+  the group the essay appears under on the overview page. The known groups (`Art`,
+  `History`, `Philosophy`) and their display order live only in the frontend
+  (`CATEGORY_ORDER` in `src/ShellEntry.tsx`); any other value renders in its own group
+  after those, and `null` renders last under "Uncategorized". Adding a category is a
+  content change, not a schema change.
+- `sort_index` — integer, default `0`, the essay's position **within its category**,
+  ascending (ties break on `created_at`). This is where a sequence number goes — it is
+  never written into `title`. Distinct from `essay_sections.order_index`, which is
+  auto-derived from payload array order; `sort_index` is set explicitly by the author.
+
+Both are `on conflict do update`d on re-ingest, so a later payload with the same slug
+re-files or re-orders the essay. `GET /essays` orders rows
+`(category asc nulls last, sort_index asc, created_at asc)` and carries both fields on
+every row; `EssayListView` groups on them. Blank `category` or non-integer `sort_index`
+is `VALIDATION_ERROR` (JSON path) / `IngestionError` (markdown path).
+
 **Markdown CLI** (offline authoring — YAML front matter, `## Heading {#anchor}` sections,
 one fenced ```flashcards YAML block per section):
 
@@ -167,32 +187,39 @@ primary **Flip** button (grade buttons replace it after flip), then a small
 diagnostics frame. The stats card has two sections, their names (`CURRENT` /
 `UPCOMING`) rotated vertically in a left gutter, no divider between them:
 - **CURRENT** — three metric blocks: `Session` (reviews done this session,
-  incl. relearning re-reviews), `Backlog` (main queue remaining + relearning
-  pending), `New` (remaining `is_new` cards in the main queue).
+  including a card that came back around), `Backlog` (cards due in the most
+  recent `/due` refetch), `New` (`is_new` cards in that same queue).
 - **UPCOMING** — a two-row × six-column forecast (`≤10m <1d <7d <30d <3mo ≥3mo`),
   horizontally scrollable on narrow widths. `All` = live `GET /stats` (the six
   forward bands, `due_now` omitted). `Session` = client-side tally: each review
   response gives `next_due_at − last_reviewed_at`, bucketed by the same band
-  edges and counted per session (reset when a new queue loads). No backend
-  state; `FORECAST_COLUMNS` in `ShellEntry.tsx` mirrors the `/stats` band edges.
+  edges and counted per session (reset when the session starts, not on the
+  per-grade refetch). No backend state; `FORECAST_COLUMNS` in `ShellEntry.tsx`
+  mirrors the `/stats` band edges.
 
 **Recency-selected bold frame.** The question card gets a **2 px primary
 border** whenever the current card's `is_recent` is true — i.e. it was placed
 ahead of the backlog because it was reviewed within the last 24 h (RECENT
 category, sorted by `next_due_at`), not because of its interval. The
 diagnostics frame under the buttons then shows either "↩ Failed earlier this
-session — shown again" (relearning sub-queue, below) or "◆ Selected by
-recency…", plus the current card's `scheduled_interval_seconds` ("last
-interval" — the BACKLOG sort key) and the new interval the previously-graded
-card landed on.
+session — shown again" (the card's `flashcard_id` is in the session's
+`againIds` set) or "◆ Selected by recency…", plus the current card's
+`scheduled_interval_seconds` ("last interval" — the BACKLOG sort key) and the
+new interval the previously-graded card landed on. `againIds` is a
+diagnostics-only label; it has no effect on which card is shown.
 
-**In-session relearning (Sprint05c).** The session still loads `/due` once and
-never re-fetches, but a card graded **`again`** is re-queued *client-side* into
-a relearning sub-queue (`RelearnItem`, `is_recent: true`) and shown again near
-the front — after a one-fresh-card breather while the main queue still has
-cards, immediately once it is exhausted. Eligible relearning cards (soonest
-`next_due_at` first) preempt the main queue. Grading it anything but `again`
-drops it from the sub-queue.
+**Refetch-on-grade (supersedes the Sprint05c relearning sub-queue).** The
+session re-fetches `GET /flashcards/due` on mount, after **every** grade, and
+from the completion screen's **Check again** button — never on a timer.
+`ReviewSessionView` holds no `index` or client-side relearning queue; it always
+renders `queue[0]` from the latest response. The card just graded is scheduled
+at least 5 s (`again`) / 1 min (floored `hard`) into the future, so it is
+absent from the immediate refetch and reappears only on a **later** refetch,
+once it actually comes due, in the server's RECENT-first order. The session
+ends when a refetch returns nothing due. One accepted gap: the very last card
+graded `again` or floored `hard`, with nothing else to grade while its
+interval elapses — **Check again** on the completion screen re-runs the fetch
+for exactly that case.
 
 ## Oral examinations
 Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —

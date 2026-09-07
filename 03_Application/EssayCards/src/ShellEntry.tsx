@@ -32,6 +32,8 @@ interface EssayRow {
   id: string;
   title: string;
   slug: string;
+  category: string | null;
+  sort_index: number;
 }
 
 interface SectionRow {
@@ -403,6 +405,34 @@ function buildExploreClipboardText(pkg: ExplorationPackage): string {
 
 // ── Essay List View ───────────────────────────────────────────────────────────
 
+// Preferred display order for known overview categories. Anything not listed
+// here sorts after these, alphabetically; essays with no category (null) go
+// into a trailing "Uncategorized" group. This list is a UI-side convention —
+// the backend stores `category` as free text and imposes no fixed set.
+const CATEGORY_ORDER = ['Art', 'History', 'Philosophy'];
+const UNCATEGORIZED = 'Uncategorized';
+
+function categoryRank(name: string): number {
+  const i = CATEGORY_ORDER.indexOf(name);
+  if (i !== -1) return i;
+  if (name === UNCATEGORIZED) return Number.MAX_SAFE_INTEGER;
+  return CATEGORY_ORDER.length;
+}
+
+function groupEssaysByCategory(essays: EssayRow[]): [string, EssayRow[]][] {
+  const groups = new Map<string, EssayRow[]>();
+  for (const e of essays) {
+    const key = e.category ?? UNCATEGORIZED;
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(e);
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.sort_index - b.sort_index || a.title.localeCompare(b.title));
+  }
+  return [...groups.entries()].sort(
+    ([a], [b]) => categoryRank(a) - categoryRank(b) || a.localeCompare(b),
+  );
+}
+
 function EssayListView() {
   const navigate = useNavigate();
   const [essays, setEssays] = useState<EssayRow[]>([]);
@@ -451,22 +481,52 @@ function EssayListView() {
           <code>docker exec atlas-essaycards python -m backend.ingest /app/content/&lt;file&gt;.md</code>
         </div>
       )}
-      {!loading && !error && essays.map(e => (
-        <div
-          key={e.id}
-          onClick={() => navigate(`/essaycards/essays/${e.id}`)}
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            border: '1px solid #e0e0e0',
-            marginBottom: 8,
-            cursor: 'pointer',
-          }}
-        >
-          <div style={{ fontWeight: 600 }}>{e.title}</div>
-          <div style={{ fontSize: 12, color: '#888' }}>{e.slug}</div>
-        </div>
-      ))}
+      {!loading && !error && essays.length > 0 && (() => {
+        const groups = groupEssaysByCategory(essays);
+        const showHeadings = !(groups.length === 1 && groups[0][0] === UNCATEGORIZED);
+        return groups.map(([category, rows]) => (
+          <div key={category} style={{ marginBottom: 20 }}>
+            {showHeadings && (
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  letterSpacing: 0.6,
+                  textTransform: 'uppercase',
+                  color: '#666',
+                  margin: '0 0 8px',
+                }}
+              >
+                {category}
+              </div>
+            )}
+            {rows.map(e => (
+              <div
+                key={e.id}
+                onClick={() => navigate(`/essaycards/essays/${e.id}`)}
+                style={{
+                  padding: 12,
+                  borderRadius: 8,
+                  border: '1px solid #e0e0e0',
+                  marginBottom: 8,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 10,
+                }}
+              >
+                <span style={{ fontSize: 12, color: '#bbb', minWidth: 16, textAlign: 'right' }}>
+                  {e.sort_index}
+                </span>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{e.title}</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>{e.slug}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ));
+      })()}
     </div>
   );
 }
@@ -1078,8 +1138,10 @@ const STUB_PROMPT = `You are generating a JSON payload for an app called EssayCa
 Fill in the template below. Every value is an instruction describing what belongs there — replace each one with real content, and remove these instructions from your reply:
 
 {
-  "title": "the essay's display title, e.g. \\"Why Rome Fell\\"",
+  "title": "the essay's display title, e.g. \\"Why Rome Fell\\" — do NOT put a leading sequence number in here; use sort_index for ordering",
   "slug": "a url-safe stable id for the essay: letters, digits, underscore, hyphen only, no spaces, e.g. why_rome_fell — submitting this JSON again later with the same slug UPDATES this essay instead of creating a new one",
+  "category": "the overview-page group this essay belongs under — one of \\"Art\\", \\"History\\", \\"Philosophy\\" (omit the key entirely if none applies)",
+  "sort_index": "integer position of this essay within its category, ascending (e.g. 1, 2, 3) — this replaces writing a number into the title; omit for 0",
   "sections": [
     {
       "heading": "this section's display heading, e.g. \\"The Economic Causes\\"",
@@ -1100,6 +1162,7 @@ Rules that don't fit cleanly inline above:
 - This must be valid JSON. Any double-quote character that appears INSIDE a string value (e.g. quoting a word for emphasis, or a quoted phrase in the prose) must be escaped as \\" — e.g. write \\"there is no self\\" not "there is no self". An unescaped " inside a string breaks the JSON the moment it appears. Before replying, check every string value in your output for stray unescaped double quotes.
 - A card's section is determined ONLY by which section object's "cards" array it is physically nested inside — there is no id/field that points a card at a section. Put each card directly inside the section whose body_markdown it tests.
 - "sections" must have at least 1 entry; a section's "cards" list may be empty, but aim for 2-5 cards per section.
+- "category" and "sort_index" are optional essay-level metadata for the overview page. Never encode a sequence number in "title" — put it in "sort_index". Omit "category" entirely if the topic given doesn't clearly fit one.
 - The order of the "sections" array IS the reading order (there is no separate order field); same for the order you list "cards" within a section.
 - This is an upsert, never a wholesale replace: if you're updating an existing essay, sections/cards you omit from the payload are left untouched, not deleted.
 - Repeat the section object for every section of the essay — a real essay should have several sections, not just one.
@@ -1113,6 +1176,8 @@ Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell
 {
   "title": "Why Rome Fell",
   "slug": "why_rome_fell",
+  "category": "History",
+  "sort_index": 1,
   "sections": [
     {
       "heading": "The Economic Causes",
@@ -1142,8 +1207,10 @@ Now write a complete essay with flashcards on the topic I give you, following ev
 // section object's "cards" array it's nested inside (no separate linking
 // field exists), and that's invisible with just one section to look at.
 const PLACEHOLDER_JSON = `{
-  "title": "title of the essay",
+  "title": "title of the essay (no leading sequence number)",
   "slug": "url-safe id, e.g. my_essay (letters/digits/_/- only)",
+  "category": "Art | History | Philosophy (optional)",
+  "sort_index": 1,
   "sections": [
     {
       "heading": "first section's heading",

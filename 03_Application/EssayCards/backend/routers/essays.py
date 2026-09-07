@@ -40,8 +40,10 @@ router = APIRouter(prefix="/essays", tags=["essays"])
 _SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 ESSAY_SCHEMA: list[ColumnSchema] = [
-    ColumnSchema(key="title", label="Title", type="string", sortable=True,  filterable=True),
-    ColumnSchema(key="slug",  label="Slug",  type="string", sortable=False, filterable=False),
+    ColumnSchema(key="title",      label="Title",    type="string", sortable=True,  filterable=True),
+    ColumnSchema(key="slug",       label="Slug",     type="string", sortable=False, filterable=False),
+    ColumnSchema(key="category",   label="Category", type="string", sortable=True,  filterable=True),
+    ColumnSchema(key="sort_index", label="Order",    type="number", sortable=True,  filterable=False),
 ]
 
 
@@ -71,12 +73,18 @@ def _dataset_response(dataset: Dataset) -> JSONResponse:
 
 @router.get("", response_model=None)
 def list_essays() -> JSONResponse:
-    """No parameters. Ordered by created_at asc. Empty result is valid."""
+    """No parameters. Ordered by (category asc nulls last, sort_index asc,
+    created_at asc) so the overview page can render the essays grouped by
+    category and in author-assigned sequence without re-sorting. Empty result
+    is valid. Each row carries `category` (string | null) and `sort_index`
+    (int) in addition to id/title/slug.
+    """
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, title, slug, created_at, updated_at "
-                "from essaycards.essays order by created_at asc"
+                "select id, title, slug, category, sort_index, created_at, updated_at "
+                "from essaycards.essays "
+                "order by category asc nulls last, sort_index asc, created_at asc"
             )
             rows = [_row_to_dict(r) for r in cur.fetchall()]
 
@@ -105,7 +113,7 @@ def get_essay(essay_id: str) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, title, slug, created_at, updated_at "
+                "select id, title, slug, category, sort_index, created_at, updated_at "
                 "from essaycards.essays where id = %s",
                 (essay_id,),
             )
@@ -174,6 +182,22 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
     slug = slug.strip()
     if not _SLUG_LIKE_RE.match(slug):
         return None, api_error("VALIDATION_ERROR", f"slug '{slug}' must match ^[a-zA-Z0-9_-]+$")
+
+    # Optional overview-page grouping metadata. category is free text (no fixed
+    # set); sort_index orders the essay within its category group.
+    category = body.get("category")
+    if category is not None:
+        if not isinstance(category, str) or not category.strip():
+            return None, api_error(
+                "VALIDATION_ERROR", "category, if present, must be a non-empty string"
+            )
+        category = category.strip()
+
+    sort_index = body.get("sort_index", 0)
+    if isinstance(sort_index, bool) or not isinstance(sort_index, int):
+        return None, api_error(
+            "VALIDATION_ERROR", "sort_index, if present, must be an integer"
+        )
 
     sections_raw = body.get("sections")
     if not isinstance(sections_raw, list) or not sections_raw:
@@ -267,7 +291,13 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
                 )
             seen_card_keys.add(card["card_key"])
 
-    doc = {"title": title, "slug": slug, "sections": sections}
+    doc = {
+        "title": title,
+        "slug": slug,
+        "category": category,
+        "sort_index": sort_index,
+        "sections": sections,
+    }
     return doc, None
 
 

@@ -6,10 +6,32 @@ create table if not exists essaycards.essays (
     id         uuid        primary key default gen_random_uuid(),
     title      text        not null,
     slug       text        not null,
+    -- Which overview-page group the essay is filed under (e.g. 'Art',
+    -- 'History', 'Philosophy'). Free text, deliberately NOT constrained to a
+    -- fixed set — new categories are added without a schema change and without
+    -- a lookup table. An essay has at most one category; null means
+    -- "uncategorized" and is rendered in its own trailing group by the UI.
+    category   text,
+    -- Author-assigned position of the essay WITHIN its category, ascending.
+    -- Distinct from essay_sections.order_index (which is auto-derived from the
+    -- ingest payload's array order): this one is set explicitly by the author
+    -- and is the "sequence number" that used to be written into the title.
+    -- Not unique — ties break on created_at asc.
+    sort_index integer     not null default 0,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     constraint uq_essays_slug unique (slug)
 );
+
+-- Additive columns for databases created before category/sort_index existed.
+-- (create table ... if not exists above covers only fresh databases.)
+alter table essaycards.essays add column if not exists category   text;
+alter table essaycards.essays add column if not exists sort_index integer not null default 0;
+
+-- GET /essays returns every essay ordered (category nulls last, sort_index,
+-- created_at) so the overview page can render it grouped without a re-sort.
+create index if not exists ix_essays_category_sort
+    on essaycards.essays(category, sort_index, created_at);
 
 create table if not exists essaycards.essay_sections (
     id            uuid        primary key default gen_random_uuid(),
