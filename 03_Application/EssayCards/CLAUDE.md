@@ -9,12 +9,88 @@ always links back to the essay passage that taught it; the reader lets the user 
 into review at the end of each section, and a global "Due for review" queue surfaces
 cards from every section as they come due over time.
 
+## Glossary
+Canonical domain vocabulary. Use these words with exactly these meanings in code,
+comments, endpoint params, UI labels, and sprint drafts — do not coin near-synonyms.
+
+Some terms below (essay `status`, the `review_interval` column, the `focus` / `review`
+session split) are being introduced by the "Essay Roadmap / Directed Learning" sprint
+and may not all be in the code yet; the definitions are still authoritative for how
+they must be built.
+
+### Structure
+- **topic** — a named collection of essays. Stored as the free-text `essays.category`
+  value; an essay belongs to at most one topic, or to none.
+- **essay** — one learning unit: an `essaycards.essays` row plus its ordered sections
+  and their flashcards.
+- **status** — an essay's lifecycle position. One of **planned** or **complete**
+  (more values may be added later).
+- **planned** — the essay exists as a stub; its body text *is* the planning document
+  (intended sections, narrative, scope notes).
+- **complete** — content is finished enough to learn from.
+- **card** — a single flashcard (`essaycards.flashcards`), with one
+  `flashcard_review_state` row.
+
+### Card scheduling
+- **open** — the scheduler currently considers the card showable:
+  `next_due_at <= now()`. Also called *due*. Not changed by the Roadmap sprint.
+- **interval** — the span a card is currently scheduled across:
+  `next_due_at − last_reviewed_at`, fixed at its last review. Materialised as
+  `flashcard_review_state.review_interval` (Postgres `interval` type,
+  `NOT NULL DEFAULT '0'`), written in the same statement as `next_due_at`. `'0'` for a
+  *new* card. The timestamp difference stays the definition of record; the column is a
+  write-time cache of it (single writer: the review endpoint; seeded `'0'` by
+  `ingest.py`). Column is `review_interval`, not `interval`, because `interval` is a
+  reserved word.
+- **new** — a card never reviewed: `last_reviewed_at IS NULL` (interval `'0'`).
+- **learning** — reviewed at least once, interval still `< 24h`.
+- **established** — interval `>= 24h`.
+- Every scheduled card is exactly one of **new** / **learning** / **established**.
+- **graduate** / **graduation** — a card's interval first reaching 24h, moving it from
+  *learning* to *established*. Not stored; detectable only by the threshold crossing.
+
+### Sessions
+- **scope** — the restriction on a focus session: exactly one topic, or exactly one
+  essay.
+- **focus** — a study session restricted to a scope, surfacing every **open** card in
+  that scope regardless of state (new / learning / established). Started from the essay
+  overview. This is the *learning* mode.
+- **review** — the global study session, no scope, surfacing cards that are **open AND
+  established**. This is the *maintenance* mode.
+
+### Oral exams
+- **exam** — the current oral-exam standing of an essay, derived (not stored) from
+  `section_examinations` (append-only, one row per section per occasion). Method: for
+  each section take its most recent row (latest `examined_at`) — that row is the current
+  assessment of that section. The essay-level **score** / **exam date** exist only when
+  **every** section has at least one such row; if any section has never been examined,
+  both are null (an essay is not "currently examined" until all of it has been).
+- **section score** — one `section_examinations` row's raw grade, `0–6`.
+- **score** — the essay's overall exam result, present only when every section has been
+  examined: `round(avg(latest section_score across all sections) / 6 * 100)`. Rendered
+  as a percentage.
+- **exam date** — the **oldest** `examined_at` among those per-section most-recent rows
+  (the least-recently-tested section sets it); present under the same all-sections
+  condition as **score**. Re-examining one stale section moves the date forward to
+  whichever section is stalest next.
+- Sections only ever grow (re-ingest never deletes them), so a section added in a later
+  ingest drops the essay back to no **score** / **exam date** until it too is examined.
+
+### Overview indicators
+- **progress** — for an essay or topic: **established** cards / total cards in scope —
+  the `22 / 34` line. Established cards that are also *open* still count. Not a maturity
+  score.
+- **open count** — for an essay or topic: how many cards in scope are **open** right
+  now — what a focus session would surface. The `12 open` line.
+
 ## Sprint scope
 - Sprint 1: One-shot markdown ingestion CLI, essay/section/flashcard data model, due-queue
   review loop with floor/doubling SRS scheduling, minimal React reader + review session UI.
 - Sprint 2: `POST /api/essaycards/essays/ingest` JSON ingestion endpoint plus an in-app
   "Add / Update Essay" paste-JSON UI, sharing one upsert core with the markdown CLI path.
 - Sprint 5: two-category ordering for `GET /flashcards/due` (see `## Due-queue ordering`).
+- Sprint 7: essay roadmap (`status`), focus vs review sessions, materialised `review_interval`,
+  roadmap knowledge indicators on `GET /essays` (see `## Roadmap, focus and review`).
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys
@@ -22,8 +98,8 @@ Essays can be ingested two ways — both upsert by the same stable author-assign
 `backend.ingest.upsert_document(conn, doc)` core, so re-ingestion via either path never
 resets a flashcard's review state.
 
-### Essay overview metadata (`category`, `sort_index`)
-Both ingestion paths accept two optional essay-level fields — front-matter keys for the
+### Essay overview metadata (`category`, `sort_index`, `status`)
+Both ingestion paths accept three optional essay-level fields — front-matter keys for the
 markdown CLI, top-level JSON keys for the API:
 - `category` — free text, no fixed set, no lookup table (an essay has at most one). It is
   the group the essay appears under on the overview page. The known groups (`Art`,
@@ -35,12 +111,17 @@ markdown CLI, top-level JSON keys for the API:
   ascending (ties break on `created_at`). This is where a sequence number goes — it is
   never written into `title`. Distinct from `essay_sections.order_index`, which is
   auto-derived from payload array order; `sort_index` is set explicitly by the author.
+- `status` — `planned` | `complete`, default `complete` (`ck_essays_status`). `planned`
+  is a stub whose body text is a planning document; a normal ingest is `complete`, so a
+  stub must set `status: planned` explicitly. `VALID_ESSAY_STATUSES` / `DEFAULT_ESSAY_STATUS`
+  in `backend/ingest.py` are the single source for both ingest paths.
 
-Both are `on conflict do update`d on re-ingest, so a later payload with the same slug
-re-files or re-orders the essay. `GET /essays` orders rows
-`(category asc nulls last, sort_index asc, created_at asc)` and carries both fields on
-every row; `EssayListView` groups on them. Blank `category` or non-integer `sort_index`
-is `VALIDATION_ERROR` (JSON path) / `IngestionError` (markdown path).
+All three are `on conflict do update`d on re-ingest, so a later payload with the same slug
+re-files, re-orders or re-statuses the essay. `GET /essays` orders rows
+`(category asc nulls last, sort_index asc, created_at asc)` and carries all three fields
+on every row; `EssayListView` groups on them. Blank `category`, non-integer `sort_index`
+or a `status` outside the set is `VALIDATION_ERROR` (JSON path) / `IngestionError`
+(markdown path).
 
 **Markdown CLI** (offline authoring — YAML front matter, `## Heading {#anchor}` sections,
 one fenced ```flashcards YAML block per section):
@@ -140,34 +221,90 @@ ApiError VALIDATION_ERROR (400) instead of FastAPI's default 422 shape. See
 `Sprint01_Core/10_architecture.json` §contracts.invariants.
 
 ## Due-queue ordering
-`GET /api/essaycards/flashcards/due` — eligibility is unchanged (`next_due_at <=
-now()`), but eligible cards are returned in two categories, **RECENT entirely
-before BACKLOG** (Sprint05):
+`GET /api/essaycards/flashcards/due` — base eligibility is `next_due_at <= now()`.
+**Sprint07** splits the endpoint into two session types, inferred from whether a
+scope param is present (there is no `mode` param — see `## Roadmap, focus and
+review`):
+
+- **review** (no scope) additionally requires `review_interval >= interval '24
+  hours'` — only `established` cards that are also due.
+- **focus** (`?topic=` | `?essay_id=` | `?essay_id=&section_id=`) applies no
+  interval filter — every open card in scope (new, learning, established).
+
+Within either session, eligible cards are returned in two categories, **RECENT
+entirely before BACKLOG** (Sprint05):
 
 - **RECENT** — `last_reviewed_at >= now() - interval '24 hours'` (a rolling
   window off Postgres `now()`, *not* a calendar day / "reviewed today"; a
   never-reviewed card is never RECENT). Sorted by `next_due_at` **DESC** —
   closest-to-now first — so a card the user just pushed a few minutes out
   re-enters near the front once that delay elapses. Serves relearning.
-- **BACKLOG** — everything else eligible. Sorted by the interval the card is
-  currently scheduled across, `next_due_at - last_reviewed_at`, **DESC**
-  (longest first). Overdue duration is deliberately ignored. A never-reviewed
-  card has interval 0 (`last_reviewed_at IS NULL`, seeded by `ingest.py`) and
-  sorts behind every reviewed backlog card — no separate new-card queue.
+- **BACKLOG** — everything else eligible. Sorted by `flashcard_review_state.review_interval`
+  (`== next_due_at - last_reviewed_at`), **DESC** (longest first). Overdue
+  duration is deliberately ignored. A never-reviewed card has `review_interval`
+  `'0'` (seeded by `ingest.py`) and sorts behind every reviewed backlog card —
+  no separate new-card queue.
 - Tie-breakers: `next_due_at ASC`, then `f.id ASC`.
 
-`last_reviewed_at` (on `flashcard_review_state`, written by `POST .../review`
-from a single `select now()`) is the sole source of truth — EssayCards has no
-per-review history table. All ordering logic is one SQL `ORDER BY` in
-`list_due_flashcards`; the review UI renders `rows` in server order.
+`last_reviewed_at` / `next_due_at` / `review_interval` (on `flashcard_review_state`,
+all written by `POST .../review` from a single `select now()`) are the source of
+truth — EssayCards has no per-review history table. All ordering logic is one SQL
+`ORDER BY` in `list_due_flashcards`; the review UI renders `rows` in server order.
 
 Each `/due` row also carries three additive fields (R-CON-BP-04; none affects
 eligibility or ordering): `is_new` (bool) = `last_reviewed_at IS NULL`;
 `is_recent` (bool) = `last_reviewed_at >= now() - interval '24 hours'` (the
 RECENT-vs-BACKLOG category flag, false when `is_new`); and
-`scheduled_interval_seconds` (int | null) = epoch seconds of `next_due_at −
-last_reviewed_at`, the interval the card is currently scheduled across (the
-BACKLOG sort key; null when `is_new`). All three feed the review screen.
+`scheduled_interval_seconds` (int) = epoch seconds of `review_interval`, the
+interval the card is currently scheduled across (the BACKLOG sort key; `0` when
+`is_new`). All three feed the review screen.
+
+## Roadmap, focus and review
+Sprint07. Terms are defined in `## Glossary`; this section is the implementation
+contract.
+
+### `review_interval` (materialised interval)
+`flashcard_review_state.review_interval` (`interval`, `NOT NULL DEFAULT '0'`,
+`ck_review_state_interval >= 0`) is a **write-time cache** of
+`next_due_at - last_reviewed_at`. The timestamp difference stays the definition
+of record. Single writer: `POST /flashcards/{id}/review` sets it in the same
+`UPDATE` as `next_due_at`, to `next_due_at - now` (`now` also being
+`last_reviewed_at`), so the cache always equals the difference. `ingest.py`
+seeds `'0'`. Any future code path that reschedules a card without going through
+`compute_next_due_at` must recompute it. Card classification:
+`new` = `last_reviewed_at IS NULL` (interval `'0'`); `learning` =
+`review_interval < interval '24 hours'` and not new; `established` =
+`review_interval >= interval '24 hours'`.
+
+### focus vs review (`GET /flashcards/due`)
+No `mode` param — the session type is inferred from scope presence:
+`{}` → review (`+ review_interval >= '24 hours'`); `{topic}` / `{essay_id}` /
+`{essay_id, section_id}` → focus (no interval filter). Rejected with
+`VALIDATION_ERROR`: `section_id` without `essay_id`; `topic` together with
+`essay_id` or `section_id`. `topic` filters on `essays.category`. The reader's
+end-of-section jump is already scoped, so it is a focus session with no code
+change. `GET /flashcards/stats` is unchanged.
+
+### `GET /essays` roadmap indicators
+Every row carries, beyond `id/title/slug/category/sort_index/status`, five
+derived fields (all against Postgres `now()` at query time; `list_essays`
+docstring is authoritative):
+- `progress_total` (int) — every flashcard in the essay (not gated on a
+  review-state row existing).
+- `progress_established` (int) — those with `review_interval >= interval '24 hours'`
+  (a `LEFT JOIN`, so a card with no review-state row counts in total, not here).
+- `open_count` (int) — those with `next_due_at <= now()` (the plain `open`
+  definition; **not** gated on established — exactly what a focus session would
+  surface).
+- `oral_score` (int | null) — `round(avg(latest section_score) / 6 * 100)` over
+  the most recent `section_examinations` row per section. `null` unless **every**
+  section has ≥ 1 examination.
+- `oral_date` (ISO str | null) — the **oldest** `examined_at` among those
+  most-recent-per-section rows; same all-sections gate as `oral_score`.
+
+Topic-level progress / open count are **not** returned — the frontend sums the
+per-essay counts of a topic's rows. `GET /essays/{id}` (detail) carries `status`
+only, not the derived indicators.
 
 ## Queue stats
 `GET /api/essaycards/flashcards/stats` — review-queue forecast. Returns a Dataset of
