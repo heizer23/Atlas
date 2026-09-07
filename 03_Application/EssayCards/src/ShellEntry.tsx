@@ -4,7 +4,8 @@
  * Views:
  *   /essaycards                → EssayListView
  *   /essaycards/essays/:id     → ReaderView
- *   /essaycards/review         → ReviewSessionView (query: essay_id?, section_id?)
+ *   /essaycards/review         → ReviewSessionView (no query = review/maintenance;
+ *                                 query topic? | essay_id? [+ section_id?] = focus session)
  *   /essaycards/ingest         → IngestView (Sprint02: paste-JSON add/update essay)
  *
  * Review session note: the due queue is re-fetched from GET /flashcards/due
@@ -34,6 +35,12 @@ interface EssayRow {
   slug: string;
   category: string | null;
   sort_index: number;
+  status: 'planned' | 'complete';
+  progress_total: number;
+  progress_established: number;
+  open_count: number;
+  oral_score: number | null;
+  oral_date: string | null;
 }
 
 interface SectionRow {
@@ -59,7 +66,7 @@ interface DueCardRow {
   next_due_at: string;
   is_new: boolean;
   is_recent: boolean;
-  scheduled_interval_seconds: number | null;
+  scheduled_interval_seconds: number;
 }
 
 interface ReviewResult {
@@ -433,6 +440,38 @@ function groupEssaysByCategory(essays: EssayRow[]): [string, EssayRow[]][] {
   );
 }
 
+function formatOralDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+const studyBtnStyle: React.CSSProperties = {
+  ...btnStyle,
+  padding: '4px 12px',
+  fontSize: 12,
+  flexShrink: 0,
+  alignSelf: 'center',
+};
+
+function StatusPill({ status }: { status: 'planned' | 'complete' }) {
+  const planned = status === 'planned';
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 0.5,
+        textTransform: 'uppercase',
+        padding: '2px 6px',
+        borderRadius: 4,
+        color: planned ? '#8a6d1f' : '#3a7a3a',
+        background: planned ? '#fdf3d8' : '#e6f4e6',
+      }}
+    >
+      {status}
+    </span>
+  );
+}
+
 function EssayListView() {
   const navigate = useNavigate();
   const [essays, setEssays] = useState<EssayRow[]>([]);
@@ -484,48 +523,91 @@ function EssayListView() {
       {!loading && !error && essays.length > 0 && (() => {
         const groups = groupEssaysByCategory(essays);
         const showHeadings = !(groups.length === 1 && groups[0][0] === UNCATEGORIZED);
-        return groups.map(([category, rows]) => (
-          <div key={category} style={{ marginBottom: 20 }}>
-            {showHeadings && (
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: 0.6,
-                  textTransform: 'uppercase',
-                  color: '#666',
-                  margin: '0 0 8px',
-                }}
-              >
-                {category}
-              </div>
-            )}
-            {rows.map(e => (
-              <div
-                key={e.id}
-                onClick={() => navigate(`/essaycards/essays/${e.id}`)}
-                style={{
-                  padding: 12,
-                  borderRadius: 8,
-                  border: '1px solid #e0e0e0',
-                  marginBottom: 8,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 10,
-                }}
-              >
-                <span style={{ fontSize: 12, color: '#bbb', minWidth: 16, textAlign: 'right' }}>
-                  {e.sort_index}
-                </span>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{e.title}</div>
-                  <div style={{ fontSize: 12, color: '#888' }}>{e.slug}</div>
+        return groups.map(([category, rows]) => {
+          const isTopic = category !== UNCATEGORIZED;
+          const est = rows.reduce((n, e) => n + e.progress_established, 0);
+          const tot = rows.reduce((n, e) => n + e.progress_total, 0);
+          const open = rows.reduce((n, e) => n + e.open_count, 0);
+          return (
+            <div key={category} style={{ marginBottom: 24 }}>
+              {showHeadings && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 8px' }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      letterSpacing: 0.6,
+                      textTransform: 'uppercase',
+                      color: '#666',
+                    }}
+                  >
+                    {category}
+                  </div>
+                  {isTopic && tot > 0 && (
+                    <>
+                      <div style={{ fontSize: 12, color: '#999' }}>
+                        {est} / {tot} established · {open} open
+                      </div>
+                      <button
+                        style={{ ...studyBtnStyle, marginLeft: 'auto' }}
+                        onClick={() => navigate(`/essaycards/review?topic=${encodeURIComponent(category)}`)}
+                      >
+                        Study
+                      </button>
+                    </>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-        ));
+              )}
+              {rows.map(e => (
+                <div
+                  key={e.id}
+                  onClick={() => navigate(`/essaycards/essays/${e.id}`)}
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    border: '1px solid #e0e0e0',
+                    marginBottom: 8,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ fontSize: 12, color: '#bbb', minWidth: 16, textAlign: 'right', lineHeight: '20px' }}>
+                    {e.sort_index}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600 }}>{e.title}</span>
+                      <StatusPill status={e.status} />
+                    </div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>
+                      {e.progress_total === 0
+                        ? 'No flashcards yet'
+                        : `Progress: ${e.progress_established} / ${e.progress_total} · Open: ${e.open_count}`}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                      {e.oral_score == null
+                        ? 'No oral exam yet'
+                        : `Oral: ${e.oral_score}% · ${formatOralDate(e.oral_date!)}`}
+                    </div>
+                  </div>
+                  {e.progress_total > 0 && (
+                    <button
+                      style={studyBtnStyle}
+                      onClick={ev => {
+                        ev.stopPropagation();
+                        navigate(`/essaycards/review?essay_id=${e.id}`);
+                      }}
+                    >
+                      Study
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        });
       })()}
     </div>
   );
@@ -859,8 +941,17 @@ const diagFrameStyle: React.CSSProperties = {
 function ReviewSessionView() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const topic = searchParams.get('topic');
   const essayId = searchParams.get('essay_id');
   const sectionId = searchParams.get('section_id');
+  // Scope present -> FOCUS session (all open cards in scope). No scope ->
+  // REVIEW session (open AND established). The backend infers this from the
+  // params; the caption just reflects it.
+  const scopeLabel = topic
+    ? `Focus · ${topic}`
+    : essayId
+      ? 'Focus · this essay'
+      : 'Review';
 
   const [queue, setQueue] = useState<DueCardRow[]>([]);
   const [flipped, setFlipped] = useState(false);
@@ -888,10 +979,11 @@ function ReviewSessionView() {
 
   const dueUrl = useCallback(() => {
     const qs = new URLSearchParams();
+    if (topic) qs.set('topic', topic);
     if (essayId) qs.set('essay_id', essayId);
     if (sectionId) qs.set('section_id', sectionId);
     return `/essaycards/flashcards/due${qs.toString() ? `?${qs.toString()}` : ''}`;
-  }, [essayId, sectionId]);
+  }, [topic, essayId, sectionId]);
 
   // Load the current due queue into state. Called once on mount, after every
   // grade, and from the completion screen's "Check again" — never on a timer.
@@ -992,9 +1084,25 @@ function ReviewSessionView() {
     />
   );
 
+  const scopeCaption = (
+    <div
+      style={{
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        color: '#888',
+        marginBottom: 8,
+      }}
+    >
+      {scopeLabel}
+    </div>
+  );
+
   if (!current) {
     return (
       <div style={pageStyle}>
+        {scopeCaption}
         {statsPanel}
         <div style={{ ...reviewCardStyle, textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)' }}>
           {reviewedCount === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
@@ -1022,6 +1130,7 @@ function ReviewSessionView() {
 
   return (
     <div style={pageStyle}>
+      {scopeCaption}
       {statsPanel}
 
       <div
@@ -1101,7 +1210,7 @@ function ReviewSessionView() {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <span>This card — last interval</span>
           <strong style={{ color: 'var(--md-sys-color-on-surface)', fontVariantNumeric: 'tabular-nums' }}>
-            {formatInterval(current.scheduled_interval_seconds)}
+            {formatInterval(current.is_new ? null : current.scheduled_interval_seconds)}
           </strong>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -1131,6 +1240,7 @@ Fill in the template below. Every value is an instruction describing what belong
   "slug": "a url-safe stable id for the essay: letters, digits, underscore, hyphen only, no spaces, e.g. why_rome_fell — submitting this JSON again later with the same slug UPDATES this essay instead of creating a new one",
   "category": "the overview-page group this essay belongs under — one of \\"Art\\", \\"History\\", \\"Philosophy\\" (omit the key entirely if none applies)",
   "sort_index": "integer position of this essay within its category, ascending (e.g. 1, 2, 3) — this replaces writing a number into the title; omit for 0",
+  "status": "\\"complete\\" for a finished essay (the default — omit the key), or \\"planned\\" if this is a stub whose body is just planning notes",
   "sections": [
     {
       "heading": "this section's display heading, e.g. \\"The Economic Causes\\"",
@@ -1151,7 +1261,7 @@ Rules that don't fit cleanly inline above:
 - This must be valid JSON. Any double-quote character that appears INSIDE a string value (e.g. quoting a word for emphasis, or a quoted phrase in the prose) must be escaped as \\" — e.g. write \\"there is no self\\" not "there is no self". An unescaped " inside a string breaks the JSON the moment it appears. Before replying, check every string value in your output for stray unescaped double quotes.
 - A card's section is determined ONLY by which section object's "cards" array it is physically nested inside — there is no id/field that points a card at a section. Put each card directly inside the section whose body_markdown it tests.
 - "sections" must have at least 1 entry; a section's "cards" list may be empty, but aim for 2-5 cards per section.
-- "category" and "sort_index" are optional essay-level metadata for the overview page. Never encode a sequence number in "title" — put it in "sort_index". Omit "category" entirely if the topic given doesn't clearly fit one.
+- "category", "sort_index" and "status" are optional essay-level metadata for the overview page. Never encode a sequence number in "title" — put it in "sort_index". Omit "category" entirely if the topic given doesn't clearly fit one. Use "status": "planned" only for a stub essay whose body is just planning notes; a normal finished essay omits "status".
 - The order of the "sections" array IS the reading order (there is no separate order field); same for the order you list "cards" within a section.
 - This is an upsert, never a wholesale replace: if you're updating an existing essay, sections/cards you omit from the payload are left untouched, not deleted.
 - Repeat the section object for every section of the essay — a real essay should have several sections, not just one.
@@ -1167,6 +1277,7 @@ Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell
   "slug": "why_rome_fell",
   "category": "History",
   "sort_index": 1,
+  "status": "complete",
   "sections": [
     {
       "heading": "The Economic Causes",
@@ -1200,6 +1311,7 @@ const PLACEHOLDER_JSON = `{
   "slug": "url-safe id, e.g. my_essay (letters/digits/_/- only)",
   "category": "Art | History | Philosophy (optional)",
   "sort_index": 1,
+  "status": "complete | planned (optional, default complete)",
   "sections": [
     {
       "heading": "first section's heading",
