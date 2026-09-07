@@ -449,7 +449,7 @@ const studyBtnStyle: React.CSSProperties = {
   padding: '4px 12px',
   fontSize: 12,
   flexShrink: 0,
-  alignSelf: 'center',
+  whiteSpace: 'nowrap',
 };
 
 function StatusPill({ status }: { status: 'planned' | 'complete' }) {
@@ -477,6 +477,8 @@ function EssayListView() {
   const [essays, setEssays] = useState<EssayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+  const [examMsg, setExamMsg] = useState<string | null>(null);
+  const [examBusyId, setExamBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -490,6 +492,29 @@ function EssayListView() {
       setEssays(res.rows);
     })();
   }, []);
+
+  // Oral-exam export: copies the essay's examination package + rubric prompt to
+  // the clipboard. Lives here (not on the reader page) so it sits under the
+  // essay's Study button on the overview.
+  const handleExportExam = async (essayId: string) => {
+    setExamBusyId(essayId);
+    setExamMsg(null);
+    const res = await apiFetch<ExaminationPackage>(`/essaycards/essays/${essayId}/examination-package`);
+    setExamBusyId(null);
+    if (isApiError(res)) {
+      setExamMsg(`Export failed: ${res.error.message}`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(buildExamClipboardText(res));
+      setExamMsg(
+        'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply ' +
+        'into "Import exam results" above.',
+      );
+    } catch {
+      setExamMsg('Could not access the clipboard — check browser permissions.');
+    }
+  };
 
   return (
     <div style={pageStyle}>
@@ -513,6 +538,7 @@ function EssayListView() {
 
       {loading && <Skeleton />}
       {error && <ErrorCard error={error} />}
+      {examMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{examMsg}</div>}
       {!loading && !error && essays.length === 0 && (
         <div style={{ color: '#888', fontSize: 14 }}>
           No essays yet. Ingest one with the backend CLI:
@@ -531,7 +557,7 @@ function EssayListView() {
           return (
             <div key={category} style={{ marginBottom: 24 }}>
               {showHeadings && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 8px', padding: '0 12px' }}>
                   <div
                     style={{
                       fontSize: 12,
@@ -592,17 +618,31 @@ function EssayListView() {
                         : `Oral: ${e.oral_score}% · ${formatOralDate(e.oral_date!)}`}
                     </div>
                   </div>
-                  {e.progress_total > 0 && (
-                    <button
-                      style={studyBtnStyle}
-                      onClick={ev => {
-                        ev.stopPropagation();
-                        navigate(`/essaycards/review?essay_id=${e.id}`);
-                      }}
-                    >
-                      Study
-                    </button>
-                  )}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0, alignItems: 'stretch' }}>
+                    {e.progress_total > 0 && (
+                      <button
+                        style={studyBtnStyle}
+                        onClick={ev => {
+                          ev.stopPropagation();
+                          navigate(`/essaycards/review?essay_id=${e.id}`);
+                        }}
+                      >
+                        Study
+                      </button>
+                    )}
+                    {e.status === 'complete' && (
+                      <button
+                        style={studyBtnStyle}
+                        disabled={examBusyId === e.id}
+                        onClick={ev => {
+                          ev.stopPropagation();
+                          handleExportExam(e.id);
+                        }}
+                      >
+                        {examBusyId === e.id ? 'Preparing…' : 'Oral exam'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -622,8 +662,6 @@ function ReaderView() {
   const [essay, setEssay] = useState<EssayDetailRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
-  const [exportMsg, setExportMsg] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -649,42 +687,17 @@ function ReaderView() {
     }
   }, [loading, essay, location.hash]);
 
-  const handleExportForExamination = async () => {
-    if (!essay) return;
-    setExporting(true);
-    setExportMsg(null);
-    const res = await apiFetch<ExaminationPackage>(`/essaycards/essays/${essay.id}/examination-package`);
-    setExporting(false);
-    if (isApiError(res)) {
-      setExportMsg(`Export failed: ${res.error.message}`);
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(buildExamClipboardText(res));
-      setExportMsg(
-        'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply into ' +
-        '"Import exam results" (from the essay list) to store the results.'
-      );
-    } catch {
-      setExportMsg('Could not access the clipboard — check browser permissions.');
-    }
-  };
-
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
   if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
   if (!essay) return <div style={pageStyle}>Essay not found.</div>;
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ marginBottom: 12 }}>
         <button style={btnStyle} onClick={() => navigate('/essaycards')}>
           ← All essays
         </button>
-        <button style={btnStyle} disabled={exporting} onClick={handleExportForExamination}>
-          {exporting ? 'Preparing…' : 'Export for examination'}
-        </button>
       </div>
-      {exportMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{exportMsg}</div>}
       <h1 style={{ marginBottom: 24 }}>{essay.title}</h1>
 
       {essay.sections.length === 0 && (
