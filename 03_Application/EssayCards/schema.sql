@@ -70,8 +70,28 @@ create table if not exists essaycards.flashcard_review_state (
     flashcard_id      uuid        primary key references essaycards.flashcards(id) on delete cascade,
     last_reviewed_at  timestamptz,
     next_due_at       timestamptz not null,
-    updated_at        timestamptz not null default now()
+    -- The span the card is currently scheduled across: next_due_at -
+    -- last_reviewed_at, fixed at the last review. '0' for a never-reviewed
+    -- ("new") card. This is a WRITE-TIME CACHE — the timestamp difference is
+    -- the definition of record. Single writer: POST /flashcards/{id}/review
+    -- writes it in the same statement as next_due_at; ingest seeds it '0'.
+    -- Used to classify cards (new / learning / established, threshold 24h) and
+    -- to order the BACKLOG queue without recomputing the difference each time.
+    review_interval   interval    not null default '0',
+    updated_at        timestamptz not null default now(),
+    constraint ck_review_state_interval check (review_interval >= interval '0')
 );
+
+-- Additive column for databases created before review_interval existed.
+alter table essaycards.flashcard_review_state
+    add column if not exists review_interval interval not null default '0';
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_review_state_interval') then
+        alter table essaycards.flashcard_review_state
+            add constraint ck_review_state_interval check (review_interval >= interval '0');
+    end if;
+end $$;
 
 -- Supports both the global due queue (no filter) and the essay/section-scoped
 -- due queue (WHERE next_due_at <= now() AND essay_id = ... AND section_id = ...)

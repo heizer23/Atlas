@@ -119,6 +119,15 @@ INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, n
   ('fc000018-0000-0000-0000-000000000018', now() - interval '3 days',                  now() - interval '3 days' + interval '20 minutes'),
   ('fc000019-0000-0000-0000-000000000019', null,                                       now() - interval '5 minutes');
 
+-- Materialise review_interval for every fixture review-state row, matching what
+-- POST /flashcards/{id}/review would have written: (next_due_at - last_reviewed_at)
+-- for a reviewed card, interval '0' for a never-reviewed one. Keeps the fixture
+-- world consistent with the review_interval column (schema.sql) so BACKLOG
+-- ordering and the new/learning/established classification behave as in prod.
+UPDATE essaycards.flashcard_review_state
+SET review_interval = GREATEST(interval '0', next_due_at - last_reviewed_at)
+WHERE last_reviewed_at IS NOT NULL;
+
 -- ── Section examinations ─────────────────────────────────────────────────────
 -- Two prior sittings for essay A / section "origins" (se-origins-1 older,
 -- se-origins-2 newer — export's last_examination and the history endpoint's

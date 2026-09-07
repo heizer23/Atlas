@@ -44,11 +44,12 @@ DUE_SCHEMA: list[ColumnSchema] = [
     # false for a never-reviewed card. Additive, non-breaking; the review
     # screen bolds the question frame when true.
     ColumnSchema(key="is_recent",   label="Recent",   type="boolean", sortable=False, filterable=False),
-    # scheduled_interval_seconds == extract(epoch from next_due_at -
-    # last_reviewed_at) — the interval this card is currently scheduled across,
-    # i.e. the value the BACKLOG ordering sorts on. NULL for a never-reviewed
-    # card. Additive, non-breaking; shown in the review screen's diagnostics
-    # frame ("this card's last interval").
+    # scheduled_interval_seconds == extract(epoch from
+    # flashcard_review_state.review_interval) — the interval this card is
+    # currently scheduled across, i.e. the value the BACKLOG ordering sorts on.
+    # 0 for a never-reviewed ("new") card (review_interval defaults to '0').
+    # Additive, non-breaking; shown in the review screen's diagnostics frame
+    # ("this card's last interval").
     ColumnSchema(key="scheduled_interval_seconds", label="Interval (s)", type="number", sortable=False, filterable=False),
 ]
 
@@ -103,11 +104,29 @@ def _due_dataset(rows: list[dict[str, Any]]) -> Dataset:
 
 
 @router.get("/due", response_model=None)
-def list_due_flashcards(essay_id: str | None = None, section_id: str | None = None) -> JSONResponse:
+def list_due_flashcards(
+    topic: str | None = None,
+    essay_id: str | None = None,
+    section_id: str | None = None,
+) -> JSONResponse:
     """
-    Allowed combinations: {} system-wide; {essay_id} due cards in that essay;
-    {essay_id, section_id} due cards in that section only. {section_id} alone
-    is rejected with VALIDATION_ERROR.
+    Session type is inferred from whether a scope parameter is present — there
+    is no mode parameter:
+
+      - no scope           -> REVIEW (maintenance). Eligibility adds
+                              review_interval >= interval '24 hours', so only
+                              `established` cards that are also due appear.
+      - topic=<category>    -> FOCUS on that topic (all essays whose
+                              essays.category equals it).
+      - essay_id=<id>       -> FOCUS on that essay.
+      - essay_id + section_id -> FOCUS on that section.
+
+    A FOCUS session applies no interval filter: every open card in scope
+    appears, whether it is new, learning, or established.
+
+    Allowed scoped forms are exactly: {topic}, {essay_id}, {essay_id,
+    section_id}. {section_id} alone, or {topic} together with essay_id or
+    section_id, are rejected with VALIDATION_ERROR.
 
     Eligibility: next_due_at <= now(), evaluated by Postgres at query time
     (R-CON-AL-06 — single server-clock authority; the client never sends a
@@ -128,14 +147,15 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
                 broader learning period.
 
       BACKLOG — every other eligible card. Sorted by the interval the card is
-                currently scheduled across, (next_due_at - last_reviewed_at),
-                DESC: longest interval first, shortest last. How overdue the
-                card is does NOT affect this order — a mature card only 1
-                minute overdue still precedes an immature card days overdue.
-                A never-reviewed card (last_reviewed_at IS NULL) has interval
-                0 and therefore sorts behind every previously-reviewed backlog
-                card. interval = 0 is how the data model represents a new card
-                (backend/ingest.py seeds last_reviewed_at = null); no separate
+                currently scheduled across, flashcard_review_state.review_interval
+                (== next_due_at - last_reviewed_at), DESC: longest interval
+                first, shortest last. How overdue the card is does NOT affect
+                this order — a mature card only 1 minute overdue still precedes
+                an immature card days overdue. A never-reviewed card has
+                review_interval 0 and therefore sorts behind every
+                previously-reviewed backlog card. interval = 0 is how the data
+                model represents a new card (backend/ingest.py seeds
+                last_reviewed_at = null, review_interval = '0'); no separate
                 new-card queue or "block until backlog empty" gate exists or is
                 needed.
 
@@ -147,15 +167,29 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
       - is_new (bool) = (last_reviewed_at IS NULL) — never-reviewed / interval-0.
       - is_recent (bool) = (last_reviewed_at >= now() - interval '24 hours') —
         the RECENT-vs-BACKLOG category flag (false when is_new).
-      - scheduled_interval_seconds (int | null) = epoch seconds of
-        (next_due_at - last_reviewed_at), the interval the card is currently
-        scheduled across (the BACKLOG sort key). NULL when is_new.
+      - scheduled_interval_seconds (int) = epoch seconds of
+        flashcard_review_state.review_interval, the interval the card is
+        currently scheduled across (the BACKLOG sort key). 0 when is_new.
     """
     if section_id and not essay_id:
         return api_error("VALIDATION_ERROR", "section_id requires essay_id to also be provided")
+    if topic and (essay_id or section_id):
+        return api_error(
+            "VALIDATION_ERROR", "topic cannot be combined with essay_id or section_id"
+        )
+
+    scoped = bool(topic or essay_id)  # section_id implies essay_id
 
     conditions: list[str] = ["frs.next_due_at <= now()"]
     params: list[Any] = []
+    extra_join = ""
+    if not scoped:
+        # REVIEW / maintenance: only established cards that are also due.
+        conditions.append("frs.review_interval >= interval '24 hours'")
+    if topic:
+        extra_join = "join essaycards.essays e on e.id = f.essay_id"
+        conditions.append("e.category = %s")
+        params.append(topic)
     if essay_id:
         conditions.append("f.essay_id = %s")
         params.append(essay_id)
@@ -173,18 +207,19 @@ def list_due_flashcards(essay_id: str | None = None, section_id: str | None = No
                        (frs.last_reviewed_at is null) as is_new,
                        coalesce(frs.last_reviewed_at >= now() - interval '24 hours', false)
                            as is_recent,
-                       extract(epoch from (frs.next_due_at - frs.last_reviewed_at))::bigint
+                       extract(epoch from frs.review_interval)::bigint
                            as scheduled_interval_seconds
                 from essaycards.flashcards f
                 join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
                 join essaycards.essay_sections s on s.id = f.section_id
+                {extra_join}
                 {where}
                 order by
                     case when frs.last_reviewed_at >= now() - interval '24 hours'
                          then 0 else 1 end,
                     case when frs.last_reviewed_at >= now() - interval '24 hours'
                          then frs.next_due_at end desc nulls last,
-                    coalesce(frs.next_due_at - frs.last_reviewed_at, interval '0') desc,
+                    frs.review_interval desc,
                     frs.next_due_at asc,
                     f.id asc
                 """,
@@ -333,6 +368,12 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
     R-CON-AL-06 time authority: a single `select now()` read at the start of
     the transaction is reused as both last_reviewed_at and the base for
     computing next_due_at.
+
+    This is the single writer of flashcard_review_state.review_interval — the
+    write-time cache of (next_due_at - last_reviewed_at). It is set here in the
+    same UPDATE as next_due_at, to exactly next_due_at - now (now being the
+    value also stored as last_reviewed_at), so the cache always equals the
+    timestamp difference that defines it. ingest.py seeds it '0' for new cards.
     """
     grade, error = await _parse_review_grade(request)
     if error is not None:
@@ -352,14 +393,15 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
                 return api_error("NOT_FOUND", f"Flashcard {flashcard_id} not found", status=404)
 
             next_due_at = compute_next_due_at(grade, state_row["last_reviewed_at"], now)
+            review_interval = next_due_at - now
 
             cur.execute(
                 """
                 update essaycards.flashcard_review_state
-                set last_reviewed_at = %s, next_due_at = %s, updated_at = %s
+                set last_reviewed_at = %s, next_due_at = %s, review_interval = %s, updated_at = %s
                 where flashcard_id = %s
                 """,
-                (now, next_due_at, now, flashcard_id),
+                (now, next_due_at, review_interval, now, flashcard_id),
             )
         conn.commit()
 

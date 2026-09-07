@@ -9,6 +9,7 @@ certain."). FC_ORIGINS_3 (fc-origins-3) is essay A / section 'structure'.
 """
 
 ESSAY_A_SLUG = "origins-of-long-form-formats"
+ESSAY_A_ID = "ea000001-0000-0000-0000-000000000001"
 
 SECTION_ORIGINS_ID = "ec000001-0000-0000-0000-000000000001"
 SECTION_STRUCTURE_ID = "ec000002-0000-0000-0000-000000000002"
@@ -266,7 +267,9 @@ def test_update_card_answer_only_leaves_question(client, db_conn):
 
 def test_edited_away_question_not_in_due_queue(client):
     client.post(IMPORT_URL, json={"actions": [_discussion(), _update_q()]})
-    due = client.get("/api/essaycards/flashcards/due")
+    # fc-origins-1 is a new card, so scope the queue to its essay (a focus
+    # session) — the unscoped review queue only carries established cards.
+    due = client.get(f"/api/essaycards/flashcards/due?essay_id={ESSAY_A_ID}")
     questions = [row["question"] for row in due.json()["rows"]]
     assert "Who coined the term?" not in questions
     assert "Who is credited with coining the term, if anyone?" in questions

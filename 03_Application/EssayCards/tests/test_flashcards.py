@@ -58,28 +58,45 @@ def _order(rows: list[dict]) -> list[str]:
     return [row["flashcard_id"] for row in rows]
 
 
-def test_due_no_params_returns_system_wide(client):
-    """Scenario: Due flashcards — no params returns system-wide queue."""
+def test_due_no_params_returns_review_queue(client):
+    """No scope params -> REVIEW mode: only cards that are open AND established
+    (review_interval >= 24h). New and learning (sub-24h) cards are excluded —
+    they are reachable only through a scoped (focus) session.
+    """
     r = client.get("/api/essaycards/flashcards/due")
     assert r.status_code == 200
     rows = r.json()["rows"]
+    ids = _order(rows)
 
-    essay_ids = {row["essay_id"] for row in rows}
-    assert ESSAY_A in essay_ids
-    assert ESSAY_B in essay_ids
+    # Every card in the review queue is established.
+    assert rows and all(row["scheduled_interval_seconds"] >= 86400 for row in rows)
 
-    # New contract: RECENT category (reviewed within the rolling 24h window)
-    # precedes BACKLOG. fc-origins-3 was reviewed ~60m ago; fc-origins-1/2 were
-    # never reviewed, so they are backlog and must come after it.
-    order = _order(rows)
-    assert order.index(FC_ORIGINS_3) < order.index(FC_ORIGINS_1)
-    assert order.index(FC_ORIGINS_3) < order.index(FC_ORIGINS_2)
+    # New / learning / still-sub-24h cards are absent.
+    assert FC_ORIGINS_1 not in ids        # never reviewed (interval 0)
+    assert FC_ORIGINS_3 not in ids        # reviewed ~60m ago, ~59m interval
+    assert FC_E_BACK_20MIN not in ids     # 20-minute interval
+    assert FC_E_RECENT_23H not in ids     # ~23h interval, still < 24h
+
+    # The established, currently-due cards (Essay E) in BACKLOG order
+    # (longest interval first).
+    assert ids == [FC_E_BACK_90D, FC_E_BACK_30D, FC_E_BACK_25H, FC_E_BACK_1D]
 
     for row in rows:
         assert row["id"] == row["flashcard_id"]
         for field in ("question", "answer", "essay_id", "section_id", "anchor_slug",
                       "next_due_at", "is_new", "is_recent", "scheduled_interval_seconds"):
             assert field in row
+
+
+def test_due_essay_scope_is_focus_includes_new_and_learning(client):
+    """A scope param makes the session a FOCUS session: every open card in
+    scope appears regardless of interval — new, learning, established alike.
+    """
+    r = client.get(f"/api/essaycards/flashcards/due?essay_id={ESSAY_A}")
+    assert r.status_code == 200
+    ids = {row["flashcard_id"] for row in r.json()["rows"]}
+    assert {FC_ORIGINS_1, FC_ORIGINS_2, FC_ORIGINS_3} <= ids   # 2 new + 1 sub-24h
+    assert FC_NOT_DUE not in ids                                # still must be open
 
 
 def test_due_scoped_to_essay(client):
@@ -104,6 +121,32 @@ def test_due_scoped_to_section(client):
 def test_due_section_without_essay_rejected(client):
     """Scenario: Due flashcards — section_id without essay_id is rejected."""
     r = client.get(f"/api/essaycards/flashcards/due?section_id={SECTION_A1}")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_due_topic_scope_is_focus_across_the_topics_essays(client):
+    """?topic=<category> is a FOCUS session over every essay in that topic:
+    all open cards, no interval filter."""
+    for slug in ("ftopic-a", "ftopic-b"):
+        assert client.post("/api/essaycards/essays/ingest", json={
+            "title": slug, "slug": slug, "category": "FocusTopic",
+            "sections": [{
+                "heading": "S", "anchor_slug": f"{slug}-s", "body_markdown": "b",
+                "cards": [{"id": f"{slug}-c1", "q": f"{slug} q", "a": "a"}],
+            }],
+        }).status_code == 200
+
+    r = client.get("/api/essaycards/flashcards/due?topic=FocusTopic")
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    # both freshly-ingested (new, interval 0) cards appear — no established gate
+    assert {row["question"] for row in rows} == {"ftopic-a q", "ftopic-b q"}
+    assert all(row["scheduled_interval_seconds"] == 0 for row in rows)
+
+
+def test_due_topic_combined_with_essay_id_rejected(client):
+    r = client.get(f"/api/essaycards/flashcards/due?topic=Whatever&essay_id={ESSAY_A}")
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
 
@@ -270,7 +313,7 @@ def test_due_rows_expose_is_new_recent_and_interval(client):
 
     Feed the review screen's CURRENT 'New' metric, the recency-selected bold
     frame, and the diagnostics frame. fc-e-new is never reviewed (is_new, not
-    recent, null interval); fc-e-recent-near was reviewed 2h ago (recent);
+    recent, interval 0); fc-e-recent-near was reviewed 2h ago (recent);
     fc-e-back-25h was reviewed 25h ago (not recent); fc-e-back-1d was last
     reviewed 2 days ago and is due 1 day ago -> a ~1-day interval.
     """
@@ -283,7 +326,7 @@ def test_due_rows_expose_is_new_recent_and_interval(client):
 
     assert by_id[FC_E_NEW]["is_new"] is True
     assert by_id[FC_E_NEW]["is_recent"] is False
-    assert by_id[FC_E_NEW]["scheduled_interval_seconds"] is None
+    assert by_id[FC_E_NEW]["scheduled_interval_seconds"] == 0
 
     assert by_id[FC_E_RECENT_NEAR]["is_recent"] is True
     assert by_id[FC_E_RECENT_23H]["is_recent"] is True
@@ -319,6 +362,28 @@ def test_review_again_schedules_five_seconds(client):
     next_due = _parse_ts(body["next_due_at"])
     delta = (next_due - last_reviewed).total_seconds()
     assert 4.5 <= delta <= 5.5
+
+
+def test_review_materialises_review_interval(client, db_conn):
+    """POST .../review writes review_interval = next_due_at - last_reviewed_at
+    in the same statement (the single writer of that cache column)."""
+    client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_3}/review", json={"grade": "good"})
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select last_reviewed_at, next_due_at, review_interval "
+            "from essaycards.flashcard_review_state where flashcard_id = %s",
+            (FC_ORIGINS_3,),
+        )
+        row = cur.fetchone()
+    assert row["review_interval"] == row["next_due_at"] - row["last_reviewed_at"]
+
+    client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_1}/review", json={"grade": "again"})
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select review_interval from essaycards.flashcard_review_state where flashcard_id = %s",
+            (FC_ORIGINS_1,),
+        )
+        assert 4 <= cur.fetchone()["review_interval"].total_seconds() <= 6
 
 
 def test_review_good_first_time_uses_floor(client):
