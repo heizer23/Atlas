@@ -7,15 +7,15 @@
  *   /essaycards/review         → ReviewSessionView (query: essay_id?, section_id?)
  *   /essaycards/ingest         → IngestView (Sprint02: paste-JSON add/update essay)
  *
- * Review session note: the due queue is fetched once at session start and
- * held in local state for the whole session — no mid-session re-fetch, per
- * 00_draft.md "Session ends when the due queue (as loaded at session start)
- * is exhausted; it does not live-poll for newly-due cards mid-session."
- *
- * Exception (Sprint05c): a card graded `again` is re-queued client-side into
- * an in-session relearning sub-queue (RelearnItem) and shown again near the
- * front, after a one-card breather. This is pure local state — still no
- * re-fetch and no live-poll of the server.
+ * Review session note: the due queue is re-fetched from GET /flashcards/due
+ * after every grade (and via a manual "Check again" on the completion screen).
+ * The just-graded card is scheduled past now() so it drops out on its own; a
+ * card graded `again` (+5s) or a floored `hard` (+1 min) reappears on a later
+ * refetch once it comes due, in the server's RECENT-first order. No
+ * client-side queue, no timer, no live-poll. The session ends when a refetch
+ * returns nothing due — the completion screen's "Check again" re-runs the
+ * fetch for the one case that leaves behind (the very last card graded `again`
+ * or floored `hard`, with nothing else to grade while its interval elapses).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -844,17 +844,6 @@ function ReviewStatsPanel({
 
 // ── Review Session View ───────────────────────────────────────────────────────
 
-// A card graded `again` earlier this session, waiting to be shown again. Held
-// purely client-side (no re-fetch / no live-poll) — `card` is the original
-// queue row with next_due_at / scheduled_interval_seconds patched from the
-// review response. Becomes eligible once `index` reaches `showAfterIndex` (a
-// one-fresh-card breather) or the main queue is exhausted.
-interface RelearnItem {
-  card: DueCardRow;
-  dueAtMs: number;
-  showAfterIndex: number;
-}
-
 const diagFrameStyle: React.CSSProperties = {
   marginTop: 12,
   border: '1px solid var(--md-sys-color-outline-variant)',
@@ -874,7 +863,6 @@ function ReviewSessionView() {
   const sectionId = searchParams.get('section_id');
 
   const [queue, setQueue] = useState<DueCardRow[]>([]);
-  const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -884,11 +872,11 @@ function ReviewSessionView() {
   // UPCOMING `Session` row — histogram of the intervals cards were rescheduled
   // into during this session. Built purely from review responses.
   const [sessionForecast, setSessionForecast] = useState<Forecast>(emptyForecast);
-  // In-session relearning sub-queue: cards graded `again` come back near the
-  // front (see RelearnItem). New interval of the most recently graded card,
-  // for the diagnostics frame.
-  const [relearning, setRelearning] = useState<RelearnItem[]>([]);
   const [lastNewIntervalSec, setLastNewIntervalSec] = useState<number | null>(null);
+  // flashcard_ids graded `again` at least once this session — drives only the
+  // diagnostics-frame label, not queue behaviour. The server's RECENT ordering
+  // is what actually brings the card back on the next refetch.
+  const [againIds, setAgainIds] = useState<Set<string>>(() => new Set());
   // Sprint06 — "Explore" export on the revealed answer. Read-only: fetches the
   // exploration package and copies it (plus the ChatGPT prompt) to the
   // clipboard; touches no review/scheduling state.
@@ -898,42 +886,41 @@ function ReviewSessionView() {
   // "Import result" button routing to ExploreImportView — reset on the next card.
   const [exported, setExported] = useState(false);
 
-  // Fetch the due queue exactly once at session start — deliberately not a
-  // dependency-driven re-fetch loop (see file header note).
+  const dueUrl = useCallback(() => {
+    const qs = new URLSearchParams();
+    if (essayId) qs.set('essay_id', essayId);
+    if (sectionId) qs.set('section_id', sectionId);
+    return `/essaycards/flashcards/due${qs.toString() ? `?${qs.toString()}` : ''}`;
+  }, [essayId, sectionId]);
+
+  // Load the current due queue into state. Called once on mount, after every
+  // grade, and from the completion screen's "Check again" — never on a timer.
+  const reloadQueue = useCallback(async (): Promise<ApiError | null> => {
+    const res = await apiFetch<Dataset<DueCardRow>>(dueUrl());
+    if (isApiError(res)) return res;
+    setQueue(res.rows);
+    return null;
+  }, [dueUrl]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       setError(null);
-      const qs = new URLSearchParams();
-      if (essayId) qs.set('essay_id', essayId);
-      if (sectionId) qs.set('section_id', sectionId);
-      const url = `/essaycards/flashcards/due${qs.toString() ? `?${qs.toString()}` : ''}`;
-      const res = await apiFetch<Dataset<DueCardRow>>(url);
-      setLoading(false);
-      if (isApiError(res)) {
-        setError(res);
-        return;
-      }
-      setQueue(res.rows);
-      setIndex(0);
       setFlipped(false);
       setSessionForecast(emptyForecast());
-      setRelearning([]);
       setReviewedCount(0);
       setLastNewIntervalSec(null);
+      setAgainIds(new Set());
+      const err = await reloadQueue();
+      setLoading(false);
+      if (err) setError(err);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [essayId, sectionId]);
+  }, [reloadQueue]);
 
-  // Next card: an eligible relearning card (soonest-due first) preempts the
-  // main queue; otherwise the card at `index`.
-  const eligibleRelearn = relearning
-    .filter(r => index >= r.showAfterIndex || index >= queue.length)
-    .sort((a, b) => a.dueAtMs - b.dueAtMs || a.showAfterIndex - b.showAfterIndex);
-  const relearnCard = eligibleRelearn[0] ?? null;
-  const mainCard = queue[index] ?? null;
-  const current = relearnCard?.card ?? mainCard;
-  const showingRelearn = current != null && current === relearnCard?.card;
+  // The server returns the queue already ordered (RECENT closest-due-first,
+  // then BACKLOG); always work the head of the list.
+  const current = queue[0] ?? null;
+  const showingRelearn = current != null && againIds.has(current.flashcard_id);
 
   const handleExplore = async () => {
     if (!current || exploring) return;
@@ -959,14 +946,13 @@ function ReviewSessionView() {
   const handleGrade = async (grade: Grade) => {
     if (!current || grading) return;
     const card = current;
-    const fromRelearn = showingRelearn;
     setGrading(true);
     const res = await apiFetch<ReviewResult>(`/essaycards/flashcards/${card.flashcard_id}/review`, {
       method: 'POST',
       body: JSON.stringify({ grade }),
     });
-    setGrading(false);
     if (isApiError(res)) {
+      setGrading(false);
       setError(res as ApiError);
       return;
     }
@@ -980,26 +966,15 @@ function ReviewSessionView() {
     setExploreMsg(null);
     setExported(false);
     setStatsRefresh(n => n + 1);
+    if (grade === 'again') setAgainIds(s => new Set(s).add(card.flashcard_id));
 
-    // Breather before a failed card returns: one fresh card if we're still in
-    // the main queue, immediate once it's exhausted.
-    const showAfterIndex = index + (fromRelearn ? 1 : 2);
-    const requeued: RelearnItem = {
-      card: {
-        ...card,
-        next_due_at: res.next_due_at,
-        scheduled_interval_seconds: Math.round(newIntervalSec),
-        is_new: false,
-        is_recent: true, // just reviewed -> RECENT category on the next pass
-      },
-      dueAtMs: Date.parse(res.next_due_at),
-      showAfterIndex,
-    };
-    setRelearning(rs => {
-      const rest = rs.filter(r => r.card.flashcard_id !== card.flashcard_id);
-      return grade === 'again' ? [...rest, requeued] : rest;
-    });
-    if (!fromRelearn) setIndex(i => i + 1);
+    // Re-fetch the due queue after every grade. The card just graded is now
+    // scheduled at least 5 s (`again`) / 1 min (floored `hard`) out, so it is
+    // absent from this response and reappears only on a later refetch once it
+    // comes due — no client-side relearning queue, no timer.
+    const err = await reloadQueue();
+    setGrading(false);
+    if (err) setError(err);
   };
 
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
@@ -1011,8 +986,8 @@ function ReviewSessionView() {
       sectionId={sectionId}
       refreshToken={statsRefresh}
       reviewed={reviewedCount}
-      backlog={queue.length - index + relearning.length}
-      newRemaining={queue.slice(index).filter(c => c.is_new).length}
+      backlog={queue.length}
+      newRemaining={queue.filter(c => c.is_new).length}
       sessionForecast={sessionForecast}
     />
   );
@@ -1022,8 +997,22 @@ function ReviewSessionView() {
       <div style={pageStyle}>
         {statsPanel}
         <div style={{ ...reviewCardStyle, textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)' }}>
-          {queue.length === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
+          {reviewedCount === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
         </div>
+        <button
+          style={flipBtnStyle}
+          disabled={grading}
+          onClick={async () => {
+            setGrading(true);
+            setError(null);
+            const err = await reloadQueue();
+            setGrading(false);
+            setStatsRefresh(n => n + 1);
+            if (err) setError(err);
+          }}
+        >
+          {grading ? 'Checking…' : 'Check again'}
+        </button>
         <button style={{ ...gradeBtnStyle, width: '100%', flex: 'none' }} onClick={() => navigate('/essaycards')}>
           Back to all essays
         </button>
