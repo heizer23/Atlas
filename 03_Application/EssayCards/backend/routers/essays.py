@@ -31,7 +31,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.database import get_db
-from backend.ingest import upsert_document
+from backend.ingest import DEFAULT_ESSAY_STATUS, VALID_ESSAY_STATUSES, upsert_document
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
 
@@ -39,21 +39,32 @@ router = APIRouter(prefix="/essays", tags=["essays"])
 
 _SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+# Detail endpoint (GET /essays/{id}) — the base essay columns.
 ESSAY_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="title",      label="Title",    type="string", sortable=True,  filterable=True),
     ColumnSchema(key="slug",       label="Slug",     type="string", sortable=False, filterable=False),
     ColumnSchema(key="category",   label="Category", type="string", sortable=True,  filterable=True),
     ColumnSchema(key="sort_index", label="Order",    type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="status",     label="Status",   type="string", sortable=True,  filterable=True),
+]
+
+# List endpoint (GET /essays) — the roadmap view: base columns plus derived
+# per-essay knowledge indicators (see list_essays docstring).
+ESSAY_OVERVIEW_SCHEMA: list[ColumnSchema] = ESSAY_SCHEMA + [
+    ColumnSchema(key="progress_established", label="Established", type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="progress_total",       label="Total cards", type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="open_count",           label="Open",        type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="oral_score",           label="Oral score",  type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="oral_date",            label="Oral date",   type="date",   sortable=True,  filterable=False),
 ]
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     d["id"] = str(d["id"])
-    if d.get("created_at"):
-        d["created_at"] = d["created_at"].isoformat()
-    if d.get("updated_at"):
-        d["updated_at"] = d["updated_at"].isoformat()
+    for k in ("created_at", "updated_at", "oral_date"):
+        if d.get(k):
+            d[k] = d[k].isoformat()
     return d
 
 
@@ -71,21 +82,79 @@ def _dataset_response(dataset: Dataset) -> JSONResponse:
     return JSONResponse(content=dataset.model_dump(by_alias=True, mode="json"))
 
 
+_OVERVIEW_QUERY = """
+select
+  e.id, e.title, e.slug, e.category, e.sort_index, e.status,
+  e.created_at, e.updated_at,
+  (select count(*) from essaycards.flashcards f where f.essay_id = e.id)
+      as progress_total,
+  (select count(*)
+     from essaycards.flashcards f
+     join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
+     where f.essay_id = e.id and frs.review_interval >= interval '24 hours')
+      as progress_established,
+  (select count(*)
+     from essaycards.flashcards f
+     join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
+     where f.essay_id = e.id and frs.next_due_at <= now())
+      as open_count,
+  oral.oral_score,
+  oral.oral_date
+from essaycards.essays e
+left join lateral (
+  with sec as (
+    select s.id from essaycards.essay_sections s where s.essay_id = e.id
+  ),
+  latest as (
+    select distinct on (se.section_id) se.section_id, se.score, se.examined_at
+    from essaycards.section_examinations se
+    where se.section_id in (select id from sec)
+    order by se.section_id, se.examined_at desc
+  )
+  select
+    case when (select count(*) from sec) > 0
+          and (select count(*) from sec) = (select count(*) from latest)
+         then round(avg(l.score)::numeric / 6 * 100)::int end as oral_score,
+    case when (select count(*) from sec) > 0
+          and (select count(*) from sec) = (select count(*) from latest)
+         then min(l.examined_at) end                          as oral_date
+  from latest l
+) oral on true
+order by e.category asc nulls last, e.sort_index asc, e.created_at asc
+"""
+
+
 @router.get("", response_model=None)
 def list_essays() -> JSONResponse:
-    """No parameters. Ordered by (category asc nulls last, sort_index asc,
-    created_at asc) so the overview page can render the essays grouped by
-    category and in author-assigned sequence without re-sorting. Empty result
-    is valid. Each row carries `category` (string | null) and `sort_index`
-    (int) in addition to id/title/slug.
+    """No parameters. The roadmap view.
+
+    Ordering (R-CON-AL-01): (category asc nulls last, sort_index asc, created_at
+    asc) so the overview page renders the essays grouped by topic and in
+    author-assigned sequence without re-sorting. Empty result is valid.
+
+    Each row carries, beyond id/title/slug/category/sort_index/status, five
+    derived knowledge indicators (all computed against Postgres now() at query
+    time — R-CON-AL-06):
+      - progress_total (int)       — every flashcard in the essay.
+      - progress_established (int) — those whose review_interval >= 24h.
+      - open_count (int)           — those whose next_due_at <= now() (the
+                                     existing `open` definition; NOT gated on
+                                     established — a focus session would surface
+                                     exactly this many).
+      - oral_score (int | null)    — round(avg(latest section_score) / 6 * 100)
+                                     over the most recent section_examinations
+                                     row per section. null unless EVERY section
+                                     has at least one examination.
+      - oral_date (ISO str | null) — the oldest examined_at among those
+                                     most-recent-per-section rows; null under
+                                     the same all-sections condition as
+                                     oral_score.
+    Topic-level progress / open count are not returned — the client sums the
+    per-essay counts of a topic's rows.
     """
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "select id, title, slug, category, sort_index, created_at, updated_at "
-                "from essaycards.essays "
-                "order by category asc nulls last, sort_index asc, created_at asc"
-            )
+            cur.execute(_OVERVIEW_QUERY)
             rows = [_row_to_dict(r) for r in cur.fetchall()]
 
     dataset = Dataset(
@@ -97,7 +166,7 @@ def list_essays() -> JSONResponse:
             page_size=max(len(rows), 1),
             row_actions=[],
         ),
-        **{"schema": ESSAY_SCHEMA},
+        **{"schema": ESSAY_OVERVIEW_SCHEMA},
         rows=rows,
     )
     return _dataset_response(dataset)
@@ -113,7 +182,7 @@ def get_essay(essay_id: str) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, title, slug, category, sort_index, created_at, updated_at "
+                "select id, title, slug, category, sort_index, status, created_at, updated_at "
                 "from essaycards.essays where id = %s",
                 (essay_id,),
             )
@@ -197,6 +266,13 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
     if isinstance(sort_index, bool) or not isinstance(sort_index, int):
         return None, api_error(
             "VALIDATION_ERROR", "sort_index, if present, must be an integer"
+        )
+
+    status = body.get("status", DEFAULT_ESSAY_STATUS)
+    if status not in VALID_ESSAY_STATUSES:
+        return None, api_error(
+            "VALIDATION_ERROR",
+            f"status, if present, must be one of: {', '.join(VALID_ESSAY_STATUSES)}",
         )
 
     sections_raw = body.get("sections")
@@ -296,6 +372,7 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
         "slug": slug,
         "category": category,
         "sort_index": sort_index,
+        "status": status,
         "sections": sections,
     }
     return doc, None

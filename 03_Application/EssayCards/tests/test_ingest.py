@@ -68,30 +68,39 @@ def test_ingest_creates_essay_sections_and_cards(db_conn):
             assert c["next_due_at"] == c["created_at"]
 
 
-# ── Ingestion — front-matter category / sort_index ───────────────────────────
+# ── Ingestion — front-matter category / sort_index / status ──────────────────
 
-def test_ingest_reads_category_and_sort_index_from_front_matter(db_conn):
+def test_ingest_reads_category_sort_index_and_status_from_front_matter(db_conn):
     ingest(_path("well_formed_categorized.md"), db_conn)
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select category, sort_index from essaycards.essays where slug = 'categorised-essay'"
+            "select category, sort_index, status from essaycards.essays where slug = 'categorised-essay'"
         )
         row = cur.fetchone()
 
     assert row["category"] == "Philosophy"
     assert row["sort_index"] == 4
+    assert row["status"] == "planned"
 
 
-def test_ingest_defaults_category_null_sort_index_zero_when_front_matter_omits_them(db_conn):
+def test_ingest_defaults_category_null_sort_index_zero_status_complete_when_omitted(db_conn):
     ingest(_path("well_formed.md"), db_conn)
 
     with db_conn.cursor() as cur:
-        cur.execute("select category, sort_index from essaycards.essays where slug = 'test-essay'")
+        cur.execute(
+            "select category, sort_index, status from essaycards.essays where slug = 'test-essay'"
+        )
         row = cur.fetchone()
 
     assert row["category"] is None
     assert row["sort_index"] == 0
+    assert row["status"] == "complete"
+
+
+def test_ingest_rejects_unknown_status(db_conn):
+    with pytest.raises(IngestionError):
+        ingest(_path("bad_status.md"), db_conn)
 
 
 # ── Ingestion — re-ingesting an unchanged file preserves review state ─────────

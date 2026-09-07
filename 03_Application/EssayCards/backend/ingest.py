@@ -7,7 +7,7 @@ Grammar (Sprint01_Core/10_architecture.json §internal_flow steps 2-3):
     line; requires non-empty 'title' and 'slug'. Optional 'category' (non-empty
     string, defaults to null) and 'sort_index' (integer, defaults to 0) place
     the essay in the overview page's category groups and order it within its
-    group.
+    group. Optional 'status' ('planned' | 'complete', defaults to 'complete').
   - Each '## Heading {#anchor}' line starts a new section, in order of
     appearance. Any '##' heading line missing the '{#anchor}' suffix aborts
     ingestion. Content before the first matched section heading is discarded
@@ -37,6 +37,12 @@ from typing import Any
 import yaml
 
 # ── Public API ──────────────────────────────────────────────────────────────
+
+# Essay lifecycle (schema.sql ck_essays_status). Shared with the JSON ingest
+# path (backend/routers/essays.py). DEFAULT applies when the key is absent from
+# a payload — a normal ingest is a finished essay.
+VALID_ESSAY_STATUSES = ("planned", "complete")
+DEFAULT_ESSAY_STATUS = "complete"
 
 
 class IngestionError(Exception):
@@ -85,7 +91,8 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
     try:
         with conn.cursor() as cur:
             essay_id, essay_inserted = _upsert_essay(
-                cur, doc["title"], doc["slug"], doc.get("category"), doc.get("sort_index", 0)
+                cur, doc["title"], doc["slug"], doc.get("category"),
+                doc.get("sort_index", 0), doc.get("status", DEFAULT_ESSAY_STATUS),
             )
             summary.essay_created = essay_inserted
             summary.essay_id = str(essay_id)
@@ -116,10 +123,11 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
 _FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?\n)---\s*\n?", re.DOTALL)
 
 
-def _parse_front_matter(text: str) -> tuple[str, str, str | None, int, str]:
-    """Returns (title, slug, category, sort_index, remaining_text).
+def _parse_front_matter(text: str) -> tuple[str, str, str | None, int, str, str]:
+    """Returns (title, slug, category, sort_index, status, remaining_text).
 
-    category is None when the key is absent; sort_index defaults to 0.
+    category is None when the key is absent; sort_index defaults to 0; status
+    defaults to DEFAULT_ESSAY_STATUS.
     """
     m = _FRONT_MATTER_RE.match(text)
     if not m:
@@ -152,7 +160,13 @@ def _parse_front_matter(text: str) -> tuple[str, str, str | None, int, str]:
     if isinstance(sort_index, bool) or not isinstance(sort_index, int):
         raise IngestionError("Front matter 'sort_index', if present, must be an integer")
 
-    return title.strip(), slug.strip(), category, sort_index, text[m.end():]
+    status = fm.get("status", DEFAULT_ESSAY_STATUS)
+    if status not in VALID_ESSAY_STATUSES:
+        raise IngestionError(
+            f"Front matter 'status', if present, must be one of {list(VALID_ESSAY_STATUSES)}"
+        )
+
+    return title.strip(), slug.strip(), category, sort_index, status, text[m.end():]
 
 
 # ── Section splitting ─────────────────────────────────────────────────────────
@@ -294,7 +308,7 @@ def _validate_uniqueness(sections: list[dict[str, Any]]) -> None:
 # ── Top-level parse ─────────────────────────────────────────────────────────────
 
 def _parse_document(text: str) -> dict[str, Any]:
-    title, slug, category, sort_index, body = _parse_front_matter(text)
+    title, slug, category, sort_index, status, body = _parse_front_matter(text)
     raw_sections = _split_sections(body)
 
     sections: list[dict[str, Any]] = []
@@ -316,6 +330,7 @@ def _parse_document(text: str) -> dict[str, Any]:
         "slug": slug,
         "category": category,
         "sort_index": sort_index,
+        "status": status,
         "sections": sections,
     }
 
@@ -323,20 +338,21 @@ def _parse_document(text: str) -> dict[str, Any]:
 # ── DB upserts ──────────────────────────────────────────────────────────────────
 
 def _upsert_essay(
-    cur: Any, title: str, slug: str, category: str | None, sort_index: int
+    cur: Any, title: str, slug: str, category: str | None, sort_index: int, status: str
 ) -> tuple[str, bool]:
     cur.execute(
         """
-        insert into essaycards.essays (title, slug, category, sort_index)
-        values (%s, %s, %s, %s)
+        insert into essaycards.essays (title, slug, category, sort_index, status)
+        values (%s, %s, %s, %s, %s)
         on conflict (slug) do update
             set title      = excluded.title,
                 category   = excluded.category,
                 sort_index = excluded.sort_index,
+                status     = excluded.status,
                 updated_at = now()
         returning id, (xmax = 0) as was_inserted
         """,
-        (title, slug, category, sort_index),
+        (title, slug, category, sort_index, status),
     )
     row = cur.fetchone()
     return row["id"], row["was_inserted"]
@@ -380,8 +396,9 @@ def _upsert_flashcard(cur: Any, essay_id: str, section_id: str, card: dict[str, 
     if row["was_inserted"]:
         cur.execute(
             """
-            insert into essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at)
-            values (%s, null, %s)
+            insert into essaycards.flashcard_review_state
+                (flashcard_id, last_reviewed_at, next_due_at, review_interval)
+            values (%s, null, %s, interval '0')
             """,
             (row["id"], row["created_at"]),
         )

@@ -374,3 +374,30 @@ def test_ingest_json_rejects_non_integer_sort_index(client):
     r = client.post(INGEST_URL, json=_minimal_payload("meta-bad-sort", sort_index="2"))
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# ── Ingest — essay status ────────────────────────────────────────────────────
+
+def test_ingest_json_status_defaults_complete(client, db_conn):
+    assert client.post(INGEST_URL, json=_minimal_payload("status-default")).status_code == 200
+    with db_conn.cursor() as cur:
+        cur.execute("select status from essaycards.essays where slug = 'status-default'")
+        assert cur.fetchone()["status"] == "complete"
+
+
+def test_ingest_json_status_planned_persisted_and_upsertable(client, db_conn):
+    assert client.post(INGEST_URL, json=_minimal_payload("status-plan", status="planned")).status_code == 200
+    with db_conn.cursor() as cur:
+        cur.execute("select status from essaycards.essays where slug = 'status-plan'")
+        assert cur.fetchone()["status"] == "planned"
+    # re-ingest without status -> back to the default
+    assert client.post(INGEST_URL, json=_minimal_payload("status-plan")).status_code == 200
+    with db_conn.cursor() as cur:
+        cur.execute("select status from essaycards.essays where slug = 'status-plan'")
+        assert cur.fetchone()["status"] == "complete"
+
+
+def test_ingest_json_rejects_unknown_status(client):
+    r = client.post(INGEST_URL, json=_minimal_payload("status-bad", status="draft"))
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"

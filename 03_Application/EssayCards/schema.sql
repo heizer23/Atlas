@@ -18,15 +18,30 @@ create table if not exists essaycards.essays (
     -- and is the "sequence number" that used to be written into the title.
     -- Not unique — ties break on created_at asc.
     sort_index integer     not null default 0,
+    -- Minimal essay lifecycle. 'planned' = the essay exists as a stub whose
+    -- body text is a planning document; 'complete' = content is finished
+    -- enough to learn from. More values may be added later. Default 'complete'
+    -- because a normal ingest is a finished essay; a stub is ingested with an
+    -- explicit status: planned.
+    status     text        not null default 'complete',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
-    constraint uq_essays_slug unique (slug)
+    constraint uq_essays_slug unique (slug),
+    constraint ck_essays_status check (status in ('planned', 'complete'))
 );
 
--- Additive columns for databases created before category/sort_index existed.
--- (create table ... if not exists above covers only fresh databases.)
+-- Additive columns for databases created before category/sort_index/status
+-- existed. (create table ... if not exists above covers only fresh databases.)
 alter table essaycards.essays add column if not exists category   text;
 alter table essaycards.essays add column if not exists sort_index integer not null default 0;
+alter table essaycards.essays add column if not exists status     text    not null default 'complete';
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_essays_status') then
+        alter table essaycards.essays
+            add constraint ck_essays_status check (status in ('planned', 'complete'));
+    end if;
+end $$;
 
 -- GET /essays returns every essay ordered (category nulls last, sort_index,
 -- created_at) so the overview page can render it grouped without a re-sort.

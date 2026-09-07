@@ -3,6 +3,7 @@ title: "Categorised Essay"
 slug: "categorised-essay"
 category: "Philosophy"
 sort_index: 4
+status: "planned"
 ---
 
 ## Only Section {#only}
