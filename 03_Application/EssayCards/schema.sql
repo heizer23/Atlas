@@ -101,6 +101,18 @@ create table if not exists essaycards.flashcard_review_state (
 alter table essaycards.flashcard_review_state
     add column if not exists review_interval interval not null default '0';
 
+-- Backfill the cache for rows that predate the column. Guarded on
+-- review_interval = '0' so it is a one-shot no-op on every subsequent startup:
+-- a reviewed card's real span (next_due_at - last_reviewed_at) is always > 0
+-- (the scheduler floors even `again` at 5s), so once backfilled it never
+-- re-matches. Without this, an existing DB that only gets the ADD COLUMN above
+-- would read every established card as interval '0' -> new/learning, emptying
+-- the review queue until each card is re-reviewed.
+update essaycards.flashcard_review_state
+   set review_interval = next_due_at - last_reviewed_at
+ where last_reviewed_at is not null
+   and review_interval = interval '0';
+
 do $$ begin
     if not exists (select 1 from pg_constraint where conname = 'ck_review_state_interval') then
         alter table essaycards.flashcard_review_state

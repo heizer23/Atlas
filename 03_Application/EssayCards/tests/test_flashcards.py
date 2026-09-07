@@ -505,6 +505,29 @@ def test_stats_section_without_essay_rejected(client):
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+def test_stats_scoped_to_topic(client):
+    """Queue stats accepts topic= (matching GET /flashcards/due) so the review
+    screen's forecast is scoped to a topic focus session."""
+    for slug in ("stopic-a", "stopic-b"):
+        assert client.post("/api/essaycards/essays/ingest", json={
+            "title": slug, "slug": slug, "category": "StatTopic",
+            "sections": [{
+                "heading": "S", "anchor_slug": f"{slug}-s", "body_markdown": "b",
+                "cards": [{"id": f"{slug}-c1", "q": "q", "a": "a"}],
+            }],
+        }).status_code == 200
+
+    counts = _stats_counts(client.get("/api/essaycards/flashcards/stats?topic=StatTopic").json()["rows"])
+    assert counts["due_now"] == 2               # both essays' new cards, due at ingest
+    assert sum(counts.values()) == 2            # nothing else in scope
+
+
+def test_stats_topic_combined_with_essay_id_rejected(client):
+    r = client.get(f"/api/essaycards/flashcards/stats?topic=X&essay_id={ESSAY_A}")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 def test_stats_unknown_scope_is_zero_filled(client):
     """Scenario: Queue stats — empty scope still returns seven zero-filled bands."""
     r = client.get(f"/api/essaycards/flashcards/stats?essay_id={UNKNOWN_ID}")

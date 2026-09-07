@@ -313,9 +313,11 @@ row into non-overlapping horizon bands by `next_due_at` vs Postgres `now()`: `du
 `within_10_min`, `within_1_day`, `within_7_days`, `within_30_days`, `within_90_days`,
 `beyond_90_days` (bands open on the lower edge, closed on the upper; the seven counts
 sum to the total scheduled cards in scope). The 30-/90-day split feeds the review
-screen's UPCOMING `≤3 mo` / `>3 mo` forecast columns. Same `essay_id` / `section_id`
-scoping rules as `GET /flashcards/due` (`section_id` without `essay_id` →
-`VALIDATION_ERROR`).
+screen's UPCOMING `≤3 mo` / `>3 mo` forecast columns. Same `topic` / `essay_id` /
+`section_id` scoping rules as `GET /flashcards/due` (`section_id` without `essay_id`,
+or `topic` with `essay_id`/`section_id` → `VALIDATION_ERROR`) — but **no** interval
+filter: it always counts every scheduled card in scope, so the forecast matches the
+focus session it accompanies (`ReviewStatsPanel` passes the session's scope through).
 
 ## Review screen (`src/ShellEntry.tsx` → `ReviewSessionView` / `ReviewStatsPanel`)
 Material 3 layout, no page header: one flat `surface-variant` stats card, the

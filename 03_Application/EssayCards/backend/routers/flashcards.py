@@ -235,17 +235,25 @@ def list_due_flashcards(
 
 
 @router.get("/stats", response_model=None)
-def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = None) -> JSONResponse:
+def flashcard_queue_stats(
+    topic: str | None = None,
+    essay_id: str | None = None,
+    section_id: str | None = None,
+) -> JSONResponse:
     """
     Review-queue forecast: every flashcard that has a review-state row,
     partitioned into seven non-overlapping horizon bands by next_due_at relative
     to now(). Read endpoint -> returns Dataset (R-CON-BP-04).
 
-    Parameters (identical scoping rules to GET /flashcards/due):
+    Parameters (identical scoping rules to GET /flashcards/due, minus the
+    review/focus interval filter — this endpoint always counts every scheduled
+    card in scope regardless of interval):
+      - topic       optional; restrict to essays whose essays.category matches.
       - essay_id    optional; restrict to one essay.
       - section_id  optional; requires essay_id; restrict to one section.
-      - section_id without essay_id      -> VALIDATION_ERROR (400).
-      - no params                        -> system-wide.
+      - section_id without essay_id                  -> VALIDATION_ERROR (400).
+      - topic together with essay_id or section_id   -> VALIDATION_ERROR (400).
+      - no params                                    -> system-wide.
     No other parameter is accepted. There is no ordering parameter: rows are
     always returned in the fixed near -> far band order of STATS_BUCKETS.
 
@@ -272,9 +280,18 @@ def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = 
     """
     if section_id and not essay_id:
         return api_error("VALIDATION_ERROR", "section_id requires essay_id to also be provided")
+    if topic and (essay_id or section_id):
+        return api_error(
+            "VALIDATION_ERROR", "topic cannot be combined with essay_id or section_id"
+        )
 
     conditions: list[str] = []
     params: list[Any] = []
+    extra_join = ""
+    if topic:
+        extra_join = "join essaycards.essays e on e.id = f.essay_id"
+        conditions.append("e.category = %s")
+        params.append(topic)
     if essay_id:
         conditions.append("f.essay_id = %s")
         params.append(essay_id)
@@ -309,6 +326,7 @@ def flashcard_queue_stats(essay_id: str | None = None, section_id: str | None = 
                     where frs.next_due_at >  now() + interval '90 days')             as beyond_90_days
                 from essaycards.flashcard_review_state frs
                 join essaycards.flashcards f on f.id = frs.flashcard_id
+                {extra_join}
                 {where}
                 """,
                 params,

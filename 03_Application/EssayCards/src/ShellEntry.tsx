@@ -840,6 +840,7 @@ function ForecastRow({ label, values }: { label: string; values: (number | null)
 }
 
 function ReviewStatsPanel({
+  topic,
   essayId,
   sectionId,
   refreshToken,
@@ -848,6 +849,7 @@ function ReviewStatsPanel({
   newRemaining,
   sessionForecast,
 }: {
+  topic: string | null;
   essayId: string | null;
   sectionId: string | null;
   refreshToken: number;
@@ -861,6 +863,7 @@ function ReviewStatsPanel({
   useEffect(() => {
     (async () => {
       const qs = new URLSearchParams();
+      if (topic) qs.set('topic', topic);
       if (essayId) qs.set('essay_id', essayId);
       if (sectionId) qs.set('section_id', sectionId);
       const url = `/essaycards/flashcards/stats${qs.toString() ? `?${qs.toString()}` : ''}`;
@@ -871,7 +874,7 @@ function ReviewStatsPanel({
       }
       setStats(Object.fromEntries(res.rows.map(r => [r.bucket, r.count])));
     })();
-  }, [essayId, sectionId, refreshToken]);
+  }, [topic, essayId, sectionId, refreshToken]);
 
   const metrics: [number, string][] = [
     [reviewed, 'Session'],
@@ -1087,6 +1090,7 @@ function ReviewSessionView() {
 
   const statsPanel = (
     <ReviewStatsPanel
+      topic={topic}
       essayId={essayId}
       sectionId={sectionId}
       refreshToken={statsRefresh}
