@@ -316,6 +316,37 @@ function formatInterval(seconds: number | null): string {
 const ESSAYCARDS_IMG_CSS =
   '.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto; }';
 
+// ── Clipboard helpers ────────────────────────────────────────────────────────
+//
+// navigator.clipboard.writeText/readText can throw (permissions denied,
+// insecure context, etc.). Every export/import view in this app (whole-essay
+// ingest, oral-exam export/import, flashcard exploration, section export)
+// surfaces that failure the same way, so the two messages live here once
+// instead of at each call site.
+
+const CLIPBOARD_WRITE_DENIED = 'Could not access the clipboard — check browser permissions.';
+const CLIPBOARD_READ_DENIED =
+  'Could not read the clipboard — check browser permissions, or paste manually (Ctrl/Cmd+V) into the box below.';
+
+// Returns null on success, or CLIPBOARD_WRITE_DENIED on failure — the caller
+// substitutes its own success message when this returns null.
+async function writeClipboard(text: string): Promise<string | null> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return null;
+  } catch {
+    return CLIPBOARD_WRITE_DENIED;
+  }
+}
+
+async function readClipboard(): Promise<{ text: string } | { error: string }> {
+  try {
+    return { text: await navigator.clipboard.readText() };
+  } catch {
+    return { error: CLIPBOARD_READ_DENIED };
+  }
+}
+
 // ── Oral examination prompt ──────────────────────────────────────────────────
 //
 // Copied to the clipboard together with the fetched examination package (see
@@ -558,15 +589,12 @@ function EssayListView() {
       setExamMsg(`Export failed: ${res.error.message}`);
       return;
     }
-    try {
-      await navigator.clipboard.writeText(buildExamClipboardText(res));
-      setExamMsg(
+    const err = await writeClipboard(buildExamClipboardText(res));
+    setExamMsg(
+      err ??
         'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply ' +
-        'into "Import exam results" above.',
-      );
-    } catch {
-      setExamMsg('Could not access the clipboard — check browser permissions.');
-    }
+          'into "Import exam results" above.',
+    );
   };
 
   return (
@@ -729,17 +757,14 @@ function ReaderView() {
       setSectionExportMsg({ sectionId, text: `Export failed: ${res.error.message}` });
       return;
     }
-    try {
-      await navigator.clipboard.writeText(buildSectionExportClipboardText(res));
-      setSectionExportMsg({
-        sectionId,
-        text:
-          'Copied. Paste into ChatGPT (or similar), have it revise the section, then paste its JSON ' +
+    const err = await writeClipboard(buildSectionExportClipboardText(res));
+    setSectionExportMsg({
+      sectionId,
+      text:
+        err ??
+        'Copied. Paste into ChatGPT (or similar), have it revise the section, then paste its JSON ' +
           'reply into "Add / Update Essay" to save it.',
-      });
-    } catch {
-      setSectionExportMsg({ sectionId, text: 'Could not access the clipboard — check browser permissions.' });
-    }
+    });
   };
 
   const load = useCallback(async () => {
@@ -1132,12 +1157,12 @@ function ReviewSessionView() {
       setExploreMsg(`Export failed: ${res.error.message}`);
       return;
     }
-    try {
-      await navigator.clipboard.writeText(buildExploreClipboardText(res));
+    const err = await writeClipboard(buildExploreClipboardText(res));
+    if (err) {
+      setExploreMsg(err);
+    } else {
       setExploreMsg('Copied for ChatGPT');
       setExported(true);
-    } catch {
-      setExploreMsg('Could not access the clipboard — check browser permissions.');
     }
   };
 
@@ -1458,22 +1483,21 @@ function IngestView() {
   const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
 
   const handleCopyStub = async () => {
-    try {
-      await navigator.clipboard.writeText(STUB_PROMPT);
-      setClipboardMsg('Copied. Paste into ChatGPT (or similar) with your topic, then use "Paste from clipboard" below to bring its reply back in.');
-    } catch {
-      setClipboardMsg('Could not access the clipboard — check browser permissions.');
-    }
+    const err = await writeClipboard(STUB_PROMPT);
+    setClipboardMsg(
+      err ??
+        'Copied. Paste into ChatGPT (or similar) with your topic, then use "Paste from clipboard" below to bring its reply back in.',
+    );
   };
 
   const handlePasteFromClipboard = async () => {
-    try {
-      const clip = await navigator.clipboard.readText();
-      setText(clip);
-      setClipboardMsg(null);
-    } catch {
-      setClipboardMsg('Could not read the clipboard — check browser permissions, or paste manually (Ctrl/Cmd+V) into the box below.');
+    const res = await readClipboard();
+    if ('error' in res) {
+      setClipboardMsg(res.error);
+      return;
     }
+    setText(res.text);
+    setClipboardMsg(null);
   };
 
   const handleSubmit = async () => {
@@ -1601,13 +1625,13 @@ function ImportExaminationsView() {
   const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
 
   const handlePasteFromClipboard = async () => {
-    try {
-      const clip = await navigator.clipboard.readText();
-      setText(clip);
-      setClipboardMsg(null);
-    } catch {
-      setClipboardMsg('Could not read the clipboard — check browser permissions, or paste manually (Ctrl/Cmd+V) into the box below.');
+    const res = await readClipboard();
+    if ('error' in res) {
+      setClipboardMsg(res.error);
+      return;
     }
+    setText(res.text);
+    setClipboardMsg(null);
   };
 
   const handleSubmit = async () => {
@@ -1736,13 +1760,13 @@ function ExploreImportView() {
   };
 
   const handlePasteFromClipboard = async () => {
-    try {
-      const clip = await navigator.clipboard.readText();
-      onTextChange(clip);
-      setClipboardMsg(null);
-    } catch {
-      setClipboardMsg('Could not read the clipboard — check browser permissions, or paste manually (Ctrl/Cmd+V) into the box below.');
+    const res = await readClipboard();
+    if ('error' in res) {
+      setClipboardMsg(res.error);
+      return;
     }
+    onTextChange(res.text);
+    setClipboardMsg(null);
   };
 
   const handlePreview = async () => {
