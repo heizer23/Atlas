@@ -169,6 +169,30 @@ interface ExploreImportResult {
   preview: ExplorePreview;
 }
 
+// ── Single-section export/import ────────────────────────────────────────────
+//
+// Same shape as the POST /essays/ingest payload (see IngestView / STUB_PROMPT
+// below), just pre-filled from one existing section and scoped to a single
+// element in "sections" — so pasting an edited reply straight into
+// "Add / Update Essay" upserts only that section. See
+// backend/routers/essays.py::export_section.
+
+interface SectionExportPackage {
+  export_version: number;
+  section_id: string;
+  title: string;
+  slug: string;
+  category: string | null;
+  sort_index: number;
+  status: string;
+  sections: {
+    heading: string;
+    anchor_slug: string;
+    body_markdown: string;
+    cards: { id: string; q: string; a: string }[];
+  }[];
+}
+
 interface Dataset<T> {
   meta: { object_type: string; total: number };
   rows: T[];
@@ -408,6 +432,35 @@ Here is the exploration package:
 
 function buildExploreClipboardText(pkg: ExplorationPackage): string {
   return EXPLORE_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+// ── Single-section export prompt ────────────────────────────────────────────
+//
+// Copied to the clipboard with the section export package by the "Export
+// section" button in ReaderView. The package IS a valid POST /essays/ingest
+// payload (see SectionExportPackage above) — the reply is meant to be pasted
+// straight into IngestView ("Add / Update Essay") unmodified in shape, only
+// its content revised.
+
+const SECTION_EXPORT_PROMPT_INTRO = `You are helping revise one section of an essay for an app called EssayCards. Below this prompt is a JSON payload describing that ONE section, wrapped in the essay-level fields required to save it back.
+
+Revise the section as I direct in this conversation — rewrite "body_markdown", fix errors, tighten prose, or add/edit/remove entries in "cards".
+
+RULES (breaking these makes the reply unusable):
+- Do NOT change "slug" (the essay's id) or sections[0].anchor_slug (this section's id) — either breaks links back to this section.
+- Do NOT change "title", "category", "sort_index", or "status" unless I explicitly ask you to.
+- Each entry in "cards" has a short "id". Keep the "id" of any card you are editing unchanged, so it updates in place instead of creating a duplicate. Only invent a new "id" (letters, digits, "_"/"-" only, unique in this list) for a genuinely new card.
+- Removing a card from "cards" does NOT delete it from the app on reimport — it is simply left unchanged. There is no way to delete a card through this mechanism.
+- "body_markdown" is the actual essay prose the reader sees — write real text, not a summary.
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY the complete JSON object — no markdown code fences, no commentary before or after — the same shape as below with your revisions applied. Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the section package:
+
+`;
+
+function buildSectionExportClipboardText(pkg: SectionExportPackage): string {
+  return SECTION_EXPORT_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
 }
 
 // ── Essay List View ───────────────────────────────────────────────────────────
@@ -662,6 +715,32 @@ function ReaderView() {
   const [essay, setEssay] = useState<EssayDetailRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+  // "Export section" — one message slot, keyed to the section it was shown
+  // for, since only one export is ever in flight at a time.
+  const [sectionExportMsg, setSectionExportMsg] = useState<{ sectionId: string; text: string } | null>(null);
+
+  const handleExportSection = async (sectionId: string) => {
+    if (!essay) return;
+    setSectionExportMsg(null);
+    const res = await apiFetch<SectionExportPackage>(
+      `/essaycards/essays/${essay.id}/sections/${sectionId}/export`
+    );
+    if (isApiError(res)) {
+      setSectionExportMsg({ sectionId, text: `Export failed: ${res.error.message}` });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(buildSectionExportClipboardText(res));
+      setSectionExportMsg({
+        sectionId,
+        text:
+          'Copied. Paste into ChatGPT (or similar), have it revise the section, then paste its JSON ' +
+          'reply into "Add / Update Essay" to save it.',
+      });
+    } catch {
+      setSectionExportMsg({ sectionId, text: 'Could not access the clipboard — check browser permissions.' });
+    }
+  };
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -717,7 +796,18 @@ function ReaderView() {
             >
               Review this section
             </button>
+            <button style={btnStyle} onClick={() => handleExportSection(section.id)}>
+              Export section
+            </button>
+            {sectionExportMsg && sectionExportMsg.sectionId === section.id && (
+              <button style={btnStyle} onClick={() => navigate('/essaycards/ingest')}>
+                Add / Update Essay →
+              </button>
+            )}
           </div>
+          {sectionExportMsg && sectionExportMsg.sectionId === section.id && (
+            <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{sectionExportMsg.text}</div>
+          )}
           <SectionExaminationHistory sectionId={section.id} />
         </section>
       ))}

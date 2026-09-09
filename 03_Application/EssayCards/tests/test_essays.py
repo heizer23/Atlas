@@ -182,3 +182,87 @@ def test_overview_oral_score_requires_every_section_examined(client, db_conn):
     # now() - 10 days (which precedes origins' now() - 2 days).
     age_days = (datetime.now(timezone.utc) - datetime.fromisoformat(row["oral_date"])).days
     assert 9 <= age_days <= 11
+
+
+# ── GET /essays/{essay_id}/sections/{section_id}/export ─────────────────────
+
+def test_export_section_returns_ingest_shaped_payload(client):
+    """The export package is directly postable to POST /essays/ingest: it
+    carries the essay-level fields plus a single-element sections list for
+    the requested section, with its cards."""
+    eid = _mk_essay(client, "export-essay", 2, category="Philosophy", sort_index=3)
+    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    section = detail["sections"][0]
+
+    r = client.get(f"/api/essaycards/essays/{eid}/sections/{section['id']}/export")
+    assert r.status_code == 200
+    pkg = r.json()
+
+    assert pkg["title"] == "export-essay"
+    assert pkg["slug"] == "export-essay"
+    assert pkg["category"] == "Philosophy"
+    assert pkg["sort_index"] == 3
+    assert pkg["status"] == "complete"
+    assert pkg["section_id"] == section["id"]
+
+    assert len(pkg["sections"]) == 1
+    exported = pkg["sections"][0]
+    assert exported["heading"] == section["heading"]
+    assert exported["anchor_slug"] == section["anchor_slug"]
+    assert exported["body_markdown"] == section["body_markdown"]
+    assert {c["id"] for c in exported["cards"]} == {"export-essay-c0", "export-essay-c1"}
+    assert {c["q"] for c in exported["cards"]} == {"q0", "q1"}
+
+
+def test_export_section_essay_not_found(client):
+    r = client.get(f"/api/essaycards/essays/{UNKNOWN_ID}/sections/{UNKNOWN_ID}/export")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_export_section_section_not_found(client):
+    eid = _mk_essay(client, "export-essay-2", 0)
+    r = client.get(f"/api/essaycards/essays/{eid}/sections/{UNKNOWN_ID}/export")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_export_then_reingest_updates_only_that_section(client):
+    """Round trip: export a section, edit its body/cards, re-post it through
+    the existing whole-essay ingest endpoint (as the frontend does via
+    IngestView) — only that section changes; the essay's other section and
+    metadata are untouched."""
+    payload = {
+        "title": "roundtrip-essay", "slug": "roundtrip-essay",
+        "category": "Art", "sort_index": 7,
+        "sections": [
+            {"heading": "One", "anchor_slug": "rt-one", "body_markdown": "body one",
+             "cards": [{"id": "rt-c1", "q": "q1", "a": "a1"}]},
+            {"heading": "Two", "anchor_slug": "rt-two", "body_markdown": "body two", "cards": []},
+        ],
+    }
+    r = client.post("/api/essaycards/essays/ingest", json=payload)
+    assert r.status_code == 200, r.text
+    eid = r.json()["essay_id"]
+
+    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    section_one = next(s for s in detail["sections"] if s["anchor_slug"] == "rt-one")
+
+    pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{section_one['id']}/export").json()
+    pkg["sections"][0]["body_markdown"] = "REVISED body one"
+    pkg["sections"][0]["cards"][0]["a"] = "REVISED a1"
+
+    r2 = client.post("/api/essaycards/essays/ingest", json=pkg)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["sections_updated"] == 1
+    assert r2.json()["cards_updated"] == 1
+
+    detail2 = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    assert detail2["category"] == "Art"
+    assert detail2["sort_index"] == 7
+    assert len(detail2["sections"]) == 2  # "rt-two" untouched, not dropped
+
+    updated_one = next(s for s in detail2["sections"] if s["anchor_slug"] == "rt-one")
+    assert updated_one["body_markdown"] == "REVISED body one"
+    untouched_two = next(s for s in detail2["sections"] if s["anchor_slug"] == "rt-two")
+    assert untouched_two["body_markdown"] == "body two"

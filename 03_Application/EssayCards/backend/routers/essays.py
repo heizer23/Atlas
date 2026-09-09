@@ -217,6 +217,82 @@ def get_essay(essay_id: str) -> JSONResponse:
     return _dataset_response(dataset)
 
 
+@router.get("/{essay_id}/sections/{section_id}/export", response_model=None)
+def export_section(essay_id: str, section_id: str) -> JSONResponse:
+    """
+    Self-contained JSON export of ONE section, shaped as a valid POST /ingest
+    payload — title/slug/category/sort_index/status plus a single-element
+    `sections` list carrying this section's heading/anchor_slug/body_markdown
+    and cards. Pasting an edited reply from an external LLM straight into
+    "Add / Update Essay" (IngestView -> POST /essays/ingest) therefore upserts
+    just this section: sections and cards absent from a payload are left
+    untouched by upsert_document (see backend/ingest.py), so the rest of the
+    essay is unaffected.
+
+    Bespoke JSON, not a Dataset — R-CON-BP-04 exemption on the same rationale
+    as GET /essays/{essay_id}/examination-package (see module docstring in
+    backend/routers/examinations.py): copied to the clipboard for an external
+    LLM, not rendered by a Dataset-consuming UI component.
+
+    `section_id` (the essay_sections row id) and `export_version` are extra
+    top-level fields for traceability only — POST /essays/ingest reads none
+    of them, so they round-trip harmlessly through an unedited reply.
+
+    404 ApiError if essay_id does not exist, or if section_id does not exist
+    under this essay.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select title, slug, category, sort_index, status "
+                "from essaycards.essays where id = %s",
+                (essay_id,),
+            )
+            essay_row = cur.fetchone()
+            if not essay_row:
+                return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
+
+            cur.execute(
+                "select id, anchor_slug, heading, body_markdown "
+                "from essaycards.essay_sections where id = %s and essay_id = %s",
+                (section_id, essay_id),
+            )
+            section_row = cur.fetchone()
+            if not section_row:
+                return api_error(
+                    "NOT_FOUND", f"Section {section_id} not found in essay {essay_id}", status=404
+                )
+
+            cur.execute(
+                "select card_key, question, answer from essaycards.flashcards "
+                "where section_id = %s order by created_at asc",
+                (section_id,),
+            )
+            cards = [
+                {"id": r["card_key"], "q": r["question"], "a": r["answer"]}
+                for r in cur.fetchall()
+            ]
+
+    package = {
+        "export_version": 1,
+        "section_id": str(section_row["id"]),
+        "title": essay_row["title"],
+        "slug": essay_row["slug"],
+        "category": essay_row["category"],
+        "sort_index": essay_row["sort_index"],
+        "status": essay_row["status"],
+        "sections": [
+            {
+                "heading": section_row["heading"],
+                "anchor_slug": section_row["anchor_slug"],
+                "body_markdown": section_row["body_markdown"],
+                "cards": cards,
+            }
+        ],
+    }
+    return JSONResponse(content=package)
+
+
 # ── POST /ingest ──────────────────────────────────────────────────────────────
 #
 # NOTE ON STRING NORMALIZATION (design review §Recommended Improvements 1):

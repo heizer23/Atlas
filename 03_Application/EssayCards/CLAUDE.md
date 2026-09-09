@@ -360,6 +360,31 @@ graded `again` or floored `hard`, with nothing else to grade while its
 interval elapses — **Check again** on the completion screen re-runs the fetch
 for exactly that case.
 
+## Single-section export/import
+Revise one section with ChatGPT without touching the rest of the essay. Deliberately
+reuses the whole-essay JSON round trip (`## Content ingestion`) instead of introducing a
+parallel mechanism: `GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export`
+(`backend/routers/essays.py::export_section`) returns a bespoke JSON blob (R-CON-BP-04
+exemption, same rationale as `examination-package`/`exploration-package`) that IS already
+a valid `POST /essays/ingest` payload — `title`/`slug`/`category`/`sort_index`/`status`
+plus a single-element `sections` list holding this section's `heading`/`anchor_slug`/
+`body_markdown`/`cards` (`section_id` is an extra top-level field, for traceability only;
+`export_version` too — the ingest endpoint reads neither).
+
+The **Export section** button at the end of each section in `ReaderView` fetches this
+package and copies it, plus `SECTION_EXPORT_PROMPT_INTRO` (`src/ShellEntry.tsx`), to the
+clipboard, then surfaces an **Add / Update Essay →** button. There is no dedicated import
+view or endpoint: the ChatGPT reply is pasted into the existing "Add / Update Essay"
+(`IngestView`, `/essaycards/ingest`) and submitted through `POST /essays/ingest` exactly
+like a full essay paste. Because `upsert_document` never touches a section or card absent
+from the payload (`## Content ingestion`), submitting a single-section payload upserts
+only that section and its listed cards — the essay's other sections and top-level fields
+are left exactly as they were, PROVIDED the essay-level fields round-trip unedited (the
+export intentionally echoes the essay's current `category`/`sort_index`/`status` for this
+reason — see `_validate_ingest_body` defaults in `backend/routers/essays.py`). Same
+accepted gap as ingest generally: a card removed from `cards` on reimport is left
+unchanged, not deleted.
+
 ## Oral examinations
 Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —
 that id is reused as-is for examination history; no separate section-id scheme was
