@@ -70,9 +70,19 @@ create table if not exists essaycards.flashcards (
     card_key   text        not null,
     question   text        not null,
     answer     text        not null,
+    -- Structural depth (Sprint08_QuestionLevelsAndStructure): 1 = foundational
+    -- / spine, 2 = building / explanatory structure, 3 = decorating / examples,
+    -- terminology, anecdotes, supporting detail. Plain integer, not an enum —
+    -- deliberately open-ended upward so a finer scale can be introduced later
+    -- without a schema change; only >= 1 is enforced. Set exclusively by
+    -- POST /flashcards/upsert (backend/routers/flashcards.py) — the
+    -- essay/section JSON ingest paths (backend/ingest.py) never read or write
+    -- this column, so re-ingesting an essay or section can never change it.
+    level      integer     not null default 2,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
-    constraint uq_flashcards_card_key unique (essay_id, card_key)
+    constraint uq_flashcards_card_key unique (essay_id, card_key),
+    constraint ck_flashcards_level check (level >= 1)
 );
 
 create index if not exists ix_flashcards_essay_id
@@ -80,6 +90,18 @@ create index if not exists ix_flashcards_essay_id
 
 create index if not exists ix_flashcards_section_id
     on essaycards.flashcards(section_id);
+
+-- Additive column for databases created before level existed (Sprint08).
+-- Default 2 ("building/explanatory") for every pre-existing card — a
+-- neutral mid-tier guess absent any signal for which cards are foundational
+-- vs. decorative; see CLAUDE.md "Question levels".
+alter table essaycards.flashcards add column if not exists level integer not null default 2;
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_flashcards_level') then
+        alter table essaycards.flashcards add constraint ck_flashcards_level check (level >= 1);
+    end if;
+end $$;
 
 create table if not exists essaycards.flashcard_review_state (
     flashcard_id      uuid        primary key references essaycards.flashcards(id) on delete cascade,

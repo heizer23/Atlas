@@ -1,7 +1,9 @@
 """
-GET /flashcards/due and POST /flashcards/{flashcard_id}/review.
+GET /flashcards/due, GET /flashcards/stats, POST /flashcards/upsert,
+GET /flashcards/{flashcard_id}/export, and POST /flashcards/{flashcard_id}/review.
 
-GET /due is a read endpoint and returns Dataset per R-CON-BP-04.
+GET /due and GET /stats are read endpoints and return Dataset per
+R-CON-BP-04.
 
 POST .../review is a mutation endpoint (R-CON-BP-04 exempt from the Dataset
 requirement). It reads the raw Starlette Request body — not a Pydantic body
@@ -10,10 +12,24 @@ value, or an unparsable JSON body are ALL caught by application code and
 returned as ApiError with error.code=VALIDATION_ERROR (400). FastAPI's default
 RequestValidationError 422 shape must never be produced by this endpoint.
 
-'/due' is registered before the parameterised '/{flashcard_id}/review' route
-to avoid FastAPI path-matching ambiguity with any future single-segment route.
+POST /upsert (Sprint08_QuestionLevelsAndStructure) is the single-question
+create/update operation: {essay_slug, section_id, card: {id?, level, q, a}}.
+Same raw-Request/no-Pydantic-model precedent as .../review. It never touches
+essaycards.essays or essaycards.essay_sections — see its own docstring for
+why that makes it safe to reimport a single-question AI export unedited.
+
+GET /{flashcard_id}/export is a bespoke-JSON, Dataset-exempt read endpoint
+(R-CON-BP-04 exemption, same rationale as GET
+/essays/{essay_id}/examination-package) — the single-question counterpart to
+POST /upsert, for copying to the clipboard for an external LLM.
+
+'/due', '/stats' and '/upsert' are registered before the parameterised
+'/{flashcard_id}/...' routes to avoid FastAPI path-matching ambiguity with
+any future single-segment route.
 """
 
+import re
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -25,6 +41,8 @@ from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
+
+_CARD_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 DUE_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="question",    label="Question", type="string",  sortable=False, filterable=False),
@@ -350,6 +368,267 @@ def flashcard_queue_stats(
         rows=rows,
     )
     return _dataset_response(dataset)
+
+
+# ── Single-question maintenance (Sprint08_QuestionLevelsAndStructure) ───────
+#
+# POST /upsert + GET /{flashcard_id}/export are the narrow, question-only
+# counterpart to the essay-shaped ingest/export pair in
+# backend/routers/essays.py. Both operate purely on essaycards.flashcards
+# (+ flashcard_review_state for a create) and never touch essaycards.essays
+# or essaycards.essay_sections.
+
+def _validate_upsert_body(body: Any) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """
+    Full structural validation of a POST /upsert payload. Returns
+    (parsed, None) on success, or (None, ApiError VALIDATION_ERROR) on the
+    first violation. Never touches the database — mirrors
+    essays.py::_validate_ingest_body's validate-everything-first precedent.
+
+    `card.level` is REQUIRED (no silent default) — an omitted level must
+    never quietly reset an existing level-1/level-3 card back to some
+    default; the caller (the overview's edit form, always pre-filled with
+    the card's current level, or an AI reply that copied it from the export)
+    must always state it explicitly.
+    """
+    if not isinstance(body, dict):
+        return None, api_error("VALIDATION_ERROR", "Request body must be a JSON object")
+
+    essay_slug = body.get("essay_slug")
+    if not isinstance(essay_slug, str) or not essay_slug.strip():
+        return None, api_error("VALIDATION_ERROR", "essay_slug is required and must be a non-empty string")
+    essay_slug = essay_slug.strip()
+
+    section_id = body.get("section_id")
+    if not isinstance(section_id, str) or not section_id.strip():
+        return None, api_error("VALIDATION_ERROR", "section_id is required and must be a non-empty string")
+    section_id = section_id.strip()
+
+    card_raw = body.get("card")
+    if not isinstance(card_raw, dict):
+        return None, api_error("VALIDATION_ERROR", "card is required and must be an object")
+
+    card_id = card_raw.get("id")
+    if card_id is not None:
+        if not isinstance(card_id, str) or not card_id.strip():
+            return None, api_error("VALIDATION_ERROR", "card.id, if present, must be a non-empty string")
+        card_id = card_id.strip()
+        if not _CARD_ID_RE.match(card_id):
+            return None, api_error(
+                "VALIDATION_ERROR", f"card.id '{card_id}' must match ^[a-zA-Z0-9_-]+$"
+            )
+
+    level = card_raw.get("level")
+    if isinstance(level, bool) or not isinstance(level, int) or level < 1:
+        return None, api_error("VALIDATION_ERROR", "card.level is required and must be an integer >= 1")
+
+    q = card_raw.get("q")
+    if not isinstance(q, str) or not q.strip():
+        return None, api_error("VALIDATION_ERROR", "card.q is required and must be a non-empty string")
+
+    a = card_raw.get("a")
+    if not isinstance(a, str) or not a.strip():
+        return None, api_error("VALIDATION_ERROR", "card.a is required and must be a non-empty string")
+
+    return {
+        "essay_slug": essay_slug,
+        "section_id": section_id,
+        "card_id": card_id,  # None => auto-generate (new card, no author-chosen id)
+        "level": level,
+        "question": q,
+        "answer": a,
+    }, None
+
+
+def _new_card_key(cur: Any, essay_id: str) -> str:
+    """Auto-generated card_key for a new question created without an
+    explicit id (the question-overview's "Add question" form). Deliberately
+    NOT a cross-module import of backend/exploration.py's own "_"-private
+    helper of the same shape — each module owns its own key-generation
+    concern. flashcards has unique(essay_id, card_key); retry on the
+    (vanishingly unlikely) collision."""
+    for _ in range(10):
+        key = f"q-{secrets.token_hex(4)}"
+        cur.execute(
+            "select 1 from essaycards.flashcards where essay_id = %s and card_key = %s",
+            (essay_id, key),
+        )
+        if not cur.fetchone():
+            return key
+    raise RuntimeError("could not allocate a unique card_key")  # pragma: no cover
+
+
+def _upsert_question(
+    cur: Any, essay_slug: str, section_id: str, card_id: str | None,
+    level: int, question: str, answer: str,
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """
+    Create or update exactly one flashcard. Returns (result, None) or
+    (None, ApiError). Never touches essaycards.essays or
+    essaycards.essay_sections (only reads them, to resolve/validate ids).
+
+    card_id present and matching an existing card_key for this essay ->
+    UPDATE in place (question/answer/level change; id, card_key, essay,
+    section all stable). card_id present but unmatched -> CREATE with that
+    id. card_id None -> CREATE with an auto-generated id.
+
+    Rejects a card_id that already exists under a DIFFERENT section
+    (mirrors essays.py::_check_card_section_collisions) — section_id is not
+    in the UPDATE's SET clause, so this endpoint cannot move a card between
+    sections even by accident.
+    """
+    cur.execute("select id from essaycards.essays where slug = %s", (essay_slug,))
+    essay_row = cur.fetchone()
+    if not essay_row:
+        return None, api_error("NOT_FOUND", f"Essay with slug '{essay_slug}' not found", status=404)
+    essay_id = essay_row["id"]
+
+    cur.execute("select essay_id from essaycards.essay_sections where id = %s", (section_id,))
+    section_row = cur.fetchone()
+    if not section_row:
+        return None, api_error("NOT_FOUND", f"Section {section_id} not found", status=404)
+    if str(section_row["essay_id"]) != str(essay_id):
+        return None, api_error(
+            "VALIDATION_ERROR", f"Section {section_id} does not belong to essay '{essay_slug}'"
+        )
+
+    if card_id is not None:
+        cur.execute(
+            "select section_id from essaycards.flashcards where essay_id = %s and card_key = %s",
+            (essay_id, card_id),
+        )
+        existing = cur.fetchone()
+        if existing and str(existing["section_id"]) != str(section_id):
+            return None, api_error(
+                "VALIDATION_ERROR",
+                f"card '{card_id}' already exists under a different section and cannot be "
+                "moved via this endpoint",
+            )
+    else:
+        card_id = _new_card_key(cur, str(essay_id))
+
+    cur.execute(
+        """
+        insert into essaycards.flashcards (essay_id, section_id, card_key, question, answer, level)
+        values (%s, %s, %s, %s, %s, %s)
+        on conflict (essay_id, card_key) do update
+            set question   = excluded.question,
+                answer     = excluded.answer,
+                level      = excluded.level,
+                updated_at = now()
+        returning id, created_at, (xmax = 0) as was_inserted
+        """,
+        (essay_id, section_id, card_id, question, answer, level),
+    )
+    row = cur.fetchone()
+
+    if row["was_inserted"]:
+        cur.execute(
+            "insert into essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at) "
+            "values (%s, null, %s)",
+            (row["id"], row["created_at"]),
+        )
+
+    return {
+        "flashcard_id": str(row["id"]),
+        "card_id": card_id,
+        "essay_id": str(essay_id),
+        "section_id": section_id,
+        "level": level,
+        "created": row["was_inserted"],
+    }, None
+
+
+@router.post("/upsert", response_model=None)
+async def upsert_flashcard(request: Request) -> JSONResponse:
+    """
+    Create or update exactly ONE flashcard — the question-level counterpart
+    to POST /essays/ingest, sharing none of its code or validation. Body:
+    {essay_slug, section_id, card: {id?, level, q, a}}. Reads the raw
+    Starlette Request body — not a Pydantic body model — same VALIDATION_ERROR
+    precedent as POST /essays/ingest and POST .../review.
+
+    This is a mutation endpoint (R-CON-BP-04 exempt): returns a typed record
+    on success (200), ApiError on any failure. It never touches
+    essaycards.essays or essaycards.essay_sections — the payload has no
+    field for section prose/heading/order at all, so even pasting back an
+    unedited single-question export (which DOES carry that context, as
+    read-only grounding for an external LLM — see GET .../export below)
+    cannot change essay content; there is nothing here for such a field to
+    write to.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return api_error("VALIDATION_ERROR", "Request body must be valid JSON")
+
+    parsed, error = _validate_upsert_body(body)
+    if error is not None:
+        return error
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            result, error = _upsert_question(
+                cur, parsed["essay_slug"], parsed["section_id"], parsed["card_id"],
+                parsed["level"], parsed["question"], parsed["answer"],
+            )
+            if error is not None:
+                return error
+        conn.commit()
+
+    return JSONResponse(content=result)
+
+
+@router.get("/{flashcard_id}/export", response_model=None)
+def export_question(flashcard_id: str) -> JSONResponse:
+    """
+    Self-contained JSON export of ONE flashcard for an external AI
+    conversation. essay_slug/essay_title/section_* fields are READ-ONLY
+    CONTEXT (grounding for the discussion) — POST /upsert has no field to
+    write them back to, so this package can be pasted back unedited (or with
+    only card.* changed) with no risk of touching essay prose. See
+    POST /upsert's docstring.
+
+    Bespoke JSON, not a Dataset — R-CON-BP-04 exemption, same rationale as
+    GET /essays/{essay_id}/examination-package.
+
+    404 ApiError if flashcard_id does not exist.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select f.card_key, f.question, f.answer, f.level,
+                       f.section_id, s.anchor_slug as section_anchor_slug,
+                       s.heading as section_heading, s.body_markdown as section_body_markdown,
+                       e.slug as essay_slug, e.title as essay_title
+                from essaycards.flashcards f
+                join essaycards.essay_sections s on s.id = f.section_id
+                join essaycards.essays e on e.id = f.essay_id
+                where f.id = %s
+                """,
+                (flashcard_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return api_error("NOT_FOUND", f"Flashcard {flashcard_id} not found", status=404)
+
+    package = {
+        "export_version": 1,
+        "essay_slug": row["essay_slug"],
+        "essay_title": row["essay_title"],
+        "section_id": str(row["section_id"]),
+        "section_anchor_slug": row["section_anchor_slug"],
+        "section_heading": row["section_heading"],
+        "section_body_markdown": row["section_body_markdown"],
+        "card": {
+            "id": row["card_key"],
+            "level": row["level"],
+            "q": row["question"],
+            "a": row["answer"],
+        },
+    }
+    return JSONResponse(content=package)
 
 
 async def _parse_review_grade(request: Request) -> tuple[str | None, JSONResponse | None]:

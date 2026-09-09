@@ -203,6 +203,69 @@ interface SectionExportPackage {
   }[];
 }
 
+// ── Single-essay export (Sprint08_QuestionLevelsAndStructure) ──────────────
+//
+// Sibling of SectionExportPackage — same shape, minus focus_section_id: "any
+// number of sections, revise whichever I direct" rather than one named
+// section. Reimports through the existing POST /essays/ingest via IngestView.
+
+interface EssayExportPackage {
+  export_version: number;
+  title: string;
+  slug: string;
+  category: string | null;
+  sort_index: number;
+  status: string;
+  sections: {
+    section_id: string;
+    heading: string;
+    anchor_slug: string;
+    body_markdown: string;
+    cards: { id: string; q: string; a: string }[];
+  }[];
+}
+
+// ── Question overview + single-question export/upsert ──────────────────────
+//
+// QuestionRow is one flat GET /essays/{id}/questions row — QuestionOverviewView
+// groups these by section then by level client-side, the same pattern
+// EssayListView already uses to group essays by category from a flat row list.
+
+interface QuestionRow {
+  id: string;
+  card_key: string;
+  question: string;
+  answer: string;
+  level: number;
+  section_id: string;
+  section_anchor_slug: string;
+  section_heading: string;
+  section_order_index: number;
+}
+
+// GET /flashcards/{id}/export — essay_slug/essay_title/section_* are
+// READ-ONLY CONTEXT for an AI conversation; POST /flashcards/upsert has no
+// field to write any of them back to (see buildQuestionUpsertBody below).
+interface QuestionExportPackage {
+  export_version: number;
+  essay_slug: string;
+  essay_title: string;
+  section_id: string;
+  section_anchor_slug: string;
+  section_heading: string;
+  section_body_markdown: string;
+  card: { id: string; level: number; q: string; a: string };
+}
+
+interface QuestionUpsertResult {
+  flashcard_id: string;
+  card_id: string;
+  essay_id: string;
+  section_id: string;
+  level: number;
+  created: boolean;
+}
+
 interface Dataset<T> {
   meta: { object_type: string; total: number };
   rows: T[];
@@ -553,6 +616,69 @@ function buildSectionInsertClipboardText(pkg: SectionExportPackage): string {
   return SECTION_INSERT_PROMPT_INTRO + JSON.stringify({ ...pkg, sections }, null, 2);
 }
 
+// ── Single-essay export prompt ──────────────────────────────────────────────
+//
+// Copied to the clipboard by the "Export essay" button in ReaderView. Same
+// package shape as SectionExportPackage minus focus_section_id — the model
+// may revise however many sections I direct, not just one named section.
+
+const ESSAY_EXPORT_PROMPT_INTRO = `You are helping revise an essay for an app called EssayCards. Below this prompt is a JSON payload containing EVERY section of the essay, in order, wrapped in the essay-level fields required to save it back.
+
+Revise whichever sections I direct in this conversation — rewrite "body_markdown", fix errors, tighten prose, or add/edit/remove entries in a section's "cards". Leave every section I do NOT ask you to touch completely unchanged, in the same order — the array order is what saves each section's position, so adding, removing, or reordering sections will silently move or lose them.
+
+RULES (breaking these makes the reply unusable):
+- Return exactly the same sections, in the same order — do not add, remove, or reorder any of them (ask me explicitly if I want a new section; that is a different workflow).
+- Do NOT change "slug" (the essay's id) or any section's "anchor_slug" — renaming one breaks links back to that section.
+- Do NOT change "title", "category", "sort_index", or "status" unless I explicitly ask you to.
+- Each card has a short "id". Keep the "id" of any card you are editing unchanged, so it updates in place instead of creating a duplicate. Only invent a new "id" (letters, digits, "_"/"-" only, unique across the whole essay) for a genuinely new card.
+- Removing a card from a section's "cards" does NOT delete it from the app on reimport — it is simply left unchanged. There is no way to delete a card through this mechanism.
+- "body_markdown" is the actual essay prose the reader sees — write real text, not a summary.
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY the complete JSON object — no markdown code fences, no commentary before or after — the same shape as below with your revisions applied. Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the essay package:
+
+`;
+
+function buildEssayExportClipboardText(pkg: EssayExportPackage): string {
+  return ESSAY_EXPORT_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+// ── Single-question export prompt (Sprint08_QuestionLevelsAndStructure) ────
+//
+// Copied to the clipboard by the "Export" button on a question row in
+// QuestionOverviewView. essay_slug/essay_title/section_* are READ-ONLY
+// CONTEXT — POST /flashcards/upsert (the reimport target) has no field to
+// write any of them back to, so even a reply that echoes this whole export
+// back verbatim cannot touch essay prose. Every field named here must stay
+// in sync with backend/routers/flashcards.py::_validate_upsert_body.
+
+const QUESTION_EXPORT_PROMPT_INTRO = `This is an EssayCards single-question export, for discussing and improving one flashcard with you. Below this prompt is a JSON payload. Only "card" is what gets saved — "essay_slug", "essay_title", "section_id", "section_anchor_slug", "section_heading" and "section_body_markdown" are READ-ONLY CONTEXT: use them to understand the surrounding essay, but nothing you write into them has any effect, so don't bother rewriting them.
+
+Discuss and improve the question as I direct in this conversation — rewrite "card.q" and/or "card.a", and change "card.level" if I ask you to reconsider its structural depth (1 = foundational/spine, 2 = building/explanatory structure, 3 = decorating/example/detail — open-ended upward, but 1-3 is the current convention).
+
+RULES (breaking these makes the reply unusable):
+- Do NOT change "card.id" — it is this question's stable identity; changing it creates a duplicate question instead of updating this one.
+- "card.level" must be a plain integer >= 1.
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY a JSON object of this exact shape — no markdown code fences, no commentary before or after:
+
+{
+  "essay_slug": "copy verbatim from this package's essay_slug",
+  "section_id": "copy verbatim from this package's section_id",
+  "card": { "id": "copy verbatim from card.id", "level": 0, "q": "...", "a": "..." }
+}
+
+Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the question package:
+
+`;
+
+function buildQuestionExportClipboardText(pkg: QuestionExportPackage): string {
+  return QUESTION_EXPORT_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
 // ── Essay List View ───────────────────────────────────────────────────────────
 
 // Preferred display order for known overview categories. Anything not listed
@@ -813,6 +939,29 @@ function ReaderView() {
   const sectionActionReady = (sectionId: string, kind: 'export' | 'insert') =>
     sectionActionMsg?.sectionId === sectionId && sectionActionMsg.kind === kind && sectionActionMsg.ok;
 
+  // "Export essay" — same toggle-to-Import pattern as the per-section
+  // buttons, one level up (no sectionId to key on; only one essay on this
+  // page).
+  const [essayExportMsg, setEssayExportMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleExportEssay = async () => {
+    if (!essay) return;
+    setEssayExportMsg(null);
+    const res = await apiFetch<EssayExportPackage>(`/essaycards/essays/${essay.id}/export`);
+    if (isApiError(res)) {
+      setEssayExportMsg({ ok: false, text: `Export failed: ${res.error.message}` });
+      return;
+    }
+    const err = await writeClipboard(buildEssayExportClipboardText(res));
+    setEssayExportMsg({
+      ok: !err,
+      text:
+        err ??
+        'Copied. Paste into ChatGPT (or similar), have it revise whichever sections you direct, then ' +
+          'paste its JSON reply into "Add / Update Essay" to save it.',
+    });
+  };
+
   const handleExportSection = async (sectionId: string) => {
     if (!essay) return;
     setSectionActionMsg(null);
@@ -887,11 +1036,25 @@ function ReaderView() {
 
   return (
     <div style={pageStyle}>
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <button style={btnStyle} onClick={() => navigate('/essaycards')}>
           ← All essays
         </button>
+        <button style={btnStyle} onClick={() => navigate(`/essaycards/essays/${essay.id}/questions`)}>
+          Question overview
+        </button>
+        <button
+          style={btnStyle}
+          onClick={() =>
+            essayExportMsg?.ok ? navigate('/essaycards/ingest') : handleExportEssay()
+          }
+        >
+          {essayExportMsg?.ok ? 'Import →' : 'Export essay'}
+        </button>
       </div>
+      {essayExportMsg && (
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{essayExportMsg.text}</div>
+      )}
       <h1 style={{ marginBottom: 24 }}>{essay.title}</h1>
 
       {essay.sections.length === 0 && (
@@ -938,6 +1101,455 @@ function ReaderView() {
           <SectionExaminationHistory sectionId={section.id} />
         </section>
       ))}
+    </div>
+  );
+}
+
+// ── Question Overview (Sprint08_QuestionLevelsAndStructure) ─────────────────
+//
+// Editorial/narrative overview of one essay's questions — NOT a review
+// screen. Hierarchy: essay -> sections (essay order) -> questions grouped by
+// level (ascending). Purpose: let the reader see the essay's question
+// skeleton at a glance — a section with no Level 1 entries visibly lacks a
+// foundational question; too many Level 3 entries and too few Level 1/2
+// visibly signals "too much detail, not enough structure".
+//
+// Levels 1/2/3 always render (even empty, with a muted "none yet" line) so a
+// gap is something you SEE, not something you have to infer from a missing
+// heading; any level beyond 3 present in the data renders after them,
+// ascending — the schema is intentionally open-ended upward (schema.sql
+// ck_flashcards_level only enforces >= 1).
+
+const LEVEL_DESCRIPTIONS: Record<number, string> = {
+  1: 'Foundational / spine',
+  2: 'Building / explanatory structure',
+  3: 'Decorating — examples, terminology, anecdotes, supporting detail',
+};
+
+function levelLabel(level: number): string {
+  const desc = LEVEL_DESCRIPTIONS[level];
+  return desc ? `Level ${level} — ${desc}` : `Level ${level}`;
+}
+
+// Level 1 reads as the bold load-bearing structure, 2 as the explanatory
+// layer, 3+ progressively lighter/supporting — via the existing Material 3
+// tokens already used throughout this app, not a new palette.
+function levelBorderColor(level: number): string {
+  if (level <= 1) return 'var(--md-sys-color-primary)';
+  if (level === 2) return 'var(--md-sys-color-outline)';
+  return 'var(--md-sys-color-outline-variant)';
+}
+
+const questionFieldStyle: React.CSSProperties = {
+  width: '100%',
+  fontSize: 13,
+  padding: 6,
+  boxSizing: 'border-box',
+  border: '1px solid #ccc',
+  borderRadius: 6,
+  marginBottom: 6,
+};
+
+interface SectionQuestionGroup {
+  section: SectionRow;
+  levels: { level: number; questions: QuestionRow[] }[];
+}
+
+function groupQuestionsBySection(sections: SectionRow[], questions: QuestionRow[]): SectionQuestionGroup[] {
+  const bySection = new Map<string, QuestionRow[]>();
+  for (const q of questions) {
+    const list = bySection.get(q.section_id);
+    if (list) list.push(q); else bySection.set(q.section_id, [q]);
+  }
+  return sections.map(section => {
+    const inSection = bySection.get(section.id) ?? [];
+    const byLevel = new Map<number, QuestionRow[]>();
+    for (const q of inSection) {
+      const list = byLevel.get(q.level);
+      if (list) list.push(q); else byLevel.set(q.level, [q]);
+    }
+    const levelKeys = Array.from(new Set([1, 2, 3, ...byLevel.keys()])).sort((a, b) => a - b);
+    return {
+      section,
+      levels: levelKeys.map(level => ({ level, questions: byLevel.get(level) ?? [] })),
+    };
+  });
+}
+
+function QuestionOverviewView() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [essay, setEssay] = useState<EssayDetailRow | null>(null);
+  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const load = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    const [essayRes, questionsRes] = await Promise.all([
+      apiFetch<Dataset<EssayDetailRow>>(`/essaycards/essays/${id}`),
+      apiFetch<Dataset<QuestionRow>>(`/essaycards/essays/${id}/questions`),
+    ]);
+    setLoading(false);
+    if (isApiError(essayRes)) { setError(essayRes); return; }
+    if (isApiError(questionsRes)) { setError(questionsRes); return; }
+    setEssay(essayRes.rows[0] ?? null);
+    setQuestions(questionsRes.rows);
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <div style={pageStyle}><Skeleton /></div>;
+  if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
+  if (!essay) return <div style={pageStyle}>Essay not found.</div>;
+
+  const groups = groupQuestionsBySection(essay.sections, questions);
+
+  return (
+    <div style={pageStyle}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <button style={btnStyle} onClick={() => navigate(`/essaycards/essays/${essay.id}`)}>
+          ← Reader
+        </button>
+        <button style={btnStyle} onClick={() => navigate('/essaycards/questions/import')}>
+          Import question
+        </button>
+      </div>
+      <h1 style={{ marginBottom: 4 }}>{essay.title}</h1>
+      <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Question overview</div>
+
+      {groups.length === 0 && (
+        <div style={{ color: '#888', fontSize: 14 }}>This essay has no sections yet.</div>
+      )}
+
+      {groups.map(group => (
+        <SectionQuestionGroupView
+          key={group.section.id}
+          essaySlug={essay.slug}
+          group={group}
+          onChanged={load}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SectionQuestionGroupView({ essaySlug, group, onChanged }: {
+  essaySlug: string;
+  group: SectionQuestionGroup;
+  onChanged: () => void;
+}) {
+  const [addingLevel, setAddingLevel] = useState<number | null>(null);
+
+  return (
+    <section style={{ marginBottom: 32 }}>
+      <h2 style={{ marginBottom: 8 }}>{group.section.heading}</h2>
+      {group.levels.map(({ level, questions }) => (
+        <div
+          key={level}
+          style={{ marginBottom: 16, paddingLeft: 12, borderLeft: `3px solid ${levelBorderColor(level)}` }}
+        >
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{levelLabel(level)}</div>
+          {questions.length === 0 ? (
+            <div style={{ color: '#aaa', fontSize: 13, marginBottom: 6 }}>No questions at this level yet.</div>
+          ) : (
+            questions.map(q => (
+              <QuestionItem key={q.id} essaySlug={essaySlug} question={q} onChanged={onChanged} />
+            ))
+          )}
+          <button
+            style={{ ...btnStyle, fontSize: 12, padding: '2px 10px' }}
+            onClick={() => setAddingLevel(addingLevel === level ? null : level)}
+          >
+            {addingLevel === level ? 'Cancel' : '+ Add question'}
+          </button>
+          {addingLevel === level && (
+            <AddQuestionForm
+              essaySlug={essaySlug}
+              sectionId={group.section.id}
+              defaultLevel={level}
+              onDone={() => { setAddingLevel(null); onChanged(); }}
+            />
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function QuestionItem({ essaySlug, question, onChanged }: {
+  essaySlug: string;
+  question: QuestionRow;
+  onChanged: () => void;
+}) {
+  const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
+  const [q, setQ] = useState(question.question);
+  const [a, setA] = useState(question.answer);
+  const [level, setLevel] = useState(question.level);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [exportMsg, setExportMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleStartEdit = () => {
+    setQ(question.question);
+    setA(question.answer);
+    setLevel(question.level);
+    setError(null);
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    const res = await apiFetch<QuestionUpsertResult>('/essaycards/flashcards/upsert', {
+      method: 'POST',
+      body: JSON.stringify({
+        essay_slug: essaySlug,
+        section_id: question.section_id,
+        card: { id: question.card_key, level, q, a },
+      }),
+    });
+    setSaving(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    setEditing(false);
+    onChanged();
+  };
+
+  const handleExport = async () => {
+    setExportMsg(null);
+    const res = await apiFetch<QuestionExportPackage>(`/essaycards/flashcards/${question.id}/export`);
+    if (isApiError(res)) {
+      setExportMsg({ ok: false, text: `Export failed: ${res.error.message}` });
+      return;
+    }
+    const err = await writeClipboard(buildQuestionExportClipboardText(res));
+    setExportMsg({
+      ok: !err,
+      text:
+        err ??
+        'Copied. Paste into ChatGPT (or similar), discuss and improve the question, then paste its ' +
+          'JSON reply into "Import question" to save it.',
+    });
+  };
+
+  if (!editing) {
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 14 }}>{question.question}</div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+          <button style={{ ...btnStyle, fontSize: 12, padding: '2px 10px' }} onClick={handleStartEdit}>
+            Edit
+          </button>
+          <button
+            style={{ ...btnStyle, fontSize: 12, padding: '2px 10px' }}
+            onClick={() =>
+              exportMsg?.ok ? navigate('/essaycards/questions/import') : handleExport()
+            }
+          >
+            {exportMsg?.ok ? 'Import →' : 'Export'}
+          </button>
+        </div>
+        {exportMsg && (
+          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{exportMsg.text}</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 12, padding: 8, background: 'var(--md-sys-color-surface)', borderRadius: 6 }}>
+      <textarea value={q} onChange={e => setQ(e.target.value)} rows={2} style={questionFieldStyle} placeholder="Question" />
+      <textarea value={a} onChange={e => setA(e.target.value)} rows={2} style={questionFieldStyle} placeholder="Answer" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <label style={{ fontSize: 12 }}>Level</label>
+        <input
+          type="number"
+          min={1}
+          value={level}
+          onChange={e => setLevel(Math.max(1, parseInt(e.target.value, 10) || 1))}
+          style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6 }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button style={primaryBtnStyle} disabled={saving || !q.trim() || !a.trim()} onClick={handleSave}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button style={btnStyle} onClick={() => setEditing(false)}>Cancel</button>
+      </div>
+      {error && <div style={{ marginTop: 8 }}><ErrorCard error={error} /></div>}
+    </div>
+  );
+}
+
+function AddQuestionForm({ essaySlug, sectionId, defaultLevel, onDone }: {
+  essaySlug: string;
+  sectionId: string;
+  defaultLevel: number;
+  onDone: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const [a, setA] = useState('');
+  const [level, setLevel] = useState(defaultLevel);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const handleAdd = async () => {
+    setSaving(true);
+    setError(null);
+    // card.id omitted -> backend auto-generates a fresh id.
+    const res = await apiFetch<QuestionUpsertResult>('/essaycards/flashcards/upsert', {
+      method: 'POST',
+      body: JSON.stringify({ essay_slug: essaySlug, section_id: sectionId, card: { level, q, a } }),
+    });
+    setSaving(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <div style={{ marginTop: 8, padding: 8, background: 'var(--md-sys-color-surface)', borderRadius: 6 }}>
+      <textarea value={q} onChange={e => setQ(e.target.value)} rows={2} style={questionFieldStyle} placeholder="New question" />
+      <textarea value={a} onChange={e => setA(e.target.value)} rows={2} style={questionFieldStyle} placeholder="Answer" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <label style={{ fontSize: 12 }}>Level</label>
+        <input
+          type="number"
+          min={1}
+          value={level}
+          onChange={e => setLevel(Math.max(1, parseInt(e.target.value, 10) || 1))}
+          style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6 }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button style={primaryBtnStyle} disabled={saving || !q.trim() || !a.trim()} onClick={handleAdd}>
+          {saving ? 'Adding…' : 'Add question'}
+        </button>
+      </div>
+      {error && <div style={{ marginTop: 8 }}><ErrorCard error={error} /></div>}
+    </div>
+  );
+}
+
+// ── Question Import View ─────────────────────────────────────────────────────
+//
+// Paste ChatGPT's JSON reply from a single-question export (see
+// QUESTION_EXPORT_PROMPT_INTRO). Same paste/submit pattern as
+// IngestView/ImportExaminationsView/ExploreImportView: the raw pasted text
+// goes straight to POST /flashcards/upsert as the request body — no
+// client-side JSON.parse/re-stringify — so the backend's own manual
+// request.json() parse (or reject) sees exactly what was pasted.
+
+const QUESTION_IMPORT_PLACEHOLDER_JSON = `{
+  "essay_slug": "what_can_we_know",
+  "section_id": "7402691f-edbd-4408-8f1c-dbd23916e5a6",
+  "card": {
+    "id": "plato-appearances-6",
+    "level": 3,
+    "q": "In Plato's Meno, what was he trying to demonstrate with the example of the road to Larissa?",
+    "a": "That a true belief can guide action just as successfully as knowledge, but knowledge is more secure because the true belief is tethered by an account of why it is correct."
+  }
+}`;
+
+function QuestionImportView() {
+  const navigate = useNavigate();
+  const [text, setText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [result, setResult] = useState<QuestionUpsertResult | null>(null);
+  const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
+
+  const handlePasteFromClipboard = async () => {
+    const res = await readClipboard();
+    if ('error' in res) {
+      setClipboardMsg(res.error);
+      return;
+    }
+    setText(res.text);
+    setClipboardMsg(null);
+  };
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setError(null);
+    setResult(null);
+    const res = await apiFetch<QuestionUpsertResult>('/essaycards/flashcards/upsert', {
+      method: 'POST',
+      body: text,
+    });
+    setSubmitting(false);
+    if (isApiError(res)) {
+      setError(res);
+      return;
+    }
+    setResult(res);
+  };
+
+  return (
+    <div style={pageStyle}>
+      <h2 style={{ marginTop: 0 }}>Import Question</h2>
+      <div style={{ fontSize: 13, color: '#888', marginBottom: 12 }}>
+        Paste ChatGPT's JSON reply from a single-question export (started with "Export" on a question
+        in that essay's question overview). Only the named card is created or updated — everything else
+        in the essay is left untouched.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
+      </div>
+      {clipboardMsg && (
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+      )}
+
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        rows={14}
+        style={{
+          width: '100%',
+          fontFamily: 'monospace',
+          fontSize: 13,
+          padding: 8,
+          boxSizing: 'border-box',
+          border: '1px solid #ccc',
+          borderRadius: 6,
+        }}
+        placeholder={QUESTION_IMPORT_PLACEHOLDER_JSON}
+      />
+
+      <div style={{ marginTop: 12 }}>
+        <button style={primaryBtnStyle} disabled={submitting || !text.trim()} onClick={handleSubmit}>
+          {submitting ? 'Submitting…' : 'Submit'}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ marginTop: 16 }}>
+          <ErrorCard error={error} />
+        </div>
+      )}
+
+      {result && (
+        <div style={{ marginTop: 16, padding: 12, border: '1px solid #ccc', borderRadius: 8 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>
+            {result.created ? 'Question created' : 'Question updated'}
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>
+            card id <code>{result.card_id}</code>, level {result.level}
+          </div>
+          <button style={btnStyle} onClick={() => navigate(`/essaycards/essays/${result.essay_id}/questions`)}>
+            Back to question overview →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2333,6 +2945,8 @@ export default function EssayCardsApp() {
       <Routes>
         <Route path="/" element={<EssayListView />} />
         <Route path="/essays/:id" element={<ReaderView />} />
+        <Route path="/essays/:id/questions" element={<QuestionOverviewView />} />
+        <Route path="/questions/import" element={<QuestionImportView />} />
         <Route path="/review" element={<ReviewSessionView />} />
         <Route path="/ingest" element={<IngestView />} />
         <Route path="/examinations/import" element={<ImportExaminationsView />} />

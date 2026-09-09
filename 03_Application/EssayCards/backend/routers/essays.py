@@ -1,5 +1,7 @@
 """
-GET /essays, GET /essays/{essay_id}, and POST /essays/ingest.
+GET /essays, GET /essays/{essay_id}, GET /essays/{essay_id}/questions,
+GET /essays/{essay_id}/export, GET /essays/{essay_id}/sections/{section_id}/export,
+and POST /essays/ingest.
 
 GET /essays and GET /essays/{essay_id} are read endpoints and return Dataset
 per R-CON-BP-04.
@@ -56,6 +58,22 @@ ESSAY_OVERVIEW_SCHEMA: list[ColumnSchema] = ESSAY_SCHEMA + [
     ColumnSchema(key="open_count",           label="Open",        type="number", sortable=True,  filterable=False),
     ColumnSchema(key="oral_score",           label="Oral score",  type="number", sortable=True,  filterable=False),
     ColumnSchema(key="oral_date",            label="Oral date",   type="date",   sortable=True,  filterable=False),
+]
+
+# GET /essays/{essay_id}/questions — the question-overview screen. A flat row
+# list, same pattern as ESSAY_OVERVIEW_SCHEMA: the frontend groups rows by
+# section then by level client-side (mirroring EssayListView's existing
+# category grouping) rather than the backend inventing a nested Dataset shape
+# (Datasets are flat by contract — R-CON-BP-04).
+QUESTION_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="card_key",            label="Card id",      type="string", sortable=False, filterable=False),
+    ColumnSchema(key="question",            label="Question",     type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="answer",              label="Answer",       type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="level",               label="Level",        type="number", sortable=True,  filterable=True),
+    ColumnSchema(key="section_id",          label="Section",      type="string", sortable=False, filterable=True),
+    ColumnSchema(key="section_anchor_slug", label="Anchor",       type="string", sortable=False, filterable=False),
+    ColumnSchema(key="section_heading",     label="Section title", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="section_order_index", label="Section order", type="number", sortable=True,  filterable=False),
 ]
 
 
@@ -217,6 +235,155 @@ def get_essay(essay_id: str) -> JSONResponse:
     return _dataset_response(dataset)
 
 
+@router.get("/{essay_id}/questions", response_model=None)
+def list_essay_questions(essay_id: str) -> JSONResponse:
+    """
+    Every flashcard in this essay, flat, each row carrying its section's
+    identity/order — the question-overview screen groups section -> level
+    client-side from this, the same way EssayListView groups essays by
+    category from a flat GET /essays row list (R-CON-BP-06 pattern fidelity;
+    Datasets are flat by contract, R-CON-BP-04).
+
+    Ordering (R-CON-AL-01): (section order_index asc, level asc, created_at
+    asc) — sections in essay order; within a section, questions grouped by
+    level ascending; created_at asc as the stable tiebreaker within a level
+    (there is no question sort_index in this sprint — see
+    Sprint08_QuestionLevelsAndStructure/00_draft.md). No parameters. Time
+    basis: not applicable (no time-dependent filtering). 404 if essay_id does
+    not exist. An essay with no cards returns rows: [].
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select 1 from essaycards.essays where id = %s", (essay_id,))
+            if not cur.fetchone():
+                return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
+
+            cur.execute(
+                """
+                select f.id, f.card_key, f.question, f.answer, f.level,
+                       f.section_id, s.anchor_slug as section_anchor_slug,
+                       s.heading as section_heading, s.order_index as section_order_index
+                from essaycards.flashcards f
+                join essaycards.essay_sections s on s.id = f.section_id
+                where f.essay_id = %s
+                order by s.order_index asc, f.level asc, f.created_at asc
+                """,
+                (essay_id,),
+            )
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                d["id"] = str(d["id"])
+                d["section_id"] = str(d["section_id"])
+                rows.append(d)
+
+    dataset = Dataset(
+        meta=DatasetMeta(
+            object_type="question",
+            label="Questions",
+            total=len(rows),
+            page=1,
+            page_size=max(len(rows), 1),
+            row_actions=[],
+        ),
+        **{"schema": QUESTION_SCHEMA},
+        rows=rows,
+    )
+    return _dataset_response(dataset)
+
+
+def _ordered_sections_with_cards(cur: Any, essay_id: str) -> list[dict[str, Any]]:
+    """
+    Every section of essay_id, in current order, each carrying its own
+    cards — the common body of an ingest-shaped export package, shared by
+    export_section (adds focus_section_id) and export_essay (no focus).
+    Cards are exported as {id, q, a} only — deliberately NOT `level`: level
+    is exclusively a POST /flashcards/upsert concern (see schema.sql), and
+    POST /essays/ingest's card schema has no level field to read, so it can
+    never be reset by an essay/section re-ingest. Read-only — issues no
+    writes. Caller has already confirmed essay_id exists.
+    """
+    cur.execute(
+        "select id, anchor_slug, heading, body_markdown "
+        "from essaycards.essay_sections where essay_id = %s order by order_index asc",
+        (essay_id,),
+    )
+    section_rows = cur.fetchall()
+
+    cur.execute(
+        "select section_id, card_key, question, answer from essaycards.flashcards "
+        "where essay_id = %s order by created_at asc",
+        (essay_id,),
+    )
+    cards_by_section: dict[str, list[dict[str, str]]] = {}
+    for r in cur.fetchall():
+        cards_by_section.setdefault(str(r["section_id"]), []).append(
+            {"id": r["card_key"], "q": r["question"], "a": r["answer"]}
+        )
+
+    return [
+        {
+            "section_id": str(r["id"]),
+            "heading": r["heading"],
+            "anchor_slug": r["anchor_slug"],
+            "body_markdown": r["body_markdown"],
+            "cards": cards_by_section.get(str(r["id"]), []),
+        }
+        for r in section_rows
+    ]
+
+
+@router.get("/{essay_id}/export", response_model=None)
+def export_essay(essay_id: str) -> JSONResponse:
+    """
+    Self-contained JSON export of ONE essay's full current content, shaped
+    as a valid POST /ingest payload —
+    title/slug/category/sort_index/status plus every section (each carrying
+    its own heading/anchor_slug/body_markdown/cards), in current order.
+    Reimports through the existing POST /essays/ingest via "Add / Update
+    Essay" — there is no separate import endpoint. Because ingest is already
+    scoped to exactly one essay per call (one `slug` per payload), importing
+    this package can never touch any other essay
+    (Sprint08_QuestionLevelsAndStructure/00_draft.md §6).
+
+    Sibling of GET /essays/{essay_id}/sections/{section_id}/export (shares
+    _ordered_sections_with_cards) minus `focus_section_id` — this variant is
+    for "revise however many sections I direct" rather than one named
+    section; ESSAY_EXPORT_PROMPT_INTRO (src/ShellEntry.tsx) instructs the
+    external LLM to leave any section it wasn't asked to touch exactly as
+    given, in the same order, for the same order_index reason documented on
+    export_section.
+
+    Bespoke JSON, not a Dataset — R-CON-BP-04 exemption, same rationale as
+    GET /essays/{essay_id}/examination-package.
+
+    404 ApiError if essay_id does not exist.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select title, slug, category, sort_index, status "
+                "from essaycards.essays where id = %s",
+                (essay_id,),
+            )
+            essay_row = cur.fetchone()
+            if not essay_row:
+                return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
+
+            sections = _ordered_sections_with_cards(cur, essay_id)
+
+    package = {
+        "export_version": 1,
+        "title": essay_row["title"],
+        "slug": essay_row["slug"],
+        "category": essay_row["category"],
+        "sort_index": essay_row["sort_index"],
+        "status": essay_row["status"],
+        "sections": sections,
+    }
+    return JSONResponse(content=package)
+
+
 @router.get("/{essay_id}/sections/{section_id}/export", response_model=None)
 def export_section(essay_id: str, section_id: str) -> JSONResponse:
     """
@@ -270,26 +437,10 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
             if not essay_row:
                 return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
 
-            cur.execute(
-                "select id, anchor_slug, heading, body_markdown "
-                "from essaycards.essay_sections where essay_id = %s order by order_index asc",
-                (essay_id,),
-            )
-            section_rows = cur.fetchall()
-            if not any(str(r["id"]) == section_id for r in section_rows):
+            sections = _ordered_sections_with_cards(cur, essay_id)
+            if not any(s["section_id"] == section_id for s in sections):
                 return api_error(
                     "NOT_FOUND", f"Section {section_id} not found in essay {essay_id}", status=404
-                )
-
-            cur.execute(
-                "select section_id, card_key, question, answer from essaycards.flashcards "
-                "where essay_id = %s order by created_at asc",
-                (essay_id,),
-            )
-            cards_by_section: dict[str, list[dict[str, str]]] = {}
-            for r in cur.fetchall():
-                cards_by_section.setdefault(str(r["section_id"]), []).append(
-                    {"id": r["card_key"], "q": r["question"], "a": r["answer"]}
                 )
 
     package = {
@@ -300,16 +451,7 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
         "category": essay_row["category"],
         "sort_index": essay_row["sort_index"],
         "status": essay_row["status"],
-        "sections": [
-            {
-                "section_id": str(r["id"]),
-                "heading": r["heading"],
-                "anchor_slug": r["anchor_slug"],
-                "body_markdown": r["body_markdown"],
-                "cards": cards_by_section.get(str(r["id"]), []),
-            }
-            for r in section_rows
-        ],
+        "sections": sections,
     }
     return JSONResponse(content=package)
 
