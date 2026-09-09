@@ -185,11 +185,37 @@ def test_overview_oral_score_requires_every_section_examined(client, db_conn):
 
 
 # ── GET /essays/{essay_id}/sections/{section_id}/export ─────────────────────
+#
+# The export carries EVERY section of the essay (not just the requested one),
+# in current order, because POST /essays/ingest assigns order_index from a
+# submitted section's position in the "sections" array — a payload with only
+# the target section would always land it at order_index 0, silently
+# reordering the essay for any section past the first. See export_section's
+# docstring in backend/routers/essays.py.
+
+def _mk_essay_sections(client, slug, headings, **extra):
+    """Ingest an essay with one cardless section per heading, in order.
+    Returns (essay_id, [section_id, ...]) in that same order."""
+    payload = {
+        "title": slug, "slug": slug,
+        "sections": [
+            {"heading": h, "anchor_slug": f"{slug}-{h.lower()}", "body_markdown": f"body {h}", "cards": []}
+            for h in headings
+        ],
+        **extra,
+    }
+    r = client.post("/api/essaycards/essays/ingest", json=payload)
+    assert r.status_code == 200, r.text
+    eid = r.json()["essay_id"]
+    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    by_heading = {s["heading"]: s["id"] for s in detail["sections"]}
+    return eid, [by_heading[h] for h in headings]
+
 
 def test_export_section_returns_ingest_shaped_payload(client):
     """The export package is directly postable to POST /essays/ingest: it
-    carries the essay-level fields plus a single-element sections list for
-    the requested section, with its cards."""
+    carries the essay-level fields plus every section (each with its cards),
+    in order, and `focus_section_id` naming the requested one."""
     eid = _mk_essay(client, "export-essay", 2, category="Philosophy", sort_index=3)
     detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
     section = detail["sections"][0]
@@ -203,10 +229,11 @@ def test_export_section_returns_ingest_shaped_payload(client):
     assert pkg["category"] == "Philosophy"
     assert pkg["sort_index"] == 3
     assert pkg["status"] == "complete"
-    assert pkg["section_id"] == section["id"]
+    assert pkg["focus_section_id"] == section["id"]
 
-    assert len(pkg["sections"]) == 1
+    assert len(pkg["sections"]) == 1  # essay-essay only has one section
     exported = pkg["sections"][0]
+    assert exported["section_id"] == section["id"]
     assert exported["heading"] == section["heading"]
     assert exported["anchor_slug"] == section["anchor_slug"]
     assert exported["body_markdown"] == section["body_markdown"]
@@ -227,11 +254,23 @@ def test_export_section_section_not_found(client):
     assert r.json()["error"]["code"] == "NOT_FOUND"
 
 
+def test_export_includes_every_section_in_order(client):
+    eid, section_ids = _mk_essay_sections(client, "multi-sec", ["A", "B", "C"])
+
+    r = client.get(f"/api/essaycards/essays/{eid}/sections/{section_ids[1]}/export")
+    assert r.status_code == 200
+    pkg = r.json()
+
+    assert pkg["focus_section_id"] == section_ids[1]
+    assert [s["anchor_slug"] for s in pkg["sections"]] == ["multi-sec-a", "multi-sec-b", "multi-sec-c"]
+    assert [s["section_id"] for s in pkg["sections"]] == section_ids
+
+
 def test_export_then_reingest_updates_only_that_section(client):
-    """Round trip: export a section, edit its body/cards, re-post it through
-    the existing whole-essay ingest endpoint (as the frontend does via
-    IngestView) — only that section changes; the essay's other section and
-    metadata are untouched."""
+    """Round trip: export, edit the target section's body/cards, re-post the
+    WHOLE returned payload through the existing whole-essay ingest endpoint
+    (as the frontend does via IngestView) — only that section changes; the
+    essay's other section and metadata are untouched."""
     payload = {
         "title": "roundtrip-essay", "slug": "roundtrip-essay",
         "category": "Art", "sort_index": 7,
@@ -249,20 +288,72 @@ def test_export_then_reingest_updates_only_that_section(client):
     section_one = next(s for s in detail["sections"] if s["anchor_slug"] == "rt-one")
 
     pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{section_one['id']}/export").json()
-    pkg["sections"][0]["body_markdown"] = "REVISED body one"
-    pkg["sections"][0]["cards"][0]["a"] = "REVISED a1"
+    target = next(s for s in pkg["sections"] if s["anchor_slug"] == "rt-one")
+    target["body_markdown"] = "REVISED body one"
+    target["cards"][0]["a"] = "REVISED a1"
 
     r2 = client.post("/api/essaycards/essays/ingest", json=pkg)
     assert r2.status_code == 200, r2.text
-    assert r2.json()["sections_updated"] == 1
+    assert r2.json()["sections_updated"] == 2  # both entries in the payload upsert, only one's content changed
     assert r2.json()["cards_updated"] == 1
 
     detail2 = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
     assert detail2["category"] == "Art"
     assert detail2["sort_index"] == 7
-    assert len(detail2["sections"]) == 2  # "rt-two" untouched, not dropped
+    assert len(detail2["sections"]) == 2
 
     updated_one = next(s for s in detail2["sections"] if s["anchor_slug"] == "rt-one")
     assert updated_one["body_markdown"] == "REVISED body one"
     untouched_two = next(s for s in detail2["sections"] if s["anchor_slug"] == "rt-two")
     assert untouched_two["body_markdown"] == "body two"
+
+
+def test_export_then_reingest_preserves_order_for_non_first_section(client):
+    """Regression test for the order_index bug: editing the SECOND (or later)
+    section via export/reimport must not move it to the front. Before the
+    export package carried every section (not just the target), reimporting
+    a single-section payload always assigned order_index 0 — the array
+    position within that payload — silently promoting any non-first section
+    to first."""
+    eid, section_ids = _mk_essay_sections(client, "ord-essay", ["A", "B", "C"])
+
+    pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{section_ids[1]}/export").json()
+    target = next(s for s in pkg["sections"] if s["section_id"] == section_ids[1])
+    target["body_markdown"] = "REVISED B"
+
+    r = client.post("/api/essaycards/essays/ingest", json=pkg)
+    assert r.status_code == 200, r.text
+
+    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    ordered = sorted(detail["sections"], key=lambda s: s["order_index"])
+    assert [s["anchor_slug"] for s in ordered] == ["ord-essay-a", "ord-essay-b", "ord-essay-c"]
+    assert next(s for s in ordered if s["anchor_slug"] == "ord-essay-b")["body_markdown"] == "REVISED B"
+
+
+def test_insert_flow_splices_new_section_at_correct_position(client):
+    """Simulates the frontend's "Insert section after" flow: export the
+    target section's full package, splice a new section object into the
+    array right after the target (as the frontend does client-side), reimport
+    the whole array. The new section lands between its intended neighbors and
+    every existing section keeps its content and relative order."""
+    eid, section_ids = _mk_essay_sections(client, "ins-essay", ["A", "B", "C"])
+
+    pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{section_ids[0]}/export").json()
+    idx = next(i for i, s in enumerate(pkg["sections"]) if s["section_id"] == section_ids[0])
+    pkg["sections"].insert(idx + 1, {
+        "heading": "New Middle", "anchor_slug": "ins-essay-new",
+        "body_markdown": "brand new section", "cards": [{"id": "ins-new-c1", "q": "q", "a": "a"}],
+    })
+
+    r = client.post("/api/essaycards/essays/ingest", json=pkg)
+    assert r.status_code == 200, r.text
+    assert r.json()["sections_created"] == 1
+    assert r.json()["sections_updated"] == 3
+
+    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    ordered = sorted(detail["sections"], key=lambda s: s["order_index"])
+    assert [s["anchor_slug"] for s in ordered] == [
+        "ins-essay-a", "ins-essay-new", "ins-essay-b", "ins-essay-c",
+    ]
+    new_section = next(s for s in ordered if s["anchor_slug"] == "ins-essay-new")
+    assert new_section["body_markdown"] == "brand new section"

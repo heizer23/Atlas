@@ -220,23 +220,41 @@ def get_essay(essay_id: str) -> JSONResponse:
 @router.get("/{essay_id}/sections/{section_id}/export", response_model=None)
 def export_section(essay_id: str, section_id: str) -> JSONResponse:
     """
-    Self-contained JSON export of ONE section, shaped as a valid POST /ingest
-    payload — title/slug/category/sort_index/status plus a single-element
-    `sections` list carrying this section's heading/anchor_slug/body_markdown
-    and cards. Pasting an edited reply from an external LLM straight into
-    "Add / Update Essay" (IngestView -> POST /essays/ingest) therefore upserts
-    just this section: sections and cards absent from a payload are left
-    untouched by upsert_document (see backend/ingest.py), so the rest of the
-    essay is unaffected.
+    Self-contained JSON export of the essay's FULL current section list (not
+    just section_id), shaped as a valid POST /ingest payload —
+    title/slug/category/sort_index/status plus every section (each carrying
+    its own heading/anchor_slug/body_markdown/cards), in current order, plus
+    `focus_section_id` naming which section_id the request was for.
+
+    The export MUST carry every section, in order — POST /essays/ingest
+    assigns each submitted section's order_index from its position in the
+    `sections` array (backend.ingest._upsert_section /
+    _validate_ingest_body's `"order_index": s_idx`), not from any value
+    carried in the payload. A payload with only the target section would
+    therefore always land it at order_index 0 on reimport, silently moving it
+    to the front of the essay for any section past the first. Carrying the
+    whole array at its current order means an unedited reply reproduces every
+    section's existing order_index; the export/insert prompts built from this
+    package (SECTION_EXPORT_PROMPT_INTRO / SECTION_INSERT_PROMPT_INTRO in
+    src/ShellEntry.tsx) instruct the external LLM to return every entry but
+    the one it was asked to change exactly as given, in the same order.
+
+    Two frontend flows share this endpoint: "Export section" (revise
+    section_id's own content in place) and "Insert section" (the frontend
+    splices a blank-template new section into the array, immediately after
+    section_id, before copying to the clipboard). Both reimport through the
+    existing POST /essays/ingest via "Add / Update Essay" — there is no
+    separate import endpoint for either.
 
     Bespoke JSON, not a Dataset — R-CON-BP-04 exemption on the same rationale
     as GET /essays/{essay_id}/examination-package (see module docstring in
     backend/routers/examinations.py): copied to the clipboard for an external
     LLM, not rendered by a Dataset-consuming UI component.
 
-    `section_id` (the essay_sections row id) and `export_version` are extra
-    top-level fields for traceability only — POST /essays/ingest reads none
-    of them, so they round-trip harmlessly through an unedited reply.
+    Each section's `section_id` is an extra field for traceability only —
+    POST /essays/ingest reads none of them (or `focus_section_id`, or
+    `export_version`), so they round-trip harmlessly through an unedited
+    reply.
 
     404 ApiError if essay_id does not exist, or if section_id does not exist
     under this essay.
@@ -254,28 +272,29 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
 
             cur.execute(
                 "select id, anchor_slug, heading, body_markdown "
-                "from essaycards.essay_sections where id = %s and essay_id = %s",
-                (section_id, essay_id),
+                "from essaycards.essay_sections where essay_id = %s order by order_index asc",
+                (essay_id,),
             )
-            section_row = cur.fetchone()
-            if not section_row:
+            section_rows = cur.fetchall()
+            if not any(str(r["id"]) == section_id for r in section_rows):
                 return api_error(
                     "NOT_FOUND", f"Section {section_id} not found in essay {essay_id}", status=404
                 )
 
             cur.execute(
-                "select card_key, question, answer from essaycards.flashcards "
-                "where section_id = %s order by created_at asc",
-                (section_id,),
+                "select section_id, card_key, question, answer from essaycards.flashcards "
+                "where essay_id = %s order by created_at asc",
+                (essay_id,),
             )
-            cards = [
-                {"id": r["card_key"], "q": r["question"], "a": r["answer"]}
-                for r in cur.fetchall()
-            ]
+            cards_by_section: dict[str, list[dict[str, str]]] = {}
+            for r in cur.fetchall():
+                cards_by_section.setdefault(str(r["section_id"]), []).append(
+                    {"id": r["card_key"], "q": r["question"], "a": r["answer"]}
+                )
 
     package = {
-        "export_version": 1,
-        "section_id": str(section_row["id"]),
+        "export_version": 2,
+        "focus_section_id": section_id,
         "title": essay_row["title"],
         "slug": essay_row["slug"],
         "category": essay_row["category"],
@@ -283,11 +302,13 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
         "status": essay_row["status"],
         "sections": [
             {
-                "heading": section_row["heading"],
-                "anchor_slug": section_row["anchor_slug"],
-                "body_markdown": section_row["body_markdown"],
-                "cards": cards,
+                "section_id": str(r["id"]),
+                "heading": r["heading"],
+                "anchor_slug": r["anchor_slug"],
+                "body_markdown": r["body_markdown"],
+                "cards": cards_by_section.get(str(r["id"]), []),
             }
+            for r in section_rows
         ],
     }
     return JSONResponse(content=package)

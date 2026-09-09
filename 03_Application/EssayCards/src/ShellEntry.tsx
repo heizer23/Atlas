@@ -172,20 +172,30 @@ interface ExploreImportResult {
 // ── Single-section export/import ────────────────────────────────────────────
 //
 // Same shape as the POST /essays/ingest payload (see IngestView / STUB_PROMPT
-// below), just pre-filled from one existing section and scoped to a single
-// element in "sections" — so pasting an edited reply straight into
-// "Add / Update Essay" upserts only that section. See
+// below) — pre-filled from the essay's CURRENT sections, ALL of them, in
+// order. POST /essays/ingest assigns each section's order_index from its
+// array position, not from any value in the payload, so a partial payload
+// would silently reorder the essay on reimport; carrying every section keeps
+// an unedited reply's order_index identical to what is already stored. See
 // backend/routers/essays.py::export_section.
+//
+// "Export section" (revise the focus section's own content) and "Insert
+// section" (splice a blank-template new section right after the focus one,
+// client-side, before copying) both use this same package — only the prompt
+// and whether a placeholder is spliced in differ. Both reimport through the
+// existing "Add / Update Essay" (IngestView -> POST /essays/ingest); there is
+// no separate import endpoint for either.
 
 interface SectionExportPackage {
   export_version: number;
-  section_id: string;
+  focus_section_id: string;
   title: string;
   slug: string;
   category: string | null;
   sort_index: number;
   status: string;
   sections: {
+    section_id: string;
     heading: string;
     anchor_slug: string;
     body_markdown: string;
@@ -465,23 +475,27 @@ function buildExploreClipboardText(pkg: ExplorationPackage): string {
   return EXPLORE_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
 }
 
-// ── Single-section export prompt ────────────────────────────────────────────
+// ── Single-section export / insert prompts ──────────────────────────────────
 //
 // Copied to the clipboard with the section export package by the "Export
-// section" button in ReaderView. The package IS a valid POST /essays/ingest
-// payload (see SectionExportPackage above) — the reply is meant to be pasted
-// straight into IngestView ("Add / Update Essay") unmodified in shape, only
-// its content revised.
+// section" / "Insert section after" buttons in ReaderView. The package IS a
+// valid POST /essays/ingest payload (see SectionExportPackage above) — the
+// reply is meant to be pasted straight into IngestView ("Add / Update
+// Essay") unmodified in shape, only content changed. Both prompts stress
+// leaving every non-target section byte-for-byte identical and in place,
+// because array order becomes each section's order_index on reimport (see
+// export_section's docstring in backend/routers/essays.py).
 
-const SECTION_EXPORT_PROMPT_INTRO = `You are helping revise one section of an essay for an app called EssayCards. Below this prompt is a JSON payload describing that ONE section, wrapped in the essay-level fields required to save it back.
+const SECTION_EXPORT_PROMPT_INTRO = `You are helping revise one section of an essay for an app called EssayCards. Below this prompt is a JSON payload containing EVERY section of the essay, in order, wrapped in the essay-level fields required to save it back. "focus_section_id" names the ONE section to revise — find it in "sections" by matching its "section_id".
 
-Revise the section as I direct in this conversation — rewrite "body_markdown", fix errors, tighten prose, or add/edit/remove entries in "cards".
+Revise ONLY that section as I direct in this conversation — rewrite its "body_markdown", fix errors, tighten prose, or add/edit/remove entries in its "cards". Leave every OTHER entry in "sections" completely untouched, in the same order — the array order is what saves each section's position, so adding, removing or reordering any section you were not asked to change will silently move or lose sections.
 
 RULES (breaking these makes the reply unusable):
-- Do NOT change "slug" (the essay's id) or sections[0].anchor_slug (this section's id) — either breaks links back to this section.
+- Return exactly the same sections, in the same order — do not add, remove, or reorder any of them. Only the focus section's content changes.
+- Do NOT change "slug" (the essay's id) or any section's "anchor_slug" — renaming one breaks links back to that section.
 - Do NOT change "title", "category", "sort_index", or "status" unless I explicitly ask you to.
-- Each entry in "cards" has a short "id". Keep the "id" of any card you are editing unchanged, so it updates in place instead of creating a duplicate. Only invent a new "id" (letters, digits, "_"/"-" only, unique in this list) for a genuinely new card.
-- Removing a card from "cards" does NOT delete it from the app on reimport — it is simply left unchanged. There is no way to delete a card through this mechanism.
+- Each card has a short "id". Keep the "id" of any card you are editing unchanged, so it updates in place instead of creating a duplicate. Only invent a new "id" (letters, digits, "_"/"-" only, unique across the whole essay) for a genuinely new card.
+- Removing a card from a section's "cards" does NOT delete it from the app on reimport — it is simply left unchanged. There is no way to delete a card through this mechanism.
 - "body_markdown" is the actual essay prose the reader sees — write real text, not a summary.
 
 WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY the complete JSON object — no markdown code fences, no commentary before or after — the same shape as below with your revisions applied. Every string must be valid JSON — escape any double quote inside a value as \\".
@@ -492,6 +506,51 @@ Here is the section package:
 
 function buildSectionExportClipboardText(pkg: SectionExportPackage): string {
   return SECTION_EXPORT_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+const SECTION_INSERT_PROMPT_INTRO = `You are helping write a NEW section for an essay in an app called EssayCards, to be inserted at a specific position. Below this prompt is a JSON payload containing EVERY section of the essay, in order, wrapped in the essay-level fields required to save it back. A placeholder entry has been spliced into "sections" at the position where the new section goes — it is the entry whose "heading" is "NEW SECTION — replace this whole entry"; every field on that entry is an instruction for what to write, not real content.
+
+Write the new section as I direct in this conversation, fitting naturally between its neighbors in the array — read their "body_markdown" for context and continuity, and don't repeat what they already cover. Replace the placeholder entry's "heading", "anchor_slug", "body_markdown" and "cards" with the real content. Leave every OTHER entry in "sections" completely untouched, in the same order.
+
+RULES (breaking these makes the reply unusable):
+- Return exactly the same number of sections, in the same order, with ONLY the placeholder entry filled in — do not add, remove, or reorder any other section.
+- The new section's "anchor_slug" must be a url-safe id (letters, digits, "_"/"-" only) not matching any anchor_slug already used elsewhere in this payload.
+- Do NOT change "slug" (the essay's id) or any EXISTING section's "anchor_slug" — renaming one breaks links back to that section.
+- Do NOT change "title", "category", "sort_index", or "status" unless I explicitly ask you to.
+- Give each new card a short "id" (letters, digits, "_"/"-" only) not matching any card id already used elsewhere in this payload.
+- "body_markdown" is the actual essay prose the reader sees, roughly 300-600 words — write real text, not a summary.
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY the complete JSON object — no markdown code fences, no commentary before or after — the same shape as below, with the placeholder replaced. Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the section package:
+
+`;
+
+// The instructional placeholder entry spliced into the array right after the
+// focus section, for the "Insert section after" flow. Its own field values
+// ARE the fill-in instructions (same convention as PLACEHOLDER_JSON/
+// STUB_PROMPT below) — SECTION_INSERT_PROMPT_INTRO tells the model to find it
+// by this exact heading text and replace the whole entry.
+function buildInsertPlaceholderSection(): SectionExportPackage['sections'][number] {
+  return {
+    section_id: '(new — assigned automatically on import)',
+    heading: 'NEW SECTION — replace this whole entry',
+    anchor_slug: 'a-new-url-safe-id-unique-in-this-essay',
+    body_markdown:
+      "THE ACTUAL NEW SECTION'S ESSAY TEXT, written in Markdown, roughly 300-600 words, continuing naturally " +
+      'from the surrounding sections — replace this instruction text with real prose. Do not summarize.',
+    cards: [
+      { id: 'a-new-unique-card-id', q: 'a flashcard question drawn from this new section', a: 'its answer' },
+    ],
+  };
+}
+
+function buildSectionInsertClipboardText(pkg: SectionExportPackage): string {
+  const focusIdx = pkg.sections.findIndex(s => s.section_id === pkg.focus_section_id);
+  const insertAt = focusIdx === -1 ? pkg.sections.length : focusIdx + 1;
+  const sections = [...pkg.sections];
+  sections.splice(insertAt, 0, buildInsertPlaceholderSection());
+  return SECTION_INSERT_PROMPT_INTRO + JSON.stringify({ ...pkg, sections }, null, 2);
 }
 
 // ── Essay List View ───────────────────────────────────────────────────────────
@@ -743,26 +802,57 @@ function ReaderView() {
   const [essay, setEssay] = useState<EssayDetailRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
-  // "Export section" — one message slot, keyed to the section it was shown
-  // for, since only one export is ever in flight at a time.
-  const [sectionExportMsg, setSectionExportMsg] = useState<{ sectionId: string; text: string } | null>(null);
+  // "Export section" / "Insert section after" — one message slot, keyed to
+  // the section and action it was shown for, since only one is ever in
+  // flight at a time. `ok` drives the button's copied -> "Import" toggle;
+  // `text` also carries failure messages, which must NOT toggle the button.
+  const [sectionActionMsg, setSectionActionMsg] = useState<
+    { sectionId: string; kind: 'export' | 'insert'; ok: boolean; text: string } | null
+  >(null);
+
+  const sectionActionReady = (sectionId: string, kind: 'export' | 'insert') =>
+    sectionActionMsg?.sectionId === sectionId && sectionActionMsg.kind === kind && sectionActionMsg.ok;
 
   const handleExportSection = async (sectionId: string) => {
     if (!essay) return;
-    setSectionExportMsg(null);
+    setSectionActionMsg(null);
     const res = await apiFetch<SectionExportPackage>(
       `/essaycards/essays/${essay.id}/sections/${sectionId}/export`
     );
     if (isApiError(res)) {
-      setSectionExportMsg({ sectionId, text: `Export failed: ${res.error.message}` });
+      setSectionActionMsg({ sectionId, kind: 'export', ok: false, text: `Export failed: ${res.error.message}` });
       return;
     }
     const err = await writeClipboard(buildSectionExportClipboardText(res));
-    setSectionExportMsg({
+    setSectionActionMsg({
       sectionId,
+      kind: 'export',
+      ok: !err,
       text:
         err ??
         'Copied. Paste into ChatGPT (or similar), have it revise the section, then paste its JSON ' +
+          'reply into "Add / Update Essay" to save it.',
+    });
+  };
+
+  const handleInsertSection = async (sectionId: string) => {
+    if (!essay) return;
+    setSectionActionMsg(null);
+    const res = await apiFetch<SectionExportPackage>(
+      `/essaycards/essays/${essay.id}/sections/${sectionId}/export`
+    );
+    if (isApiError(res)) {
+      setSectionActionMsg({ sectionId, kind: 'insert', ok: false, text: `Export failed: ${res.error.message}` });
+      return;
+    }
+    const err = await writeClipboard(buildSectionInsertClipboardText(res));
+    setSectionActionMsg({
+      sectionId,
+      kind: 'insert',
+      ok: !err,
+      text:
+        err ??
+        'Copied. Paste into ChatGPT (or similar), have it write the new section, then paste its JSON ' +
           'reply into "Add / Update Essay" to save it.',
     });
   };
@@ -821,17 +911,29 @@ function ReaderView() {
             >
               Review this section
             </button>
-            <button style={btnStyle} onClick={() => handleExportSection(section.id)}>
-              Export section
+            <button
+              style={btnStyle}
+              onClick={() =>
+                sectionActionReady(section.id, 'export')
+                  ? navigate('/essaycards/ingest')
+                  : handleExportSection(section.id)
+              }
+            >
+              {sectionActionReady(section.id, 'export') ? 'Import →' : 'Export section'}
             </button>
-            {sectionExportMsg && sectionExportMsg.sectionId === section.id && (
-              <button style={btnStyle} onClick={() => navigate('/essaycards/ingest')}>
-                Add / Update Essay →
-              </button>
-            )}
+            <button
+              style={btnStyle}
+              onClick={() =>
+                sectionActionReady(section.id, 'insert')
+                  ? navigate('/essaycards/ingest')
+                  : handleInsertSection(section.id)
+              }
+            >
+              {sectionActionReady(section.id, 'insert') ? 'Import →' : 'Insert section after'}
+            </button>
           </div>
-          {sectionExportMsg && sectionExportMsg.sectionId === section.id && (
-            <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{sectionExportMsg.text}</div>
+          {sectionActionMsg && sectionActionMsg.sectionId === section.id && (
+            <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{sectionActionMsg.text}</div>
           )}
           <SectionExaminationHistory sectionId={section.id} />
         </section>

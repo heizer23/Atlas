@@ -360,30 +360,52 @@ graded `again` or floored `hard`, with nothing else to grade while its
 interval elapses — **Check again** on the completion screen re-runs the fetch
 for exactly that case.
 
-## Single-section export/import
-Revise one section with ChatGPT without touching the rest of the essay. Deliberately
-reuses the whole-essay JSON round trip (`## Content ingestion`) instead of introducing a
-parallel mechanism: `GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export`
+## Single-section export / insert
+Revise one section, or insert a new one, with ChatGPT — without a dedicated import
+endpoint. Deliberately reuses the whole-essay JSON round trip (`## Content ingestion`):
+`GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export`
 (`backend/routers/essays.py::export_section`) returns a bespoke JSON blob (R-CON-BP-04
 exemption, same rationale as `examination-package`/`exploration-package`) that IS already
 a valid `POST /essays/ingest` payload — `title`/`slug`/`category`/`sort_index`/`status`
-plus a single-element `sections` list holding this section's `heading`/`anchor_slug`/
-`body_markdown`/`cards` (`section_id` is an extra top-level field, for traceability only;
-`export_version` too — the ingest endpoint reads neither).
+plus **every** current section (each with `section_id`/`heading`/`anchor_slug`/
+`body_markdown`/`cards`), in order, plus `focus_section_id` naming which section the
+request was for.
 
-The **Export section** button at the end of each section in `ReaderView` fetches this
-package and copies it, plus `SECTION_EXPORT_PROMPT_INTRO` (`src/ShellEntry.tsx`), to the
-clipboard, then surfaces an **Add / Update Essay →** button. There is no dedicated import
-view or endpoint: the ChatGPT reply is pasted into the existing "Add / Update Essay"
-(`IngestView`, `/essaycards/ingest`) and submitted through `POST /essays/ingest` exactly
-like a full essay paste. Because `upsert_document` never touches a section or card absent
-from the payload (`## Content ingestion`), submitting a single-section payload upserts
-only that section and its listed cards — the essay's other sections and top-level fields
-are left exactly as they were, PROVIDED the essay-level fields round-trip unedited (the
-export intentionally echoes the essay's current `category`/`sort_index`/`status` for this
-reason — see `_validate_ingest_body` defaults in `backend/routers/essays.py`). Same
-accepted gap as ingest generally: a card removed from `cards` on reimport is left
-unchanged, not deleted.
+**Why the full array, not just the one section.** `POST /essays/ingest` assigns each
+submitted section's `order_index` from its position in the payload's `sections` array
+(`_validate_ingest_body`'s `"order_index": s_idx` / `_upsert_section`'s `on conflict do
+update set order_index = excluded.order_index`) — never from a value carried in the
+payload. A payload holding only the target section therefore always lands it at
+`order_index` 0 on reimport, silently promoting any non-first section to the front of the
+essay. Carrying the whole array at its current order means an unedited reply reproduces
+every section's existing `order_index`; the export/insert prompts instruct the model to
+return every entry but the one it was asked to change exactly as given, in place. (This
+was a real bug in the original single-section-payload version of this feature, fixed
+before it saw use beyond the one session that introduced it — see `git log` on
+`backend/routers/essays.py::export_section` and the `preserves_order_for_non_first_section`
+regression test in `tests/test_essays.py`.)
+
+Two buttons at the end of each section in `ReaderView`, both toggling to **Import →**
+(navigating to the existing `IngestView`, `/essaycards/ingest`) once something is copied —
+same mechanism, different prompt:
+- **Export section** — copies the package + `SECTION_EXPORT_PROMPT_INTRO`
+  (`src/ShellEntry.tsx`) unmodified; the model is told to revise only the section named by
+  `focus_section_id` and return every other entry byte-for-byte identical.
+- **Insert section after** — `buildSectionInsertClipboardText` splices a blank
+  instructional placeholder section (its field *values* are the fill-in instructions, same
+  convention as `PLACEHOLDER_JSON`/`STUB_PROMPT`) into the array immediately after
+  `focus_section_id`, client-side, before copying it with `SECTION_INSERT_PROMPT_INTRO`;
+  the model fills in the placeholder and returns the whole array, everything else
+  untouched. On reimport this is an ordinary `POST /essays/ingest` with one new
+  `anchor_slug` — `upsert_document` inserts it and assigns its `order_index` from where it
+  sits in the returned array, i.e. exactly where it was spliced in.
+
+Because `upsert_document` still never touches a section or card absent from the payload
+(`## Content ingestion`), and both flows always resubmit every section, nothing is ever
+silently dropped — PROVIDED the essay-level fields round-trip unedited (the export
+intentionally echoes the essay's current `category`/`sort_index`/`status` for this reason —
+see `_validate_ingest_body` defaults). Same accepted gap as ingest generally: a card
+removed from `cards` on reimport is left unchanged, not deleted.
 
 ## Oral examinations
 Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —
