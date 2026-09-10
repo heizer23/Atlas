@@ -51,6 +51,12 @@ function wsUrl(): string {
   return `${proto}//${window.location.host}/api/claudeconsole/ws`;
 }
 
+// Browser-native dictation (Web Speech API) — no backend involved. Chrome's
+// implementation only exposes the vendor-prefixed constructor.
+function getSpeechRecognitionCtor(): any {
+  return (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition ?? null;
+}
+
 function extractText(event: any): string | null {
   if (typeof event?.text === 'string') return event.text;
   const content = event?.message?.content;
@@ -267,8 +273,23 @@ export default function ClaudeConsoleApp() {
   const [input, setInput]             = useState('');
   const [wsError, setWsError]         = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
-  const wsRef     = useRef<WebSocket | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [listening, setListening]     = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const wsRef         = useRef<WebSocket | null>(null);
+  const scrollRef     = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const dictationBaseRef = useRef('');  // input text as it stood when dictation started
+  const listeningRef = useRef(false);   // mirrors `listening` for use inside recognition callbacks
+
+  const speechCtor = getSpeechRecognitionCtor();
+  const speechApiPresent = !!speechCtor;
+  const secureContext = window.isSecureContext;
+  const speechSupported = speechApiPresent && secureContext;
+  const speechDisabledReason = !secureContext
+    ? 'Voice input needs HTTPS (or localhost) — this page is loaded over plain HTTP.'
+    : !speechApiPresent
+      ? 'Voice input is not supported in this browser.'
+      : null;
 
   const loadSession = useCallback(async () => {
     setLoading(true);
@@ -354,9 +375,79 @@ export default function ClaudeConsoleApp() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, liveMessages]);
 
+  // Stop any live dictation on unmount so the mic doesn't stay hot.
+  useEffect(() => () => {
+    listeningRef.current = false;
+    recognitionRef.current?.stop();
+  }, []);
+
+  const stopListening = useCallback(() => {
+    listeningRef.current = false;
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+  }, []);
+
+  // `continuous: true` on mobile Chrome is unreliable — it silently restarts
+  // internal recognition segments and, on Android in particular, replays
+  // already-finalized text as "new" final results, producing duplicated
+  // words/phrases. This runs one single-utterance (continuous: false)
+  // session at a time and chains a fresh one on `onend` for as long as the
+  // user hasn't tapped stop — same effect (dictate across pauses) without
+  // relying on the browser's buggy continuous mode.
+  const runSegment = useCallback((speechCtorRef: any) => {
+    const recognition = new speechCtorRef();
+    recognition.lang = navigator.language || 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event: any) => {
+      let finalChunk = '';
+      let interimChunk = '';
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) finalChunk += result[0].transcript;
+        else interimChunk += result[0].transcript;
+      }
+      if (finalChunk) {
+        dictationBaseRef.current = `${dictationBaseRef.current} ${finalChunk}`.trim();
+      }
+      setInput(`${dictationBaseRef.current} ${interimChunk}`.trim());
+    };
+    recognition.onerror = (event: any) => {
+      // 'no-speech' just means this segment's silence timeout was hit —
+      // onend follows and, since we're still "listening", starts a fresh
+      // segment. Not a real failure.
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+      setSpeechError(
+        event.error === 'not-allowed' || event.error === 'permission-denied'
+          ? 'Microphone permission denied.'
+          : `Voice input error: ${event.error}`
+      );
+      listeningRef.current = false;
+      setListening(false);
+    };
+    recognition.onend = () => {
+      if (listeningRef.current) runSegment(speechCtorRef);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, []);
+
+  const startListening = useCallback(() => {
+    if (!speechCtor || listeningRef.current) return;
+    dictationBaseRef.current = input.trim();
+    setSpeechError(null);
+    listeningRef.current = true;
+    setListening(true);
+    runSegment(speechCtor);
+  }, [speechCtor, input, runSegment]);
+
   const handleSend = () => {
     const prompt = input.trim();
     if (!prompt || !wsRef.current || !wsConnected || turnActive) return;
+    if (listening) stopListening();
     wsRef.current.send(JSON.stringify({ prompt }));
     setInput('');
     setTurnActive(true);
@@ -411,6 +502,7 @@ export default function ClaudeConsoleApp() {
       </div>
 
       {wsError && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{wsError}</div>}
+      {speechError && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{speechError}</div>}
       {!wsConnected && (
         <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>
           Disconnected — reconnecting…
@@ -422,10 +514,23 @@ export default function ClaudeConsoleApp() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder={wsConnected ? 'Message Claude Code…' : 'Reconnecting…'}
+          placeholder={!wsConnected ? 'Reconnecting…' : listening ? 'Listening…' : 'Message Claude Code…'}
           disabled={turnActive || !wsConnected}
           style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
         />
+        <button
+          onClick={listening ? stopListening : startListening}
+          disabled={!speechSupported || turnActive}
+          title={speechDisabledReason ?? (listening ? 'Stop dictation' : 'Start dictation')}
+          style={{
+            padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', fontSize: 16, cursor: 'pointer',
+            background: listening ? 'var(--md-sys-color-error)' : 'transparent',
+            color: listening ? '#fff' : 'inherit',
+            opacity: speechSupported ? 1 : 0.4,
+          }}
+        >
+          🎤
+        </button>
         {turnActive ? (
           <button
             onClick={handleInterrupt}
