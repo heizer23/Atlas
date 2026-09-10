@@ -62,6 +62,71 @@ function extractText(event: any): string | null {
   return null;
 }
 
+// Events that carry no chat-relevant content of their own (session bookkeeping,
+// rate-limit telemetry, the turn-complete marker) — never rendered as a bubble.
+const SILENT_EVENT_TYPES = new Set(['system', 'rate_limit_event', 'result']);
+
+function parseEvent(row: MessageRow): any | null {
+  if (!row.tool_detail) return null;
+  try { return JSON.parse(row.tool_detail); } catch { return null; }
+}
+
+function summarizeToolUse(block: any): string {
+  const name = block.name ?? 'Tool';
+  const input = block.input ?? {};
+  if (typeof input.command === 'string') return `${name}: ${input.command}`;
+  if (typeof input.file_path === 'string') return `${name}: ${input.file_path}`;
+  if (typeof input.pattern === 'string') return `${name}: ${input.pattern}`;
+  const keys = Object.keys(input);
+  return keys.length ? `${name}(${keys[0]}: ${JSON.stringify(input[keys[0]]).slice(0, 60)})` : name;
+}
+
+function toolResultText(block: any): string {
+  const content = block.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.filter((c: any) => c?.type === 'text').map((c: any) => c.text ?? '').join('\n');
+  }
+  return JSON.stringify(content, null, 2);
+}
+
+// A single stream-json event can hold several distinct pieces (a tool call
+// alongside text, in principle) — this expands one message row into zero or
+// more render entries instead of assuming a 1:1 row-to-bubble mapping.
+type RenderEntry =
+  | { kind: 'bubble'; key: string; role: 'user' | 'assistant'; content: string }
+  | { kind: 'tool_call'; key: string; summary: string; input: any }
+  | { kind: 'tool_result'; key: string; isError: boolean; text: string };
+
+function toRenderEntries(row: MessageRow): RenderEntry[] {
+  const event = parseEvent(row);
+  const etype = event?.type;
+  if (etype && SILENT_EVENT_TYPES.has(etype)) return [];
+
+  const content = event?.message?.content;
+  if (Array.isArray(content)) {
+    const entries: RenderEntry[] = [];
+    content.forEach((block: any, i: number) => {
+      if (block?.type === 'text' && block.text) {
+        entries.push({ kind: 'bubble', key: `${row.id}-${i}`, role: row.role === 'user' ? 'user' : 'assistant', content: block.text });
+      } else if (block?.type === 'tool_use') {
+        entries.push({ kind: 'tool_call', key: `${row.id}-${i}`, summary: summarizeToolUse(block), input: block.input ?? {} });
+      } else if (block?.type === 'tool_result') {
+        entries.push({ kind: 'tool_result', key: `${row.id}-${i}`, isError: block.is_error === true, text: toolResultText(block) });
+      }
+      // 'thinking' blocks are intentionally not rendered — internal reasoning, not chat content.
+    });
+    if (entries.length) return entries;
+  }
+
+  // Rows with no parseable raw event (fixtures, or events extractText already
+  // handled) fall back to the persisted plain-text content.
+  if (row.content) {
+    return [{ kind: 'bubble', key: row.id, role: row.role === 'user' ? 'user' : 'assistant', content: row.content }];
+  }
+  return [];
+}
+
 // ── Start-session panel ───────────────────────────────────────────────────────
 
 function StartSessionPanel({ onStarted }: { onStarted: () => void }) {
@@ -135,8 +200,8 @@ function StartSessionPanel({ onStarted }: { onStarted: () => void }) {
 
 // ── Chat bubble ───────────────────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: MessageRow }) {
-  const isUser = message.role === 'user';
+function MessageBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
+  const isUser = role === 'user';
   return (
     <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
       <div style={{
@@ -148,13 +213,47 @@ function MessageBubble({ message }: { message: MessageRow }) {
         fontSize:     14,
         whiteSpace:   'pre-wrap',
       }}>
-        {message.role === 'tool' && (
-          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>tool</div>
-        )}
-        {message.content ?? <span style={{ opacity: 0.6 }}>[no text — see tool detail]</span>}
+        {content}
       </div>
     </div>
   );
+}
+
+const detailCardStyle: React.CSSProperties = {
+  fontSize: 12, margin: '4px 0 10px', maxWidth: '85%',
+};
+
+const detailBodyStyle: React.CSSProperties = {
+  whiteSpace: 'pre-wrap', fontSize: 11, background: 'var(--md-sys-color-surface-variant)',
+  color: 'var(--md-sys-color-on-surface-variant)', padding: 8, borderRadius: 6, marginTop: 4,
+  maxHeight: 240, overflowY: 'auto',
+};
+
+function ToolCallCard({ summary, input }: { summary: string; input: any }) {
+  const short = summary.length > 100 ? summary.slice(0, 100) + '…' : summary;
+  return (
+    <details style={detailCardStyle}>
+      <summary style={{ cursor: 'pointer', opacity: 0.75 }}>🔧 {short}</summary>
+      <pre style={detailBodyStyle}>{JSON.stringify(input, null, 2)}</pre>
+    </details>
+  );
+}
+
+function ToolResultCard({ isError, text }: { isError: boolean; text: string }) {
+  return (
+    <details style={detailCardStyle}>
+      <summary style={{ cursor: 'pointer', opacity: 0.75, color: isError ? 'var(--md-sys-color-error)' : undefined }}>
+        {isError ? '⚠️ Tool error' : '✓ Tool result'}
+      </summary>
+      <pre style={detailBodyStyle}>{text}</pre>
+    </details>
+  );
+}
+
+function ChatEntry({ entry }: { entry: RenderEntry }) {
+  if (entry.kind === 'bubble') return <MessageBubble role={entry.role} content={entry.content} />;
+  if (entry.kind === 'tool_call') return <ToolCallCard summary={entry.summary} input={entry.input} />;
+  return <ToolResultCard isError={entry.isError} text={entry.text} />;
 }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
@@ -281,7 +380,7 @@ export default function ClaudeConsoleApp() {
         }}
       >
         {allMessages.length === 0 && <div style={{ color: '#888', fontSize: 14 }}>No messages yet — say hello.</div>}
-        {allMessages.map(m => <MessageBubble key={m.id} message={m} />)}
+        {allMessages.flatMap(toRenderEntries).map(entry => <ChatEntry key={entry.key} entry={entry} />)}
       </div>
 
       {wsError && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{wsError}</div>}
