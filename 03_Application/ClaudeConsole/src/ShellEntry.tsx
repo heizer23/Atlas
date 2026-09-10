@@ -397,7 +397,9 @@ export default function ClaudeConsoleApp() {
   // relying on the browser's buggy continuous mode.
   const runSegment = useCallback((speechCtorRef: any) => {
     const recognition = new speechCtorRef();
-    recognition.lang = navigator.language || 'en-US';
+    // Hardcoded rather than navigator.language — dictation is for dev work,
+    // done in English, regardless of the phone/browser's OS locale (German).
+    recognition.lang = 'en-US';
     recognition.continuous = false;
     recognition.interimResults = true;
 
