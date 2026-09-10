@@ -1,0 +1,317 @@
+/**
+ * ClaudeConsole ShellEntry — Sprint 01
+ *
+ * Single view: a chat window driving one headless Claude Code session.
+ * REST reads/mutations go through the shared apiFetch client. The chat
+ * socket uses the native WebSocket API directly — apiFetch is REST-only,
+ * so this is an intentional, singular exception to "no raw fetch," not a
+ * pattern to spread elsewhere. See backend/ws.py for the server side.
+ */
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetch, isApiError } from '@platform-ui/api/client';
+import ErrorCard from '@platform-ui/components/ErrorCard';
+import Skeleton from '@platform-ui/components/Skeleton';
+import type { Row, ApiError } from '@platform-ui/api/types';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface SessionRow extends Row {
+  id: string;
+  permission_mode: string;
+  status: string;
+  created_at: string;
+}
+
+interface MessageRow extends Row {
+  id: string;
+  role: 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_detail: string | null;
+  created_at: string;
+}
+
+interface AppDataset<T> {
+  meta: { object_type: string; total: number };
+  rows: T[];
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const PERMISSION_MODES = ['plan', 'acceptEdits', 'bypassPermissions'] as const;
+
+const PERMISSION_LABELS: Record<string, string> = {
+  plan:               'Plan (no side effects)',
+  acceptEdits:        'Accept Edits (default)',
+  bypassPermissions:  'Bypass Permissions (no safety checks)',
+};
+
+function wsUrl(): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/api/claudeconsole/ws`;
+}
+
+function extractText(event: any): string | null {
+  if (typeof event?.text === 'string') return event.text;
+  const content = event?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const parts = content.filter((c: any) => c?.type === 'text').map((c: any) => c.text ?? '');
+    if (parts.length) return parts.join('');
+  }
+  return null;
+}
+
+// ── Start-session panel ───────────────────────────────────────────────────────
+
+function StartSessionPanel({ onStarted }: { onStarted: () => void }) {
+  const [mode, setMode]           = useState<string>('acceptEdits');
+  const [confirming, setConfirming] = useState(false);
+  const [starting, setStarting]   = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+
+  const doStart = async () => {
+    setStarting(true);
+    setError(null);
+    const res = await apiFetch('/claudeconsole/session', {
+      method: 'POST',
+      body: JSON.stringify({ permission_mode: mode }),
+    });
+    setStarting(false);
+    if (isApiError(res)) {
+      setError((res as ApiError).error.message);
+      return;
+    }
+    onStarted();
+  };
+
+  const handleStartClick = () => {
+    if (mode === 'bypassPermissions' && !confirming) {
+      setConfirming(true);
+      return;
+    }
+    doStart();
+  };
+
+  return (
+    <div style={{ padding: 24, maxWidth: 480 }}>
+      <h2 style={{ marginTop: 0 }}>Start a Console session</h2>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, fontWeight: 500, marginBottom: 16 }}>
+        Permission mode
+        <select
+          value={mode}
+          onChange={e => { setMode(e.target.value); setConfirming(false); }}
+          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+        >
+          {PERMISSION_MODES.map(m => <option key={m} value={m}>{PERMISSION_LABELS[m]}</option>)}
+        </select>
+      </label>
+
+      {confirming && (
+        <div style={{
+          padding: 12, borderRadius: 8, marginBottom: 16,
+          background: '#fef2f2', border: '1px solid var(--md-sys-color-error)', fontSize: 13,
+        }}>
+          <strong>Bypass Permissions</strong> skips all of Claude Code's safety checks for this
+          session — every tool call runs without approval. Click Start again to confirm.
+        </div>
+      )}
+
+      {error && <ErrorCard message={error} />}
+
+      <button
+        onClick={handleStartClick}
+        disabled={starting}
+        style={{
+          padding: '8px 16px', borderRadius: 6, border: 'none',
+          background: 'var(--md-sys-color-primary)', color: '#fff', cursor: 'pointer', fontSize: 14,
+        }}
+      >
+        {starting ? 'Starting…' : confirming ? 'Confirm Start' : 'Start Session'}
+      </button>
+    </div>
+  );
+}
+
+// ── Chat bubble ───────────────────────────────────────────────────────────────
+
+function MessageBubble({ message }: { message: MessageRow }) {
+  const isUser = message.role === 'user';
+  return (
+    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
+      <div style={{
+        maxWidth:     '75%',
+        padding:      '8px 12px',
+        borderRadius: 12,
+        background:   isUser ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-variant)',
+        color:        isUser ? 'var(--md-sys-color-on-primary-container, inherit)' : 'var(--md-sys-color-on-surface-variant)',
+        fontSize:     14,
+        whiteSpace:   'pre-wrap',
+      }}>
+        {message.role === 'tool' && (
+          <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>tool</div>
+        )}
+        {message.content ?? <span style={{ opacity: 0.6 }}>[no text — see tool detail]</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── Root ──────────────────────────────────────────────────────────────────────
+
+export default function ClaudeConsoleApp() {
+  const [session, setSession]         = useState<SessionRow | null>(null);
+  const [loadingSession, setLoading]  = useState(true);
+  const [messages, setMessages]       = useState<MessageRow[]>([]);
+  const [liveMessages, setLiveMessages] = useState<MessageRow[]>([]);
+  const [turnActive, setTurnActive]   = useState(false);
+  const [input, setInput]             = useState('');
+  const [wsError, setWsError]         = useState<string | null>(null);
+  const wsRef     = useRef<WebSocket | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const loadSession = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch('/claudeconsole/session');
+    setLoading(false);
+    if (isApiError(res)) return;
+    const rows = (res as AppDataset<SessionRow>).rows;
+    setSession(rows[0] ?? null);
+  }, []);
+
+  const loadMessages = useCallback(async () => {
+    const res = await apiFetch('/claudeconsole/session/messages');
+    if (isApiError(res)) return;
+    setMessages((res as AppDataset<MessageRow>).rows ?? []);
+    setLiveMessages([]);
+  }, []);
+
+  useEffect(() => { loadSession(); }, [loadSession]);
+  useEffect(() => { if (session) loadMessages(); }, [session, loadMessages]);
+
+  // One WebSocket connection per active session.
+  useEffect(() => {
+    if (!session) return;
+    const ws = new WebSocket(wsUrl());
+    wsRef.current = ws;
+    setWsError(null);
+
+    ws.onmessage = (evt) => {
+      const data = JSON.parse(evt.data);
+      if (data.type === 'error') {
+        setWsError(data.message ?? data.code);
+        if (data.code !== 'ALREADY_CONNECTED') setTurnActive(false);
+        return;
+      }
+      const text = extractText(data);
+      setLiveMessages(prev => [...prev, {
+        id:          `live-${prev.length}-${Date.now()}`,
+        role:        data.type === 'user' ? 'user' : 'assistant',
+        content:     text,
+        tool_detail: JSON.stringify(data),
+        created_at:  new Date().toISOString(),
+      }]);
+      if (data.type === 'result') {
+        setTurnActive(false);
+        // Reload from the DB-backed Dataset once the turn is done — this is
+        // the authoritative transcript; liveMessages was a best-effort
+        // real-time preview built on an unverified event schema.
+        loadMessages();
+      }
+    };
+    ws.onclose = () => { wsRef.current = null; };
+
+    return () => { ws.close(); };
+  }, [session, loadMessages]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages, liveMessages]);
+
+  const handleSend = () => {
+    const prompt = input.trim();
+    if (!prompt || !wsRef.current || turnActive) return;
+    wsRef.current.send(JSON.stringify({ prompt }));
+    setInput('');
+    setTurnActive(true);
+    setWsError(null);
+  };
+
+  const handleInterrupt = async () => {
+    await apiFetch('/claudeconsole/session/interrupt', { method: 'POST' });
+    setTurnActive(false);
+  };
+
+  const handleNewSession = () => {
+    if (!confirm('Start a new session? The current one will end (history stays browsable via its own record, just not resumable).')) return;
+    wsRef.current?.close();
+    setSession(null);
+    setMessages([]);
+    setLiveMessages([]);
+    setTurnActive(false);
+  };
+
+  if (loadingSession) return <div style={{ padding: 16 }}><Skeleton /></div>;
+
+  if (!session) {
+    return <StartSessionPanel onStarted={loadSession} />;
+  }
+
+  const allMessages = [...messages, ...liveMessages];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>
+          Session mode: <strong>{PERMISSION_LABELS[session.permission_mode] ?? session.permission_mode}</strong>
+        </div>
+        <button
+          onClick={handleNewSession}
+          style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #ccc', background: 'transparent', cursor: 'pointer', fontSize: 12 }}
+        >
+          New Session
+        </button>
+      </div>
+
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1, overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 8,
+          padding: 12, marginBottom: 8, background: 'var(--md-sys-color-surface)',
+        }}
+      >
+        {allMessages.length === 0 && <div style={{ color: '#888', fontSize: 14 }}>No messages yet — say hello.</div>}
+        {allMessages.map(m => <MessageBubble key={m.id} message={m} />)}
+      </div>
+
+      {wsError && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{wsError}</div>}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          placeholder="Message Claude Code…"
+          disabled={turnActive}
+          style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
+        />
+        {turnActive ? (
+          <button
+            onClick={handleInterrupt}
+            style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: 'var(--md-sys-color-error)', color: '#fff', cursor: 'pointer', fontSize: 14 }}
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={handleSend}
+            disabled={!input.trim()}
+            style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: 'var(--md-sys-color-primary)', color: '#fff', cursor: 'pointer', fontSize: 14 }}
+          >
+            Send
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

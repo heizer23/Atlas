@@ -1,0 +1,43 @@
+services:
+  claudeconsole:
+    build:
+      context: ../..
+      dockerfile: 03_Application/ClaudeConsole/Dockerfile
+    container_name: atlas-claudeconsole
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    volumes:
+      - ${DATA_ROOT}/claudeconsole/logs:/app/logs
+      # Live, read-write bind mount of the actual Atlas repo working tree.
+      # UNLIKE every sibling app (which only COPYs its own backend code at
+      # build time), ClaudeConsole's entire purpose is letting the inner
+      # `claude` subprocess edit real files in the real working repo you use
+      # day to day. Host and container paths must stay identical — this same
+      # literal path is passed to `claude --cwd`.
+      - /home/linse/Prod/Atlas:/home/linse/Prod/Atlas
+      # Personal OAuth credentials — READ-WRITE (not read-only): OAuth
+      # access-token refresh rewrites this file, so a read-only mount would
+      # break auth after the first token expiry.
+      # ACCEPTED, DELIBERATE SECURITY TRADEOFF: this puts your personal
+      # Claude subscription credentials inside a container. Only this one
+      # file is mounted (not all of ~/.claude/) to minimize exposure, but
+      # the exposure itself is real and knowingly accepted for v1, not
+      # mitigated further. See 03_Application/ClaudeConsole/CLAUDE.md.
+      - /home/linse/.claude/.credentials.json:/root/.claude/.credentials.json
+      # Git author identity only — read-only. Deliberately does NOT include
+      # SSH keys or push credentials: pushing stays a manual, human step
+      # outside ClaudeConsole for v1.
+      - /home/linse/.gitconfig:/root/.gitconfig:ro
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

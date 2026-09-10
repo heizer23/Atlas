@@ -51,6 +51,8 @@ export default defineConfig({
       '/api/batch/series':   { target: 'http://localhost:8014', changeOrigin: true },
       '/api/cal':            { target: 'http://localhost:8023', changeOrigin: true },
       '/api/essaycards':     { target: 'http://localhost:8024', changeOrigin: true },
+      '/api/claudeconsole/ws': { target: 'http://localhost:8025', ws: true, changeOrigin: true },
+      '/api/claudeconsole':    { target: 'http://localhost:8025', changeOrigin: true },
     },
   },
   test: {
