@@ -63,7 +63,6 @@ class TurnInProgress(Exception):
 class _ActiveTurn:
     def __init__(self) -> None:
         self.process: asyncio.subprocess.Process | None = None
-        self.task: asyncio.Task | None = None
 
 
 _active = _ActiveTurn()
@@ -75,12 +74,22 @@ def is_turn_active() -> bool:
 
 
 async def interrupt() -> bool:
-    """Kill the in-flight turn, if any. Returns True if something was killed."""
+    """Kill the in-flight turn's subprocess, if any. Killing it is enough on
+    its own: the pending `proc.stdout.readline()` in run_turn()'s read loop
+    returns EOF (not an exception) once the process dies, so the loop exits
+    cleanly on its own.
+
+    Do NOT also cancel a tracked task here (a previous version did, via
+    asyncio.current_task() captured inside run_turn()). run_turn() is awaited
+    directly inline within ws_endpoint()'s own coroutine, not spawned as a
+    separate asyncio.Task — so "the task running run_turn()" IS the task
+    handling the whole WebSocket connection. Cancelling it tore down the
+    entire connection (uncaught CancelledError crashing the ASGI request),
+    not just the current turn, leaving the client's socket dead with no
+    error surfaced and no way to send another message."""
     if _active.process is None:
         return False
     _active.process.kill()
-    if _active.task is not None:
-        _active.task.cancel()
     return True
 
 
@@ -172,7 +181,6 @@ async def run_turn(
             cwd=ATLAS_ROOT,
         )
         _active.process = proc
-        _active.task = asyncio.current_task()
 
     try:
         _persist_message(db_session_id, "user", prompt, None)
@@ -225,4 +233,3 @@ async def run_turn(
     finally:
         async with _lock:
             _active.process = None
-            _active.task = None

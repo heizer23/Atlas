@@ -266,6 +266,7 @@ export default function ClaudeConsoleApp() {
   const [turnActive, setTurnActive]   = useState(false);
   const [input, setInput]             = useState('');
   const [wsError, setWsError]         = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
   const wsRef     = useRef<WebSocket | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -288,39 +289,65 @@ export default function ClaudeConsoleApp() {
   useEffect(() => { loadSession(); }, [loadSession]);
   useEffect(() => { if (session) loadMessages(); }, [session, loadMessages]);
 
-  // One WebSocket connection per active session.
+  // One WebSocket connection per active session, with auto-reconnect.
+  // Any unexpected close (container restart, network blip, a server-side
+  // crash) previously left wsRef.current null forever with no visible
+  // sign — Send would just silently no-op. Now it retries on a short delay
+  // and surfaces connection state so that's never silent again.
   useEffect(() => {
     if (!session) return;
-    const ws = new WebSocket(wsUrl());
-    wsRef.current = ws;
-    setWsError(null);
+    let stopped = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    ws.onmessage = (evt) => {
-      const data = JSON.parse(evt.data);
-      if (data.type === 'error') {
-        setWsError(data.message ?? data.code);
-        if (data.code !== 'ALREADY_CONNECTED') setTurnActive(false);
-        return;
-      }
-      const text = extractText(data);
-      setLiveMessages(prev => [...prev, {
-        id:          `live-${prev.length}-${Date.now()}`,
-        role:        data.type === 'user' ? 'user' : 'assistant',
-        content:     text,
-        tool_detail: JSON.stringify(data),
-        created_at:  new Date().toISOString(),
-      }]);
-      if (data.type === 'result') {
+    const connect = () => {
+      const ws = new WebSocket(wsUrl());
+      wsRef.current = ws;
+
+      ws.onopen = () => setWsConnected(true);
+
+      ws.onmessage = (evt) => {
+        const data = JSON.parse(evt.data);
+        if (data.type === 'error') {
+          setWsError(data.message ?? data.code);
+          if (data.code !== 'ALREADY_CONNECTED') setTurnActive(false);
+          return;
+        }
+        const text = extractText(data);
+        setLiveMessages(prev => [...prev, {
+          id:          `live-${prev.length}-${Date.now()}`,
+          role:        data.type === 'user' ? 'user' : 'assistant',
+          content:     text,
+          tool_detail: JSON.stringify(data),
+          created_at:  new Date().toISOString(),
+        }]);
+        if (data.type === 'result') {
+          setTurnActive(false);
+          // Reload from the DB-backed Dataset once the turn is done — this is
+          // the authoritative transcript; liveMessages was a best-effort
+          // real-time preview built on an unverified event schema.
+          loadMessages();
+        }
+      };
+
+      ws.onclose = (evt) => {
+        wsRef.current = null;
+        setWsConnected(false);
+        if (stopped) return;
+        // 4409 = another tab already owns this session's single connection;
+        // retrying would just loop against the same rejection.
+        if (evt.code === 4409) return;
         setTurnActive(false);
-        // Reload from the DB-backed Dataset once the turn is done — this is
-        // the authoritative transcript; liveMessages was a best-effort
-        // real-time preview built on an unverified event schema.
-        loadMessages();
-      }
+        retryTimer = setTimeout(connect, 2000);
+      };
     };
-    ws.onclose = () => { wsRef.current = null; };
 
-    return () => { ws.close(); };
+    connect();
+
+    return () => {
+      stopped = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      wsRef.current?.close();
+    };
   }, [session, loadMessages]);
 
   useEffect(() => {
@@ -329,7 +356,7 @@ export default function ClaudeConsoleApp() {
 
   const handleSend = () => {
     const prompt = input.trim();
-    if (!prompt || !wsRef.current || turnActive) return;
+    if (!prompt || !wsRef.current || !wsConnected || turnActive) return;
     wsRef.current.send(JSON.stringify({ prompt }));
     setInput('');
     setTurnActive(true);
@@ -384,14 +411,19 @@ export default function ClaudeConsoleApp() {
       </div>
 
       {wsError && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{wsError}</div>}
+      {!wsConnected && (
+        <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>
+          Disconnected — reconnecting…
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <input
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder="Message Claude Code…"
-          disabled={turnActive}
+          placeholder={wsConnected ? 'Message Claude Code…' : 'Reconnecting…'}
+          disabled={turnActive || !wsConnected}
           style={{ flex: 1, padding: '8px 12px', borderRadius: 6, border: '1px solid #ccc', fontSize: 14 }}
         />
         {turnActive ? (
@@ -404,7 +436,7 @@ export default function ClaudeConsoleApp() {
         ) : (
           <button
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() || !wsConnected}
             style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: 'var(--md-sys-color-primary)', color: '#fff', cursor: 'pointer', fontSize: 14 }}
           >
             Send
