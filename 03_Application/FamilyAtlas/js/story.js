@@ -7,12 +7,19 @@ export function renderStory(titleEl, storyEl, atmosphereEl, data, sourcesData, f
   titleEl.innerHTML = `<h1>${person.name}</h1>`;
 
   const era = person.living ? lifespan(person) : `ca. ${lifespan(person)}`;
-  atmosphereEl.setAttribute(
-    "data-caption",
-    person.has_data
-      ? `Atmosphärisches Bild (Platzhalter) — ${person.profession || "Lebenswelt"}, ${era}`
-      : "Kein Bild hinterlegt"
-  );
+
+  if (person.image) {
+    atmosphereEl.innerHTML = `<img src="assets/${person.image}" alt="${person.name}" loading="lazy" />`;
+    atmosphereEl.setAttribute("data-caption", `${person.profession || "Lebenswelt"}, ${era}`);
+  } else {
+    atmosphereEl.innerHTML = "";
+    atmosphereEl.setAttribute(
+      "data-caption",
+      person.has_data
+        ? `Atmosphärisches Bild (Platzhalter) — ${person.profession || "Lebenswelt"}, ${era}`
+        : "Kein Bild hinterlegt"
+    );
+  }
 
   if (!person.has_data) {
     storyEl.innerHTML = `<p class="empty-note">Noch nicht dokumentiert. Diese Person wartet auf Quellen aus dem Upload-Ordner.</p>`;
