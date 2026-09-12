@@ -48,6 +48,34 @@
       "lat": 52.3218,
       "lon": 10.2349,
       "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "berlin",
+      "name": "Berlin",
+      "lat": 52.5200,
+      "lon": 13.4050,
+      "note": "Koordinate: Stadtzentrum. Genauer Zeitraum und Anschrift der Tätigkeit dort nicht bekannt."
+    },
+    {
+      "id": "schoenebeck-elbe",
+      "name": "Schönebeck (Elbe)",
+      "lat": 52.0167,
+      "lon": 11.7500,
+      "note": "Koordinate: Ortszentrum. Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit; genauer Zeitraum nicht bekannt."
+    },
+    {
+      "id": "karlsbad",
+      "name": "Karlsbad (heute Karlovy Vary, Tschechien)",
+      "lat": 50.2311,
+      "lon": 12.8718,
+      "note": "Koordinate: Stadtzentrum. Gehörte 1938–1945 infolge des Münchner Abkommens zum Deutschen Reich, danach wieder tschechisch als Karlovy Vary."
+    },
+    {
+      "id": "barsinghausen",
+      "name": "Barsinghausen",
+      "lat": 52.3000,
+      "lon": 9.4500,
+      "note": "Koordinate: Ortszentrum. Sitz des Steinkohlenbergwerks und des Gesamtbergamts Obernkirchen-Barsinghausen."
     }
   ],
 
@@ -236,19 +264,23 @@
       "children": ["hans-jochen-remmecke"],
       "has_data": true,
       "image": null,
-      "path": ["gehrden", "handorf-peine", "egestorf-suentel"],
-      "prose": "Friedrich Wilhelm Remmecke wurde am 23. Februar 1907, vormittags um 11 Uhr, in der Wohnung seines Vaters in Gehrden geboren {{evt-gehrden-1907-nr24-birth}} (Beleg noch nicht gesichert) — im Geburtsregister noch als „Ludwig Wilhelm Friedrich” eingetragen. Alle späteren Quellen nennen ihn „Friedrich Wilhelm”; ein Dokument, das beide Namensformen ausdrücklich derselben Person zuordnet, fehlt noch. Für die Gleichsetzung sprechen das exakt übereinstimmende Geburtsdatum und der seltene Name; theoretisch offen bleibt, ob es sich um einen entfernt verwandten Remmecke handeln könnte.\n\nEr war evangelisch-lutherisch und wohnte bis April 1945 in Gehrden {{evt-gehrden-1945-residence-end}}, 1948/49 in Handorf im Kreis Peine {{evt-handorf-1948-residence}} — in dieser Zeit lief sein Entnazifizierungsverfahren (nicht eingesehen). Er war Kriegsteilnehmer im Zweiten Weltkrieg.\n\nBeruflich war er Betriebsleiter der Staatlichen Glasmanufaktur Karlsbad, Geschäftsführer der Schönebecker Brunnenfilter GmbH und der Deutschen Bentonit, Kaufmännischer Leiter des Gesamtbergamts Obernkirchen-Barsinghausen sowie Kaufmännischer Leiter der Ziegeleien und Geschäftsführer der Niedersächsischen Rohrwerke GmbH — mit Wirkorten in Berlin, Karlsbad und Barsinghausen (belegt über die Niedersächsische Personen-Bibliographie, PPN 1043193405, GND 1035121867). Eine neunseitige Biographie bei Ewig, Die Direktoren des Steinkohlenbergwerkes in Barsinghausen, 1996, S. 68–76, ist noch nicht eingesehen. Die genaue zeitliche Reihenfolge dieser Stationen ist ungeklärt, darum auf der Karte nicht als eigene Punkte dargestellt.\n\nEr starb am 25. August 1990 in Egestorf (Süntel), Stadt Bad Münder am Deister {{evt-egestorf-1990-death}}.",
+      "path": ["gehrden", "berlin", "schoenebeck-elbe", "karlsbad", "gehrden", "handorf-peine", "barsinghausen", "egestorf-suentel"],
+      "prose": "Am 23. Februar 1907, vormittags um elf Uhr, kam in Gehrden ein Junge zur Welt {{evt-gehrden-1907-nr24-birth}}, in der Wohnung seines Vaters. Fünf Tage später ging der Vater zum Standesamt und ließ ihn auf drei Namen eintragen: Ludwig Wilhelm Friedrich. Gerufen wurde er sein Leben lang nach dem letzten davon.\n\nSein Vater war Monteur und starb, als der Junge fünf war {{evt-gehrden-1912-nr9-death}}. Was das für die Familie bedeutete, wissen wir nicht — nur, dass die Mutter, Louise geborene Baumgarten, mit einem kleinen Kind zurückblieb in einem Ort, in dem sie vermutlich keine Verwandten hatte.\n\nWas dann kam, kennen wir nur in Bruchstücken, und die Reihenfolge ist unsicher. Er muss eine kaufmännische Ausbildung durchlaufen haben, denn alles, was später von ihm überliefert ist, sind leitende Stellungen in der Industrie: Berlin, dann Schönebeck an der Elbe, wo er Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit war. Kein Handwerk mehr wie bei Vater und Großvater, sondern Schreibtisch, Bilanz und Personalverantwortung. In drei Generationen vom Zimmermann über den Monteur zum Direktor.\n\nVermutlich nach 1938 ging er nach Karlsbad, als Betriebsleiter der Staatlichen Glasmanufaktur {{evt-karlsbad-1938-employment}}. Die Stadt gehörte erst seit dem Münchner Abkommen zum Deutschen Reich; eine „staatliche” Manufaktur dort setzt die deutsche Verwaltung voraus. Im selben Jahr trat er in die NSDAP ein.\n\nEs ist nicht das einzige Dokument dieser Art. Ein Fragebogen von 1948 listet auf: Deutsche Arbeitsfront seit 1933, NS-Volkswohlfahrt seit 1933, Volksbund für das Deutschtum im Ausland seit 1935, Deutsche Jägerschaft seit 1941. Und eine Zeile, die neugierig macht: Vor 1933 sei er Mitglied einer anderen Partei gewesen. Welcher, steht dort nicht.\n\nEr war Soldat im Zweiten Weltkrieg.\n\n1945 endete alles, was er sich aufgebaut hatte. Karlsbad wurde wieder Karlovy Vary, die Deutschen mussten gehen. Im April 1945 ist er in Gehrden gemeldet {{evt-gehrden-1945-residence-end}}, also dort, wo er geboren wurde. Im Jahr darauf, 1946, kommt in Peine ein Sohn zur Welt {{evt-peine-1946-birth}}.\n\n1948 lebt die Familie in Handorf, einem Dorf im Kreis Peine {{evt-handorf-1948-residence}}. In diesem Jahr läuft sein Entnazifizierungsverfahren. Es endet mit der mildesten Einstufung, die es gab: entlastet.\n\nDanach beginnt er noch einmal. Das Gesamtbergamt Obernkirchen-Barsinghausen macht ihn zum Kaufmännischen Leiter — zehn Kilometer von Gehrden entfernt, zurück in der Gegend seiner Kindheit. Später leitet er die Ziegeleien und führt die Niedersächsischen Rohrwerke. Ein Ortsverein in Barsinghausen hat ihm 1996 neun Seiten gewidmet, in einem Buch über die Direktoren des dortigen Steinkohlenbergwerks. Er war offenbar der letzte in dieser Reihe.\n\nEr starb am 25. August 1990 in Egestorf im Süntel, mit 83 Jahren {{evt-egestorf-1990-death}}.",
       "events": [
         { "id": "evt-gehrden-1907-nr24-birth", "year": 1907, "date_display": "1907-02-23", "type": "birth", "place_id": "gehrden", "label": "Geburt, vormittags 11 Uhr (Beleg noch nicht gesichert)" },
+        { "id": "evt-karlsbad-1938-employment", "year": 1938, "date_display": "ca. 1938 [?]", "type": "employment", "place_id": "karlsbad", "label": "Betriebsleiter Staatliche Glasmanufaktur Karlsbad; NSDAP-Eintritt im selben Jahr (Fragebogen 1948, nicht eingesehen)" },
         { "id": "evt-gehrden-1945-residence-end", "year": 1945, "date_display": "1945-04 [?]", "type": "residence_end", "place_id": "gehrden", "label": "Wohnort bis April 1945 in Gehrden" },
-        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort Handorf (Kreis Peine); Entnazifizierungsverfahren" },
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort Handorf (Kreis Peine); Entnazifizierungsverfahren, Ergebnis: entlastet (Fragebogen 1948, nicht eingesehen)" },
         { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf (Süntel)" }
       ],
       "facts": [
         "Geboren 23.02.1907, vormittags 11 Uhr, in Gehrden, in der Wohnung des Vaters.",
         "Im Geburtsregister als „Ludwig Wilhelm Friedrich” eingetragen, später durchgehend als „Friedrich Wilhelm” geführt.",
-        "Evangelisch-lutherisch. Wohnort bis April 1945 Gehrden, 1948/49 Handorf (Kreis Peine). Kriegsteilnehmer im Zweiten Weltkrieg.",
-        "Beruflich: Betriebsleiter Staatliche Glasmanufaktur Karlsbad; Geschäftsführer Schönebecker Brunnenfilter GmbH und Deutsche Bentonit; Kaufmännischer Leiter Gesamtbergamt Obernkirchen-Barsinghausen; Kaufmännischer Leiter der Ziegeleien und Geschäftsführer Niedersächsische Rohrwerke GmbH. Wirkorte Berlin, Karlsbad, Barsinghausen.",
+        "Evangelisch-lutherisch. Kriegsteilnehmer im Zweiten Weltkrieg.",
+        "Berufliche Stationen (Reihenfolge größtenteils unsicher): Berlin; Schönebeck (Elbe) als Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit; ab vermutlich 1938 Betriebsleiter der Staatlichen Glasmanufaktur Karlsbad.",
+        "1938 laut eigener Angabe (Fragebogen 1948) NSDAP-Eintritt in Karlsbad; laut demselben Fragebogen zudem Deutsche Arbeitsfront (seit 1933), NS-Volkswohlfahrt (seit 1933), Volksbund für das Deutschtum im Ausland (seit 1935), Deutsche Jägerschaft (seit 1941); vor 1933 Mitglied einer nicht genannten anderen Partei.",
+        "April 1945 Wohnort Gehrden, 1948/49 Handorf (Kreis Peine) — dort Entnazifizierungsverfahren, Ergebnis: entlastet.",
+        "Nach 1948: Kaufmännischer Leiter Gesamtbergamt Obernkirchen-Barsinghausen, später Leiter der Ziegeleien und Geschäftsführer Niedersächsische Rohrwerke GmbH; Wirkort Barsinghausen. Eine neunseitige Biographie (Ewig 1996) nennt ihn den letzten Direktor des dortigen Steinkohlenbergwerks.",
         "Gestorben 25.08.1990 in Egestorf (Süntel), Stadt Bad Münder am Deister."
       ],
       "historical_context": null,
@@ -256,7 +288,10 @@
       "open_questions": [
         "Die Gleichsetzung von „Ludwig Wilhelm Friedrich” (Geburtsregister) und „Friedrich Wilhelm” (alle späteren Quellen) gilt als tragfähig, ist aber durch kein einzelnes Dokument bewiesen. Erwartete Auflösung: Sterbeeintrag 1990, Standesamt Bad Münder (seit 2020 frei), nennt Vornamensfolge, Geburtsdaten und Eltern.",
         "Ob Geburtseintrag Nr. 24 Randvermerke trägt (z. B. eine Namensänderung), ist noch nicht geprüft.",
-        "Ewig 1996, S. 68–76 (neunseitige Biographie) ist noch nicht eingesehen (vermutlich GWLB Hannover; Stadtarchiv Barsinghausen)."
+        "Ewig 1996, S. 68–76 (neunseitige Biographie) ist noch nicht eingesehen (vermutlich GWLB Hannover; Stadtarchiv Barsinghausen).",
+        "Fragebogen 1948 (vermutlich aus der Entnazifizierungsakte, NLA HA Nds. 171 Hildesheim Nr. 52871) ist noch nicht als Quelle mit Archivsignatur/Screenshot erfasst — Inhalt bislang nur aus dem Gespräch bekannt.",
+        "Welcher Partei er laut Fragebogen 1948 vor 1933 angehörte, ist im Dokument nicht genannt und ungeklärt.",
+        "Exakte Chronologie und Datierung der Stationen Berlin und Schönebeck (Elbe) sind unbekannt; auf der Karte nur als Wegpunkte ohne Datum dargestellt."
       ]
     },
     {
