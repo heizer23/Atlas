@@ -1,0 +1,381 @@
+{
+  "places": [
+    {
+      "id": "brunkensen",
+      "name": "Brunkensen (Alfeld, Leine)",
+      "lat": 51.989541,
+      "lon": 9.766298,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "hoyershausen",
+      "name": "Hoyershausen (Duingen)",
+      "lat": 52.0183,
+      "lon": 9.7533,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "georgsmarienhuette",
+      "name": "Georgsmarienhütte",
+      "lat": 52.2044,
+      "lon": 7.9917,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "gehrden",
+      "name": "Gehrden (Region Hannover)",
+      "lat": 52.3110,
+      "lon": 9.6050,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "handorf-peine",
+      "name": "Handorf (Kreis Peine)",
+      "lat": 52.29138,
+      "lon": 10.21197,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "egestorf-suentel",
+      "name": "Egestorf (Süntel), Bad Münder am Deister",
+      "lat": 52.21916,
+      "lon": 9.40264,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    },
+    {
+      "id": "peine",
+      "name": "Peine",
+      "lat": 52.3218,
+      "lon": 10.2349,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Hofstelle."
+    }
+  ],
+
+  "regional_events": [
+    {
+      "year": 1860,
+      "place_id": "georgsmarienhuette",
+      "label": "Gründung der Gemeinde Georgsmarienhütte",
+      "note": "Historischer Kontext, nicht personenbezogen. Quelle: georgsmarienhuette.de/stadt/stadtgeschichte."
+    }
+  ],
+
+  "people": [
+    {
+      "id": "johann-1839",
+      "name": "Johann Heinrich Friedrich Christian Remmeke",
+      "birth_year": 1839,
+      "death_year": null,
+      "profession": "Zimmermann",
+      "spouse": "hanne-1841",
+      "parents": ["heinrich-remmeke", "johanne-schwarze"],
+      "children": ["karl-1870", "karoline-1872"],
+      "has_data": true,
+      "image": null,
+      "path": ["brunkensen", "hoyershausen", "georgsmarienhuette"],
+      "prose": "Johann Heinrich Friedrich Christian Remmeke wurde am 29. Juni 1839 in Brunkensen geboren {{evt-brunkensen-1839-006-birth}} und im August desselben Jahres dort getauft {{evt-brunkensen-1839-006-baptism}}. Bei seiner Heirat am 27. Dezember 1868 in Hoyershausen wird er als „Zimmermann in Oesede” bezeichnet {{evt-hoyershausen-1868-007-marriage}} — Oesede liegt im heutigen Georgsmarienhütte. Er heiratete Hanne Justine Louise Beinling; das Paar bekam zwei Kinder in Georgsmarienhütte: Karl Friedrich, geboren 1870 {{evt-katharinen-1870-075-birth}}, und Karoline Charlotte Luise, geboren 1872 {{evt-katharinen-1872-004-birth}} und noch im selben Jahr verstorben {{evt-katharinen-1872-012-death}}.\n\nJohann Heinrich war Zimmermann — im Kirchenbuch bei Karls Geburt als Zimmergesell verzeichnet. Die Gemeinde Georgsmarienhütte wurde erst 1860 gegründet; dass er dort als Handwerker Arbeit fand, passt zeitlich zum Wachstum der jungen Hüttensiedlung, auch wenn ein dokumentierter Zuzugsgrund bislang fehlt. Beide Eheleute waren vor dem 27. Februar 1912 verstorben und zuletzt in Georgsmarienhütte wohnhaft (belegt über den Sterbeeintrag seines Sohnes Karl).",
+      "events": [
+        { "id": "evt-brunkensen-1839-006-birth", "year": 1839, "date_display": "1839-06-29", "type": "birth", "place_id": "brunkensen", "label": "Geburt" },
+        { "id": "evt-brunkensen-1839-006-baptism", "year": 1839, "date_display": "1839-08-25 [?]", "type": "baptism", "place_id": "brunkensen", "label": "Taufe" },
+        { "id": "evt-hoyershausen-1868-007-marriage", "year": 1868, "date_display": "1868-12-27", "type": "marriage", "place_id": "hoyershausen", "label": "Heirat mit Hanne Justine Louise Beinling" },
+        { "id": "evt-katharinen-1870-075-birth", "year": 1870, "date_display": "1870-06-12", "type": "child_birth", "place_id": "georgsmarienhuette", "label": "Geburt des Sohnes Karl Friedrich" },
+        { "id": "evt-katharinen-1872-004-birth", "year": 1872, "date_display": "1872-02-01", "type": "child_birth", "place_id": "georgsmarienhuette", "label": "Geburt der Tochter Karoline Charlotte Luise" },
+        { "id": "evt-katharinen-1872-012-death", "year": 1872, "date_display": "1872-03-06 [?]", "type": "death_of_child", "place_id": "georgsmarienhuette", "label": "Tod der Tochter Karoline" }
+      ],
+      "facts": [
+        "Geboren am 29. Juni 1839 in Brunkensen.",
+        "Getauft am 25. August 1839 in Brunkensen (Tageslesung unsicher).",
+        "Heirat mit Hanne Justine Louise Beinling am 27. Dezember 1868 in Hoyershausen, dabei als „Zimmermann in Oesede” bezeichnet.",
+        "Beruf: Zimmermann — als Zimmergesell bei Karls Geburt 1870 im Kirchenbuch verzeichnet.",
+        "Kinder: Karl Friedrich (*1870) und Karoline Charlotte Luise (*1872, †1872).",
+        "Eltern (Gen. V): Heinrich Remmeke ∞ Johanne Sophie Luise Schwarze, Brunkensen (belegt für die Elternschaft)."
+      ],
+      "historical_context": "Die Gemeinde Georgsmarienhütte wurde 1860 gegründet. In den folgenden Jahren entstand dort eine neue Siedlung rund um die Eisenhütte.",
+      "interpretation": "Dass Johann Heinrich als Zimmermann nach Georgsmarienhütte kam, passt zeitlich zum Wachstum der jungen Hüttensiedlung nach ihrer Gemeindegründung 1860 — dort wurde vermutlich Baukapazität gebraucht. Ein dokumentierter Zuzugsgrund liegt bislang nicht vor.",
+      "open_questions": [
+        "Die Verbindung dieses Johann Heinrich zu Karls Vater ist eine von der bisherigen Recherche akzeptierte Arbeitsannahme, kein abschließend bewiesener Identitätsnachweis.",
+        "Das genaue Zuzugsdatum nach Georgsmarienhütte (zwischen der Heirat 1868 und Karls Geburt 1870) ist nicht dokumentiert.",
+        "Die Heirat Remmeke–Schwarze (Eltern, Gen. V) ist in Brunkensen gefunden, aber noch nicht transkribiert (Tracker-Status B)."
+      ]
+    },
+    {
+      "id": "hanne-1841",
+      "name": "Hanne Justine Louise Beinling",
+      "birth_year": 1841,
+      "death_year": null,
+      "profession": null,
+      "spouse": "johann-1839",
+      "parents": ["heinrich-beinling", "justine-dietsch"],
+      "children": ["karl-1870", "karoline-1872"],
+      "has_data": true,
+      "image": null,
+      "path": ["hoyershausen", "georgsmarienhuette"],
+      "prose": "Hanne Justine Louise Beinling wurde am 1. Juli 1841 in Hoyershausen geboren {{evt-hoyershausen-1841-022-birth}} und zehn Tage später dort getauft {{evt-hoyershausen-1841-022-baptism}}. Am 27. Dezember 1868 heiratete sie in Hoyershausen Johann Heinrich Friedrich Christian Remmeke {{evt-hoyershausen-1868-007-marriage}}. Das Paar bekam zwei Kinder in Georgsmarienhütte: Karl Friedrich, geboren 1870 {{evt-katharinen-1870-075-birth}}, und Karoline Charlotte Luise, geboren 1872 {{evt-katharinen-1872-004-birth}} und noch im selben Jahr verstorben {{evt-katharinen-1872-012-death}}.\n\nIhre Schwester Marie Justine Caroline Beinling heiratete im Februar 1870 in Hoyershausen Friedrich Christian Herhold (plausibel — im Original dieselben Eltern genannt) — vermutlich derselbe Herhold, dessen Sohn Karl 1870 Taufpate von Hannes Sohn Karl wurde.\n\nIn den Taufeinträgen 1870/72 in Georgsmarienhütte wird sie als „Hanne Sophie Luise” geführt, abweichend von „Justine Louise” bei ihrer eigenen Taufe 1841. Eine vermutete, nicht belegte Erklärung: Übertragung des Namens ihrer Schwiegermutter, die Johanne Sophie Luise hieß. Das 1872 verstorbene Kind trug mit Karoline auch den Namen ihrer eigenen Schwester — ein weiteres, ebenfalls nicht beweisendes Indiz für Namensübertragung in dieser Familie.",
+      "events": [
+        { "id": "evt-hoyershausen-1841-022-birth", "year": 1841, "date_display": "1841-07-01", "type": "birth", "place_id": "hoyershausen", "label": "Geburt" },
+        { "id": "evt-hoyershausen-1841-022-baptism", "year": 1841, "date_display": "1841-07-11", "type": "baptism", "place_id": "hoyershausen", "label": "Taufe" },
+        { "id": "evt-hoyershausen-1868-007-marriage", "year": 1868, "date_display": "1868-12-27", "type": "marriage", "place_id": "hoyershausen", "label": "Heirat mit Johann Heinrich Friedrich Christian Remmeke" },
+        { "id": "evt-katharinen-1870-075-birth", "year": 1870, "date_display": "1870-06-12", "type": "child_birth", "place_id": "georgsmarienhuette", "label": "Geburt des Sohnes Karl Friedrich" },
+        { "id": "evt-katharinen-1872-004-birth", "year": 1872, "date_display": "1872-02-01", "type": "child_birth", "place_id": "georgsmarienhuette", "label": "Geburt der Tochter Karoline Charlotte Luise" },
+        { "id": "evt-katharinen-1872-012-death", "year": 1872, "date_display": "1872-03-06 [?]", "type": "death_of_child", "place_id": "georgsmarienhuette", "label": "Tod der Tochter Karoline" }
+      ],
+      "facts": [
+        "Geboren am 1. Juli 1841 in Hoyershausen.",
+        "Getauft am 11. Juli 1841 in Hoyershausen.",
+        "Heirat mit Johann Heinrich Friedrich Christian Remmeke am 27. Dezember 1868 in Hoyershausen.",
+        "Kinder: Karl Friedrich (*1870) und Karoline Charlotte Luise (*1872, †1872).",
+        "Eltern (Gen. V): Heinrich Beinling ∞ Justine Dietsch[?], Hoyershausen (belegt für die Elternschaft).",
+        "Schwester Marie Justine Caroline Beinling heiratete 1870 Friedrich Christian Herhold (plausibel)."
+      ],
+      "historical_context": null,
+      "interpretation": "Die Namensabweichung Justine/Sophie könnte auf eine Übertragung des Schwiegermutternamens zurückgehen; beweisend ist das nicht.",
+      "open_questions": [
+        "Ihr Taufeintrag nennt den Vornamen Justine; die Georgsmarienhütte-Kirchenbücher führen sie später als Sophie. Diese Abweichung ist nicht aufgelöst.",
+        "Der Geburtsname ihrer Mutter ist unsicher gelesen (Dietsch[?]/Dietzsch)."
+      ]
+    },
+    {
+      "id": "karl-1870",
+      "name": "Karl Friedrich Remmecke",
+      "birth_year": 1870,
+      "death_year": 1912,
+      "profession": "Zimmermann (1870) / später Monteur",
+      "spouse": "louise-baumgarten",
+      "children": ["friedrich-wilhelm-remmecke"],
+      "has_data": true,
+      "image": null,
+      "path": ["georgsmarienhuette", "gehrden"],
+      "prose": "Karl Friedrich Remmecke wurde am 12. Juni 1870 in Georgsmarienhütte geboren {{evt-katharinen-1870-075-birth}} und am 3. Juli desselben Jahres getauft {{evt-katharinen-1870-075-baptism}}. Taufpaten waren der Tischler Karl Hildebrand, der Maler Friedrich Mehseke [?] und der Zimmermann Karl Herhold — alle ledig und in Georgsmarienhütte wohnhaft. Karl Herhold dürfte zur Familie des Friedrich Christian Herhold gehören, der 1870 Hannes Schwester Marie heiratete (plausibel). Karl Friedrich war der Sohn von Johann Heinrich Friedrich Christian Remmeke und Hanne Justine Louise Beinling.\n\nÜber die Jahre 1872 bis 1907 ist nichts bekannt — kein Wohnort, keine Ausbildung, kein Militärdienst. Er heiratete Louise Karoline Sophie Elise Baumgarten vor Februar 1907 {{evt-gehrden-karl-louise-marriage}}; ein genaueres Datum ist nicht belegt. 1907 wird in Gehrden sein Sohn geboren {{evt-gehrden-1907-nr24-birth}} (Beleg noch nicht gesichert). Karl Friedrich starb am 27. Februar 1912 in Gehrden, im Alter von 41 oder 42 Jahren {{evt-gehrden-1912-nr9-death}} (Beleg noch nicht gesichert); Sterbeort und -ursache davor sind unbekannt.",
+      "events": [
+        { "id": "evt-katharinen-1870-075-birth", "year": 1870, "date_display": "1870-06-12", "type": "birth", "place_id": "georgsmarienhuette", "label": "Geburt, nachmittags 16:30 Uhr" },
+        { "id": "evt-katharinen-1870-075-baptism", "year": 1870, "date_display": "1870-07-03", "type": "baptism", "place_id": "georgsmarienhuette", "label": "Taufe" },
+        { "id": "evt-gehrden-1907-nr24-birth", "year": 1907, "date_display": "1907 [?]", "type": "child_birth", "place_id": "gehrden", "label": "Geburt des Sohnes Friedrich Wilhelm (Beleg noch nicht gesichert)" },
+        { "id": "evt-gehrden-1912-nr9-death", "year": 1912, "date_display": "1912-02-27", "type": "death", "place_id": "gehrden", "label": "Tod in Gehrden (Beleg noch nicht gesichert)" }
+      ],
+      "facts": [
+        "Geboren am 12. Juni 1870 in Georgsmarienhütte.",
+        "Getauft am 3. Juli 1870.",
+        "Sohn von Johann Heinrich Friedrich Christian Remmeke und Hanne Justine Louise Beinling.",
+        "Taufpaten: Tischler Karl Hildebrand, Maler Friedrich Mehseke[?], Zimmermann Karl Herhold (letzterer plausibel verwandt mit dem Schwager Friedrich Christian Herhold).",
+        "Lücke 1872–1907: kein Wohnort, keine Ausbildung, kein Heiratsdatum bekannt.",
+        "Ehe mit Louise Karoline Sophie Elise Baumgarten vor Februar 1907 — genaueres Datum nicht belegt.",
+        "1907 Geburt des Sohnes Friedrich Wilhelm in Gehrden.",
+        "Gestorben am 27. Februar 1912 in Gehrden, im Alter von 41 oder 42 Jahren; Sterbeort/-ursache davor unbekannt."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburtsregister Gehrden 1907 Nr. 24 (Geburt des Sohnes) ist gesehen, aber noch ohne gesicherten Screenshot (Tracker-Status A).",
+        "Sterbeeintrag 1912 und Heiratseintrag mit Baumgarten sind ohne gesicherten Screenshot (Tracker-Status B/E).",
+        "Frühere Schätzung der Heirat auf 1900–1906 war reine Vermutung und wurde korrigiert: belegt ist nur 'vor Februar 1907'."
+      ]
+    },
+    {
+      "id": "karoline-1872",
+      "name": "Karoline Charlotte Luise Remmecke",
+      "birth_year": 1872,
+      "death_year": 1872,
+      "profession": null,
+      "spouse": null,
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "path": ["georgsmarienhuette"],
+      "prose": "Karoline Charlotte Luise Remmecke wurde am 1. Februar 1872 in Georgsmarienhütte geboren {{evt-katharinen-1872-004-birth}} und am 18. Februar getauft {{evt-katharinen-1872-004-baptism}}. Sie starb bereits im März desselben Jahres, im Alter von wenigen Wochen {{evt-katharinen-1872-012-death}}, und wurde am 10. März begraben {{evt-katharinen-1872-012-burial}}.\n\nDie leicht widersprüchlichen Angaben zu Sterbetag und Alter sind typisch für Kirchenbucheinträge dieser Zeit — sie schmälern nicht die Gewissheit über ihren frühen Tod.",
+      "events": [
+        { "id": "evt-katharinen-1872-004-birth", "year": 1872, "date_display": "1872-02-01", "type": "birth", "place_id": "georgsmarienhuette", "label": "Geburt, nachts 23:45 Uhr" },
+        { "id": "evt-katharinen-1872-004-baptism", "year": 1872, "date_display": "1872-02-18", "type": "baptism", "place_id": "georgsmarienhuette", "label": "Taufe" },
+        { "id": "evt-katharinen-1872-012-death", "year": 1872, "date_display": "1872-03-06 [?]", "type": "death", "place_id": "georgsmarienhuette", "label": "Tod, im Alter von wenigen Wochen" },
+        { "id": "evt-katharinen-1872-012-burial", "year": 1872, "date_display": "1872-03-10", "type": "burial", "place_id": "georgsmarienhuette", "label": "Begräbnis" }
+      ],
+      "facts": [
+        "Geboren am 1. Februar 1872 in Georgsmarienhütte.",
+        "Getauft am 18. Februar 1872.",
+        "Gestorben im März 1872, im Alter von wenigen Wochen.",
+        "Begraben am 10. März 1872."
+      ],
+      "historical_context": null,
+      "interpretation": "Die leicht widersprüchlichen Angaben zu Sterbetag und Alter sind typisch für Kirchenbucheinträge dieser Zeit — sie schmälern nicht die Gewissheit über ihren frühen Tod.",
+      "open_questions": [
+        "Der genaue Sterbetag (6. März?) und die überlieferte Altersangabe widersprechen sich leicht; beide Lesungen sind ungesichert."
+      ]
+    },
+    {
+      "id": "louise-baumgarten",
+      "name": "Louise Karoline Sophie Elise Baumgarten",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "karl-1870",
+      "children": ["friedrich-wilhelm-remmecke"],
+      "has_data": true,
+      "image": null,
+      "path": ["gehrden"],
+      "prose": "Louise Karoline Sophie Elise Baumgarten, lutherisch, heiratete Karl Friedrich Remmecke vor Februar 1907 {{evt-gehrden-karl-louise-marriage}}; ein genaueres Datum ist nicht belegt. 1907 ist sie in Gehrden wohnhaft, wo ihr Sohn Friedrich Wilhelm geboren wird {{evt-gehrden-1907-nr24-birth}} (Beleg noch nicht gesichert). Ihre eigenen Geburts- und Sterbedaten sind in dieser Recherche noch nicht erfasst.",
+      "events": [],
+      "facts": [
+        "Ehefrau von Karl Friedrich Remmecke, lutherisch.",
+        "1907 wohnhaft in Gehrden.",
+        "Eigene Geburts- und Sterbedaten noch nicht erfasst."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Herkunft und Lebensdaten von Louise Baumgarten sind noch nicht recherchiert.",
+        "Das genaue Heiratsdatum mit Karl Friedrich Remmecke ist unbekannt; belegt ist nur 'vor Februar 1907' (Tracker-Status E)."
+      ]
+    },
+    {
+      "id": "friedrich-wilhelm-remmecke",
+      "name": "Friedrich Wilhelm Remmecke",
+      "birth_year": 1907,
+      "death_year": 1990,
+      "profession": "Kaufmännischer Leiter / Betriebsleiter (mehrere Unternehmen)",
+      "spouse": null,
+      "parents": ["karl-1870", "louise-baumgarten"],
+      "children": ["hans-jochen-remmecke"],
+      "has_data": true,
+      "image": null,
+      "path": ["gehrden", "handorf-peine", "egestorf-suentel"],
+      "prose": "Friedrich Wilhelm Remmecke wurde am 23. Februar 1907, vormittags um 11 Uhr, in der Wohnung seines Vaters in Gehrden geboren {{evt-gehrden-1907-nr24-birth}} (Beleg noch nicht gesichert) — im Geburtsregister noch als „Ludwig Wilhelm Friedrich” eingetragen. Alle späteren Quellen nennen ihn „Friedrich Wilhelm”; ein Dokument, das beide Namensformen ausdrücklich derselben Person zuordnet, fehlt noch. Für die Gleichsetzung sprechen das exakt übereinstimmende Geburtsdatum und der seltene Name; theoretisch offen bleibt, ob es sich um einen entfernt verwandten Remmecke handeln könnte.\n\nEr war evangelisch-lutherisch und wohnte bis April 1945 in Gehrden {{evt-gehrden-1945-residence-end}}, 1948/49 in Handorf im Kreis Peine {{evt-handorf-1948-residence}} — in dieser Zeit lief sein Entnazifizierungsverfahren (nicht eingesehen). Er war Kriegsteilnehmer im Zweiten Weltkrieg.\n\nBeruflich war er Betriebsleiter der Staatlichen Glasmanufaktur Karlsbad, Geschäftsführer der Schönebecker Brunnenfilter GmbH und der Deutschen Bentonit, Kaufmännischer Leiter des Gesamtbergamts Obernkirchen-Barsinghausen sowie Kaufmännischer Leiter der Ziegeleien und Geschäftsführer der Niedersächsischen Rohrwerke GmbH — mit Wirkorten in Berlin, Karlsbad und Barsinghausen (belegt über die Niedersächsische Personen-Bibliographie, PPN 1043193405, GND 1035121867). Eine neunseitige Biographie bei Ewig, Die Direktoren des Steinkohlenbergwerkes in Barsinghausen, 1996, S. 68–76, ist noch nicht eingesehen. Die genaue zeitliche Reihenfolge dieser Stationen ist ungeklärt, darum auf der Karte nicht als eigene Punkte dargestellt.\n\nEr starb am 25. August 1990 in Egestorf (Süntel), Stadt Bad Münder am Deister {{evt-egestorf-1990-death}}.",
+      "events": [
+        { "id": "evt-gehrden-1907-nr24-birth", "year": 1907, "date_display": "1907-02-23", "type": "birth", "place_id": "gehrden", "label": "Geburt, vormittags 11 Uhr (Beleg noch nicht gesichert)" },
+        { "id": "evt-gehrden-1945-residence-end", "year": 1945, "date_display": "1945-04 [?]", "type": "residence_end", "place_id": "gehrden", "label": "Wohnort bis April 1945 in Gehrden" },
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort Handorf (Kreis Peine); Entnazifizierungsverfahren" },
+        { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf (Süntel)" }
+      ],
+      "facts": [
+        "Geboren 23.02.1907, vormittags 11 Uhr, in Gehrden, in der Wohnung des Vaters.",
+        "Im Geburtsregister als „Ludwig Wilhelm Friedrich” eingetragen, später durchgehend als „Friedrich Wilhelm” geführt.",
+        "Evangelisch-lutherisch. Wohnort bis April 1945 Gehrden, 1948/49 Handorf (Kreis Peine). Kriegsteilnehmer im Zweiten Weltkrieg.",
+        "Beruflich: Betriebsleiter Staatliche Glasmanufaktur Karlsbad; Geschäftsführer Schönebecker Brunnenfilter GmbH und Deutsche Bentonit; Kaufmännischer Leiter Gesamtbergamt Obernkirchen-Barsinghausen; Kaufmännischer Leiter der Ziegeleien und Geschäftsführer Niedersächsische Rohrwerke GmbH. Wirkorte Berlin, Karlsbad, Barsinghausen.",
+        "Gestorben 25.08.1990 in Egestorf (Süntel), Stadt Bad Münder am Deister."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Die Gleichsetzung von „Ludwig Wilhelm Friedrich” (Geburtsregister) und „Friedrich Wilhelm” (alle späteren Quellen) gilt als tragfähig, ist aber durch kein einzelnes Dokument bewiesen. Erwartete Auflösung: Sterbeeintrag 1990, Standesamt Bad Münder (seit 2020 frei), nennt Vornamensfolge, Geburtsdaten und Eltern.",
+        "Ob Geburtseintrag Nr. 24 Randvermerke trägt (z. B. eine Namensänderung), ist noch nicht geprüft.",
+        "Ewig 1996, S. 68–76 (neunseitige Biographie) ist noch nicht eingesehen (vermutlich GWLB Hannover; Stadtarchiv Barsinghausen)."
+      ]
+    },
+    {
+      "id": "hans-jochen-remmecke",
+      "name": "Dr. Hans-Jochen Christoph Remmecke",
+      "birth_year": 1946,
+      "death_year": null,
+      "living": true,
+      "profession": null,
+      "spouse": null,
+      "parents": ["friedrich-wilhelm-remmecke"],
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "path": ["peine"],
+      "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.",
+      "events": [
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "birth", "place_id": "peine", "label": "Geburt, urkundlich noch nicht nachgewiesen" }
+      ],
+      "facts": [
+        "Geboren 1946 in Peine.",
+        "Urkundlicher Nachweis (Geburtenregister Peine 1946) steht aus — Register gesperrt bis ca. 2056."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Beleggrad bislang nur Familienauskunft, kein Dokument. Abschrift nach § 62 PStG durch Abkömmlinge in gerader Linie möglich.",
+        "Theoretisch offen: dass der 1907 in Gehrden geborene Junge (Friedrich Wilhelm) ein anderer, entfernt verwandter Remmecke war als der hier angenommene Vater — auflösbar über den Sterbeeintrag 1990."
+      ]
+    },
+    {
+      "id": "heinrich-remmeke",
+      "name": "Heinrich Remmeke",
+      "birth_year": null,
+      "death_year": null,
+      "profession": "Zimmermann",
+      "spouse": "johanne-schwarze",
+      "children": ["johann-1839"],
+      "has_data": true,
+      "image": null,
+      "path": ["brunkensen"],
+      "prose": "Heinrich Remmeke war Zimmermann in Brunkensen und der Vater von Johann Heinrich Friedrich Christian Remmeke. Er heiratete Johanne Sophie Luise Schwarze — die Heirat ist in Brunkensen gefunden (Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), aber noch nicht transkribiert; ein Screenshot fehlt. Die Elternschaft für den 1839 getauften Johann Heinrich gilt als belegt.",
+      "events": [],
+      "facts": [
+        "Zimmermann in Brunkensen.",
+        "Vater von Johann Heinrich Friedrich Christian Remmeke (belegt für die Elternschaft).",
+        "Heirat mit Johanne Sophie Luise Schwarze in Brunkensen gefunden, aber nicht transkribiert, kein Screenshot."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Die Heirat Remmeke–Schwarze (Brunkensen 1815–1845, Bild 146/220, Nr. 9 rechts) ist gefunden, aber nicht transkribiert, kein Screenshot (Tracker-Status B)."
+      ]
+    },
+    {
+      "id": "johanne-schwarze",
+      "name": "Johanne Sophie Luise Schwarze",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "heinrich-remmeke",
+      "children": ["johann-1839"],
+      "has_data": true,
+      "image": null,
+      "path": ["brunkensen"],
+      "prose": "Johanne Sophie Luise Schwarze heiratete Heinrich Remmeke in Brunkensen und war die Mutter von Johann Heinrich Friedrich Christian Remmeke. Ihr eigener Vorname dürfte später auf ihre Schwiegertochter Hanne übertragen worden sein, die in den Georgsmarienhütte-Kirchenbüchern ebenfalls als „Sophie Luise” erscheint — eine vermutete, nicht belegte Erklärung.",
+      "events": [],
+      "facts": [
+        "Mutter von Johann Heinrich Friedrich Christian Remmeke (belegt für die Elternschaft).",
+        "Heirat mit Heinrich Remmeke in Brunkensen gefunden, aber nicht transkribiert."
+      ],
+      "historical_context": null,
+      "interpretation": "Ihr Vorname könnte der Ursprung der späteren Bezeichnung ihrer Schwiegertochter als „Sophie Luise” sein — eine Vermutung, kein Beleg.",
+      "open_questions": [
+        "Die Heirat Remmeke–Schwarze ist gefunden, aber nicht transkribiert, kein Screenshot (Tracker-Status B)."
+      ]
+    },
+    {
+      "id": "heinrich-beinling",
+      "name": "Heinrich Beinling",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "justine-dietsch",
+      "children": ["hanne-1841"],
+      "has_data": true,
+      "image": null,
+      "path": ["hoyershausen"],
+      "prose": "Heinrich Beinling war der Vater von Hanne Justine Louise Beinling in Hoyershausen. Er heiratete Justine Dietsch [?]; die Elternschaft für die 1841 getaufte Hanne gilt als belegt.",
+      "events": [],
+      "facts": [
+        "Vater von Hanne Justine Louise Beinling (belegt für die Elternschaft)."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": []
+    },
+    {
+      "id": "justine-dietsch",
+      "name": "Justine Dietsch [?]",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "heinrich-beinling",
+      "children": ["hanne-1841"],
+      "has_data": true,
+      "image": null,
+      "path": ["hoyershausen"],
+      "prose": "Justine Dietsch [?] (Lesung unsicher, auch Dietzsch möglich) war die Mutter von Hanne Justine Louise Beinling. Die Elternschaft gilt als belegt, ihr genauer Geburtsname ist aber nicht gesichert gelesen.",
+      "events": [],
+      "facts": [
+        "Mutter von Hanne Justine Louise Beinling (belegt für die Elternschaft).",
+        "Geburtsname unsicher gelesen: Dietsch[?]/Dietzsch."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburtsname unsicher gelesen (Dietsch[?]/Dietzsch)."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+services:
+  atlas-familyatlas:
+    container_name: atlas-familyatlas
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../01_System/secrets.env
+    volumes:
+      # Real scans/photos live outside git (see .gitignore) — mounted readonly.
+      - /mnt/data/familyatlas/images:/var/familyatlas-images:ro
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

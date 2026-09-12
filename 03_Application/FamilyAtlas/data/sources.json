@@ -1,0 +1,76 @@
+{
+  "sources": [
+    {
+      "id": "src-brunkensen-1839-006",
+      "title": "Kirchenbuch 1815–1845; 04-01057; Taufen 1839 Nr. 6",
+      "archive_ref": "Archion 369739, Bild 81/220",
+      "url": "https://www.archion.de/p/8d3a70c0dc/",
+      "accessed_on": "2026-09-11",
+      "caveats": "Tauftag 25.08.1839 [?] erneut zu lesen. Verbindung dieses Mannes zu Karls Vater ist eine Arbeitsannahme, kein abschließend gelöster Identitätsbeweis."
+    },
+    {
+      "id": "src-hoyershausen-1841-022",
+      "title": "Kirchenbuch 1794–1845; 04-01169; Geborene 1841 S. 434 Nr. 22",
+      "archive_ref": "Archion 369846, Bild 220/355",
+      "url": "https://www.archion.de/p/687f46bdbb/",
+      "accessed_on": "2026-09-11",
+      "caveats": "Justine im Original gelesen. Abweichung zu „Sophie“ in Georgsmarienhütte nicht aufgelöst."
+    },
+    {
+      "id": "src-hoyershausen-1868-007",
+      "title": "Trauungen 1853–1907; 04-01172; 1868 S. 53 Nr. 7",
+      "archive_ref": "Archion 369848, Bild 55/161",
+      "url": "https://www.archion.de/p/26cb8b99df/",
+      "accessed_on": "2026-09-11",
+      "caveats": "Heirat am Original geprüft. Falsches Indexjahr 1537 verworfen. Identität der Braut mit „Hanne Sophie Luise“ bleibt ungeklärt."
+    },
+    {
+      "id": "src-katharinen-1870-075",
+      "title": "Osnabrück St. Katharinen-Land, Taufen 1853–1874; 1870 Pag. 7 Nr. 75",
+      "archive_ref": "STAOS Dep 3b IV Nr. 2442; Archion 215357, Bild 252/324",
+      "url": "https://www.archion.de/p/c745ff8321/",
+      "accessed_on": "2026-09-11",
+      "caveats": "Kirchliche Registerzuständigkeit ist kein Nachweis des genauen Taufortes. 03.07.1870 nach späterer Lesung; Paten-Nachname Mehseke [?] unsicher."
+    },
+    {
+      "id": "src-katharinen-1872-004",
+      "title": "Osnabrück St. Katharinen-Land, Taufen 1853–1874; 1872 Pag. 93 Nr. 4",
+      "archive_ref": "STAOS Dep 3b IV Nr. 2442; Archion 215357, Bild 282/324",
+      "url": "https://www.archion.de/p/73232f8ef9/",
+      "accessed_on": "2026-09-11",
+      "caveats": "Frühere Dateinamen „Caroline“, spätere Lesung „Karoline“. Genaue Schreibungen der Paten ungeklärt."
+    },
+    {
+      "id": "src-katharinen-1872-012",
+      "title": "Osnabrück St. Katharinen-Land, Beerdigungen 1872–1875; 1872 S. 4 Nr. 12",
+      "archive_ref": "Archion 215294, Bild 4/23",
+      "url": "https://www.archion.de/de/viewer/churchRegister/215294?cHash=be034879d4966d376284b9944c59f9ae",
+      "accessed_on": "2026-09-11",
+      "caveats": "Sterbetag (6. März [?]) und Altersangabe widersprechen sich leicht gegenüber der Geburt am 01.02.1872. Begräbnisort nicht gesichert."
+    }
+  ],
+
+  "screenshots": [
+    { "id": "img-brunkensen-1839-006-doppelseite", "source_id": "src-brunkensen-1839-006", "event_ids": ["evt-brunkensen-1839-006-birth", "evt-brunkensen-1839-006-baptism"], "role": "Doppelseite", "path": "draft/brunkensen-1839-006/img-brunkensen-1839-006-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-brunkensen-1839-006-detail", "source_id": "src-brunkensen-1839-006", "event_ids": ["evt-brunkensen-1839-006-birth", "evt-brunkensen-1839-006-baptism"], "role": "Detail", "path": "draft/brunkensen-1839-006/img-brunkensen-1839-006-detail_draft.jpg", "quality_status": "draft" },
+
+    { "id": "img-hoyershausen-1841-022-doppelseite", "source_id": "src-hoyershausen-1841-022", "event_ids": ["evt-hoyershausen-1841-022-birth", "evt-hoyershausen-1841-022-baptism"], "role": "Doppelseite", "path": "draft/hoyershausen-1841-022/img-hoyershausen-1841-022-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-hoyershausen-1841-022-detail", "source_id": "src-hoyershausen-1841-022", "event_ids": ["evt-hoyershausen-1841-022-birth", "evt-hoyershausen-1841-022-baptism"], "role": "Detail", "path": "draft/hoyershausen-1841-022/img-hoyershausen-1841-022-detail_draft.jpg", "quality_status": "draft" },
+
+    { "id": "img-hoyershausen-1868-007-doppelseite", "source_id": "src-hoyershausen-1868-007", "event_ids": ["evt-hoyershausen-1868-007-marriage"], "role": "Doppelseite", "path": "draft/hoyershausen-1868-007/img-hoyershausen-1868-007-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-hoyershausen-1868-007-detail", "source_id": "src-hoyershausen-1868-007", "event_ids": ["evt-hoyershausen-1868-007-marriage"], "role": "Detail", "path": "draft/hoyershausen-1868-007/img-hoyershausen-1868-007-detail_draft.jpg", "quality_status": "draft" },
+
+    { "id": "img-katharinen-1870-075-doppelseite", "source_id": "src-katharinen-1870-075", "event_ids": ["evt-katharinen-1870-075-birth", "evt-katharinen-1870-075-baptism"], "role": "Doppelseite", "path": "draft/katharinen-1870-075/img-katharinen-1870-075-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1870-075-paten", "source_id": "src-katharinen-1870-075", "event_ids": ["evt-katharinen-1870-075-birth", "evt-katharinen-1870-075-baptism"], "role": "Paten", "path": "draft/katharinen-1870-075/img-katharinen-1870-075-paten_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1870-075-uebersicht", "source_id": "src-katharinen-1870-075", "event_ids": ["evt-katharinen-1870-075-birth", "evt-katharinen-1870-075-baptism"], "role": "Übersicht", "path": "draft/katharinen-1870-075/img-katharinen-1870-075-uebersicht_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1870-075-vollbild", "source_id": "src-katharinen-1870-075", "event_ids": ["evt-katharinen-1870-075-birth", "evt-katharinen-1870-075-baptism"], "role": "Vollbild", "path": "draft/katharinen-1870-075/img-katharinen-1870-075-vollbild_draft.png", "quality_status": "draft" },
+
+    { "id": "img-katharinen-1872-004-doppelseite", "source_id": "src-katharinen-1872-004", "event_ids": ["evt-katharinen-1872-004-birth", "evt-katharinen-1872-004-baptism"], "role": "Doppelseite", "path": "draft/katharinen-1872-004/img-katharinen-1872-004-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1872-004-eltern", "source_id": "src-katharinen-1872-004", "event_ids": ["evt-katharinen-1872-004-birth", "evt-katharinen-1872-004-baptism"], "role": "Eltern", "path": "draft/katharinen-1872-004/img-katharinen-1872-004-eltern_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1872-004-paten", "source_id": "src-katharinen-1872-004", "event_ids": ["evt-katharinen-1872-004-birth", "evt-katharinen-1872-004-baptism"], "role": "Paten", "path": "draft/katharinen-1872-004/img-katharinen-1872-004-paten_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1872-004-paten-gross", "source_id": "src-katharinen-1872-004", "event_ids": ["evt-katharinen-1872-004-birth", "evt-katharinen-1872-004-baptism"], "role": "Paten (groß)", "path": "draft/katharinen-1872-004/img-katharinen-1872-004-paten-gross_draft.jpg", "quality_status": "draft" },
+
+    { "id": "img-katharinen-1872-012-doppelseite", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Doppelseite", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-katharinen-1872-012-detail", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Detail", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-detail_draft.jpg", "quality_status": "draft" }
+  ]
+}

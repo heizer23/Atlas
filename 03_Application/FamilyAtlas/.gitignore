@@ -1,0 +1,6 @@
+# Root-.gitignore schließt jeden Ordner "data/" aus - hier gewollt wieder einschließen,
+# weil data/people.json versioniert werden soll (strukturierte, keine Rohdaten).
+!/data/
+
+# Symlink auf /mnt/data/familyatlas/images (echte Scans/Fotos) - nur lokal, nicht versioniert.
+/assets

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Familienatlas — Prototyp</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <header class="app-header">
+    <span class="app-title">Familienatlas</span>
+    <span class="app-subtitle">ein erzählerischer Stammbaum — Prototyp</span>
+  </header>
+
+  <main class="layout">
+    <section class="panel panel-timeline">
+      <div id="timeline" class="timeline"></div>
+    </section>
+
+    <section class="panel panel-story">
+      <div id="story-title" class="story-title"></div>
+      <div id="atmosphere" class="atmosphere"></div>
+      <div id="story" class="story"></div>
+    </section>
+
+    <div class="panel-right">
+      <section class="panel panel-tree">
+        <div id="tree" class="tree"></div>
+      </section>
+
+      <section class="panel panel-map">
+        <div id="map"></div>
+        <p class="map-legend">
+          <span class="legend-dot legend-dot--focus"></span> Lebensweg der fokussierten Person
+          <span class="legend-dot legend-dot--family"></span> weitere Familienmitglieder
+        </p>
+        <p id="map-diagnostics" class="map-diagnostics"></p>
+      </section>
+    </div>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
