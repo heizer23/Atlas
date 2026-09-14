@@ -325,25 +325,33 @@
     {
       "id": "heinrich-remmeke",
       "name": "Heinrich Remmeke",
-      "birth_year": null,
+      "birth_year": 1799,
       "death_year": null,
       "profession": "Zimmermann",
       "spouse": "johanne-schwarze",
+      "parents": ["johann-ernst-remmeke", "johanne-louise-koch"],
       "children": ["johann-1839"],
       "has_data": true,
       "image": null,
       "path": ["brunkensen"],
-      "prose": "Heinrich Remmeke war Zimmermann in Brunkensen und der Vater von Johann Heinrich Friedrich Christian Remmeke. Er heiratete Johanne Sophie Luise Schwarze — die Heirat ist in Brunkensen gefunden (Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), aber noch nicht transkribiert; ein Screenshot fehlt. Die Elternschaft für den 1839 getauften Johann Heinrich gilt als belegt.",
-      "events": [],
+      "prose": "Johann Heinrich Christoph Remmeke wurde am 9. Januar 1799, nachmittags um 3 Uhr, in Brunkensen als Sohn des Häuslings und Zimmermeisters Johann Ernst Remmeke [?] und der Hanne/Johanne Louise Koch [?] geboren {{evt-brunkensen-1799-066-birth}} und am 13. Januar desselben Jahres dort getauft {{evt-brunkensen-1799-066-baptism}}. Gerufen wurde er später als Heinrich — unter diesem Namen tritt er in allen späteren Einträgen auf.\n\n1824 heiratete er in Brunkensen Johanne Sophie Luise Schwarze {{evt-brunkensen-1824-009-marriage}}. Im Traueintrag wird der Bräutigam als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch geführt — exakt dieselbe Elternkombination wie im Taufeintrag von 1799. Diese Übereinstimmung macht die Gleichsetzung der beiden Einträge sehr wahrscheinlich, auch wenn kein Dokument beide Namen „Johann Heinrich Christoph” und „Heinrich” ausdrücklich nebeneinander nennt.\n\nEr war wie sein Vater Zimmermann. 1839 wurde sein Sohn Johann Heinrich Friedrich Christian in Brunkensen geboren und getauft {{evt-brunkensen-1839-006-birth}}.",
+      "events": [
+        { "id": "evt-brunkensen-1799-066-birth", "year": 1799, "date_display": "1799-01-09", "type": "birth", "place_id": "brunkensen", "label": "Geburt, nachmittags 3 Uhr" },
+        { "id": "evt-brunkensen-1799-066-baptism", "year": 1799, "date_display": "1799-01-13", "type": "baptism", "place_id": "brunkensen", "label": "Taufe" },
+        { "id": "evt-brunkensen-1824-009-marriage", "year": 1824, "date_display": "1824 [?]", "type": "marriage", "place_id": "brunkensen", "label": "Heirat mit Johanne Sophie Luise Schwarze (Beleg noch nicht gesichert)" }
+      ],
       "facts": [
-        "Zimmermann in Brunkensen.",
-        "Vater von Johann Heinrich Friedrich Christian Remmeke (belegt für die Elternschaft).",
-        "Heirat mit Johanne Sophie Luise Schwarze in Brunkensen gefunden, aber nicht transkribiert, kein Screenshot."
+        "Geboren am 9. Januar 1799, nachmittags um 3 Uhr, in Brunkensen; getauft am 13. Januar 1799 als Johann Heinrich Christoph.",
+        "Sohn des Häuslings und Zimmermeisters Johann Ernst Remmeke [?] und der Hanne/Johanne Louise Koch [?].",
+        "Später als „Heinrich Remmeke” geführt; Zimmermann in Brunkensen.",
+        "Heirat mit Johanne Sophie Luise Schwarze 1824 in Brunkensen; Bräutigam dort als Sohn des Johann Ernst Remmeke und der verstorbenen Johanne Louise geb. Koch genannt — deckungsgleich mit dem Taufeintrag 1799.",
+        "Vater von Johann Heinrich Friedrich Christian Remmeke (*1839, belegt für die Elternschaft)."
       ],
       "historical_context": null,
-      "interpretation": null,
+      "interpretation": "Die Gleichsetzung von „Johann Heinrich Christoph” (Taufe 1799) mit „Heinrich Remmeke” (Ehemann der Schwarze, Vater des 1839 geborenen Johann) stützt sich auf zwei unabhängig gelesene Einträge, die dieselbe, ungewöhnliche Elternkombination (Johann Ernst Remmeke ⚭ Johanne Louise Koch) nennen — starkes, aber indirektes Indiz, kein Dokument mit beiden Namen nebeneinander.",
       "open_questions": [
-        "Die Heirat Remmeke–Schwarze (Brunkensen 1815–1845, Bild 146/220, Nr. 9 rechts) ist gefunden, aber nicht transkribiert, kein Screenshot (Tracker-Status B)."
+        "Die Heirat Remmeke–Schwarze 1824 (Brunkensen 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts) ist inhaltlich bekannt, aber weiterhin ohne Screenshot (Tracker-Status B).",
+        "Mehrere Lesungen im Taufeintrag 1799 unsicher: Vatersname „Johann Ernst” [?], Familienname „Remmeke” [?], Mutter „Koch” [?], zweiter Pate/Patin nicht sicher lesbar."
       ]
     },
     {
@@ -357,16 +365,66 @@
       "has_data": true,
       "image": null,
       "path": ["brunkensen"],
-      "prose": "Johanne Sophie Luise Schwarze heiratete Heinrich Remmeke in Brunkensen und war die Mutter von Johann Heinrich Friedrich Christian Remmeke. Ihr eigener Vorname dürfte später auf ihre Schwiegertochter Hanne übertragen worden sein, die in den Georgsmarienhütte-Kirchenbüchern ebenfalls als „Sophie Luise” erscheint — eine vermutete, nicht belegte Erklärung.",
-      "events": [],
+      "prose": "Johanne Sophie Luise Schwarze heiratete 1824 in Brunkensen Johann Heinrich Christoph („Heinrich”) Remmeke {{evt-brunkensen-1824-009-marriage}} und war die Mutter von Johann Heinrich Friedrich Christian Remmeke. Ihr eigener Vorname dürfte später auf ihre Schwiegertochter Hanne übertragen worden sein, die in den Georgsmarienhütte-Kirchenbüchern ebenfalls als „Sophie Luise” erscheint — eine vermutete, nicht belegte Erklärung.",
+      "events": [
+        { "id": "evt-brunkensen-1824-009-marriage", "year": 1824, "date_display": "1824 [?]", "type": "marriage", "place_id": "brunkensen", "label": "Heirat mit Johann Heinrich Christoph Remmeke (Beleg noch nicht gesichert)" }
+      ],
       "facts": [
         "Mutter von Johann Heinrich Friedrich Christian Remmeke (belegt für die Elternschaft).",
-        "Heirat mit Heinrich Remmeke in Brunkensen gefunden, aber nicht transkribiert."
+        "Heirat mit Heinrich Remmeke 1824 in Brunkensen; Inhalt bekannt (nennt seine Eltern), aber kein Screenshot."
       ],
       "historical_context": null,
       "interpretation": "Ihr Vorname könnte der Ursprung der späteren Bezeichnung ihrer Schwiegertochter als „Sophie Luise” sein — eine Vermutung, kein Beleg.",
       "open_questions": [
-        "Die Heirat Remmeke–Schwarze ist gefunden, aber nicht transkribiert, kein Screenshot (Tracker-Status B)."
+        "Die Heirat Remmeke–Schwarze 1824 ist inhaltlich bekannt, aber weiterhin ohne Screenshot (Tracker-Status B)."
+      ]
+    },
+    {
+      "id": "johann-ernst-remmeke",
+      "name": "Johann Ernst Remmeke [?]",
+      "birth_year": null,
+      "death_year": null,
+      "profession": "Häusling und Zimmermeister",
+      "spouse": "johanne-louise-koch",
+      "children": ["heinrich-remmeke"],
+      "has_data": true,
+      "image": null,
+      "path": ["brunkensen"],
+      "prose": "Johann Ernst Remmeke [?] war Häusling und Zimmermeister in Brunkensen. Er ist als Vater im Taufeintrag seines Sohnes Johann Heinrich Christoph 1799 verzeichnet {{evt-brunkensen-1799-066-birth}} und wird 1824, im Heiratseintrag desselben Sohnes, erneut als dessen Vater genannt — dort erscheint seine Frau Johanne Louise geb. Koch bereits als verstorben.",
+      "events": [],
+      "facts": [
+        "Häusling und Zimmermeister in Brunkensen.",
+        "Vater von Johann Heinrich Christoph („Heinrich”) Remmeke (*1799), belegt über den Taufeintrag 1799 und den Heiratseintrag 1824."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Name unsicher gelesen (Taufeintrag 1799: „Johann Ernst” [?]).",
+        "Eigene Geburts- und Sterbedaten nicht erfasst."
+      ]
+    },
+    {
+      "id": "johanne-louise-koch",
+      "name": "Hanne/Johanne Louise Koch [?]",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "johann-ernst-remmeke",
+      "children": ["heinrich-remmeke"],
+      "has_data": true,
+      "image": null,
+      "path": ["brunkensen"],
+      "prose": "Hanne/Johanne Louise Koch [?] war die Mutter von Johann Heinrich Christoph („Heinrich”) Remmeke, geboren 1799 in Brunkensen {{evt-brunkensen-1799-066-birth}}. Im Heiratseintrag ihres Sohnes 1824 wird sie bereits als verstorben geführt; ihre eigenen Lebensdaten sind nicht erfasst.",
+      "events": [],
+      "facts": [
+        "Mutter von Johann Heinrich Christoph („Heinrich”) Remmeke (*1799), belegt über den Taufeintrag 1799 und den Heiratseintrag 1824.",
+        "Vor 1824 verstorben (laut Heiratseintrag des Sohnes)."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Name unsicher gelesen (Taufeintrag 1799: „Koch” [?]).",
+        "Eigene Geburts- und Sterbedaten nicht erfasst."
       ]
     },
     {

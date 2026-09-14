@@ -55,6 +55,14 @@
       "url": null,
       "accessed_on": "2026-09-14",
       "caveats": "Klärt die Geburtszeit: Original nennt „nachmittags um elf Uhr”, nicht „vormittags” wie zuvor in der Familienüberlieferung angenommen. Keine Randvermerke sichtbar."
+    },
+    {
+      "id": "src-brunkensen-1799-066",
+      "title": "Kirchengemeinde Brunkensen, Taufen 1762–1807; 1799 Januarius",
+      "archive_ref": "Landeskirchliches Archiv der Ev.-luth. Landeskirche Hannovers; Archion Bild 66",
+      "url": null,
+      "accessed_on": "2026-09-14",
+      "caveats": "Register vor 1808 ohne laufende Eintragsnummer — Bild 66 ersatzweise als Kennung verwendet. Mehrere Lesungen unsicher: Vatersname „Johann Ernst Remmeke [?]”, Familienname „Remmeke [?]”, Mutter „Hanne/Johanne Louise Koch [?]”, zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar, Alter der Mutter nicht lesbar. Verbindung zu Heinrich Remmeke (Vater von Johann Heinrich Friedrich Christian Remmeke, *1839) gestützt durch den 1824 gelesenen Heiratseintrag (Brunkensen Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), der den Bräutigam Johann Heinrich Christoph Remmeke als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch nennt — exakt dieselbe Elternkombination wie im Taufeintrag 1799."
     }
   ],
 
@@ -80,6 +88,7 @@
 
     { "id": "img-katharinen-1872-012-doppelseite", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Doppelseite", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-doppelseite_draft.jpg", "quality_status": "draft" },
     { "id": "img-katharinen-1872-012-detail", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Detail", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-detail_draft.jpg", "quality_status": "draft" },
-    { "id": "img-gehrden-1907-024-vollbild", "source_id": "src-gehrden-1907-024", "event_ids": ["evt-gehrden-1907-nr24-birth"], "role": "Vollbild", "path": "draft/gehrden-1907-024/img-gehrden-1907-024-vollbild_draft.jpg", "quality_status": "draft" }
+    { "id": "img-gehrden-1907-024-vollbild", "source_id": "src-gehrden-1907-024", "event_ids": ["evt-gehrden-1907-nr24-birth"], "role": "Vollbild", "path": "draft/gehrden-1907-024/img-gehrden-1907-024-vollbild_draft.jpg", "quality_status": "draft" },
+    { "id": "img-brunkensen-1799-066-seite", "source_id": "src-brunkensen-1799-066", "event_ids": ["evt-brunkensen-1799-066-birth", "evt-brunkensen-1799-066-baptism"], "role": "Seite", "path": "draft/brunkensen-1799-066/img-brunkensen-1799-066-seite_draft.png", "quality_status": "draft" }
   ]
 }
