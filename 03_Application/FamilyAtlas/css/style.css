@@ -136,9 +136,9 @@ html, body {
 }
 
 .beleg-figure {
-  clear: both;
+  float: left;
   width: 33%;
-  margin: 0 0 1.3rem;
+  margin: 0 1.25rem 1rem 0;
 }
 
 .beleg-figure img {
