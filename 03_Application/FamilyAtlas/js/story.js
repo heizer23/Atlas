@@ -1,5 +1,6 @@
 import { lifespan } from "./format.js";
 import { primaryScreenshotForEvent, sourceById } from "./sources.js";
+import { openLightbox } from "./lightbox.js";
 
 export function renderStory(titleEl, storyEl, atmosphereEl, data, sourcesData, focusedId) {
   const person = data.peopleById.get(focusedId);
@@ -34,6 +35,12 @@ export function renderStory(titleEl, storyEl, atmosphereEl, data, sourcesData, f
       if (fig) fig.hidden = !fig.hidden;
     });
   });
+
+  storyEl.querySelectorAll(".beleg-figure img").forEach((img) => {
+    img.addEventListener("click", () => {
+      openLightbox(`<img class="lightbox-fullimage" src="${img.src}" alt="${img.alt}" />`);
+    });
+  });
 }
 
 function renderProse(prose, sourcesData) {
@@ -62,7 +69,7 @@ function belegFigureHtml(eventId, sourcesData) {
   const source = sourceById(sourcesData, shot.source_id);
   return `
     <figure class="beleg-figure" data-event-id="${eventId}" hidden>
-      <img src="assets/${shot.path}" alt="${shot.role}" loading="lazy" />
+      <img src="assets/${shot.path}" alt="${shot.role}" loading="lazy" title="Zum Vergrößern klicken" />
       <figcaption>
         ${source ? `${source.title} — ${source.archive_ref}` : shot.role}
         <span class="beleg-badge">Entwurf — nicht gegengeprüft</span>

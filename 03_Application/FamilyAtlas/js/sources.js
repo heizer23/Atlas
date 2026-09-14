@@ -43,7 +43,11 @@ export function renderEventSources(sourcesData, eventId, eventLabel) {
       source
         ? `<div class="lightbox-source">
             <p><strong>${source.title}</strong><br>${source.archive_ref}</p>
-            <p><a href="${source.url}" target="_blank" rel="noopener">Quelle öffnen ↗</a> · abgerufen am ${source.accessed_on}</p>
+            <p>${
+              source.url
+                ? `<a href="${source.url}" target="_blank" rel="noopener">Quelle öffnen ↗</a> · `
+                : ""
+            }abgerufen am ${source.accessed_on}</p>
             <p class="lightbox-caveats">${source.caveats}</p>
           </div>`
         : ""

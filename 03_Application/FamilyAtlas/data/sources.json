@@ -47,6 +47,14 @@
       "url": "https://www.archion.de/de/viewer/churchRegister/215294?cHash=be034879d4966d376284b9944c59f9ae",
       "accessed_on": "2026-09-11",
       "caveats": "Sterbetag (6. März [?]) und Altersangabe widersprechen sich leicht gegenüber der Geburt am 01.02.1872. Begräbnisort nicht gesichert."
+    },
+    {
+      "id": "src-gehrden-1907-024",
+      "title": "Standesamt Gehrden, Geburtsregister 1907, Nr. 24",
+      "archive_ref": "Hauptregister, Nr. 24, Gehrden",
+      "url": null,
+      "accessed_on": "2026-09-14",
+      "caveats": "Klärt die Geburtszeit: Original nennt „nachmittags um elf Uhr”, nicht „vormittags” wie zuvor in der Familienüberlieferung angenommen. Keine Randvermerke sichtbar."
     }
   ],
 
@@ -71,6 +79,7 @@
     { "id": "img-katharinen-1872-004-paten-gross", "source_id": "src-katharinen-1872-004", "event_ids": ["evt-katharinen-1872-004-birth", "evt-katharinen-1872-004-baptism"], "role": "Paten (groß)", "path": "draft/katharinen-1872-004/img-katharinen-1872-004-paten-gross_draft.jpg", "quality_status": "draft" },
 
     { "id": "img-katharinen-1872-012-doppelseite", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Doppelseite", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-doppelseite_draft.jpg", "quality_status": "draft" },
-    { "id": "img-katharinen-1872-012-detail", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Detail", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-detail_draft.jpg", "quality_status": "draft" }
+    { "id": "img-katharinen-1872-012-detail", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Detail", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-detail_draft.jpg", "quality_status": "draft" },
+    { "id": "img-gehrden-1907-024-vollbild", "source_id": "src-gehrden-1907-024", "event_ids": ["evt-gehrden-1907-nr24-birth"], "role": "Vollbild", "path": "draft/gehrden-1907-024/img-gehrden-1907-024-vollbild_draft.jpg", "quality_status": "draft" }
   ]
 }
