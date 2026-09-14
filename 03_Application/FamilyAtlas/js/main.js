@@ -12,7 +12,6 @@ const treeEl = document.getElementById("tree");
 const timelineEl = document.getElementById("timeline");
 const titleEl = document.getElementById("story-title");
 const storyEl = document.getElementById("story");
-const atmosphereEl = document.getElementById("atmosphere");
 
 let map = null;
 let focusedId = DEFAULT_FOCUS;
@@ -32,7 +31,7 @@ initMap()
 function render() {
   renderTree(treeEl, data, focusedId, setFocus);
   renderTimeline(timelineEl, data, sourcesData, focusedId, openEventSources);
-  renderStory(titleEl, storyEl, atmosphereEl, data, sourcesData, focusedId);
+  renderStory(titleEl, storyEl, data, sourcesData, focusedId);
   if (map) updateMapFocus(map, data, focusedId);
 }
 

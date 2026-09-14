@@ -1,26 +1,10 @@
-import { lifespan } from "./format.js";
 import { primaryScreenshotForEvent, sourceById } from "./sources.js";
 import { openLightbox } from "./lightbox.js";
 
-export function renderStory(titleEl, storyEl, atmosphereEl, data, sourcesData, focusedId) {
+export function renderStory(titleEl, storyEl, data, sourcesData, focusedId) {
   const person = data.peopleById.get(focusedId);
 
   titleEl.innerHTML = `<h1>${person.name}</h1>`;
-
-  const era = person.living ? lifespan(person) : `ca. ${lifespan(person)}`;
-
-  if (person.image) {
-    atmosphereEl.innerHTML = `<img src="assets/${person.image}" alt="${person.name}" loading="lazy" />`;
-    atmosphereEl.setAttribute("data-caption", `${person.profession || "Lebenswelt"}, ${era}`);
-  } else {
-    atmosphereEl.innerHTML = "";
-    atmosphereEl.setAttribute(
-      "data-caption",
-      person.has_data
-        ? `Atmosphärisches Bild (Platzhalter) — ${person.profession || "Lebenswelt"}, ${era}`
-        : "Kein Bild hinterlegt"
-    );
-  }
 
   if (!person.has_data) {
     storyEl.innerHTML = `<p class="empty-note">Noch nicht dokumentiert. Diese Person wartet auf Quellen aus dem Upload-Ordner.</p>`;
@@ -28,13 +12,6 @@ export function renderStory(titleEl, storyEl, atmosphereEl, data, sourcesData, f
   }
 
   storyEl.innerHTML = `<div class="prose">${renderProse(person.prose, sourcesData)}</div>`;
-
-  storyEl.querySelectorAll(".inline-source").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const fig = storyEl.querySelector(`.beleg-figure[data-event-id="${btn.dataset.eventId}"]`);
-      if (fig) fig.hidden = !fig.hidden;
-    });
-  });
 
   storyEl.querySelectorAll(".beleg-figure img").forEach((img) => {
     img.addEventListener("click", () => {
@@ -54,10 +31,9 @@ function renderProse(prose, sourcesData) {
 function paragraphWithBelege(paragraph, sourcesData) {
   const eventIds = [];
   const textHtml = paragraph.replace(/\{\{([\w-]+)\}\}/g, (_, eventId) => {
-    const shot = primaryScreenshotForEvent(sourcesData, eventId);
-    if (!shot) return "";
+    if (!primaryScreenshotForEvent(sourcesData, eventId)) return "";
     eventIds.push(eventId);
-    return ` <button class="inline-source" data-event-id="${eventId}" title="Beleg ein-/ausblenden">Beleg</button>`;
+    return "";
   });
   const figures = eventIds.map((id) => belegFigureHtml(id, sourcesData)).join("");
   return `<p>${textHtml}</p>${figures}`;
@@ -68,7 +44,7 @@ function belegFigureHtml(eventId, sourcesData) {
   if (!shot) return "";
   const source = sourceById(sourcesData, shot.source_id);
   return `
-    <figure class="beleg-figure" data-event-id="${eventId}" hidden>
+    <figure class="beleg-figure" data-event-id="${eventId}">
       <img src="assets/${shot.path}" alt="${shot.role}" loading="lazy" title="Zum Vergrößern klicken" />
       <figcaption>
         ${source ? `${source.title} — ${source.archive_ref}` : shot.role}
