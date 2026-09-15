@@ -13,7 +13,7 @@ export function renderStory(titleEl, storyEl, data, sourcesData, focusedId) {
 
   storyEl.innerHTML = `${renderPortraits(person)}<div class="prose">${renderProse(person.prose, sourcesData)}</div>`;
 
-  storyEl.querySelectorAll(".beleg-figure img, .portrait img").forEach((img) => {
+  storyEl.querySelectorAll(".beleg-figure img, .portrait img, .portrait-figure img").forEach((img) => {
     img.addEventListener("click", () => {
       openLightbox(`<img class="lightbox-fullimage" src="${img.src}" alt="${img.alt}" />`);
     });
@@ -22,15 +22,27 @@ export function renderStory(titleEl, storyEl, data, sourcesData, focusedId) {
 
 function renderPortraits(person) {
   if (!person.portraits || !person.portraits.length) return "";
-  const figures = person.portraits
-    .map(
-      (p) => `
+
+  // Mehrere Bilder: wie Beleg-Scans neben den Text gesetzt (float, 1/3 Breite).
+  if (person.portraits.length > 1) {
+    return person.portraits
+      .map(
+        (p) => `
+        <figure class="portrait-figure">
+          <img src="assets/${p.path}" alt="${person.name}" loading="lazy" title="Zum Vergrößern klicken" />
+        </figure>`
+      )
+      .join("");
+  }
+
+  // Einzelnes Bild: zentriert, eigene Breite möglich.
+  const p = person.portraits[0];
+  return `
+    <div class="portraits">
       <figure class="portrait"${p.width ? ` style="width:${p.width}"` : ""}>
         <img src="assets/${p.path}" alt="${person.name}" loading="lazy" title="Zum Vergrößern klicken" />
-      </figure>`
-    )
-    .join("");
-  return `<div class="portraits">${figures}</div>`;
+      </figure>
+    </div>`;
 }
 
 function renderProse(prose, sourcesData) {

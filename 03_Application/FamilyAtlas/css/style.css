@@ -158,13 +158,15 @@ html, body {
   cursor: zoom-in;
 }
 
-.beleg-figure {
+.beleg-figure,
+.portrait-figure {
   float: left;
   width: 33%;
   margin: 0 1.25rem 1rem 0;
 }
 
-.beleg-figure img {
+.beleg-figure img,
+.portrait-figure img {
   display: block;
   width: 100%;
   border: 1px solid var(--line);

@@ -83,6 +83,13 @@
       "lat": 52.4227,
       "lon": 10.7865,
       "note": "Koordinate: Stadtzentrum."
+    },
+    {
+      "id": "heide",
+      "name": "Heide (Dithmarschen)",
+      "lat": 54.1936,
+      "lon": 9.0964,
+      "note": "Koordinate: Ortszentrum, nicht die genaue historische Geburtsklinik/-adresse."
     }
   ],
 
@@ -354,10 +361,11 @@
     },
     {
       "id": "birgit-remmecke",
-      "name": "Birgit Remmecke",
-      "birth_year": null,
+      "name": "Dr. med. Birgit Remmecke",
+      "birth_year": 1950,
       "death_year": null,
-      "profession": null,
+      "living": true,
+      "profession": "Ärztin (Dr. med.)",
       "spouse": "hans-jochen-remmecke",
       "children": [],
       "has_data": true,
@@ -365,16 +373,20 @@
       "portraits": [
         { "path": "portraits/birgit-remmecke/BirgitRemmecke.png", "width": "70%" }
       ],
-      "path": [],
-      "prose": "Birgit Remmecke ist die Ehefrau von Dr. Hans-Jochen Christoph Remmecke. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
-      "events": [],
+      "path": ["heide"],
+      "prose": "Dr. med. Birgit Remmecke wurde am 4. Oktober 1950 in Heide (Dithmarschen) geboren {{evt-heide-1950-birth}}. Sie ist Ärztin und heiratete Dr. Hans-Jochen Christoph Remmecke. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "events": [
+        { "id": "evt-heide-1950-birth", "year": 1950, "date_display": "1950-10-04", "type": "birth", "place_id": "heide", "label": "Geburt" }
+      ],
       "facts": [
+        "Geboren am 4. Oktober 1950 in Heide (Dithmarschen).",
+        "Ärztin (Dr. med.).",
         "Ehefrau von Dr. Hans-Jochen Christoph Remmecke."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
-        "Geburtsname, Geburts- und Lebensdaten sowie Herkunft sind in dieser Recherche noch nicht erfasst.",
+        "Geburtsname (ob „Remmecke” Geburts- oder Ehename ist) sowie Herkunft der Eltern sind in dieser Recherche noch nicht erfasst.",
         "Heiratsdatum mit Hans-Jochen Remmecke unbekannt."
       ]
     },
