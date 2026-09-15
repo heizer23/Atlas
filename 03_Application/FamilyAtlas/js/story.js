@@ -11,13 +11,26 @@ export function renderStory(titleEl, storyEl, data, sourcesData, focusedId) {
     return;
   }
 
-  storyEl.innerHTML = `<div class="prose">${renderProse(person.prose, sourcesData)}</div>`;
+  storyEl.innerHTML = `${renderPortraits(person)}<div class="prose">${renderProse(person.prose, sourcesData)}</div>`;
 
-  storyEl.querySelectorAll(".beleg-figure img").forEach((img) => {
+  storyEl.querySelectorAll(".beleg-figure img, .portrait img").forEach((img) => {
     img.addEventListener("click", () => {
       openLightbox(`<img class="lightbox-fullimage" src="${img.src}" alt="${img.alt}" />`);
     });
   });
+}
+
+function renderPortraits(person) {
+  if (!person.portraits || !person.portraits.length) return "";
+  const figures = person.portraits
+    .map(
+      (p) => `
+      <figure class="portrait${p.full_width ? " portrait--full" : ""}">
+        <img src="assets/${p.path}" alt="${person.name}" loading="lazy" title="Zum Vergrößern klicken" />
+      </figure>`
+    )
+    .join("");
+  return `<div class="portraits">${figures}</div>`;
 }
 
 function renderProse(prose, sourcesData) {

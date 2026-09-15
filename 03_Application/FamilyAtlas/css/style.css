@@ -135,6 +135,37 @@ html, body {
   margin: 0 0 1.1rem;
 }
 
+.portraits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+.portrait {
+  margin: 0;
+  width: 9rem;
+}
+
+.portrait img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: zoom-in;
+}
+
+.portrait--full {
+  width: 100%;
+}
+
+.portrait--full img {
+  max-height: 26rem;
+  object-fit: cover;
+}
+
 .beleg-figure {
   float: left;
   width: 33%;
@@ -172,6 +203,34 @@ html, body {
 
 .tree {
   margin-bottom: 1.5rem;
+}
+
+.tree-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tree-header h2 {
+  margin: 0 0 0.8rem;
+}
+
+.tree-fullscreen-btn {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tree-fullscreen-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .tree-row {
@@ -448,6 +507,161 @@ html, body {
   color: var(--ink-soft);
   font-style: italic;
   margin-top: 0.5rem;
+}
+
+/* --- Vollbild-Stammbaum --- */
+
+.fulltree-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 18, 15, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 100;
+}
+
+.fulltree-overlay[hidden] {
+  display: none;
+}
+
+.fulltree-box {
+  background: var(--bg-panel);
+  border-radius: 4px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fulltree-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.9rem 1.2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.fulltree-title {
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+}
+
+.fulltree-hint {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  flex: 1;
+}
+
+.fulltree-close {
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.fulltree-close:hover {
+  color: var(--accent);
+}
+
+.fulltree-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.fulltree-inner {
+  position: relative;
+}
+
+.fulltree-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+.fulltree-gridline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.fulltree-axis-label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  fill: var(--ink-soft);
+}
+
+.fulltree-tick {
+  fill: var(--ink-soft);
+}
+
+.fulltree-nudge {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.fulltree-marriage {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.fulltree-descent {
+  fill: none;
+  stroke: var(--ink-soft);
+  stroke-width: 1.3;
+}
+
+.fulltree-node {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.3rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.25;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.fulltree-node .name {
+  font-size: 0.74rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.fulltree-node .years {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+}
+
+.fulltree-node:hover {
+  border-color: var(--accent);
+}
+
+.fulltree-node.is-focused {
+  background: var(--ink);
+  color: var(--bg-panel);
+  border-color: var(--ink);
+}
+
+.fulltree-node.is-focused .years {
+  color: #c9c4ba;
+}
+
+.fulltree-estimated {
+  font-style: italic;
+  margin-right: 0.2rem;
 }
 
 /* --- Tablet --- */

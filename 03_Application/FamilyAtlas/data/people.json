@@ -76,6 +76,13 @@
       "lat": 52.3000,
       "lon": 9.4500,
       "note": "Koordinate: Ortszentrum. Sitz des Steinkohlenbergwerks und des Gesamtbergamts Obernkirchen-Barsinghausen."
+    },
+    {
+      "id": "wolfsburg",
+      "name": "Wolfsburg",
+      "lat": 52.4227,
+      "lon": 10.7865,
+      "note": "Koordinate: Stadtzentrum."
     }
   ],
 
@@ -169,6 +176,7 @@
       "death_year": 1912,
       "profession": "Zimmermann (1870) / später Monteur",
       "spouse": "louise-baumgarten",
+      "parents": ["johann-1839", "hanne-1841"],
       "children": ["friedrich-wilhelm-remmecke"],
       "has_data": true,
       "image": null,
@@ -205,6 +213,7 @@
       "death_year": 1872,
       "profession": null,
       "spouse": null,
+      "parents": ["johann-1839", "hanne-1841"],
       "children": [],
       "has_data": true,
       "image": null,
@@ -259,39 +268,54 @@
       "birth_year": 1907,
       "death_year": 1990,
       "profession": "Kaufmännischer Leiter / Betriebsleiter (mehrere Unternehmen)",
-      "spouse": null,
+      "spouse": "emilie-schweckendiek",
       "parents": ["karl-1870", "louise-baumgarten"],
-      "children": ["hans-jochen-remmecke"],
+      "children": ["katharina-beier", "hans-jochen-remmecke"],
       "has_data": true,
       "image": null,
+      "portraits": [
+        { "path": "portraits/friedrich-wilhelm-remmecke/Opa_Friedrich.jpg" },
+        { "path": "portraits/friedrich-wilhelm-remmecke/OpaFriedrich2.png" },
+        { "path": "portraits/friedrich-wilhelm-remmecke/OpaFriedrich3.png" },
+        { "path": "portraits/friedrich-wilhelm-remmecke/OpaFriedrich4.png" }
+      ],
       "path": ["gehrden", "berlin", "schoenebeck-elbe", "karlsbad", "gehrden", "handorf-peine", "barsinghausen", "egestorf-suentel"],
-      "prose": "Am 23. Februar 1907, nachmittags um elf Uhr, kam in Gehrden ein Junge zur Welt {{evt-gehrden-1907-nr24-birth}}, in der Wohnung seines Vaters. Fünf Tage später ging der Vater zum Standesamt und ließ ihn auf drei Namen eintragen: Ludwig Wilhelm Friedrich. Gerufen wurde er sein Leben lang nach dem letzten davon.\n\nSein Vater war Monteur und starb, als der Junge fünf war {{evt-gehrden-1912-nr9-death}}. Was das für die Familie bedeutete, wissen wir nicht — nur, dass die Mutter, Louise geborene Baumgarten, mit einem kleinen Kind zurückblieb in einem Ort, in dem sie vermutlich keine Verwandten hatte.\n\nWas dann kam, kennen wir nur in Bruchstücken, und die Reihenfolge ist unsicher. Er muss eine kaufmännische Ausbildung durchlaufen haben, denn alles, was später von ihm überliefert ist, sind leitende Stellungen in der Industrie: Berlin, dann Schönebeck an der Elbe, wo er Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit war. Kein Handwerk mehr wie bei Vater und Großvater, sondern Schreibtisch, Bilanz und Personalverantwortung. In drei Generationen vom Zimmermann über den Monteur zum Direktor.\n\nVermutlich nach 1938 ging er nach Karlsbad, als Betriebsleiter der Staatlichen Glasmanufaktur {{evt-karlsbad-1938-employment}}. Die Stadt gehörte erst seit dem Münchner Abkommen zum Deutschen Reich; eine „staatliche” Manufaktur dort setzt die deutsche Verwaltung voraus. Im selben Jahr trat er in die NSDAP ein.\n\nEs ist nicht das einzige Dokument dieser Art. Ein Fragebogen von 1948 listet auf: Deutsche Arbeitsfront seit 1933, NS-Volkswohlfahrt seit 1933, Volksbund für das Deutschtum im Ausland seit 1935, Deutsche Jägerschaft seit 1941. Und eine Zeile, die neugierig macht: Vor 1933 sei er Mitglied einer anderen Partei gewesen. Welcher, steht dort nicht.\n\nEr war Soldat im Zweiten Weltkrieg.\n\n1945 endete alles, was er sich aufgebaut hatte. Karlsbad wurde wieder Karlovy Vary, die Deutschen mussten gehen. Im April 1945 ist er in Gehrden gemeldet {{evt-gehrden-1945-residence-end}}, also dort, wo er geboren wurde. Im Jahr darauf, 1946, kommt in Peine ein Sohn zur Welt {{evt-peine-1946-birth}}.\n\n1948 lebt die Familie in Handorf, einem Dorf im Kreis Peine {{evt-handorf-1948-residence}}. In diesem Jahr läuft sein Entnazifizierungsverfahren. Es endet mit der mildesten Einstufung, die es gab: entlastet.\n\nDanach beginnt er noch einmal. Das Gesamtbergamt Obernkirchen-Barsinghausen macht ihn zum Kaufmännischen Leiter — zehn Kilometer von Gehrden entfernt, zurück in der Gegend seiner Kindheit. Später leitet er die Ziegeleien und führt die Niedersächsischen Rohrwerke. Ein Ortsverein in Barsinghausen hat ihm 1996 neun Seiten gewidmet, in einem Buch über die Direktoren des dortigen Steinkohlenbergwerks. Er war offenbar der letzte in dieser Reihe.\n\nEr starb am 25. August 1990 in Egestorf im Süntel, mit 83 Jahren {{evt-egestorf-1990-death}}.",
+      "prose": "Am 23. Februar 1907, nachmittags um elf Uhr, kam in Gehrden ein Junge zur Welt {{evt-gehrden-1907-nr24-birth}}, in der Wohnung seines Vaters. Fünf Tage später ging der Vater zum Standesamt und ließ ihn auf drei Namen eintragen: Ludwig Wilhelm Friedrich. Gerufen wurde er sein Leben lang nach dem letzten davon.\n\nSein Vater war Monteur und starb, als der Junge fünf war {{evt-gehrden-1912-nr9-death}}. Was das für die Familie bedeutete, wissen wir nicht — nur, dass die Mutter, Louise geborene Baumgarten, mit einem kleinen Kind zurückblieb in einem Ort, in dem sie vermutlich keine Verwandten hatte. Nach der Familienüberlieferung wuchs Friedrich in dieser Zeit im Bereich Klusbrink bei Egestorf am Deister auf — ob bei Verwandten der Mutter oder aus einem anderen Grund, ist nicht überliefert, und ein Beleg dafür fehlt bislang.\n\nWas dann kam, kennen wir nur in Bruchstücken, und die Reihenfolge ist unsicher. Er muss eine kaufmännische Ausbildung durchlaufen haben, denn alles, was später von ihm überliefert ist, sind leitende Stellungen in der Industrie: Berlin, dann Schönebeck an der Elbe, wo er Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit war. Kein Handwerk mehr wie bei Vater und Großvater, sondern Schreibtisch, Bilanz und Personalverantwortung. In drei Generationen vom Zimmermann über den Monteur zum Direktor.\n\nIn dieser Zeit heiratete er Emilie Schweckendiek; ein Datum ist nicht überliefert. Ihre jüngere Schwester Annemarie — in der Familie „Tante Miekchen” genannt — wurde Fürsorgerin. 1936 kam, nach bisherigem Kenntnisstand, eine Tochter zur Welt: Katharina.\n\nVermutlich nach 1938 ging er nach Karlsbad, als Betriebsleiter der Staatlichen Glasmanufaktur {{evt-karlsbad-1938-employment}}. Die Stadt gehörte erst seit dem Münchner Abkommen zum Deutschen Reich; eine „staatliche” Manufaktur dort setzt die deutsche Verwaltung voraus. Im selben Jahr trat er in die NSDAP ein.\n\nEs ist nicht das einzige Dokument dieser Art. Ein Fragebogen von 1948 listet auf: Deutsche Arbeitsfront seit 1933, NS-Volkswohlfahrt seit 1933, Volksbund für das Deutschtum im Ausland seit 1935, Deutsche Jägerschaft seit 1941. Und eine Zeile, die neugierig macht: Vor 1933 sei er Mitglied einer anderen Partei gewesen. Welcher, steht dort nicht.\n\nEr war Soldat im Zweiten Weltkrieg.\n\n1945 endete alles, was er sich aufgebaut hatte. Karlsbad wurde wieder Karlovy Vary, die Deutschen mussten gehen. Im April 1945 ist er in Gehrden gemeldet {{evt-gehrden-1945-residence-end}}, also dort, wo er geboren wurde. Im Jahr darauf, 1946, kommt in Peine ein Sohn zur Welt {{evt-peine-1946-birth}}.\n\nSchon während des Krieges war die Familie auf den Hof einer Tante Emilies gezogen, die alle nur „Muhme” nannten, in Handorf im Kreis Peine {{evt-handorf-1948-residence}} — dort verbrachte der kleine Hans-Jochen einen Teil seiner frühen Kindheit. 1948, weiterhin in Handorf, läuft Friedrichs Entnazifizierungsverfahren. Es endet mit der mildesten Einstufung, die es gab: entlastet.\n\nDanach beginnt er noch einmal. Beim Gesamtbergamt Obernkirchen-Barsinghausen — einem Betrieb der Preussag — wird er Kaufmännischer Leiter, in der Familienüberlieferung als „Direktor” bzw. „kaufmännischer Direktor” erinnert. Nicht zehn Kilometer von Gehrden, sondern, wenn die Kindheit in Klusbrink zutrifft, tatsächlich zurück in der Gegend seiner Kindheit. Die Familie bezieht eine Dienstvilla in Barsinghausen. Später leitet er die Ziegeleien und führt die Niedersächsischen Rohrwerke. Ein Ortsverein in Barsinghausen hat ihm 1996 neun Seiten gewidmet, in einem Buch über die Direktoren des dortigen Steinkohlenbergwerks. Er war offenbar der letzte in dieser Reihe — der Familienüberlieferung nach war er insbesondere mit der Endphase und der Abwicklung des Deisterbergbaus befasst; möglicherweise geht eine überlieferte Chronik des Klosterstollens auf seine eigenen Aufzeichnungen zurück, auch das bislang unbestätigt.\n\nNach seiner Pensionierung zog er in den Steinradweg in Egestorf. Dort starb er am 25. August 1990, mit 83 Jahren {{evt-egestorf-1990-death}}.",
       "events": [
         { "id": "evt-gehrden-1907-nr24-birth", "year": 1907, "date_display": "1907-02-23", "type": "birth", "place_id": "gehrden", "label": "Geburt, nachmittags 11 Uhr" },
         { "id": "evt-karlsbad-1938-employment", "year": 1938, "date_display": "ca. 1938 [?]", "type": "employment", "place_id": "karlsbad", "label": "Betriebsleiter Staatliche Glasmanufaktur Karlsbad; NSDAP-Eintritt im selben Jahr (Fragebogen 1948, nicht eingesehen)" },
         { "id": "evt-gehrden-1945-residence-end", "year": 1945, "date_display": "1945-04 [?]", "type": "residence_end", "place_id": "gehrden", "label": "Wohnort bis April 1945 in Gehrden" },
-        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort Handorf (Kreis Peine); Entnazifizierungsverfahren, Ergebnis: entlastet (Fragebogen 1948, nicht eingesehen)" },
-        { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf (Süntel)" }
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "child_birth", "place_id": "peine", "label": "Geburt des Sohnes Hans-Jochen" },
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort bei „Muhme” (Tante Emilies) in Handorf (Kreis Peine), wohl schon seit Kriegszeit; Entnazifizierungsverfahren 1948, Ergebnis: entlastet (Fragebogen 1948, nicht eingesehen)" },
+        { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf (Süntel), zuletzt wohnhaft im Steinradweg" }
       ],
       "facts": [
         "Geboren 23.02.1907, nachmittags 11 Uhr, in Gehrden, in der Wohnung des Vaters (Geburtsregister Gehrden 1907 Nr. 24).",
         "Im Geburtsregister als „Ludwig Wilhelm Friedrich” eingetragen, später durchgehend als „Friedrich Wilhelm” geführt.",
+        "Nach Familienüberlieferung möglicherweise aufgewachsen im Bereich Klusbrink bei Egestorf am Deister (nicht belegt).",
         "Evangelisch-lutherisch. Kriegsteilnehmer im Zweiten Weltkrieg.",
         "Berufliche Stationen (Reihenfolge größtenteils unsicher): Berlin; Schönebeck (Elbe) als Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit; ab vermutlich 1938 Betriebsleiter der Staatlichen Glasmanufaktur Karlsbad.",
+        "Heirat mit Emilie Schweckendiek (Datum unbekannt); Kinder Katharina (*1936) und Hans-Jochen (*1946).",
         "1938 laut eigener Angabe (Fragebogen 1948) NSDAP-Eintritt in Karlsbad; laut demselben Fragebogen zudem Deutsche Arbeitsfront (seit 1933), NS-Volkswohlfahrt (seit 1933), Volksbund für das Deutschtum im Ausland (seit 1935), Deutsche Jägerschaft (seit 1941); vor 1933 Mitglied einer nicht genannten anderen Partei.",
-        "April 1945 Wohnort Gehrden, 1948/49 Handorf (Kreis Peine) — dort Entnazifizierungsverfahren, Ergebnis: entlastet.",
-        "Nach 1948: Kaufmännischer Leiter Gesamtbergamt Obernkirchen-Barsinghausen, später Leiter der Ziegeleien und Geschäftsführer Niedersächsische Rohrwerke GmbH; Wirkort Barsinghausen. Eine neunseitige Biographie (Ewig 1996) nennt ihn den letzten Direktor des dortigen Steinkohlenbergwerks.",
+        "April 1945 Wohnort Gehrden; wohl schon während des Krieges, spätestens 1948/49 Wohnort bei „Muhme” (Tante Emilies) in Handorf (Kreis Peine) — dort Entnazifizierungsverfahren, Ergebnis: entlastet. Sohn Hans-Jochen verbrachte dort einen Teil seiner frühen Kindheit.",
+        "Nach 1948: Kaufmännischer Leiter Gesamtbergamt Obernkirchen-Barsinghausen (Betrieb der Preussag), in der Familienüberlieferung als Direktor/kaufmännischer Direktor bezeichnet; Dienstvilla in Barsinghausen. Später Leiter der Ziegeleien und Geschäftsführer Niedersächsische Rohrwerke GmbH. Eine neunseitige Biographie (Ewig 1996) nennt ihn den letzten Direktor des dortigen Steinkohlenbergwerks.",
+        "Der Familienüberlieferung nach mit der Endphase/Abwicklung des Deisterbergbaus befasst; möglicherweise Urheber der Aufzeichnungen hinter einer überlieferten Chronik des Klosterstollens (nicht bestätigt).",
+        "Nach der Pensionierung Alterswohnsitz im Steinradweg, Egestorf.",
         "Gestorben 25.08.1990 in Egestorf (Süntel), Stadt Bad Münder am Deister."
       ],
-      "historical_context": null,
-      "interpretation": null,
+      "historical_context": "Der Deister-Steinkohlenbergbau, zuletzt von der Preussag betrieben, wurde im 20. Jahrhundert schrittweise zurückgefahren; die genaue Rolle Friedrichs in dieser Abwicklungsphase ist bislang nur aus der Familienüberlieferung bekannt.",
+      "interpretation": "Falls die Kindheit im Bereich Klusbrink zutrifft, war die spätere Berufsstation in Barsinghausen keine zufällige Rückkehr in die alte Heimat, sondern buchstäblich ein Zurück in die Gegend, in der er aufgewachsen war.",
       "open_questions": [
         "Die Gleichsetzung von „Ludwig Wilhelm Friedrich” (Geburtsregister) und „Friedrich Wilhelm” (alle späteren Quellen) gilt als tragfähig, ist aber durch kein einzelnes Dokument bewiesen. Erwartete Auflösung: Sterbeeintrag 1990, Standesamt Bad Münder (seit 2020 frei), nennt Vornamensfolge, Geburtsdaten und Eltern.",
         "Geburtseintrag Nr. 24 eingesehen (src-gehrden-1907-024): keine Randvermerke sichtbar.",
         "Ewig 1996, S. 68–76 (neunseitige Biographie) ist noch nicht eingesehen (vermutlich GWLB Hannover; Stadtarchiv Barsinghausen).",
         "Fragebogen 1948 (vermutlich aus der Entnazifizierungsakte, NLA HA Nds. 171 Hildesheim Nr. 52871) ist noch nicht als Quelle mit Archivsignatur/Screenshot erfasst — Inhalt bislang nur aus dem Gespräch bekannt.",
         "Welcher Partei er laut Fragebogen 1948 vor 1933 angehörte, ist im Dokument nicht genannt und ungeklärt.",
-        "Exakte Chronologie und Datierung der Stationen Berlin und Schönebeck (Elbe) sind unbekannt; auf der Karte nur als Wegpunkte ohne Datum dargestellt."
+        "Exakte Chronologie und Datierung der Stationen Berlin und Schönebeck (Elbe) sind unbekannt; auf der Karte nur als Wegpunkte ohne Datum dargestellt.",
+        "Kindheit im Bereich Klusbrink bei Egestorf beruht bislang nur auf Familienüberlieferung; kein Dokument, keine gesicherte Zeitspanne, keine Adresse.",
+        "Genauer Zeitpunkt der Übersiedlung zu „Muhme” nach Handorf sowie deren voller Name und genaue Verwandtschaft zu Emilie (Tante) sind unbekannt.",
+        "Verbindung zur Preussag und genaues Datum der Berufung nach Barsinghausen nicht dokumentiert; ebenso die Rolle bei der Abwicklung des Deisterbergbaus und die mögliche Urheberschaft der Klosterstollen-Chronik — bislang nur mündliche Familienüberlieferung.",
+        "Die Zuordnung Katharina Beiers als gemeinsame Tochter von Friedrich und Emilie ist aus dem Kontext erschlossen (Pflege Emilies nach Friedrichs Tod, „Wiederaufnahme” alter Familienkontakte), aber nirgends ausdrücklich als „Tochter” belegt — siehe auch katharina-beier."
       ]
     },
     {
@@ -301,25 +325,179 @@
       "death_year": null,
       "living": true,
       "profession": null,
-      "spouse": null,
+      "spouse": "birgit-remmecke",
       "parents": ["friedrich-wilhelm-remmecke"],
       "children": [],
       "has_data": true,
       "image": null,
-      "path": ["peine"],
-      "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.",
+      "portraits": [
+        { "path": "portraits/hans-jochen-remmecke/jochen.png", "full_width": true }
+      ],
+      "path": ["peine", "handorf-peine"],
+      "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.\n\nEinen Teil seiner frühen Kindheit verbrachte er auf dem Hof einer Großtante, die in der Familie nur „Muhme” genannt wurde, in Handorf {{evt-handorf-1948-residence}} — wohl schon seit Kriegszeit Wohnsitz seiner Eltern. Nach bisherigem Kenntnisstand hat er eine ältere Schwester, Katharina (verheiratete Beier, *1936); ausdrücklich als Geschwister belegt ist das bislang nicht.",
       "events": [
-        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "birth", "place_id": "peine", "label": "Geburt, urkundlich noch nicht nachgewiesen" }
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "birth", "place_id": "peine", "label": "Geburt, urkundlich noch nicht nachgewiesen" },
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Kindheit bei „Muhme” (Großtante) in Handorf" }
       ],
       "facts": [
         "Geboren 1946 in Peine.",
-        "Urkundlicher Nachweis (Geburtenregister Peine 1946) steht aus — Register gesperrt bis ca. 2056."
+        "Urkundlicher Nachweis (Geburtenregister Peine 1946) steht aus — Register gesperrt bis ca. 2056.",
+        "Teile der frühen Kindheit bei „Muhme” (Großtante) in Handorf (Kreis Peine) verbracht."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
         "Beleggrad bislang nur Familienauskunft, kein Dokument. Abschrift nach § 62 PStG durch Abkömmlinge in gerader Linie möglich.",
-        "Theoretisch offen: dass der 1907 in Gehrden geborene Junge (Friedrich Wilhelm) ein anderer, entfernt verwandter Remmecke war als der hier angenommene Vater — auflösbar über den Sterbeeintrag 1990."
+        "Theoretisch offen: dass der 1907 in Gehrden geborene Junge (Friedrich Wilhelm) ein anderer, entfernt verwandter Remmecke war als der hier angenommene Vater — auflösbar über den Sterbeeintrag 1990.",
+        "Ob Katharina Beier tatsächlich seine Schwester ist (gemeinsame Eltern Friedrich und Emilie), ist aus dem Kontext erschlossen, nicht ausdrücklich belegt — siehe katharina-beier."
+      ]
+    },
+    {
+      "id": "birgit-remmecke",
+      "name": "Birgit Remmecke",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "hans-jochen-remmecke",
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "portraits": [
+        { "path": "portraits/birgit-remmecke/BirgitRemmecke.png" }
+      ],
+      "path": [],
+      "prose": "Birgit Remmecke ist die Ehefrau von Dr. Hans-Jochen Christoph Remmecke. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "events": [],
+      "facts": [
+        "Ehefrau von Dr. Hans-Jochen Christoph Remmecke."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburtsname, Geburts- und Lebensdaten sowie Herkunft sind in dieser Recherche noch nicht erfasst.",
+        "Heiratsdatum mit Hans-Jochen Remmecke unbekannt."
+      ]
+    },
+    {
+      "id": "emilie-schweckendiek",
+      "name": "Emilie Schweckendiek",
+      "birth_year": null,
+      "death_year": null,
+      "profession": null,
+      "spouse": "friedrich-wilhelm-remmecke",
+      "children": ["katharina-beier", "hans-jochen-remmecke"],
+      "has_data": true,
+      "image": null,
+      "portraits": [
+        { "path": "portraits/emilie-schweckendiek/emilieSchweckendiek.png" }
+      ],
+      "path": ["handorf-peine", "barsinghausen", "egestorf-suentel"],
+      "prose": "Emilie Schweckendiek heiratete Friedrich Wilhelm Remmecke; ein Datum ist nicht überliefert. Aus der Ehe gingen nach bisherigem Kenntnisstand zwei Kinder hervor: Katharina, geboren 1936, und Hans-Jochen, geboren 1946 in Peine {{evt-peine-1946-birth}}.\n\nIhre jüngere Schwester Annemarie — in der Familie „Tante Miekchen” genannt — wurde Fürsorgerin.\n\nSchon während des Zweiten Weltkriegs zog die Familie auf den Hof einer eigenen Tante Emilies, die alle nur „Muhme” nannten, in Handorf im Kreis Peine {{evt-handorf-1948-residence}}. Dort verbrachte zumindest der jüngere Sohn Hans-Jochen einen Teil seiner frühen Kindheit.\n\nNach dem Krieg zog die Familie mit Friedrichs neuer Stellung beim Gesamtbergamt Obernkirchen-Barsinghausen in eine Dienstvilla in Barsinghausen. Nach Friedrichs Tod 1990 {{evt-egestorf-1990-death}} blieb Emilie zunächst in Egestorf; ihre Tochter Katharina zog bald darauf dorthin, um sie zu pflegen — zunächst zuhause, später im Brigittenstift. Wann und wo Emilie selbst starb, ist in dieser Recherche noch nicht erfasst.",
+      "events": [
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort bei eigener Tante („Muhme”) in Handorf, wohl schon seit Kriegszeit" },
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "child_birth", "place_id": "peine", "label": "Geburt des Sohnes Hans-Jochen" },
+        { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "spouse_death", "place_id": "egestorf-suentel", "label": "Tod des Ehemanns Friedrich in Egestorf" }
+      ],
+      "facts": [
+        "Ehe mit Friedrich Wilhelm Remmecke (Datum unbekannt); Kinder Katharina (*1936) und Hans-Jochen (*1946).",
+        "Jüngere Schwester: Annemarie Schweckendiek, genannt „Tante Miekchen”, Fürsorgerin.",
+        "Während des Zweiten Weltkriegs mit der Familie auf den Hof einer eigenen Tante („Muhme”) in Handorf (Kreis Peine) gezogen.",
+        "Nach dem Krieg Dienstvilla in Barsinghausen (Friedrichs Stellung beim Gesamtbergamt Obernkirchen-Barsinghausen).",
+        "Nach Friedrichs Tod 1990 zunächst in Egestorf verblieben, von Tochter Katharina gepflegt."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburts- und Sterbedaten Emilies sind in dieser Recherche noch nicht erfasst.",
+        "Vorname/Identität der Tante „Muhme” sowie das genaue Datum der Eheschließung mit Friedrich sind unbekannt."
+      ]
+    },
+    {
+      "id": "annemarie-schweckendiek",
+      "name": "Annemarie Schweckendiek",
+      "birth_year": null,
+      "death_year": null,
+      "profession": "Fürsorgerin",
+      "spouse": null,
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "portraits": [
+        { "path": "portraits/annemarie-schweckendiek/miekchen.png" }
+      ],
+      "path": [],
+      "prose": "Annemarie Schweckendiek war die jüngere Schwester von Emilie Schweckendiek, verheiratete Remmecke. In der Familie wurde sie „Tante Miekchen” genannt. Sie war als Fürsorgerin tätig — mehr ist über ihren Lebensweg in dieser Recherche bislang nicht erfasst.",
+      "events": [],
+      "facts": [
+        "Jüngere Schwester von Emilie Schweckendiek.",
+        "Beruf: Fürsorgerin.",
+        "In der Familie „Tante Miekchen” genannt."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburts- und Sterbedaten sowie weiterer Lebensweg sind in dieser Recherche noch nicht erfasst."
+      ]
+    },
+    {
+      "id": "katharina-beier",
+      "name": "Katharina Beier",
+      "birth_year": 1936,
+      "death_year": 2012,
+      "profession": "Lehrerin (Hauswirtschaft und Sport)",
+      "spouse": "gerd-beier",
+      "parents": ["friedrich-wilhelm-remmecke", "emilie-schweckendiek"],
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "path": ["handorf-peine", "wolfsburg", "egestorf-suentel"],
+      "prose": "Katharina Beier wurde am 18. September 1936 geboren — nach bisherigem Kenntnisstand als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek, ausdrücklich belegt ist diese Zuordnung nicht. Möglicherweise wuchs sie, wie ihr jüngerer Bruder Hans-Jochen, zeitweise in Handorf im Kreis Peine auf.\n\nSie absolvierte eine Ausbildung zur Hauswirtschafterin auf einem Lehrhof und studierte später für das Lehramt in Hauswirtschaft und Sport. Ihre Lehrtätigkeit übte sie in Wolfsburg aus, wo sie Gerd Beier heiratete, den langjährigen Leiter der dortigen Volkshochschule. Die Ehe blieb kinderlos und wurde später geschieden.\n\nNach dem Tod ihres Vaters 1990 {{evt-egestorf-1990-death}} zog sie bald darauf nach Egestorf im Süntel, um ihre Mutter Emilie zu pflegen — zunächst zuhause, später im Brigittenstift, wo sie sich auch selbst sozial engagierte, außerdem beim Roten Kreuz.\n\nIn dieser Zeit nahm sie den Kontakt zu Linchen und Fritz wieder auf. Fritz wird in der Familienüberlieferung als unehelicher Angehöriger der Familie beschrieben und soll ebenfalls im Bergbau tätig gewesen sein — eine mögliche Parallele zu Friedrichs eigener Rolle beim Deisterbergbau, die bislang nicht weiter untersucht ist.\n\nKatharina Beier starb am 2. April 2012.",
+      "events": [
+        { "id": "evt-egestorf-1991-residence", "year": 1991, "date_display": "nach 1990 [?]", "type": "residence", "place_id": "egestorf-suentel", "label": "Umzug nach Egestorf, um Mutter Emilie zu pflegen" },
+        { "id": "evt-egestorf-2012-death", "year": 2012, "date_display": "2012-04-02", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf" }
+      ],
+      "facts": [
+        "Geboren 18.09.1936.",
+        "Möglicherweise in Handorf (Kreis Peine) aufgewachsen (unsicher).",
+        "Ausbildung zur Hauswirtschafterin auf einem Lehrhof; später Studium für das Lehramt in Hauswirtschaft und Sport.",
+        "Lehrtätigkeit in Wolfsburg.",
+        "Heirat mit Gerd Beier, Leiter der Volkshochschule Wolfsburg; Ehe kinderlos, später geschieden.",
+        "Nach Friedrichs Tod 1990 Umzug nach Egestorf zur Pflege der Mutter Emilie — zunächst zuhause, später im Brigittenstift.",
+        "Soziales Engagement u. a. beim Roten Kreuz und im Brigittenstift.",
+        "Wiederaufnahme des Kontakts zu Linchen und Fritz (Fritz: unehelicher Angehöriger der Familie, ebenfalls im Bergbau tätig).",
+        "Gestorben 02.04.2012."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Die Zuordnung als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek ist aus dem Kontext erschlossen (Pflege der Mutter, „Wiederaufnahme” alter Familienkontakte), nirgends ausdrücklich als „Tochter” belegt.",
+        "Geburtsort nicht überliefert.",
+        "Identität von Linchen und Fritz sowie die genaue Verwandtschaft zur Familie (Fritz: „unehelicher Angehöriger”) sind ungeklärt.",
+        "Genaues Datum des Umzugs nach Egestorf (vermutlich bald nach 1990) unbekannt."
+      ]
+    },
+    {
+      "id": "gerd-beier",
+      "name": "Gerd Beier",
+      "birth_year": null,
+      "death_year": null,
+      "profession": "Direktor der Volkshochschule Wolfsburg",
+      "spouse": "katharina-beier",
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "path": ["wolfsburg"],
+      "prose": "Gerd Beier war langjähriger Direktor der Volkshochschule Wolfsburg und prägte dort über viele Jahre die Erwachsenenbildung. Er heiratete Katharina Beier; die Ehe blieb kinderlos und wurde später geschieden. Sein Todeszeitpunkt ist nicht gesichert überliefert, vermutlich fiel er in die 1990er Jahre.",
+      "events": [],
+      "facts": [
+        "Langjähriger Direktor der Volkshochschule Wolfsburg.",
+        "Heirat mit Katharina Beier; Ehe kinderlos, später geschieden.",
+        "Todeszeitpunkt vermutlich in den 1990er Jahren (unsicher)."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburtsdatum und genaues Sterbedatum sind in dieser Recherche noch nicht erfasst."
       ]
     },
     {
