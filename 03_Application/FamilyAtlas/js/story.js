@@ -25,7 +25,7 @@ function renderPortraits(person) {
   const figures = person.portraits
     .map(
       (p) => `
-      <figure class="portrait${p.full_width ? " portrait--full" : ""}">
+      <figure class="portrait"${p.width ? ` style="width:${p.width}"` : ""}>
         <img src="assets/${p.path}" alt="${person.name}" loading="lazy" title="Zum Vergrößern klicken" />
       </figure>`
     )

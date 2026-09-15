@@ -331,7 +331,7 @@
       "has_data": true,
       "image": null,
       "portraits": [
-        { "path": "portraits/hans-jochen-remmecke/jochen.png", "full_width": true }
+        { "path": "portraits/hans-jochen-remmecke/jochen.png", "width": "100%" }
       ],
       "path": ["peine", "handorf-peine"],
       "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.\n\nEinen Teil seiner frühen Kindheit verbrachte er auf dem Hof einer Großtante, die in der Familie nur „Muhme” genannt wurde, in Handorf {{evt-handorf-1948-residence}} — wohl schon seit Kriegszeit Wohnsitz seiner Eltern. Nach bisherigem Kenntnisstand hat er eine ältere Schwester, Katharina (verheiratete Beier, *1936); ausdrücklich als Geschwister belegt ist das bislang nicht.",
@@ -363,7 +363,7 @@
       "has_data": true,
       "image": null,
       "portraits": [
-        { "path": "portraits/birgit-remmecke/BirgitRemmecke.png" }
+        { "path": "portraits/birgit-remmecke/BirgitRemmecke.png", "width": "70%" }
       ],
       "path": [],
       "prose": "Birgit Remmecke ist die Ehefrau von Dr. Hans-Jochen Christoph Remmecke. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
