@@ -27,7 +27,6 @@ export function renderEventSources(sourcesData, eventId, eventLabel) {
 
   return `
     <h3>${eventLabel}</h3>
-    <p class="lightbox-badge">Entwurf — nicht gegengeprüft</p>
     <div class="lightbox-gallery">
       ${shots
         .map(

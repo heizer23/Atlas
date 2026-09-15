@@ -47,33 +47,37 @@ function renderPortraits(person) {
 
 function renderProse(prose, sourcesData) {
   if (!prose) return "";
+  const shownShotIds = new Set();
   return prose
     .split("\n\n")
-    .map((paragraph) => paragraphWithBelege(paragraph, sourcesData))
+    .map((paragraph) => paragraphWithBelege(paragraph, sourcesData, shownShotIds))
     .join("");
 }
 
-function paragraphWithBelege(paragraph, sourcesData) {
+function paragraphWithBelege(paragraph, sourcesData, shownShotIds) {
   const eventIds = [];
   const textHtml = paragraph.replace(/\{\{([\w-]+)\}\}/g, (_, eventId) => {
     if (!primaryScreenshotForEvent(sourcesData, eventId)) return "";
     eventIds.push(eventId);
     return "";
   });
-  const figures = eventIds.map((id) => belegFigureHtml(id, sourcesData)).join("");
+  const figures = eventIds.map((id) => belegFigureHtml(id, sourcesData, shownShotIds)).join("");
   return `<p>${textHtml}</p>${figures}`;
 }
 
-function belegFigureHtml(eventId, sourcesData) {
+function belegFigureHtml(eventId, sourcesData, shownShotIds) {
   const shot = primaryScreenshotForEvent(sourcesData, eventId);
   if (!shot) return "";
+  // Ein Event kann Birth+Baptism teilen und auf dasselbe Beleg-Bild zeigen —
+  // nicht doppelt anzeigen, wenn es im selben Personenprofil schon gerendert wurde.
+  if (shownShotIds.has(shot.id)) return "";
+  shownShotIds.add(shot.id);
   const source = sourceById(sourcesData, shot.source_id);
   return `
     <figure class="beleg-figure" data-event-id="${eventId}">
       <img src="assets/${shot.path}" alt="${shot.role}" loading="lazy" title="Zum Vergrößern klicken" />
       <figcaption>
         ${source ? `${source.title} — ${source.archive_ref}` : shot.role}
-        <span class="beleg-badge">Entwurf — nicht gegengeprüft</span>
       </figcaption>
     </figure>
   `;
