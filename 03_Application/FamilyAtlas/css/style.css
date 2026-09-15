@@ -165,6 +165,10 @@ html, body {
   margin: 0 1.25rem 1rem 0;
 }
 
+.portrait-figure {
+  clear: left;
+}
+
 .beleg-figure img,
 .portrait-figure img {
   display: block;

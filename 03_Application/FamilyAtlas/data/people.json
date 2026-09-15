@@ -334,14 +334,14 @@
       "profession": null,
       "spouse": "birgit-remmecke",
       "parents": ["friedrich-wilhelm-remmecke"],
-      "children": [],
+      "children": ["friederike-thieringer", "philip-remmecke"],
       "has_data": true,
       "image": null,
       "portraits": [
         { "path": "portraits/hans-jochen-remmecke/jochen.png", "width": "100%" }
       ],
       "path": ["peine", "handorf-peine"],
-      "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.\n\nEinen Teil seiner frühen Kindheit verbrachte er auf dem Hof einer Großtante, die in der Familie nur „Muhme” genannt wurde, in Handorf {{evt-handorf-1948-residence}} — wohl schon seit Kriegszeit Wohnsitz seiner Eltern. Nach bisherigem Kenntnisstand hat er eine ältere Schwester, Katharina (verheiratete Beier, *1936); ausdrücklich als Geschwister belegt ist das bislang nicht.",
+      "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.\n\nEinen Teil seiner frühen Kindheit verbrachte er auf dem Hof einer Großtante, die in der Familie nur „Muhme” genannt wurde, in Handorf {{evt-handorf-1948-residence}} — wohl schon seit Kriegszeit Wohnsitz seiner Eltern. Nach bisherigem Kenntnisstand hat er eine ältere Schwester, Katharina, genannt „Katrin” (verheiratete Beier, *1936); ausdrücklich als Geschwister belegt ist das bislang nicht.\n\nAm 7. August 1980 heiratete er Dr. med. Birgit Remmecke. Neun Tage später, am 16. August 1980, kam die gemeinsame Tochter Friederike zur Welt, später Dr. Friederike Thieringer; am 18. März 1982 folgte der Sohn Philip.",
       "events": [
         { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "birth", "place_id": "peine", "label": "Geburt, urkundlich noch nicht nachgewiesen" },
         { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Kindheit bei „Muhme” (Großtante) in Handorf" }
@@ -349,7 +349,9 @@
       "facts": [
         "Geboren 1946 in Peine.",
         "Urkundlicher Nachweis (Geburtenregister Peine 1946) steht aus — Register gesperrt bis ca. 2056.",
-        "Teile der frühen Kindheit bei „Muhme” (Großtante) in Handorf (Kreis Peine) verbracht."
+        "Teile der frühen Kindheit bei „Muhme” (Großtante) in Handorf (Kreis Peine) verbracht.",
+        "Heirat mit Dr. med. Birgit Remmecke am 7. August 1980.",
+        "Kinder: Friederike (*16.08.1980, später Dr. Friederike Thieringer) und Philip (*18.03.1982)."
       ],
       "historical_context": null,
       "interpretation": null,
@@ -367,27 +369,76 @@
       "living": true,
       "profession": "Ärztin (Dr. med.)",
       "spouse": "hans-jochen-remmecke",
-      "children": [],
+      "children": ["friederike-thieringer", "philip-remmecke"],
       "has_data": true,
       "image": null,
       "portraits": [
         { "path": "portraits/birgit-remmecke/BirgitRemmecke.png", "width": "70%" }
       ],
       "path": ["heide"],
-      "prose": "Dr. med. Birgit Remmecke wurde am 4. Oktober 1950 in Heide (Dithmarschen) geboren {{evt-heide-1950-birth}}. Sie ist Ärztin und heiratete Dr. Hans-Jochen Christoph Remmecke. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "prose": "Dr. med. Birgit Remmecke wurde am 4. Oktober 1950 in Heide (Dithmarschen) geboren {{evt-heide-1950-birth}}. Sie ist Ärztin. Am 7. August 1980 heiratete sie Dr. Hans-Jochen Christoph Remmecke. Neun Tage später, am 16. August 1980, kam die gemeinsame Tochter Friederike zur Welt, später Dr. Friederike Thieringer; am 18. März 1982 folgte der Sohn Philip. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
       "events": [
         { "id": "evt-heide-1950-birth", "year": 1950, "date_display": "1950-10-04", "type": "birth", "place_id": "heide", "label": "Geburt" }
       ],
       "facts": [
         "Geboren am 4. Oktober 1950 in Heide (Dithmarschen).",
         "Ärztin (Dr. med.).",
-        "Ehefrau von Dr. Hans-Jochen Christoph Remmecke."
+        "Heirat mit Dr. Hans-Jochen Christoph Remmecke am 7. August 1980.",
+        "Kinder: Friederike (*16.08.1980, später Dr. Friederike Thieringer) und Philip (*18.03.1982)."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
-        "Geburtsname (ob „Remmecke” Geburts- oder Ehename ist) sowie Herkunft der Eltern sind in dieser Recherche noch nicht erfasst.",
-        "Heiratsdatum mit Hans-Jochen Remmecke unbekannt."
+        "Geburtsname (ob „Remmecke” Geburts- oder Ehename ist) sowie Herkunft der Eltern sind in dieser Recherche noch nicht erfasst."
+      ]
+    },
+    {
+      "id": "friederike-thieringer",
+      "name": "Dr. Friederike Thieringer",
+      "birth_year": 1980,
+      "death_year": null,
+      "living": true,
+      "profession": null,
+      "spouse": null,
+      "parents": ["hans-jochen-remmecke", "birgit-remmecke"],
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "path": [],
+      "prose": "Dr. Friederike Thieringer wurde am 16. August 1980 geboren, neun Tage nach der Heirat ihrer Eltern Dr. Hans-Jochen Christoph Remmecke und Dr. med. Birgit Remmecke. Sie heißt inzwischen Thieringer; weitere Angaben zu ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "events": [],
+      "facts": [
+        "Geboren am 16. August 1980.",
+        "Führt inzwischen den Namen Thieringer."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburtsort, Ehename-Hintergrund (Heiratsdatum, Ehemann) und weiterer Lebensweg sind in dieser Recherche noch nicht erfasst."
+      ]
+    },
+    {
+      "id": "philip-remmecke",
+      "name": "Philip Remmecke",
+      "birth_year": 1982,
+      "death_year": null,
+      "living": true,
+      "profession": null,
+      "spouse": null,
+      "parents": ["hans-jochen-remmecke", "birgit-remmecke"],
+      "children": [],
+      "has_data": true,
+      "image": null,
+      "path": [],
+      "prose": "Philip Remmecke wurde am 18. März 1982 geboren, als Sohn von Dr. Hans-Jochen Christoph Remmecke und Dr. med. Birgit Remmecke. Weitere Angaben zu seinem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "events": [],
+      "facts": [
+        "Geboren am 18. März 1982."
+      ],
+      "historical_context": null,
+      "interpretation": null,
+      "open_questions": [
+        "Geburtsort und weiterer Lebensweg sind in dieser Recherche noch nicht erfasst."
       ]
     },
     {
@@ -463,13 +514,14 @@
       "has_data": true,
       "image": null,
       "path": ["handorf-peine", "wolfsburg", "egestorf-suentel"],
-      "prose": "Katharina Beier wurde am 18. September 1936 geboren — nach bisherigem Kenntnisstand als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek, ausdrücklich belegt ist diese Zuordnung nicht. Möglicherweise wuchs sie, wie ihr jüngerer Bruder Hans-Jochen, zeitweise in Handorf im Kreis Peine auf.\n\nSie absolvierte eine Ausbildung zur Hauswirtschafterin auf einem Lehrhof und studierte später für das Lehramt in Hauswirtschaft und Sport. Ihre Lehrtätigkeit übte sie in Wolfsburg aus, wo sie Gerd Beier heiratete, den langjährigen Leiter der dortigen Volkshochschule. Die Ehe blieb kinderlos und wurde später geschieden.\n\nNach dem Tod ihres Vaters 1990 {{evt-egestorf-1990-death}} zog sie bald darauf nach Egestorf im Süntel, um ihre Mutter Emilie zu pflegen — zunächst zuhause, später im Brigittenstift, wo sie sich auch selbst sozial engagierte, außerdem beim Roten Kreuz.\n\nIn dieser Zeit nahm sie den Kontakt zu Linchen und Fritz wieder auf. Fritz wird in der Familienüberlieferung als unehelicher Angehöriger der Familie beschrieben und soll ebenfalls im Bergbau tätig gewesen sein — eine mögliche Parallele zu Friedrichs eigener Rolle beim Deisterbergbau, die bislang nicht weiter untersucht ist.\n\nKatharina Beier starb am 2. April 2012.",
+      "prose": "Katharina Beier, in der Familie „Katrin” genannt, wurde am 16. September 1936 geboren — nach bisherigem Kenntnisstand als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek, ausdrücklich belegt ist diese Zuordnung nicht. Möglicherweise wuchs sie, wie ihr jüngerer Bruder Hans-Jochen, zeitweise in Handorf im Kreis Peine auf.\n\nSie absolvierte eine Ausbildung zur Hauswirtschafterin auf einem Lehrhof und studierte später für das Lehramt in Hauswirtschaft und Sport. Ihre Lehrtätigkeit übte sie in Wolfsburg aus, wo sie Gerd Beier heiratete, den langjährigen Leiter der dortigen Volkshochschule. Die Ehe blieb kinderlos und wurde später geschieden.\n\nNach dem Tod ihres Vaters 1990 {{evt-egestorf-1990-death}} zog sie bald darauf nach Egestorf im Süntel, um ihre Mutter Emilie zu pflegen — zunächst zuhause, später im Brigittenstift, wo sie sich auch selbst sozial engagierte, außerdem beim Roten Kreuz.\n\nIn dieser Zeit nahm sie den Kontakt zu Linchen und Fritz wieder auf. Fritz wird in der Familienüberlieferung als unehelicher Angehöriger der Familie beschrieben und soll ebenfalls im Bergbau tätig gewesen sein — eine mögliche Parallele zu Friedrichs eigener Rolle beim Deisterbergbau, die bislang nicht weiter untersucht ist.\n\nKatharina Beier starb am 2. April 2012.",
       "events": [
         { "id": "evt-egestorf-1991-residence", "year": 1991, "date_display": "nach 1990 [?]", "type": "residence", "place_id": "egestorf-suentel", "label": "Umzug nach Egestorf, um Mutter Emilie zu pflegen" },
         { "id": "evt-egestorf-2012-death", "year": 2012, "date_display": "2012-04-02", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf" }
       ],
       "facts": [
-        "Geboren 18.09.1936.",
+        "Geboren 16.09.1936.",
+        "In der Familie „Katrin” genannt.",
         "Möglicherweise in Handorf (Kreis Peine) aufgewachsen (unsicher).",
         "Ausbildung zur Hauswirtschafterin auf einem Lehrhof; später Studium für das Lehramt in Hauswirtschaft und Sport.",
         "Lehrtätigkeit in Wolfsburg.",
