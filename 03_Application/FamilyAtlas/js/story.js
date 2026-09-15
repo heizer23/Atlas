@@ -1,5 +1,13 @@
-import { primaryScreenshotForEvent, sourceById } from "./sources.js";
+import { primaryScreenshotForEvent } from "./sources.js";
 import { openLightbox } from "./lightbox.js";
+
+const EVENT_CAPTION_LABELS = {
+  birth: "Geburt",
+  baptism: "Taufe",
+  marriage: "Hochzeit",
+  death: "Sterbeeintrag",
+  burial: "Begräbnis",
+};
 
 export function renderStory(titleEl, storyEl, data, sourcesData, focusedId) {
   const person = data.peopleById.get(focusedId);
@@ -11,7 +19,7 @@ export function renderStory(titleEl, storyEl, data, sourcesData, focusedId) {
     return;
   }
 
-  storyEl.innerHTML = `${renderPortraits(person)}<div class="prose">${renderProse(person.prose, sourcesData)}</div>`;
+  storyEl.innerHTML = `${renderPortraits(person)}<div class="prose">${renderProse(person, data, sourcesData)}</div>`;
 
   storyEl.querySelectorAll(".beleg-figure img, .portrait img, .portrait-figure img").forEach((img) => {
     img.addEventListener("click", () => {
@@ -45,40 +53,60 @@ function renderPortraits(person) {
     </div>`;
 }
 
-function renderProse(prose, sourcesData) {
-  if (!prose) return "";
+function renderProse(person, data, sourcesData) {
+  if (!person.prose) return "";
   const shownShotIds = new Set();
-  return prose
+  // Ein Beleg-Bild wird nur auf der Seite der Person gezeigt, deren eigenes
+  // Ereignis es dokumentiert — nicht auf jeder Seite, die das Ereignis zur
+  // Einordnung nur erwähnt (z.B. Karls Seite nennt Johanns Geburtsjahr 1839,
+  // zeigt dazu aber nicht Johanns Taufeintrag).
+  const ownEventIds = new Set((person.events || []).map((e) => e.id));
+  return person.prose
     .split("\n\n")
-    .map((paragraph) => paragraphWithBelege(paragraph, sourcesData, shownShotIds))
+    .map((paragraph) => paragraphWithBelege(paragraph, ownEventIds, data, sourcesData, shownShotIds))
     .join("");
 }
 
-function paragraphWithBelege(paragraph, sourcesData, shownShotIds) {
+function paragraphWithBelege(paragraph, ownEventIds, data, sourcesData, shownShotIds) {
   const eventIds = [];
   const textHtml = paragraph.replace(/\{\{([\w-]+)\}\}/g, (_, eventId) => {
+    if (!ownEventIds.has(eventId)) return "";
     if (!primaryScreenshotForEvent(sourcesData, eventId)) return "";
     eventIds.push(eventId);
     return "";
   });
-  const figures = eventIds.map((id) => belegFigureHtml(id, sourcesData, shownShotIds)).join("");
+  const figures = eventIds.map((id) => belegFigureHtml(id, data, sourcesData, shownShotIds)).join("");
   return `<p>${textHtml}</p>${figures}`;
 }
 
-function belegFigureHtml(eventId, sourcesData, shownShotIds) {
+function belegFigureHtml(eventId, data, sourcesData, shownShotIds) {
   const shot = primaryScreenshotForEvent(sourcesData, eventId);
   if (!shot) return "";
   // Ein Event kann Birth+Baptism teilen und auf dasselbe Beleg-Bild zeigen —
   // nicht doppelt anzeigen, wenn es im selben Personenprofil schon gerendert wurde.
   if (shownShotIds.has(shot.id)) return "";
   shownShotIds.add(shot.id);
-  const source = sourceById(sourcesData, shot.source_id);
   return `
     <figure class="beleg-figure" data-event-id="${eventId}">
       <img src="assets/${shot.path}" alt="${shot.role}" loading="lazy" title="Zum Vergrößern klicken" />
       <figcaption>
-        ${source ? `${source.title} — ${source.archive_ref}` : shot.role}
+        ${eventCaption(eventId, data) || shot.role}
       </figcaption>
     </figure>
   `;
+}
+
+function eventCaption(eventId, data) {
+  const matches = [];
+  for (const p of data.people) {
+    for (const e of p.events || []) {
+      if (e.id === eventId && EVENT_CAPTION_LABELS[e.type]) {
+        matches.push({ person: p, event: e });
+      }
+    }
+  }
+  if (!matches.length) return null;
+  const label = EVENT_CAPTION_LABELS[matches[0].event.type];
+  const names = matches.map((m) => m.person.name).join(" & ");
+  return `${label} ${names} ${matches[0].event.year}`;
 }
