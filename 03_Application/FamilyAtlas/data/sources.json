@@ -6,7 +6,7 @@
       "archive_ref": "Archion 369739, Bild 81/220",
       "url": "https://www.archion.de/p/8d3a70c0dc/",
       "accessed_on": "2026-09-11",
-      "caveats": "Geburtsmonat (Juni/Juli) am schärferen Original erneut zu prüfen. Verbindung dieses Mannes zu Karls Vater ist eine Arbeitsannahme, kein abschließend gelöster Identitätsbeweis.",
+      "caveats": "Geburtsmonat hier zunächst als „vermutlich Juli” gelesen (Scan-Qualität); der Traueintrag 1868 (src-hoyershausen-1868-007, Hoyershausen Nr. 7) nennt jedoch unabhängig „29. Juni 1839” — dort dem zeitnäheren, klarer geschriebenen Eintrag folgend als Juni geführt. Die Transkription unten bleibt die Rohlesung dieses Scans. Verbindung dieses Mannes zu Karls Vater ist eine Arbeitsannahme, kein abschließend gelöster Identitätsbeweis.",
       "transcription": {
         "Jahr": "1839",
         "Kind": "Johann Heinrich Friedrich Christian",
@@ -40,14 +40,19 @@
       "archive_ref": "Archion 369848, Bild 55/161",
       "url": "https://www.archion.de/p/26cb8b99df/",
       "accessed_on": "2026-09-11",
-      "caveats": "Heirat am Original geprüft. Falsches Indexjahr 1537 verworfen. Identität der Braut mit „Hanne Sophie Luise“ bleibt ungeklärt.",
+      "caveats": "Heirat am Original geprüft. Falsches Indexjahr 1537 verworfen. Identität der Braut mit „Hanne Sophie Luise“ bleibt ungeklärt. Bestätigt unabhängig den Geburtstag des Bräutigams als 29. Juni 1839 — damit gilt die zwischenzeitliche „Juli”-Lesung des Taufregister-Scans (src-brunkensen-1839-006) als überholt.",
       "transcription": {
-        "Jahr": "1868",
-        "Bräutigam": "Johann Heinrich Friedrich Christian Remmeke, Zimmermann in Oesede",
-        "Braut": "Hanne Justine Louise Beinling",
-        "Datum": "27. Dezember 1868",
-        "Ort": "Hoyershausen",
-        "Anmerkung": "Identität der Braut mit der später als „Hanne Sophie Luise“ geführten Person ungeklärt"
+        "Eintrag": "Nr. 7",
+        "Bräutigam": "Johann Heinrich Friedrich Christian Remmeke",
+        "Familienstand und Beruf": "unverheiratet, Zimmermann in Oesede",
+        "Geburt": "29. Juni 1839 zu Brunkensen",
+        "Vater": "Heinrich Remmeke, Zimmermann",
+        "Mutter": "dessen Ehefrau Johanne Sophie Luise, geborene Schwarze",
+        "Braut": "Hanne Justine Luise Beinling, unverheiratet, zu Hoyershausen",
+        "Geburt der Braut": "1. Juli 1841 zu Hoyershausen",
+        "Vater der Braut": "Heinrich Beinling",
+        "Mutter der Braut": "Justine, geborene Dietsch [?] — der Mädchenname bleibt etwas unsicher",
+        "Trauung": "27. Dezember 1868 zu Hoyershausen"
       }
     },
     {
@@ -144,7 +149,7 @@
     { "id": "img-hoyershausen-1841-022-doppelseite", "source_id": "src-hoyershausen-1841-022", "event_ids": ["evt-hoyershausen-1841-022-birth", "evt-hoyershausen-1841-022-baptism"], "role": "Doppelseite", "path": "draft/hoyershausen-1841-022/img-hoyershausen-1841-022-doppelseite_draft.jpg", "quality_status": "draft" },
     { "id": "img-hoyershausen-1841-022-detail", "source_id": "src-hoyershausen-1841-022", "event_ids": ["evt-hoyershausen-1841-022-birth", "evt-hoyershausen-1841-022-baptism"], "role": "Detail", "path": "draft/hoyershausen-1841-022/img-hoyershausen-1841-022-detail_draft.jpg", "quality_status": "draft" },
 
-    { "id": "img-hoyershausen-1868-007-doppelseite", "source_id": "src-hoyershausen-1868-007", "event_ids": ["evt-hoyershausen-1868-007-marriage"], "role": "Doppelseite", "path": "draft/hoyershausen-1868-007/img-hoyershausen-1868-007-doppelseite_draft.jpg", "quality_status": "draft" },
+    { "id": "img-hoyershausen-1868-007-doppelseite", "source_id": "src-hoyershausen-1868-007", "event_ids": ["evt-hoyershausen-1868-007-marriage"], "role": "Doppelseite", "path": "draft/hoyershausen-1868-007/img-hoyershausen-1868-007-doppelseite_draft.png", "quality_status": "draft" },
     { "id": "img-hoyershausen-1868-007-detail", "source_id": "src-hoyershausen-1868-007", "event_ids": ["evt-hoyershausen-1868-007-marriage"], "role": "Detail", "path": "draft/hoyershausen-1868-007/img-hoyershausen-1868-007-detail_draft.jpg", "quality_status": "draft" },
 
     { "id": "img-katharinen-1870-075-doppelseite", "source_id": "src-katharinen-1870-075", "event_ids": ["evt-katharinen-1870-075-birth", "evt-katharinen-1870-075-baptism"], "role": "Doppelseite", "path": "draft/katharinen-1870-075/img-katharinen-1870-075-doppelseite_draft.png", "quality_status": "draft" },
