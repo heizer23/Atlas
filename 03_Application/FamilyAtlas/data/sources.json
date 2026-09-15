@@ -23,7 +23,16 @@
       "archive_ref": "Archion 369846, Bild 220/355",
       "url": "https://www.archion.de/p/687f46bdbb/",
       "accessed_on": "2026-09-11",
-      "caveats": "Justine im Original gelesen. Abweichung zu „Sophie“ in Georgsmarienhütte nicht aufgelöst."
+      "caveats": "Justine im Original gelesen. Abweichung zu „Sophie“ in Georgsmarienhütte nicht aufgelöst.",
+      "transcription": {
+        "Jahr": "1841",
+        "Kind": "Hanne Justine Louise Beinling",
+        "Vater": "Heinrich Beinling, Hoyershausen",
+        "Mutter": "Justine Dietsch [?] (Lesung unsicher, auch Dietzsch möglich)",
+        "Geburt": "1. Juli 1841",
+        "Taufe": "11. Juli 1841",
+        "Taufzeugen": "nicht erfasst"
+      }
     },
     {
       "id": "src-hoyershausen-1868-007",
@@ -31,7 +40,15 @@
       "archive_ref": "Archion 369848, Bild 55/161",
       "url": "https://www.archion.de/p/26cb8b99df/",
       "accessed_on": "2026-09-11",
-      "caveats": "Heirat am Original geprüft. Falsches Indexjahr 1537 verworfen. Identität der Braut mit „Hanne Sophie Luise“ bleibt ungeklärt."
+      "caveats": "Heirat am Original geprüft. Falsches Indexjahr 1537 verworfen. Identität der Braut mit „Hanne Sophie Luise“ bleibt ungeklärt.",
+      "transcription": {
+        "Jahr": "1868",
+        "Bräutigam": "Johann Heinrich Friedrich Christian Remmeke, Zimmermann in Oesede",
+        "Braut": "Hanne Justine Louise Beinling",
+        "Datum": "27. Dezember 1868",
+        "Ort": "Hoyershausen",
+        "Anmerkung": "Identität der Braut mit der später als „Hanne Sophie Luise“ geführten Person ungeklärt"
+      }
     },
     {
       "id": "src-katharinen-1870-075",
@@ -39,7 +56,16 @@
       "archive_ref": "STAOS Dep 3b IV Nr. 2442; Archion 215357, Bild 252/324",
       "url": "https://www.archion.de/p/c745ff8321/",
       "accessed_on": "2026-09-11",
-      "caveats": "Kirchliche Registerzuständigkeit ist kein Nachweis des genauen Taufortes. 03.07.1870 nach späterer Lesung; Paten-Nachname Mehseke [?] unsicher."
+      "caveats": "Kirchliche Registerzuständigkeit ist kein Nachweis des genauen Taufortes. 03.07.1870 nach späterer Lesung; Paten-Nachname Mehseke [?] unsicher.",
+      "transcription": {
+        "Jahr": "1870",
+        "Kind": "Remmecke, Karl Friedrich",
+        "Vater": "Zimmermann Johann Heinrich Friedrich Christian Remmecke",
+        "Mutter": "dessen Ehefrau Hanne Sophie Luise, geborene Beinling, zu Georgs-Marienhütte",
+        "Geburt": "12. Juni 1870, nachmittags 4½ Uhr",
+        "Taufe": "3. Juli 1870",
+        "Taufzeugen": "1. Tischler Karl Hildebrand, ledig; 2. Maler Friedrich Mehseke [?], ledig; 3. Zimmermann Karl Herhold, ledig; sämtlich zu Georgsmarienhütte"
+      }
     },
     {
       "id": "src-katharinen-1872-004",
@@ -47,7 +73,16 @@
       "archive_ref": "STAOS Dep 3b IV Nr. 2442; Archion 215357, Bild 282/324",
       "url": "https://www.archion.de/p/73232f8ef9/",
       "accessed_on": "2026-09-11",
-      "caveats": "Frühere Dateinamen „Caroline“, spätere Lesung „Karoline“. Genaue Schreibungen der Paten ungeklärt."
+      "caveats": "Frühere Dateinamen „Caroline“, spätere Lesung „Karoline“. Genaue Schreibungen der Paten ungeklärt.",
+      "transcription": {
+        "Jahr": "1872",
+        "Kind": "Karoline Charlotte Luise Remmecke (frühere Lesung: Caroline)",
+        "Vater": "Johann Heinrich Friedrich Christian Remmecke, Zimmermann, Georgsmarienhütte",
+        "Mutter": "Hanne Sophie Luise, geborene Beinling",
+        "Geburt": "1. Februar 1872, nachts 23:45 Uhr",
+        "Taufe": "18. Februar 1872",
+        "Taufzeugen": "Schreibungen ungeklärt, nicht erfasst"
+      }
     },
     {
       "id": "src-katharinen-1872-012",
@@ -55,7 +90,15 @@
       "archive_ref": "Archion 215294, Bild 4/23",
       "url": "https://www.archion.de/de/viewer/churchRegister/215294?cHash=be034879d4966d376284b9944c59f9ae",
       "accessed_on": "2026-09-11",
-      "caveats": "Sterbetag (6. März [?]) und Altersangabe widersprechen sich leicht gegenüber der Geburt am 01.02.1872. Begräbnisort nicht gesichert."
+      "caveats": "Sterbetag (6. März [?]) und Altersangabe widersprechen sich leicht gegenüber der Geburt am 01.02.1872. Begräbnisort nicht gesichert.",
+      "transcription": {
+        "Jahr": "1872",
+        "Verstorbene(r)": "Karoline Charlotte Luise Remmecke",
+        "Eltern": "Johann Heinrich Friedrich Christian Remmecke, Zimmermann, und Ehefrau Hanne Sophie Luise, geborene Beinling",
+        "Todesdatum": "vermutlich 6. März 1872 [?] — Tag und Altersangabe widersprechen sich leicht gegenüber der Geburt am 1. Februar 1872",
+        "Alter": "wenige Wochen",
+        "Begräbnis": "10. März 1872"
+      }
     },
     {
       "id": "src-gehrden-1907-024",
@@ -63,7 +106,17 @@
       "archive_ref": "Hauptregister, Nr. 24, Gehrden",
       "url": null,
       "accessed_on": "2026-09-14",
-      "caveats": "Klärt die Geburtszeit: Original nennt „nachmittags um elf Uhr”, nicht „vormittags” wie zuvor in der Familienüberlieferung angenommen. Keine Randvermerke sichtbar."
+      "caveats": "Klärt die Geburtszeit: Original nennt „nachmittags um elf Uhr”, nicht „vormittags” wie zuvor in der Familienüberlieferung angenommen. Keine Randvermerke sichtbar.",
+      "transcription": {
+        "Jahr": "1907",
+        "Nr.": "24",
+        "Kind": "Ludwig Wilhelm Friedrich Remmecke (später durchgehend: Friedrich Wilhelm)",
+        "Vater": "Karl Friedrich Remmecke, Monteur",
+        "Mutter": "Louise Karoline Sophie Elise Baumgarten",
+        "Geburt": "23. Februar 1907, nachmittags 11 Uhr, in der Wohnung des Vaters, Gehrden",
+        "Anzeige": "28. Februar 1907 (fünf Tage nach der Geburt)",
+        "Randvermerke": "keine sichtbar"
+      }
     },
     {
       "id": "src-brunkensen-1799-066",
@@ -71,7 +124,16 @@
       "archive_ref": "Landeskirchliches Archiv der Ev.-luth. Landeskirche Hannovers; Archion Bild 66",
       "url": null,
       "accessed_on": "2026-09-14",
-      "caveats": "Register vor 1808 ohne laufende Eintragsnummer — Bild 66 ersatzweise als Kennung verwendet. Mehrere Lesungen unsicher: Vatersname „Johann Ernst Remmeke [?]”, Familienname „Remmeke [?]”, Mutter „Hanne/Johanne Louise Koch [?]”, zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar, Alter der Mutter nicht lesbar. Verbindung zu Heinrich Remmeke (Vater von Johann Heinrich Friedrich Christian Remmeke, *1839) gestützt durch den 1824 gelesenen Heiratseintrag (Brunkensen Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), der den Bräutigam Johann Heinrich Christoph Remmeke als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch nennt — exakt dieselbe Elternkombination wie im Taufeintrag 1799."
+      "caveats": "Register vor 1808 ohne laufende Eintragsnummer — Bild 66 ersatzweise als Kennung verwendet. Mehrere Lesungen unsicher: Vatersname „Johann Ernst Remmeke [?]”, Familienname „Remmeke [?]”, Mutter „Hanne/Johanne Louise Koch [?]”, zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar, Alter der Mutter nicht lesbar. Verbindung zu Heinrich Remmeke (Vater von Johann Heinrich Friedrich Christian Remmeke, *1839) gestützt durch den 1824 gelesenen Heiratseintrag (Brunkensen Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), der den Bräutigam Johann Heinrich Christoph Remmeke als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch nennt — exakt dieselbe Elternkombination wie im Taufeintrag 1799.",
+      "transcription": {
+        "Jahr": "1799",
+        "Kind": "Johann Heinrich Christoph Remmeke [?] (später geführt als: Heinrich Remmeke)",
+        "Vater": "Johann Ernst Remmeke [?], Häusling und Zimmermeister",
+        "Mutter": "Hanne/Johanne Louise Koch [?]",
+        "Geburt": "9. Januar 1799, nachmittags 3 Uhr",
+        "Taufe": "13. Januar 1799",
+        "Taufzeugen": "zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar"
+      }
     }
   ],
 
