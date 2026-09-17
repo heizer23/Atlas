@@ -2,19 +2,20 @@
   "sources": [
     {
       "id": "src-brunkensen-1839-006",
-      "title": "Kirchenbuch 1815–1845; 04-01057; Taufen 1839 Nr. 6",
+      "title": "Kirchenbuch 1815–1845; 04-01057; Taufen 1839 Nr. 6, Seite 158",
       "archive_ref": "Archion 369739, Bild 81/220",
       "url": "https://www.archion.de/p/8d3a70c0dc/",
       "accessed_on": "2026-09-11",
-      "caveats": "Geburtsmonat hier zunächst als „vermutlich Juli” gelesen (Scan-Qualität); der Traueintrag 1868 (src-hoyershausen-1868-007, Hoyershausen Nr. 7) nennt jedoch unabhängig „29. Juni 1839” — dort dem zeitnäheren, klarer geschriebenen Eintrag folgend als Juni geführt. Die Transkription unten bleibt die Rohlesung dieses Scans. Verbindung dieses Mannes zu Karls Vater ist eine Arbeitsannahme, kein abschließend gelöster Identitätsbeweis.",
+      "caveats": "Geburtsmonat wurde am ersten, unscharfen Scan zunächst als „vermutlich Juli” gelesen; der Traueintrag 1868 (src-hoyershausen-1868-007, Hoyershausen Nr. 7) nannte unabhängig bereits „29. Juni 1839”. Ein schärferer Scan (nachgereicht 2026-09-15) bestätigt nun direkt am Original „Juni” sowie den bislang nur vermuteten Taufetag 25. August — beide Angaben gelten damit als gesichert. Verbindung dieses Mannes zu Karls Vater bleibt eine Arbeitsannahme, kein abschließend gelöster Identitätsbeweis.",
       "transcription": {
         "Jahr": "1839",
-        "Kind": "Johann Heinrich Friedrich Christian",
-        "Vater": "Heinrich Remmeke, Zimmermann, mit dem Zusatz „hierselbst“",
-        "Mutter": "Johanne Sophie Louise, geborene Schwarze",
-        "Geburt": "Vermutlich 29. Juli, morgens um ein Uhr — der Monat sollte am schärferen Original geprüft werden",
-        "Taufe": "Vermutlich 25. August",
-        "Taufzeugen": "Mehrere Personen; am Ende steht „Alle drei aus Brunkensen“"
+        "Eintrag": "Nr. 6, Seite 158",
+        "Kind": "Ein Sohn, Johann Heinrich Friedrich Christian",
+        "Vater": "Der Zimmermann Heinrich Remmeke hierselbst",
+        "Mutter": "Johanne Sophie Louise, geborene Schwarze, ein und dreißig Jahr alt",
+        "Geburt": "Den neun und zwanzigsten Juni, morgens ein Uhr",
+        "Taufe": "Den fünf und zwanzigsten August",
+        "Taufzeugen": "Der Kohlschläger[?] Christian Poland[?] Schumacher, Hans Ludwig Schwarze, Frau Sophie geborene Ammermann[?], Hirtenfrau[?] — alle drei aus Brunkensen"
       }
     },
     {
@@ -129,22 +130,65 @@
       "archive_ref": "Landeskirchliches Archiv der Ev.-luth. Landeskirche Hannovers; Archion Bild 66",
       "url": null,
       "accessed_on": "2026-09-14",
-      "caveats": "Register vor 1808 ohne laufende Eintragsnummer — Bild 66 ersatzweise als Kennung verwendet. Mehrere Lesungen unsicher: Vatersname „Johann Ernst Remmeke [?]”, Familienname „Remmeke [?]”, Mutter „Hanne/Johanne Louise Koch [?]”, zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar, Alter der Mutter nicht lesbar. Verbindung zu Heinrich Remmeke (Vater von Johann Heinrich Friedrich Christian Remmeke, *1839) gestützt durch den 1824 gelesenen Heiratseintrag (Brunkensen Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), der den Bräutigam Johann Heinrich Christoph Remmeke als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch nennt — exakt dieselbe Elternkombination wie im Taufeintrag 1799.",
+      "caveats": "Register vor 1808 ohne laufende Eintragsnummer — Bild 66 ersatzweise als Kennung verwendet. Vollständige Transkription (nachgereicht 2026-09-15) klärt die zuvor unsicheren Einzel-Lesungen: Vater- und Familienname „Johann Ernst Remmeke”, Mutter „Koch” sowie die Taufzeugen (zuvor „zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar”, jetzt „Meister Christoph Weber und Sophie Remmekin aus Brunkensen, ingleichen Heinrich Koch aus Brüggen”) sind bestätigt, ebenso das zuvor unlesbare Alter der Kindbetterin (33 Jahre zu Ostern). Einzige verbleibende Abweichung: Der Vorname der Mutter steht hier als „Hanne”, im Heiratseintrag ihres Sohnes 1824 dagegen als „Johanne” — dokumentierte Namensvarianz, kein Lesefehler. Verbindung zu Heinrich Remmeke (Vater von Johann Heinrich Friedrich Christian Remmeke, *1839) weiterhin gestützt durch den 1824 gelesenen Heiratseintrag (Brunkensen Kirchenbuch 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts), der den Bräutigam Johann Heinrich Christoph Remmeke als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch nennt — exakt dieselbe Elternkombination wie im Taufeintrag 1799.",
       "transcription": {
         "Jahr": "1799",
-        "Kind": "Johann Heinrich Christoph Remmeke [?] (später geführt als: Heinrich Remmeke)",
-        "Vater": "Johann Ernst Remmeke [?], Häusling und Zimmermeister",
-        "Mutter": "Hanne/Johanne Louise Koch [?]",
-        "Geburt": "9. Januar 1799, nachmittags 3 Uhr",
-        "Taufe": "13. Januar 1799",
-        "Taufzeugen": "zweite Patin und weiterer Pate aus Brügge [?] nicht sicher lesbar"
+        "Kind": "Ein Sohn, Johann Heinrich Christoph (später geführt als: Heinrich Remmeke)",
+        "Vater": "Der Häusling und Zimmermeister Johann Ernst Remmeke",
+        "Mutter": "Seine Ehefrau Hanne Louise Koch",
+        "Geburt": "Den 9ten, nachmittags um 3 Uhr",
+        "Taufe": "Den 13ten darauf",
+        "Taufzeugen": "Meister Christoph Weber und Sophie Remmekin, beide aus Brunkensen, ingleichen Heinrich Koch aus Brüggen",
+        "Bemerkung": "NB. Die Kindelbierin ist künftig Ostern 33 Jahr alt."
+      }
+    },
+    {
+      "id": "src-brunkensen-ortsplan-1772",
+      "title": "Plan von Brunckensen nebst dessen Environs (anno 1772)",
+      "archive_ref": "Archivsignatur noch nicht ermittelt",
+      "url": null,
+      "accessed_on": "2026-09-14",
+      "caveats": "Herkunft/Archivsignatur des Plans ist noch nicht dokumentiert; die PDF-Metadaten (Ersteller „nor”, 2016) verweisen vermutlich nur auf eine spätere Digitalisierung, nicht auf das Original von 1772. Kartografischer Kontext zum Geburtsort — kein personenbezogenes Beleg-Dokument, keine Aussage zu einer bestimmten Person."
+    },
+    {
+      "id": "src-brunkensen-1825-003",
+      "title": "Kirchenbuch 1815–1845; Verstorbene 1825 Nr. 3",
+      "archive_ref": "Archivsignatur (Bild-Nr.) noch nicht ermittelt",
+      "url": null,
+      "accessed_on": "2026-09-16",
+      "caveats": "Der Verstorbene wird hier „Ernst August Remmecke” genannt, nicht „Johann Ernst Remmeke” wie im Taufeintrag 1799 und im Heiratseintrag 1824 seines Sohnes. Alter (61 Jahre, 16 Tage), Beruf (Häusling und Zimmermeister), Wohnort (Brunkensen) und Sterbedatum decken sich exakt mit der bisher für Johann Ernst Remmeke angenommenen Biografie — die Gleichsetzung beider Namen auf dieselbe Person ist nach bisherigem Stand eine Arbeitsannahme der Familie, kein durch ein weiteres Dokument bestätigter Identitätsnachweis.",
+      "transcription": {
+        "Jahr": "1825",
+        "Eintrag": "Nr. 3",
+        "Verstorbener": "Der Häusling und Zimmermeister Ernst August Remmecke, verehelicht, wohnhaft zu Brunkensen",
+        "Tag und Stunde des Todes": "Den neunten [September], morgens um zehn Uhr",
+        "Tag und Art des Begräbnisses": "Den elften [September], nachmittags um vier Uhr, still",
+        "Veranlassung des Todes": "Entkräftung",
+        "Alter": "Ein und sechzig Jahre, — Monate, sechzehn Tage"
+      }
+    },
+    {
+      "id": "src-gehrden-1912-009",
+      "title": "Standesamt Gehrden, Sterberegister 1912 Nr. 9",
+      "archive_ref": "Archivsignatur noch nicht ermittelt",
+      "url": null,
+      "accessed_on": "2026-09-17",
+      "caveats": "Handschriftliche Kurrentschrift, Transkription vorläufig — einzelne Wörter (insbesondere die genaue Formulierung um die Eheschließung und die Uhrzeitangabe „vormittags/nachmittags”) sind unsicher gelesen und sollten am Original geprüft werden. Die Anzeigende, Lisette Nöthel geb. Franke, Posthaltersfrau in Gehrden, ist keine Verwandte — passt zur bisherigen Einschätzung, dass die Familie am Ort niemanden hatte.",
+      "transcription": {
+        "Ort und Datum": "Gehrden, 27. Februar 1912",
+        "Verstorbener": "Der Obermonteur Karl Friedrich Remmecke, 41 Jahre alt, lutherisch, wohnhaft in Gehrden",
+        "Geburt": "Geboren zu Georgs-Marienhütte am 12. Juni 1870",
+        "Ehe": "Verheiratet gewesen mit der am 5. Oktober 1900 mit ihm verehelichten Ehefrau Louise, geborene Baumgarten [Lesung unsicher]",
+        "Eltern": "Sohn des verstorbenen Zimmermanns Johann Heinrich Friedrich Remmeke und dessen verstorbener Ehefrau Louise, geborene Beinling, zuletzt wohnhaft zu Georgsmarienhütte",
+        "Sterbeort und -zeit": "Zu Gehrden, in der eigenen Wohnung, am 27. Februar 1912, um sieben Uhr [Vor-/Nachmittag unsicher]",
+        "Anzeigende": "Die Posthaltersfrau Lisette Nöthel, geborene Franke, wohnhaft in Gehrden, aus eigener Wissenschaft unterrichtet"
       }
     }
   ],
 
   "screenshots": [
     { "id": "img-brunkensen-1839-006-doppelseite", "source_id": "src-brunkensen-1839-006", "event_ids": ["evt-brunkensen-1839-006-birth", "evt-brunkensen-1839-006-baptism"], "role": "Doppelseite", "path": "draft/brunkensen-1839-006/img-brunkensen-1839-006-doppelseite_draft.jpg", "quality_status": "draft" },
-    { "id": "img-brunkensen-1839-006-detail", "source_id": "src-brunkensen-1839-006", "event_ids": ["evt-brunkensen-1839-006-birth", "evt-brunkensen-1839-006-baptism"], "role": "Detail", "path": "draft/brunkensen-1839-006/img-brunkensen-1839-006-detail_draft.jpg", "quality_status": "draft" },
+    { "id": "img-brunkensen-1839-006-detail", "source_id": "src-brunkensen-1839-006", "event_ids": ["evt-brunkensen-1839-006-birth", "evt-brunkensen-1839-006-baptism"], "role": "Detail", "path": "draft/brunkensen-1839-006/img-brunkensen-1839-006-detail_draft.png", "quality_status": "draft" },
 
     { "id": "img-hoyershausen-1841-022-doppelseite", "source_id": "src-hoyershausen-1841-022", "event_ids": ["evt-hoyershausen-1841-022-birth", "evt-hoyershausen-1841-022-baptism"], "role": "Doppelseite", "path": "draft/hoyershausen-1841-022/img-hoyershausen-1841-022-doppelseite_draft.jpg", "quality_status": "draft" },
     { "id": "img-hoyershausen-1841-022-detail", "source_id": "src-hoyershausen-1841-022", "event_ids": ["evt-hoyershausen-1841-022-birth", "evt-hoyershausen-1841-022-baptism"], "role": "Detail", "path": "draft/hoyershausen-1841-022/img-hoyershausen-1841-022-detail_draft.jpg", "quality_status": "draft" },
@@ -163,6 +207,10 @@
     { "id": "img-katharinen-1872-012-doppelseite", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Doppelseite", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-doppelseite_draft.jpg", "quality_status": "draft" },
     { "id": "img-katharinen-1872-012-detail", "source_id": "src-katharinen-1872-012", "event_ids": ["evt-katharinen-1872-012-death", "evt-katharinen-1872-012-burial"], "role": "Detail", "path": "draft/katharinen-1872-012/img-katharinen-1872-012-detail_draft.jpg", "quality_status": "draft" },
     { "id": "img-gehrden-1907-024-vollbild", "source_id": "src-gehrden-1907-024", "event_ids": ["evt-gehrden-1907-nr24-birth"], "role": "Vollbild", "path": "draft/gehrden-1907-024/img-gehrden-1907-024-vollbild_draft.jpg", "quality_status": "draft" },
-    { "id": "img-brunkensen-1799-066-seite", "source_id": "src-brunkensen-1799-066", "event_ids": ["evt-brunkensen-1799-066-birth", "evt-brunkensen-1799-066-baptism"], "role": "Seite", "path": "draft/brunkensen-1799-066/img-brunkensen-1799-066-seite_draft.png", "quality_status": "draft" }
+    { "id": "img-brunkensen-1799-066-seite", "source_id": "src-brunkensen-1799-066", "event_ids": ["evt-brunkensen-1799-066-birth", "evt-brunkensen-1799-066-baptism"], "role": "Seite", "path": "draft/brunkensen-1799-066/img-brunkensen-1799-066-seite_draft.png", "quality_status": "draft" },
+    { "id": "img-brunkensen-1799-066-doppelseite", "source_id": "src-brunkensen-1799-066", "event_ids": ["evt-brunkensen-1799-066-birth", "evt-brunkensen-1799-066-baptism"], "role": "Doppelseite", "path": "draft/brunkensen-1799-066/img-brunkensen-1799-066-doppelseite_draft.png", "quality_status": "draft" },
+    { "id": "img-brunkensen-ortsplan-1772", "source_id": "src-brunkensen-ortsplan-1772", "event_ids": ["evt-brunkensen-1799-066-birth", "evt-brunkensen-1799-066-baptism"], "role": "Ortsplan", "path": "draft/brunkensen-ortsplan-1772/img-brunkensen-ortsplan-1772_draft.png", "quality_status": "draft" },
+    { "id": "img-brunkensen-1825-003-detail", "source_id": "src-brunkensen-1825-003", "event_ids": ["evt-brunkensen-1825-death", "evt-brunkensen-1825-burial"], "role": "Detail", "path": "draft/brunkensen-1825-003/img-brunkensen-1825-003-detail_draft.webp", "quality_status": "draft" },
+    { "id": "img-gehrden-1912-009-vollbild", "source_id": "src-gehrden-1912-009", "event_ids": ["evt-gehrden-1912-nr9-death", "evt-gehrden-karl-louise-marriage"], "role": "Vollbild", "path": "draft/gehrden-1912-009/img-gehrden-1912-009-vollbild_draft.jpg", "quality_status": "draft" }
   ]
 }

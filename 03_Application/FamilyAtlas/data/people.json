@@ -90,15 +90,164 @@
       "lat": 54.1936,
       "lon": 9.0964,
       "note": "Koordinate: Ortszentrum, nicht die genaue historische Geburtsklinik/-adresse."
+    },
+    {
+      "id": "bueckeburg",
+      "name": "Bückeburg",
+      "lat": 52.2667,
+      "lon": 9.05,
+      "note": "Koordinate: Ortszentrum. Bundeswehrzeit, ca. 2 Jahre (Familienauskunft, ungenau)."
+    },
+    {
+      "id": "muenster",
+      "name": "Münster (Westfalen)",
+      "lat": 51.9607,
+      "lon": 7.6261,
+      "note": "Koordinate: Stadtzentrum. Einige Semester Bergbaustudium (Familienauskunft, unsicher, ob und wie lange)."
+    },
+    {
+      "id": "hamburg",
+      "name": "Hamburg",
+      "lat": 53.5511,
+      "lon": 9.9937,
+      "note": "Koordinate: Stadtzentrum. Medizinstudium und spätere Tätigkeit als Assistenzarzt am UKE."
+    },
+    {
+      "id": "norderstedt",
+      "name": "Norderstedt",
+      "lat": 53.6887,
+      "lon": 9.9822,
+      "note": "Koordinate: Stadtzentrum. Standort der späteren Praxen."
+    },
+    {
+      "id": "wennigsen",
+      "name": "Wennigsen (Deister)",
+      "lat": 52.2333,
+      "lon": 9.6,
+      "note": "Koordinate: Ortszentrum."
     }
   ],
 
   "regional_events": [
     {
+      "year": 1648,
+      "place_id": "brunkensen",
+      "label": "Ende des Dreißigjährigen Kriegs; Brunkensen fast entvölkert",
+      "note": "Historischer Kontext, nicht personenbezogen. Kein exaktes Jahr im Text genannt (\"gut hundert Jahre\" vor 1764) — 1648 als übliches Enddatum des Kriegs verwendet. Erwähnt auf der Seite von Johann Ernst Remmeke."
+    },
+    {
+      "year": 1806,
+      "place_id": "brunkensen",
+      "label": "Französische Truppen besetzen das Herzogtum Braunschweig",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Ernst Remmeke."
+    },
+    {
+      "year": 1807,
+      "place_id": "brunkensen",
+      "label": "Herzogtum Braunschweig aufgelöst; Brunkensen wird Teil des Königreichs Westphalen",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Ernst Remmeke."
+    },
+    {
+      "year": 1813,
+      "place_id": "brunkensen",
+      "label": "Königreich Westphalen bricht zusammen; Brunkensen wieder braunschweigisch",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Ernst Remmeke."
+    },
+    {
+      "year": 1815,
+      "place_id": "brunkensen",
+      "label": "Ausbruch des Tambora auf Sumbawa",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Heinrich Remmeke (Ursache des Jahrs ohne Sommer 1816)."
+    },
+    {
+      "year": 1816,
+      "place_id": "brunkensen",
+      "label": "Jahr ohne Sommer: Missernten, steigende Getreidepreise",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Heinrich Remmeke."
+    },
+    {
+      "year": 1830,
+      "place_id": "brunkensen",
+      "label": "Revolution in Braunschweig; Herzog Karl II. flieht",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Heinrich Remmeke."
+    },
+    {
+      "year": 1840,
+      "place_id": "brunkensen",
+      "label": "Typhusepidemie in Brunkensen",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
+    },
+    {
+      "year": 1850,
+      "place_id": "brunkensen",
+      "label": "Choleraepidemie in Brunkensen",
+      "note": "Historischer Kontext, nicht personenbezogen. Jahr aus \"zehn Jahre später\" (nach 1840) abgeleitet. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
+    },
+    {
+      "year": 1852,
+      "place_id": "brunkensen",
+      "label": "Eisenbahnstrecke Hannover–Alfeld eröffnet",
+      "note": "Historischer Kontext, nicht personenbezogen. Jahr in Familientexten unterschiedlich angegeben (1852 auf der Seite von Johann Heinrich Friedrich Christian Remmeke, 1853 auf der Seite von Heinrich Remmeke) — noch nicht aufgelöst."
+    },
+    {
+      "year": 1854,
+      "place_id": "brunkensen",
+      "label": "Eisenbahnstrecke Hannover–Alfeld bis Göttingen verlängert",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
+    },
+    {
+      "year": 1856,
+      "place_id": "georgsmarienhuette",
+      "label": "Gründung der Georgs-Marien-Bergwerks- und Hüttenverein AG",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
+    },
+    {
       "year": 1860,
       "place_id": "georgsmarienhuette",
       "label": "Gründung der Gemeinde Georgsmarienhütte",
       "note": "Historischer Kontext, nicht personenbezogen. Quelle: georgsmarienhuette.de/stadt/stadtgeschichte."
+    },
+    {
+      "year": 1866,
+      "place_id": "georgsmarienhuette",
+      "label": "Preußen annektiert das Königreich Hannover (Deutscher Krieg)",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf den Seiten von Johann Heinrich Friedrich Christian Remmeke und Karl Friedrich Remmecke."
+    },
+    {
+      "year": 1870,
+      "place_id": "georgsmarienhuette",
+      "label": "Frankreich erklärt Preußen den Krieg",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
+    },
+    {
+      "year": 1871,
+      "place_id": "georgsmarienhuette",
+      "label": "Ausrufung des Deutschen Reiches in Versailles",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
+    },
+    {
+      "year": 1898,
+      "place_id": "georgsmarienhuette",
+      "label": "Zeche Piesberg wegen Wasserproblemen aufgegeben",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
+    },
+    {
+      "year": 1901,
+      "place_id": "gehrden",
+      "label": "Straßenbahn-Überlandnetz Hannover ins Umland fertiggestellt",
+      "note": "Historischer Kontext, nicht personenbezogen. Bauzeit 1898–1901 laut Text; Jahr der Fertigstellung als Pin verwendet. Erwähnt auf der Seite von Karl Friedrich Remmecke."
+    },
+    {
+      "year": 1938,
+      "place_id": "karlsbad",
+      "label": "Münchner Abkommen; Karlsbad wird Teil des Deutschen Reichs",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Friedrich Wilhelm Remmecke."
+    },
+    {
+      "year": 1945,
+      "place_id": "karlsbad",
+      "label": "Kriegsende; Karlsbad wird wieder Karlovy Vary",
+      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Friedrich Wilhelm Remmecke."
     }
   ],
 
@@ -189,29 +338,31 @@
       "has_data": true,
       "image": null,
       "path": ["georgsmarienhuette", "gehrden"],
-      "prose": "Am 12. Juni 1870, einem Sonntag, kam in Georgsmarienhütte ein Junge zur Welt {{evt-katharinen-1870-075-birth}}. Drei Wochen später trugen ihn seine Eltern zur Taufe {{evt-katharinen-1870-075-baptism}}. Als Paten standen drei junge Männer am Becken, alle ledig, alle im Ort wohnhaft: der Tischler Karl Hildebrand, ein Maler namens Mehseke, und der Zimmermann Karl Herhold. Kein Großvater, keine Tante, kein Onkel. Die Familie war fremd hier.\n\nSechs Wochen nach seiner Geburt erklärte Frankreich Preußen den Krieg.\n\nSein Vater war Zimmermann, Johann Heinrich Friedrich Christian Remmeke, geboren 1839 im Leinetal bei Alfeld {{evt-brunkensen-1839-006-birth}}, rund hundert Kilometer östlich. Seine Mutter kam aus Hoyershausen, dem Nachbardorf. Geheiratet hatten die beiden anderthalb Jahre zuvor, am zweiten Weihnachtstag 1868, in der Kirche ihres Heimatortes {{evt-hoyershausen-1868-007-marriage}}. Im Traueintrag steht er bereits als Zimmermann in Oesede — er arbeitete also schon im Osnabrücker Land und holte die Braut nur noch nach.\n\nWarum sie das Leinetal verließen, wissen wir nicht. Aber wir wissen, was sie erwartete.\n\nGeorgsmarienhütte gab es noch nicht lange. Die Aktiengesellschaft Georgs-Marien-Bergwerks- und Hüttenverein war am 4. Juni 1856 gegründet worden, mit Unterstützung von König Georg V. von Hannover und Königin Marie, deren Namen der Ort bis heute trägt. Der Zweck war handfest: Eisen für den Eisenbahnbau, das man bis dahin aus anderen deutschen Staaten und aus England einführen musste. Um die Hochöfen wuchsen Arbeitersiedlungen, und aus den Siedlungen wurde 1860 eine Gemeinde. Als Karl geboren wurde, war sein Geburtsort vierzehn Jahre alt — jünger als die meisten Menschen, die dort lebten.\n\nFür einen Zimmermann war das eine gute Adresse. Wo Werkshallen und Arbeiterhäuser aus dem Boden wachsen, braucht man Holz und jemanden, der damit umgehen kann. Vermutlich war es genau das, was die Familie nach Oesede und Georgsmarienhütte brachte; geschrieben steht es nirgends.\n\nKarl wuchs also in einer Fabriksiedlung auf, in einer Familie ohne Verwandte am Ort. Das Königreich Hannover, in dem seine Eltern geboren waren, hatte es bei seiner Geburt schon nicht mehr gegeben — Preußen hatte es 1866 annektiert. Im Januar 1871, als Karl ein halbes Jahr alt war, wurde in Versailles das Deutsche Reich ausgerufen. Er kam als Hannoveraner zur Welt und war Preuße, bevor er laufen konnte.\n\nIm Februar 1872 bekam er eine Schwester, Karoline Charlotte Luise {{evt-katharinen-1872-004-birth}}. Sie starb Anfang März, mit einem Monat {{evt-katharinen-1872-012-death}}. Auch das gehörte zum Leben in diesen Siedlungen; die Kindersterblichkeit war hoch, und die Familie hatte niemanden vor Ort, bei dem sie hätte unterkommen können.\n\nDann verliert sich seine Spur. Fünfunddreißig Jahre lang — zwischen dem Tod der Schwester und dem Frühjahr 1907 — haben wir kein Dokument über ihn. Keine Schule, keine Lehre, kein Militärdienst, keine Hochzeit.\n\nWas in dieser Zeit um ihn herum geschah, lässt sich immerhin sagen. Das Werk wuchs weiter; in den Jahren 1904 bis 1911 stieg die Zahl der Arbeiter von gut 6.200 auf über 8.100. 1898 musste die Zeche am Piesberg wegen ungelöster Wasserprobleme aufgegeben werden — für viele Familien im Osnabrücker Land ein Einschnitt.\n\nAls Karl wieder auftaucht, ist er zweihundert Kilometer weiter nordöstlich. Am 28. Februar 1907 steht er vor dem Standesbeamten in Gehrden bei Hannover und meldet die Geburt seines Sohnes {{evt-gehrden-1907-nr24-birth}}. Als Beruf gibt er Monteur an.\n\nDas ist ein modernes Wort für diese Zeit. Ein Monteur baut zusammen, was andere geliefert haben: Maschinen, Leitungen, Anlagen. Und in Gehrden gab es dafür gerade einen Grund. Zwischen 1898 und 1901 hatte die Straßenbahn Hannover ein Überlandnetz ins Umland gebaut — die Strecken führten unter anderem nach Gehrden und Barsinghausen. Wie sehr dieser Betrieb den Ort prägte, steht auf derselben Registerseite wie Karls Eintrag: Wenige Nummern vor ihm meldet ein Wagenführer die Geburt seines Sohnes, wenige nach ihm ein Straßenbahn-Wagenführer.\n\nOb Karl für die Straßenbahn arbeitete, wissen wir nicht. Aber er war Monteur in einem Dorf, das gerade elektrisch ans nächste Oberzentrum angeschlossen worden war, und seine Nachbarn fuhren die Bahnen. Ein Zufall wäre das nicht.\n\nSein Sohn wurde auf die Namen Ludwig Wilhelm Friedrich getauft. Gerufen wurde er später Friedrich.\n\nKarl Friedrich Remmecke starb am 27. Februar 1912 in Gehrden, im Alter von einundvierzig Jahren {{evt-gehrden-1912-nr9-death}}. Sein Sohn war fünf. Woran er starb, ist bislang nicht geklärt.\n\nVon seinen Eltern heißt es in diesem Sterbeeintrag nur, sie seien bereits verstorben und zuletzt in Georgsmarienhütte wohnhaft gewesen. Der Zimmermann aus dem Leinetal und seine Frau aus Hoyershausen sind also dort geblieben, wo sie um 1869 angekommen waren.",
+      "prose": "Am 12. Juni 1870, einem Sonntag, kam in Georgsmarienhütte ein Junge zur Welt {{evt-katharinen-1870-075-birth}}. Drei Wochen später trugen ihn seine Eltern zur Taufe {{evt-katharinen-1870-075-baptism}}. Als Paten standen drei junge Männer am Becken, alle ledig, alle im Ort wohnhaft: der Tischler Karl Hildebrand, ein Maler namens Mehseke, und der Zimmermann Karl Herhold. Kein Großvater, keine Tante, kein Onkel. Die Familie war fremd hier.\n\nSechs Wochen nach seiner Geburt erklärte Frankreich Preußen den Krieg.\n\nSein Vater war Zimmermann, Johann Heinrich Friedrich Christian Remmeke, geboren 1839 im Leinetal bei Alfeld {{evt-brunkensen-1839-006-birth}}, rund hundert Kilometer östlich. Seine Mutter kam aus Hoyershausen, dem Nachbardorf. Geheiratet hatten die beiden anderthalb Jahre zuvor, am zweiten Weihnachtstag 1868, in der Kirche ihres Heimatortes {{evt-hoyershausen-1868-007-marriage}}. Im Traueintrag steht er bereits als Zimmermann in Oesede — er arbeitete also schon im Osnabrücker Land und holte die Braut nur noch nach.\n\nWarum sie das Leinetal verließen, wissen wir nicht. Aber wir wissen, was sie erwartete.\n\nGeorgsmarienhütte gab es noch nicht lange. Die Aktiengesellschaft Georgs-Marien-Bergwerks- und Hüttenverein war am 4. Juni 1856 gegründet worden, mit Unterstützung von König Georg V. von Hannover und Königin Marie, deren Namen der Ort bis heute trägt. Der Zweck war handfest: Eisen für den Eisenbahnbau, das man bis dahin aus anderen deutschen Staaten und aus England einführen musste. Um die Hochöfen wuchsen Arbeitersiedlungen, und aus den Siedlungen wurde 1860 eine Gemeinde. Als Karl geboren wurde, war sein Geburtsort vierzehn Jahre alt — jünger als die meisten Menschen, die dort lebten.\n\nFür einen Zimmermann war das eine gute Adresse. Wo Werkshallen und Arbeiterhäuser aus dem Boden wachsen, braucht man Holz und jemanden, der damit umgehen kann. Vermutlich war es genau das, was die Familie nach Oesede und Georgsmarienhütte brachte; geschrieben steht es nirgends.\n\nKarl wuchs also in einer Fabriksiedlung auf, in einer Familie ohne Verwandte am Ort. Das Königreich Hannover, in dem seine Eltern geboren waren, hatte es bei seiner Geburt schon nicht mehr gegeben — Preußen hatte es 1866 annektiert. Im Januar 1871, als Karl ein halbes Jahr alt war, wurde in Versailles das Deutsche Reich ausgerufen. Er kam als Hannoveraner zur Welt und war Preuße, bevor er laufen konnte.\n\nIm Februar 1872 bekam er eine Schwester, Karoline Charlotte Luise {{evt-katharinen-1872-004-birth}}. Sie starb Anfang März, mit einem Monat {{evt-katharinen-1872-012-death}}. Auch das gehörte zum Leben in diesen Siedlungen; die Kindersterblichkeit war hoch, und die Familie hatte niemanden vor Ort, bei dem sie hätte unterkommen können.\n\nDann verliert sich seine Spur — bis zum 5. Oktober 1900: An diesem Tag heiratete er in Gehrden Louise Karoline Sophie Elise Baumgarten {{evt-gehrden-karl-louise-marriage}}. Davor und danach, bis zum Frühjahr 1907, haben wir sonst kein Dokument über ihn: keine Schule, keine Lehre, kein Militärdienst.\n\nWas in dieser Zeit um ihn herum geschah, lässt sich immerhin sagen. Das Werk wuchs weiter; in den Jahren 1904 bis 1911 stieg die Zahl der Arbeiter von gut 6.200 auf über 8.100. 1898 musste die Zeche am Piesberg wegen ungelöster Wasserprobleme aufgegeben werden — für viele Familien im Osnabrücker Land ein Einschnitt.\n\nAls Karl wieder auftaucht, ist er zweihundert Kilometer weiter nordöstlich. Am 28. Februar 1907 steht er vor dem Standesbeamten in Gehrden bei Hannover und meldet die Geburt seines Sohnes {{evt-gehrden-1907-nr24-birth}}. Als Beruf gibt er Monteur an.\n\nDas ist ein modernes Wort für diese Zeit. Ein Monteur baut zusammen, was andere geliefert haben: Maschinen, Leitungen, Anlagen. Und in Gehrden gab es dafür gerade einen Grund. Zwischen 1898 und 1901 hatte die Straßenbahn Hannover ein Überlandnetz ins Umland gebaut — die Strecken führten unter anderem nach Gehrden und Barsinghausen. Wie sehr dieser Betrieb den Ort prägte, steht auf derselben Registerseite wie Karls Eintrag: Wenige Nummern vor ihm meldet ein Wagenführer die Geburt seines Sohnes, wenige nach ihm ein Straßenbahn-Wagenführer.\n\nOb Karl für die Straßenbahn arbeitete, wissen wir nicht. Aber er war Monteur in einem Dorf, das gerade elektrisch ans nächste Oberzentrum angeschlossen worden war, und seine Nachbarn fuhren die Bahnen. Ein Zufall wäre das nicht.\n\nSein Sohn wurde auf die Namen Ludwig Wilhelm Friedrich getauft. Gerufen wurde er später Friedrich.\n\nKarl Friedrich Remmecke starb am 27. Februar 1912 in Gehrden, in der eigenen Wohnung, im Alter von einundvierzig Jahren {{evt-gehrden-1912-nr9-death}}. Der Sterbeeintrag nennt ihn Obermonteur — im Beruf war er inzwischen aufgestiegen. Angezeigt wurde sein Tod von der Posthaltersfrau Lisette Nöthel, geborene Franke: wieder niemand aus der Familie, sondern eine Nachbarin. Sein Sohn war fünf. Woran er starb, ist bislang nicht geklärt.\n\nVon seinen Eltern heißt es in diesem Sterbeeintrag nur, sie seien bereits verstorben und zuletzt in Georgsmarienhütte wohnhaft gewesen. Der Zimmermann aus dem Leinetal und seine Frau aus Hoyershausen sind also dort geblieben, wo sie um 1869 angekommen waren.",
       "events": [
         { "id": "evt-katharinen-1870-075-birth", "year": 1870, "date_display": "1870-06-12", "type": "birth", "place_id": "georgsmarienhuette", "label": "Geburt, nachmittags 16:30 Uhr" },
         { "id": "evt-katharinen-1870-075-baptism", "year": 1870, "date_display": "1870-07-03", "type": "baptism", "place_id": "georgsmarienhuette", "label": "Taufe" },
+        { "id": "evt-gehrden-karl-louise-marriage", "year": 1900, "date_display": "1900-10-05", "type": "marriage", "place_id": "gehrden", "label": "Heirat mit Louise Karoline Sophie Elise Baumgarten" },
         { "id": "evt-gehrden-1907-nr24-birth", "year": 1907, "date_display": "1907-02-23", "type": "child_birth", "place_id": "gehrden", "label": "Geburt des Sohnes Friedrich Wilhelm, nachmittags 11 Uhr" },
-        { "id": "evt-gehrden-1912-nr9-death", "year": 1912, "date_display": "1912-02-27", "type": "death", "place_id": "gehrden", "label": "Tod in Gehrden (Beleg noch nicht gesichert)" }
+        { "id": "evt-gehrden-1912-nr9-death", "year": 1912, "date_display": "1912-02-27", "type": "death", "place_id": "gehrden", "label": "Tod in Gehrden" }
       ],
       "facts": [
         "Geboren am 12. Juni 1870 in Georgsmarienhütte.",
         "Getauft am 3. Juli 1870.",
         "Sohn von Johann Heinrich Friedrich Christian Remmeke und Hanne Justine Louise Beinling.",
         "Taufpaten: Tischler Karl Hildebrand, Maler Friedrich Mehseke[?], Zimmermann Karl Herhold (letzterer plausibel verwandt mit dem Schwager Friedrich Christian Herhold).",
-        "Lücke 1872–1907: kein Wohnort, keine Ausbildung, kein Heiratsdatum bekannt.",
-        "Ehe mit Louise Karoline Sophie Elise Baumgarten vor Februar 1907 — genaueres Datum nicht belegt.",
-        "1907 Geburt des Sohnes Friedrich Wilhelm in Gehrden.",
-        "Gestorben am 27. Februar 1912 in Gehrden, im Alter von 41 oder 42 Jahren; Sterbeort/-ursache davor unbekannt."
+        "Heirat mit Louise Karoline Sophie Elise Baumgarten am 5. Oktober 1900 in Gehrden.",
+        "1907 Geburt des Sohnes Friedrich Wilhelm in Gehrden; Beruf zu diesem Zeitpunkt Monteur.",
+        "Gestorben am 27. Februar 1912 in Gehrden, in der eigenen Wohnung, im Alter von 41 Jahren; zuletzt als Obermonteur geführt. Todesursache weiterhin unbekannt.",
+        "Sterbefall angezeigt von der Posthaltersfrau Lisette Nöthel, geb. Franke — keine Verwandte."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
         "Geburtsregister Gehrden 1907 Nr. 24 (Geburt des Sohnes) ist gesehen, aber noch ohne gesicherten Screenshot (Tracker-Status A).",
-        "Sterbeeintrag 1912 und Heiratseintrag mit Baumgarten sind ohne gesicherten Screenshot (Tracker-Status B/E).",
-        "Frühere Schätzung der Heirat auf 1900–1906 war reine Vermutung und wurde korrigiert: belegt ist nur 'vor Februar 1907'."
+        "Ein separater Heiratseintrag (Standesamt) zum 5. Oktober 1900 ist noch nicht gefunden — Datum bislang nur aus dem Sterbeeintrag 1912 bekannt.",
+        "Transkription der Ehe-Passage im Sterbeeintrag 1912 ist vorläufig (Kurrentschrift, einzelne Wörter unsicher) — am Original zu prüfen.",
+        "Todesursache 1912 weiterhin ungeklärt; Sterbeeintrag nennt sie nicht."
       ]
     },
     {
@@ -256,18 +407,20 @@
       "has_data": true,
       "image": null,
       "path": ["gehrden"],
-      "prose": "Louise Karoline Sophie Elise Baumgarten, lutherisch, heiratete Karl Friedrich Remmecke vor Februar 1907 {{evt-gehrden-karl-louise-marriage}}; ein genaueres Datum ist nicht belegt. 1907 ist sie in Gehrden wohnhaft, wo ihr Sohn Friedrich Wilhelm geboren wird {{evt-gehrden-1907-nr24-birth}}. Ihre eigenen Geburts- und Sterbedaten sind in dieser Recherche noch nicht erfasst.",
-      "events": [],
+      "prose": "Louise Karoline Sophie Elise Baumgarten, lutherisch, heiratete Karl Friedrich Remmecke am 5. Oktober 1900 in Gehrden {{evt-gehrden-karl-louise-marriage}}. 1907 ist sie weiterhin in Gehrden wohnhaft, wo ihr Sohn Friedrich Wilhelm geboren wird {{evt-gehrden-1907-nr24-birth}}. Nach Karls Tod 1912 wird sie in dessen Sterbeeintrag als seine Ehefrau genannt. Ihre eigenen Geburts- und Sterbedaten sind in dieser Recherche noch nicht erfasst.",
+      "events": [
+        { "id": "evt-gehrden-karl-louise-marriage", "year": 1900, "date_display": "1900-10-05", "type": "marriage", "place_id": "gehrden", "label": "Heirat mit Karl Friedrich Remmecke" }
+      ],
       "facts": [
         "Ehefrau von Karl Friedrich Remmecke, lutherisch.",
+        "Heirat mit Karl Friedrich Remmecke am 5. Oktober 1900 in Gehrden.",
         "1907 wohnhaft in Gehrden.",
         "Eigene Geburts- und Sterbedaten noch nicht erfasst."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
-        "Herkunft und Lebensdaten von Louise Baumgarten sind noch nicht recherchiert.",
-        "Das genaue Heiratsdatum mit Karl Friedrich Remmecke ist unbekannt; belegt ist nur 'vor Februar 1907' (Tracker-Status E)."
+        "Herkunft und Lebensdaten von Louise Baumgarten sind noch nicht recherchiert."
       ]
     },
     {
@@ -288,13 +441,13 @@
         { "path": "portraits/friedrich-wilhelm-remmecke/OpaFriedrich4.png" }
       ],
       "path": ["gehrden", "berlin", "schoenebeck-elbe", "karlsbad", "gehrden", "handorf-peine", "barsinghausen", "egestorf-suentel"],
-      "prose": "Am 23. Februar 1907, nachmittags um elf Uhr, kam in Gehrden ein Junge zur Welt {{evt-gehrden-1907-nr24-birth}}, in der Wohnung seines Vaters. Fünf Tage später ging der Vater zum Standesamt und ließ ihn auf drei Namen eintragen: Ludwig Wilhelm Friedrich. Gerufen wurde er sein Leben lang nach dem letzten davon.\n\nSein Vater war Monteur und starb, als der Junge fünf war {{evt-gehrden-1912-nr9-death}}. Was das für die Familie bedeutete, wissen wir nicht — nur, dass die Mutter, Louise geborene Baumgarten, mit einem kleinen Kind zurückblieb in einem Ort, in dem sie vermutlich keine Verwandten hatte. Nach der Familienüberlieferung wuchs Friedrich in dieser Zeit im Bereich Klusbrink bei Egestorf am Deister auf — ob bei Verwandten der Mutter oder aus einem anderen Grund, ist nicht überliefert, und ein Beleg dafür fehlt bislang.\n\nWas dann kam, kennen wir nur in Bruchstücken, und die Reihenfolge ist unsicher. Er muss eine kaufmännische Ausbildung durchlaufen haben, denn alles, was später von ihm überliefert ist, sind leitende Stellungen in der Industrie: Berlin, dann Schönebeck an der Elbe, wo er Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit war. Kein Handwerk mehr wie bei Vater und Großvater, sondern Schreibtisch, Bilanz und Personalverantwortung. In drei Generationen vom Zimmermann über den Monteur zum Direktor.\n\nIn dieser Zeit heiratete er Emilie Schweckendiek; ein Datum ist nicht überliefert. Ihre jüngere Schwester Annemarie — in der Familie „Tante Miekchen” genannt — wurde Fürsorgerin. 1936 kam, nach bisherigem Kenntnisstand, eine Tochter zur Welt: Katharina.\n\nVermutlich nach 1938 ging er nach Karlsbad, als Betriebsleiter der Staatlichen Glasmanufaktur {{evt-karlsbad-1938-employment}}. Die Stadt gehörte erst seit dem Münchner Abkommen zum Deutschen Reich; eine „staatliche” Manufaktur dort setzt die deutsche Verwaltung voraus. Im selben Jahr trat er in die NSDAP ein.\n\nEs ist nicht das einzige Dokument dieser Art. Ein Fragebogen von 1948 listet auf: Deutsche Arbeitsfront seit 1933, NS-Volkswohlfahrt seit 1933, Volksbund für das Deutschtum im Ausland seit 1935, Deutsche Jägerschaft seit 1941. Und eine Zeile, die neugierig macht: Vor 1933 sei er Mitglied einer anderen Partei gewesen. Welcher, steht dort nicht.\n\nEr war Soldat im Zweiten Weltkrieg.\n\n1945 endete alles, was er sich aufgebaut hatte. Karlsbad wurde wieder Karlovy Vary, die Deutschen mussten gehen. Im April 1945 ist er in Gehrden gemeldet {{evt-gehrden-1945-residence-end}}, also dort, wo er geboren wurde. Im Jahr darauf, 1946, kommt in Peine ein Sohn zur Welt {{evt-peine-1946-birth}}.\n\nSchon während des Krieges war die Familie auf den Hof einer Tante Emilies gezogen, die alle nur „Muhme” nannten, in Handorf im Kreis Peine {{evt-handorf-1948-residence}} — dort verbrachte der kleine Hans-Jochen einen Teil seiner frühen Kindheit. 1948, weiterhin in Handorf, läuft Friedrichs Entnazifizierungsverfahren. Es endet mit der mildesten Einstufung, die es gab: entlastet.\n\nDanach beginnt er noch einmal. Beim Gesamtbergamt Obernkirchen-Barsinghausen — einem Betrieb der Preussag — wird er Kaufmännischer Leiter, in der Familienüberlieferung als „Direktor” bzw. „kaufmännischer Direktor” erinnert. Nicht zehn Kilometer von Gehrden, sondern, wenn die Kindheit in Klusbrink zutrifft, tatsächlich zurück in der Gegend seiner Kindheit. Die Familie bezieht eine Dienstvilla in Barsinghausen. Später leitet er die Ziegeleien und führt die Niedersächsischen Rohrwerke. Ein Ortsverein in Barsinghausen hat ihm 1996 neun Seiten gewidmet, in einem Buch über die Direktoren des dortigen Steinkohlenbergwerks. Er war offenbar der letzte in dieser Reihe — der Familienüberlieferung nach war er insbesondere mit der Endphase und der Abwicklung des Deisterbergbaus befasst; möglicherweise geht eine überlieferte Chronik des Klosterstollens auf seine eigenen Aufzeichnungen zurück, auch das bislang unbestätigt.\n\nNach seiner Pensionierung zog er in den Steinradweg in Egestorf. Dort starb er am 25. August 1990, mit 83 Jahren {{evt-egestorf-1990-death}}.",
+      "prose": "Am 23. Februar 1907, nachmittags um elf Uhr, kam in Gehrden ein Junge zur Welt {{evt-gehrden-1907-nr24-birth}}, in der Wohnung seines Vaters. Fünf Tage später ging der Vater zum Standesamt und ließ ihn auf drei Namen eintragen: Ludwig Wilhelm Friedrich. Gerufen wurde er sein Leben lang nach dem letzten davon.\n\nSein Vater war Monteur und starb, als der Junge fünf war {{evt-gehrden-1912-nr9-death}}. Was das für die Familie bedeutete, wissen wir nicht — nur, dass die Mutter, Louise geborene Baumgarten, mit einem kleinen Kind zurückblieb in einem Ort, in dem sie vermutlich keine Verwandten hatte. Friedrich wuchs in dieser Zeit im Bereich Klusbrink bei Egestorf am Deister auf.\n\nWas dann kam, kennen wir nur in Bruchstücken, und die Reihenfolge ist unsicher. Er muss eine kaufmännische Ausbildung durchlaufen haben, denn alles, was später von ihm überliefert ist, sind leitende Stellungen in der Industrie: Berlin, dann Schönebeck an der Elbe, wo er Geschäftsführer der Brunnenfilter-Gesellschaft und der Deutschen Bentonit war. Kein Handwerk mehr wie bei Vater und Großvater, sondern Schreibtisch, Bilanz und Personalverantwortung. In drei Generationen vom Zimmermann über den Monteur zum Direktor.\n\nIn dieser Zeit heiratete er Emilie Schweckendiek; ein Datum ist nicht überliefert. Ihre ältere Schwester Annemarie — in der Familie „Tante Miekchen” genannt — wurde Fürsorgerin. 1936 kam, nach bisherigem Kenntnisstand, eine Tochter zur Welt: Katharina.\n\nVermutlich nach 1938 ging er nach Karlsbad, als Betriebsleiter der Staatlichen Glasmanufaktur {{evt-karlsbad-1938-employment}}. Die Stadt gehörte erst seit dem Münchner Abkommen zum Deutschen Reich; eine „staatliche” Manufaktur dort setzt die deutsche Verwaltung voraus. Im selben Jahr trat er in die NSDAP ein.\n\nEs ist nicht das einzige Dokument dieser Art. Ein Fragebogen von 1948 listet auf: Deutsche Arbeitsfront seit 1933, NS-Volkswohlfahrt seit 1933, Volksbund für das Deutschtum im Ausland seit 1935, Deutsche Jägerschaft seit 1941. Und eine Zeile, die neugierig macht: Vor 1933 sei er Mitglied einer anderen Partei gewesen. Welcher, steht dort nicht.\n\nEr war Soldat im Zweiten Weltkrieg.\n\n1945 endete alles, was er sich aufgebaut hatte. Karlsbad wurde wieder Karlovy Vary, die Deutschen mussten gehen. Im April 1945 ist er in Gehrden gemeldet {{evt-gehrden-1945-residence-end}}, also dort, wo er geboren wurde. Im Jahr darauf, 1946, kommt in Peine ein Sohn zur Welt {{evt-peine-1946-birth}}.\n\nSchon während des Krieges war die Familie auf den Hof einer Tante Emilies gezogen, die alle nur „Muhme” nannten, in Handorf im Kreis Peine {{evt-handorf-1948-residence}} — dort verbrachte der kleine Hans-Jochen einen Teil seiner frühen Kindheit. 1948, weiterhin in Handorf, läuft Friedrichs Entnazifizierungsverfahren. Es endet mit der mildesten Einstufung, die es gab: entlastet.\n\nDanach beginnt er noch einmal. Beim Gesamtbergamt Obernkirchen-Barsinghausen — einem Betrieb der Preussag — wird er Kaufmännischer Leiter, als „Direktor” bzw. „kaufmännischer Direktor” bekannt. Nicht zehn Kilometer von Gehrden, sondern tatsächlich zurück in der Gegend seiner Kindheit. Die Familie bezieht eine Dienstvilla in Barsinghausen. Später leitet er die Ziegeleien und führt die Niedersächsischen Rohrwerke. Ein Ortsverein in Barsinghausen hat ihm 1996 neun Seiten gewidmet, in einem Buch über die Direktoren des dortigen Steinkohlenbergwerks. Er war offenbar der letzte in dieser Reihe — er war insbesondere mit der Endphase und der Abwicklung des Deisterbergbaus befasst; möglicherweise geht eine überlieferte Chronik des Klosterstollens auf seine eigenen Aufzeichnungen zurück.\n\nNach seiner Pensionierung zog er in den Steinradweg in Egestorf. Dort starb er am 25. August 1990, mit 83 Jahren {{evt-egestorf-1990-death}}.",
       "events": [
         { "id": "evt-gehrden-1907-nr24-birth", "year": 1907, "date_display": "1907-02-23", "type": "birth", "place_id": "gehrden", "label": "Geburt, nachmittags 11 Uhr" },
-        { "id": "evt-karlsbad-1938-employment", "year": 1938, "date_display": "ca. 1938 [?]", "type": "employment", "place_id": "karlsbad", "label": "Betriebsleiter Staatliche Glasmanufaktur Karlsbad; NSDAP-Eintritt im selben Jahr (Fragebogen 1948, nicht eingesehen)" },
+        { "id": "evt-karlsbad-1938-employment", "year": 1938, "date_display": "ca. 1938 [?]", "type": "employment", "place_id": "karlsbad", "label": "Betriebsleiter Staatliche Glasmanufaktur Karlsbad; NSDAP-Eintritt im selben Jahr" },
         { "id": "evt-gehrden-1945-residence-end", "year": 1945, "date_display": "1945-04 [?]", "type": "residence_end", "place_id": "gehrden", "label": "Wohnort bis April 1945 in Gehrden" },
-        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "child_birth", "place_id": "peine", "label": "Geburt des Sohnes Hans-Jochen" },
-        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort bei „Muhme” (Tante Emilies) in Handorf (Kreis Peine), wohl schon seit Kriegszeit; Entnazifizierungsverfahren 1948, Ergebnis: entlastet (Fragebogen 1948, nicht eingesehen)" },
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946-09-17", "type": "child_birth", "place_id": "peine", "label": "Geburt des Sohnes Hans-Jochen" },
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort bei „Muhme” (Tante Emilies) in Handorf (Kreis Peine), wohl schon seit Kriegszeit; Entnazifizierungsverfahren 1948, Ergebnis: entlastet" },
         { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf (Süntel), zuletzt wohnhaft im Steinradweg" }
       ],
       "facts": [
@@ -332,7 +485,7 @@
       "birth_year": 1946,
       "death_year": null,
       "living": true,
-      "profession": null,
+      "profession": "Arzt (Innere Medizin), niedergelassen in Norderstedt",
       "spouse": "birgit-remmecke",
       "parents": ["friedrich-wilhelm-remmecke"],
       "children": ["friederike-thieringer", "philip-remmecke"],
@@ -341,25 +494,34 @@
       "portraits": [
         { "path": "portraits/hans-jochen-remmecke/jochen.png", "width": "100%" }
       ],
-      "path": ["peine", "handorf-peine"],
-      "prose": "Dr. Hans-Jochen Christoph Remmecke wurde 1946 in Peine geboren {{evt-peine-1946-birth}}. Dass sein Vater Friedrich Wilhelm Remmecke 1948/49 im selben Kreis Peine (Handorf) wohnte, passt zur Geburt des Sohnes dort 1946.\n\nEin urkundlicher Nachweis steht noch aus: das Geburtenregister Peine 1946 ist nach deutschem Recht bis ca. 2056 gesperrt. Nach § 62 PStG können Abkömmlinge in gerader Linie eine beglaubigte Abschrift erhalten. Dieser Eintrag beruht bislang auf Familienauskunft.\n\nEinen Teil seiner frühen Kindheit verbrachte er auf dem Hof einer Großtante, die in der Familie nur „Muhme” genannt wurde, in Handorf {{evt-handorf-1948-residence}} — wohl schon seit Kriegszeit Wohnsitz seiner Eltern. Nach bisherigem Kenntnisstand hat er eine ältere Schwester, Katharina, genannt „Katrin” (verheiratete Beier, *1936); ausdrücklich als Geschwister belegt ist das bislang nicht.\n\nAm 7. August 1980 heiratete er Dr. med. Birgit Remmecke. Neun Tage später, am 16. August 1980, kam die gemeinsame Tochter Friederike zur Welt, später Dr. Friederike Thieringer; am 18. März 1982 folgte der Sohn Philip.",
+      "path": ["peine", "handorf-peine", "bueckeburg", "muenster", "hamburg", "norderstedt"],
+      "prose": "Jochen Remmecke kam am 17. September 1946 in Peine zur Welt {{evt-peine-1946-birth}}, zehn Jahre nach seiner Schwester Katharina, von allen nur „Katrin” genannt und später verheiratete Beier.\n\nEinen Teil seiner frühen Kindheit verbrachte er in Handorf, auf dem Hof einer Großtante, die in der Familie schlicht „Muhme” hieß {{evt-handorf-1948-residence}}. Sie ist als brillante Dame in Erinnerung geblieben, die sich einmal in einem Blumenladen porträtieren ließ, um das schönstmögliche Ambiente zum besten Preis zu bekommen. Auf dem Hof lebten auch das Pferd Hans und die Kuh Lisa. Auf einem der beiden soll der kleine Jochen seine ersten Reitversuche unternommen haben. Ob es nun das Pferd war oder doch die Kuh, darüber gehen die Erinnerungen bis heute auseinander.\n\nNach der Schule leistete er gemeinsam mit seinem lebenslangen Freund Hanjo den Wehrdienst in Bückeburg. Bei den Märschen legte er bemerkenswerten Ehrgeiz an den Tag: Für ein freies Wochenende trug er zur Not auch die Rucksäcke all derer, die ihn sonst aufgehalten hätten. Zu Hause wartete im Zweifel ein Tennismatch.\n\nAnschließend studierte er zunächst einige Semester Bergbau in Münster, bevor es ihn nach Hamburg und zur Medizin zog. Sein Studium finanzierte er zumindest zum Teil auf eher ungewöhnliche Weise: mit dem Verkauf von Hühnerfarmen.\n\nSeine ärztliche Laufbahn begann am Universitätsklinikum Hamburg-Eppendorf in der Inneren Medizin. Dort lernte der junge Assistenzarzt die Ärztin Birgit kennen. Eine erste Ehe lag zu diesem Zeitpunkt bereits hinter ihm. Am 7. August 1980 gaben sich die beiden das Jawort, und am 16. August wurde dann endlich Tochter Friederike geboren. Am 18. März 1982 folgte Sohn Philip.\n\nNach prägenden Jahren am UKE wagte Jochen um 1982 gemeinsam mit Carl Bischoff den Schritt in die Selbstständigkeit {{evt-norderstedt-1982-employment}}. Später kamen die Kollegen Schlamp, Tachezy und Siemensen hinzu. Aus diesem Zusammenschluss wuchs eine privatärztliche Gemeinschaft, die zeitweise mehr als 260 Betten betreute und als größte private Praxis Europas galt, manche sagen sogar der Welt.\n\nDoch auch nach seinem Ausscheiden als Seniorpartner war für ihn noch lange nicht Schluss. Zusammen mit Dr. Gonnermann gründete er eine neue Praxis in der Alten Landstraße in Norderstedt. Über viele Jahre wurde er dort für seine Patienten zum vertrauten Arzt und im Freundeskreis wie unter den Norderstedter Rotariern zu ihrem „Leibarzt”: jemand, den man nicht nur wegen seiner medizinischen Erfahrung anruft, sondern weil man seinem Urteil vertraut.",
       "events": [
-        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "birth", "place_id": "peine", "label": "Geburt, urkundlich noch nicht nachgewiesen" },
-        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Kindheit bei „Muhme” (Großtante) in Handorf" }
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946-09-17", "type": "birth", "place_id": "peine", "label": "Geburt" },
+        { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Kindheit bei „Muhme” (Großtante) in Handorf" },
+        { "id": "evt-norderstedt-1982-employment", "year": 1982, "date_display": "1982 [?]", "type": "employment", "place_id": "norderstedt", "label": "Niederlassung als Internist mit Carl Bischoff" }
       ],
       "facts": [
-        "Geboren 1946 in Peine.",
-        "Urkundlicher Nachweis (Geburtenregister Peine 1946) steht aus — Register gesperrt bis ca. 2056.",
-        "Teile der frühen Kindheit bei „Muhme” (Großtante) in Handorf (Kreis Peine) verbracht.",
+        "Geboren am 17. September 1946 in Peine, zehn Jahre nach seiner Schwester Katharina (verheiratete Beier, „Katrin”).",
+        "Teile der frühen Kindheit bei der Großtante „Muhme” in Handorf verbracht, mit dem Pferd Hans und der Kuh Lisa auf dem Hof.",
+        "Wehrdienst in Bückeburg gemeinsam mit dem lebenslangen Freund Hanjo.",
+        "Studierte zunächst einige Semester Bergbau in Münster, dann Medizin in Hamburg; Studium teils durch den Verkauf von Hühnerfarmen finanziert.",
+        "Erste Ehe vor der Begegnung mit Birgit; als Assistenzarzt am UKE (Innere Medizin) kennengelernt.",
         "Heirat mit Dr. med. Birgit Remmecke am 7. August 1980.",
-        "Kinder: Friederike (*16.08.1980, später Dr. Friederike Thieringer) und Philip (*18.03.1982)."
+        "Kinder: Friederike (*16.08.1980, später Dr. Friederike Thieringer) und Philip (*18.03.1982).",
+        "Niederlassung als Internist mit Carl Bischoff um 1982; spätere Fusion mit Schlamp, Tachezy und Siemensen zu einer der größten privatärztlichen Gemeinschaften Europas (zeitweise über 260 Betten).",
+        "Nach Ausscheiden als Seniorpartner Neugründung einer Praxis mit Dr. Gonnermann in der Alten Landstraße, Norderstedt.",
+        "Langjähriger vertrauter Arzt („Leibarzt”) von Freunden und den Rotariern Norderstedts."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
         "Beleggrad bislang nur Familienauskunft, kein Dokument. Abschrift nach § 62 PStG durch Abkömmlinge in gerader Linie möglich.",
         "Theoretisch offen: dass der 1907 in Gehrden geborene Junge (Friedrich Wilhelm) ein anderer, entfernt verwandter Remmecke war als der hier angenommene Vater — auflösbar über den Sterbeeintrag 1990.",
-        "Ob Katharina Beier tatsächlich seine Schwester ist (gemeinsame Eltern Friedrich und Emilie), ist aus dem Kontext erschlossen, nicht ausdrücklich belegt — siehe katharina-beier."
+        "Ob Katharina Beier tatsächlich seine Schwester ist (gemeinsame Eltern Friedrich und Emilie), ist aus dem Kontext erschlossen, nicht ausdrücklich belegt — siehe katharina-beier.",
+        "Voller Name/Identität des Freundes „Hanjo” (Bundeswehr- und Studienzeit) ist nicht geklärt.",
+        "Dauer der Bundeswehrzeit, ob und wie viele Semester Bergbau in Münster studiert wurden, sowie Datum und Umstände der ersten Ehe und Scheidung sind nur aus Familienerinnerung bekannt, nicht dokumentiert.",
+        "Gründungsjahr der Praxis mit Carl Bischoff (um 1982) sowie die Angabe „größte private Praxis Europas” mit über 260 Betten sind unbestätigte Familienüberlieferung."
       ]
     },
     {
@@ -446,8 +608,8 @@
       "id": "emilie-schweckendiek",
       "name": "Emilie Schweckendiek",
       "birth_year": null,
-      "death_year": null,
-      "profession": null,
+      "death_year": 2022,
+      "profession": "Lehrerin (unklar, ob sie je im Beruf gearbeitet hat)",
       "spouse": "friedrich-wilhelm-remmecke",
       "children": ["katharina-beier", "hans-jochen-remmecke"],
       "has_data": true,
@@ -456,23 +618,27 @@
         { "path": "portraits/emilie-schweckendiek/emilieSchweckendiek.png" }
       ],
       "path": ["handorf-peine", "barsinghausen", "egestorf-suentel"],
-      "prose": "Emilie Schweckendiek heiratete Friedrich Wilhelm Remmecke; ein Datum ist nicht überliefert. Aus der Ehe gingen nach bisherigem Kenntnisstand zwei Kinder hervor: Katharina, geboren 1936, und Hans-Jochen, geboren 1946 in Peine {{evt-peine-1946-birth}}.\n\nIhre jüngere Schwester Annemarie — in der Familie „Tante Miekchen” genannt — wurde Fürsorgerin.\n\nSchon während des Zweiten Weltkriegs zog die Familie auf den Hof einer eigenen Tante Emilies, die alle nur „Muhme” nannten, in Handorf im Kreis Peine {{evt-handorf-1948-residence}}. Dort verbrachte zumindest der jüngere Sohn Hans-Jochen einen Teil seiner frühen Kindheit.\n\nNach dem Krieg zog die Familie mit Friedrichs neuer Stellung beim Gesamtbergamt Obernkirchen-Barsinghausen in eine Dienstvilla in Barsinghausen. Nach Friedrichs Tod 1990 {{evt-egestorf-1990-death}} blieb Emilie zunächst in Egestorf; ihre Tochter Katharina zog bald darauf dorthin, um sie zu pflegen — zunächst zuhause, später im Brigittenstift. Wann und wo Emilie selbst starb, ist in dieser Recherche noch nicht erfasst.",
+      "prose": "Emilie Schweckendiek heiratete Friedrich Wilhelm Remmecke; ein Datum ist nicht überliefert. Aus der Ehe gingen nach bisherigem Kenntnisstand zwei Kinder hervor: Katharina, geboren 1936, und Hans-Jochen, geboren 1946 in Peine {{evt-peine-1946-birth}}. Sie war als Lehrerin ausgebildet; ob sie je im Beruf gearbeitet hat, ist unklar.\n\nIhre ältere Schwester Annemarie — in der Familie „Tante Miekchen” genannt — wurde Fürsorgerin.\n\nSchon während des Zweiten Weltkriegs zog die Familie auf den Hof einer eigenen Tante Emilies, die alle nur „Muhme” nannten, in Handorf im Kreis Peine {{evt-handorf-1948-residence}}. Dort verbrachte zumindest der jüngere Sohn Hans-Jochen einen Teil seiner frühen Kindheit.\n\nNach dem Krieg zog die Familie mit Friedrichs neuer Stellung beim Gesamtbergamt Obernkirchen-Barsinghausen in eine Dienstvilla in Barsinghausen. Nach Friedrichs Tod 1990 {{evt-egestorf-1990-death}} blieb Emilie zunächst in Egestorf; ihre Tochter Katharina zog bald darauf dorthin, um sie zu pflegen — zunächst zuhause, später im Brigittenstift. Emilie starb an Ostern 2022 {{evt-egestorf-2022-death}}.",
       "events": [
         { "id": "evt-handorf-1948-residence", "year": 1948, "date_display": "1948/1949 [?]", "type": "residence", "place_id": "handorf-peine", "label": "Wohnort bei eigener Tante („Muhme”) in Handorf, wohl schon seit Kriegszeit" },
-        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946 (Familienauskunft)", "type": "child_birth", "place_id": "peine", "label": "Geburt des Sohnes Hans-Jochen" },
-        { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "spouse_death", "place_id": "egestorf-suentel", "label": "Tod des Ehemanns Friedrich in Egestorf" }
+        { "id": "evt-peine-1946-birth", "year": 1946, "date_display": "1946-09-17", "type": "child_birth", "place_id": "peine", "label": "Geburt des Sohnes Hans-Jochen" },
+        { "id": "evt-egestorf-1990-death", "year": 1990, "date_display": "1990-08-25", "type": "spouse_death", "place_id": "egestorf-suentel", "label": "Tod des Ehemanns Friedrich in Egestorf" },
+        { "id": "evt-egestorf-2022-death", "year": 2022, "date_display": "2022 [?]", "type": "death", "place_id": "egestorf-suentel", "label": "Tod an Ostern" }
       ],
       "facts": [
         "Ehe mit Friedrich Wilhelm Remmecke (Datum unbekannt); Kinder Katharina (*1936) und Hans-Jochen (*1946).",
-        "Jüngere Schwester: Annemarie Schweckendiek, genannt „Tante Miekchen”, Fürsorgerin.",
+        "Ältere Schwester: Annemarie Schweckendiek, genannt „Tante Miekchen”, Fürsorgerin.",
+        "Ausgebildete Lehrerin; unklar, ob sie je im Beruf gearbeitet hat.",
         "Während des Zweiten Weltkriegs mit der Familie auf den Hof einer eigenen Tante („Muhme”) in Handorf (Kreis Peine) gezogen.",
         "Nach dem Krieg Dienstvilla in Barsinghausen (Friedrichs Stellung beim Gesamtbergamt Obernkirchen-Barsinghausen).",
-        "Nach Friedrichs Tod 1990 zunächst in Egestorf verblieben, von Tochter Katharina gepflegt."
+        "Nach Friedrichs Tod 1990 zunächst in Egestorf verblieben, von Tochter Katharina gepflegt.",
+        "Gestorben an Ostern 2022 (Familienüberlieferung; genaues Datum und Sterbeort nicht dokumentiert)."
       ],
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
-        "Geburts- und Sterbedaten Emilies sind in dieser Recherche noch nicht erfasst.",
+        "Geburtsdatum Emilies ist in dieser Recherche noch nicht erfasst.",
+        "Genaues Sterbedatum (nur „Ostern 2022” überliefert) und Sterbeort sind unbestätigt.",
         "Vorname/Identität der Tante „Muhme” sowie das genaue Datum der Eheschließung mit Friedrich sind unbekannt."
       ]
     },
@@ -490,10 +656,10 @@
         { "path": "portraits/annemarie-schweckendiek/miekchen.png" }
       ],
       "path": [],
-      "prose": "Annemarie Schweckendiek war die jüngere Schwester von Emilie Schweckendiek, verheiratete Remmecke. In der Familie wurde sie „Tante Miekchen” genannt. Sie war als Fürsorgerin tätig — mehr ist über ihren Lebensweg in dieser Recherche bislang nicht erfasst.",
+      "prose": "Annemarie Schweckendiek war die ältere Schwester von Emilie Schweckendiek, verheiratete Remmecke. In der Familie wurde sie „Tante Miekchen” genannt. Sie war als Fürsorgerin tätig — mehr ist über ihren Lebensweg in dieser Recherche bislang nicht erfasst.",
       "events": [],
       "facts": [
-        "Jüngere Schwester von Emilie Schweckendiek.",
+        "Ältere Schwester von Emilie Schweckendiek.",
         "Beruf: Fürsorgerin.",
         "In der Familie „Tante Miekchen” genannt."
       ],
@@ -514,22 +680,26 @@
       "children": [],
       "has_data": true,
       "image": null,
-      "path": ["handorf-peine", "wolfsburg", "egestorf-suentel"],
-      "prose": "Katharina Beier, in der Familie „Katrin” genannt, wurde am 16. September 1936 geboren — nach bisherigem Kenntnisstand als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek, ausdrücklich belegt ist diese Zuordnung nicht. Möglicherweise wuchs sie, wie ihr jüngerer Bruder Hans-Jochen, zeitweise in Handorf im Kreis Peine auf.\n\nSie absolvierte eine Ausbildung zur Hauswirtschafterin auf einem Lehrhof und studierte später für das Lehramt in Hauswirtschaft und Sport. Ihre Lehrtätigkeit übte sie in Wolfsburg aus, wo sie Gerd Beier heiratete, den langjährigen Leiter der dortigen Volkshochschule. Die Ehe blieb kinderlos und wurde später geschieden.\n\nNach dem Tod ihres Vaters 1990 {{evt-egestorf-1990-death}} zog sie bald darauf nach Egestorf im Süntel, um ihre Mutter Emilie zu pflegen — zunächst zuhause, später im Brigittenstift, wo sie sich auch selbst sozial engagierte, außerdem beim Roten Kreuz.\n\nIn dieser Zeit nahm sie den Kontakt zu Linchen und Fritz wieder auf. Fritz wird in der Familienüberlieferung als unehelicher Angehöriger der Familie beschrieben und soll ebenfalls im Bergbau tätig gewesen sein — eine mögliche Parallele zu Friedrichs eigener Rolle beim Deisterbergbau, die bislang nicht weiter untersucht ist.\n\nKatharina Beier starb am 2. April 2012.",
+      "path": ["handorf-peine", "wennigsen", "wolfsburg", "egestorf-suentel"],
+      "prose": "Katharina Beier, in der Familie „Katrin” genannt, wurde am 18. September 1936 geboren — nach bisherigem Kenntnisstand als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek, ausdrücklich belegt ist diese Zuordnung nicht. Möglicherweise wuchs sie, wie ihr jüngerer Bruder Hans-Jochen, zeitweise in Handorf im Kreis Peine auf. Schwimmen brachte ihr ihre Großmutter mütterlicherseits bei — die sanftmütige Schwester der „Muhme” — in Wennigsen.\n\nSie absolvierte eine Ausbildung zur Hauswirtschafterin auf einem Lehrhof und studierte später für das Lehramt in Hauswirtschaft und Sport. Ihre Lehrtätigkeit übte sie an einer Hauptschule in Wolfsburg aus, wo sie Gerd Beier heiratete, den langjährigen Leiter der dortigen Volkshochschule. Die Ehe blieb kinderlos und wurde später geschieden. Ihre Arbeit als Lehrerin liebte sie sehr und hielt über Jahrzehnte Kontakt zu einigen ihrer ehemaligen Schüler.\n\nSie unterhielt viele langjährige Freundschaften. Dazu zählte Helga, eine Schulfreundin, die später in die Schweiz zog; deren Töchter Annette und Susi waren für Katharina wie Ziehtöchter. Auch mit Trutz, einer sehr extravaganten Freundin aus ihrer Studienzeit, blieb sie bis zuletzt verbunden.\n\nNach dem Tod ihres Vaters 1990 {{evt-egestorf-1990-death}} zog sie bald darauf nach Egestorf im Süntel, um ihre Mutter Emilie zu pflegen — zunächst zuhause, später im Brigittenstift, wo sie sich auch selbst sozial engagierte, außerdem beim Roten Kreuz.\n\nIn dieser Zeit nahm sie den Kontakt zu Linchen und Fritz wieder auf. Fritz wird als unehelicher Angehöriger der Familie beschrieben und war ebenfalls im Bergbau tätig — eine mögliche Parallele zu Friedrichs eigener Rolle beim Deisterbergbau.\n\nAus gesundheitlichen Gründen ließ sie sich vorzeitig pensionieren, verbrachte danach aber noch rund 25 munter und aktiv erlebte Jahre. Sie hegte eine große Leidenschaft für Gärten — einen eigenen Garten, Gartenreisen nach England und eigene Vorträge zum Thema — sowie für Dackel, möglicherweise geprägt vom Familienhund ihrer Jugend, Strupke.\n\nKatharina Beier starb am 2. April 2012.",
       "events": [
         { "id": "evt-egestorf-1991-residence", "year": 1991, "date_display": "nach 1990 [?]", "type": "residence", "place_id": "egestorf-suentel", "label": "Umzug nach Egestorf, um Mutter Emilie zu pflegen" },
         { "id": "evt-egestorf-2012-death", "year": 2012, "date_display": "2012-04-02", "type": "death", "place_id": "egestorf-suentel", "label": "Tod in Egestorf" }
       ],
       "facts": [
-        "Geboren 16.09.1936.",
+        "Geboren 18.09.1936.",
         "In der Familie „Katrin” genannt.",
         "Möglicherweise in Handorf (Kreis Peine) aufgewachsen (unsicher).",
+        "Schwimmen laut Familienerinnerung von der Großmutter mütterlicherseits in Wennigsen beigebracht bekommen.",
         "Ausbildung zur Hauswirtschafterin auf einem Lehrhof; später Studium für das Lehramt in Hauswirtschaft und Sport.",
-        "Lehrtätigkeit in Wolfsburg.",
+        "An einer Hauptschule in Wolfsburg unterrichtet; liebte die Arbeit und hielt über Jahrzehnte Kontakt zu ehemaligen Schülern.",
         "Heirat mit Gerd Beier, Leiter der Volkshochschule Wolfsburg; Ehe kinderlos, später geschieden.",
+        "Langjährige Freundschaften, u. a. mit Helga (später Schweiz; deren Töchter Annette und Susi wie Ziehtöchter) und mit Trutz aus der Studienzeit.",
         "Nach Friedrichs Tod 1990 Umzug nach Egestorf zur Pflege der Mutter Emilie — zunächst zuhause, später im Brigittenstift.",
         "Soziales Engagement u. a. beim Roten Kreuz und im Brigittenstift.",
         "Wiederaufnahme des Kontakts zu Linchen und Fritz (Fritz: unehelicher Angehöriger der Familie, ebenfalls im Bergbau tätig).",
+        "Frühpensionierung aus gesundheitlichen Gründen, danach noch rund 25 aktive Jahre.",
+        "Leidenschaft für Gärten (eigener Garten, Gartenreisen nach England, eigene Vorträge) und für Dackel — möglicherweise geprägt vom Familienhund ihrer Jugend, Strupke.",
         "Gestorben 02.04.2012."
       ],
       "historical_context": null,
@@ -538,7 +708,10 @@
         "Die Zuordnung als Tochter von Friedrich Wilhelm Remmecke und Emilie Schweckendiek ist aus dem Kontext erschlossen (Pflege der Mutter, „Wiederaufnahme” alter Familienkontakte), nirgends ausdrücklich als „Tochter” belegt.",
         "Geburtsort nicht überliefert.",
         "Identität von Linchen und Fritz sowie die genaue Verwandtschaft zur Familie (Fritz: „unehelicher Angehöriger”) sind ungeklärt.",
-        "Genaues Datum des Umzugs nach Egestorf (vermutlich bald nach 1990) unbekannt."
+        "Genaues Datum des Umzugs nach Egestorf (vermutlich bald nach 1990) unbekannt.",
+        "Identität der Großmutter mütterlicherseits (Schwester der „Muhme”, vermutlich Emilies Mutter) ist unbekannt — auch ihr Name ist nicht überliefert.",
+        "Nachnamen und genaue Lebensdaten von Helga, Trutz, Annette und Susi sind nicht erfasst.",
+        "Genaues Jahr der Frühpensionierung ist nicht bekannt."
       ]
     },
     {
@@ -577,24 +750,28 @@
       "has_data": true,
       "image": null,
       "path": ["brunkensen"],
-      "prose": "Johann Heinrich Christoph Remmeke wurde am 9. Januar 1799, nachmittags um 3 Uhr, in Brunkensen als Sohn des Häuslings und Zimmermeisters Johann Ernst Remmeke [?] und der Hanne/Johanne Louise Koch [?] geboren {{evt-brunkensen-1799-066-birth}} und am 13. Januar desselben Jahres dort getauft {{evt-brunkensen-1799-066-baptism}}. Gerufen wurde er später als Heinrich — unter diesem Namen tritt er in allen späteren Einträgen auf.\n\n1824 heiratete er in Brunkensen Johanne Sophie Luise Schwarze {{evt-brunkensen-1824-009-marriage}}. Im Traueintrag wird der Bräutigam als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch geführt — exakt dieselbe Elternkombination wie im Taufeintrag von 1799. Diese Übereinstimmung macht die Gleichsetzung der beiden Einträge sehr wahrscheinlich, auch wenn kein Dokument beide Namen „Johann Heinrich Christoph” und „Heinrich” ausdrücklich nebeneinander nennt.\n\nEr war wie sein Vater Zimmermann. 1839 wurde sein Sohn Johann Heinrich Friedrich Christian in Brunkensen geboren und getauft {{evt-brunkensen-1839-006-birth}}.",
+      "prose": "Johann Heinrich Christoph Remmeke wurde am 9. Januar 1799, nachmittags um 3 Uhr, in Brunkensen als Sohn des Häuslings und Zimmermeisters Johann Ernst Remmeke und seiner Ehefrau Hanne Louise Koch geboren {{evt-brunkensen-1799-066-birth}} und vier Tage später, am 13. Januar, dort auf drei Namen getauft {{evt-brunkensen-1799-066-baptism}}. Taufzeugen waren Meister Christoph Weber und Sophie Remmekin, beide aus Brunkensen, sowie Heinrich Koch aus Brüggen. Später erscheint er in den Kirchenbüchern nur noch als Heinrich — unter diesem Namen tritt er in allen weiteren Einträgen auf.\n\nDas Jahr, in dem Heinrich siebzehn wurde, war das Jahr ohne Sommer. 1816 war verregnet und kalt, die Ernte verdarb auf den Feldern, die Getreidepreise stiegen stark. Die Ursache lag ein Jahr zurück und elftausend Kilometer entfernt: Auf Sumbawa war der Tambora ausgebrochen und hatte so viel Asche in die Atmosphäre geschleudert, dass weite Teile der Nordhalbkugel einen Sommer verloren. In Brunkensen wusste das niemand. Wer Land hatte, hatte wenigstens etwas — Häuslinge wie sein Vater hatten keins; was sie aßen, mussten sie kaufen. Im nahen Hannover, zu dem auch Alfeld gehörte, ging die Regierung schon im November 1816 gegen den Aufkauf von Getreide und Kartoffeln durch Spekulanten vor; in der Bekanntmachung war ausdrücklich vom drohenden „Nothstand der ärmeren Volks-Classe” die Rede.\n\n1824 heiratete er in Brunkensen Johanne Sophie Luise Schwarze {{evt-brunkensen-1824-009-marriage}}. Im Traueintrag wird der Bräutigam als Sohn des Johann Ernst Remmeke und der bereits verstorbenen Johanne Louise geb. Koch geführt — exakt dieselbe Elternkombination wie im Taufeintrag von 1799. Diese Übereinstimmung macht die Gleichsetzung der beiden Einträge sehr wahrscheinlich, auch wenn kein Dokument beide Namen „Johann Heinrich Christoph” und „Heinrich” ausdrücklich nebeneinander nennt. Einen Hof hatte sein Vater ihm nicht zu vererben; was Heinrich von ihm übernahm, war das Handwerk — wie Johann Ernst wurde auch er Zimmermann. Seine Mutter Hanne Louise war zu diesem Zeitpunkt bereits tot; sein Vater erlebte die Hochzeit noch, starb aber im Jahr darauf {{evt-brunkensen-1825-death}}.\n\nAls Heinrich geboren worden war, hatten in Brunkensen knapp 600 Menschen gelebt, jetzt waren es nur noch etwa 470 — in den fünfundzwanzig Jahren bis zu seiner Hochzeit hatte das Dorf mehr als ein Fünftel seiner Einwohner verloren.\n\n1830 war Heinrich einunddreißig, als es im eigenen Herzogtum zur Revolution kam: In Braunschweig wurde das Residenzschloss gestürmt und niedergebrannt, Herzog Karl II. floh aus dem Land, wenige Tage später übernahm sein Bruder Wilhelm die Herrschaft. Die Nachricht wird auch in Brunkensen schnell die Runde gemacht haben.\n\n1839 wurde sein Sohn Johann Heinrich Friedrich Christian in Brunkensen geboren und getauft {{evt-brunkensen-1839-006-birth}}. Hundert Kilometer weiter östlich fuhr da seit einem Jahr die erste Staatseisenbahn Deutschlands; 1853 hielt die Bahn auch in Alfeld. Hannover, für seinen Vater noch eine Tagesreise entfernt, war für den Sohn jetzt nur noch zwei Stunden weit.",
       "events": [
         { "id": "evt-brunkensen-1799-066-birth", "year": 1799, "date_display": "1799-01-09", "type": "birth", "place_id": "brunkensen", "label": "Geburt, nachmittags 3 Uhr" },
         { "id": "evt-brunkensen-1799-066-baptism", "year": 1799, "date_display": "1799-01-13", "type": "baptism", "place_id": "brunkensen", "label": "Taufe" },
-        { "id": "evt-brunkensen-1824-009-marriage", "year": 1824, "date_display": "1824 [?]", "type": "marriage", "place_id": "brunkensen", "label": "Heirat mit Johanne Sophie Luise Schwarze (Beleg noch nicht gesichert)" }
+        { "id": "evt-brunkensen-1824-009-marriage", "year": 1824, "date_display": "1824 [?]", "type": "marriage", "place_id": "brunkensen", "label": "Heirat mit Johanne Sophie Luise Schwarze" }
       ],
       "facts": [
-        "Geboren am 9. Januar 1799, nachmittags um 3 Uhr, in Brunkensen; getauft am 13. Januar 1799 als Johann Heinrich Christoph.",
-        "Sohn des Häuslings und Zimmermeisters Johann Ernst Remmeke [?] und der Hanne/Johanne Louise Koch [?].",
+        "Geboren am 9. Januar 1799, nachmittags um 3 Uhr, in Brunkensen; getauft am 13. Januar 1799 auf drei Namen als Johann Heinrich Christoph.",
+        "Sohn des Häuslings und Zimmermeisters Johann Ernst Remmeke und der Hanne Louise Koch (im Heiratseintrag 1824: Johanne Louise).",
         "Später als „Heinrich Remmeke” geführt; Zimmermann in Brunkensen.",
-        "Heirat mit Johanne Sophie Luise Schwarze 1824 in Brunkensen; Bräutigam dort als Sohn des Johann Ernst Remmeke und der verstorbenen Johanne Louise geb. Koch genannt — deckungsgleich mit dem Taufeintrag 1799.",
-        "Vater von Johann Heinrich Friedrich Christian Remmeke (*1839, belegt für die Elternschaft)."
+        "Als Siebzehnjähriger vom „Jahr ohne Sommer” 1816 betroffen (Tambora-Ausbruch, Missernte, steigende Getreidepreise) — als Häuslingssohn ohne eigenes Land besonders gefährdet.",
+        "Heirat mit Johanne Sophie Luise Schwarze 1824 in Brunkensen; Bräutigam dort als Sohn des Johann Ernst Remmeke und der verstorbenen Johanne Louise geb. Koch genannt — deckungsgleich mit dem Taufeintrag 1799. Vater Johann Ernst erlebte die Hochzeit, starb aber im Folgejahr 1825.",
+        "Brunkensens Einwohnerzahl fiel von knapp 600 (bei Heinrichs Geburt 1799) auf etwa 470 (bei seiner Hochzeit 1824) — ein Rückgang von über einem Fünftel in 25 Jahren.",
+        "1830, mit 31 Jahren, erlebte er die Braunschweiger Revolution (Sturm und Brand des Residenzschlosses, Flucht Herzog Karls II., Regierungsübernahme durch Herzog Wilhelm).",
+        "Vater von Johann Heinrich Friedrich Christian Remmeke (*1839, belegt für die Elternschaft); bei dessen Geburt war die Eisenbahn Hannover–Alfeld (nach dieser Erzählung 1853 in Alfeld) noch nicht in Betrieb."
       ],
-      "historical_context": null,
+      "historical_context": "1816 traf das „Jahr ohne Sommer” (Folge des Tambora-Ausbruchs 1815) auch das Fürstentum/Königreich Hannover; die Regierung ging im November 1816 gegen Getreidespekulation vor. 1830 kam es in Braunschweig zur Revolution gegen Herzog Karl II.",
       "interpretation": "Die Gleichsetzung von „Johann Heinrich Christoph” (Taufe 1799) mit „Heinrich Remmeke” (Ehemann der Schwarze, Vater des 1839 geborenen Johann) stützt sich auf zwei unabhängig gelesene Einträge, die dieselbe, ungewöhnliche Elternkombination (Johann Ernst Remmeke ⚭ Johanne Louise Koch) nennen — starkes, aber indirektes Indiz, kein Dokument mit beiden Namen nebeneinander.",
       "open_questions": [
         "Die Heirat Remmeke–Schwarze 1824 (Brunkensen 1815–1845, Archion 369739, Bild 146/220, Nr. 9 rechts) ist inhaltlich bekannt, aber weiterhin ohne Screenshot (Tracker-Status B).",
-        "Mehrere Lesungen im Taufeintrag 1799 unsicher: Vatersname „Johann Ernst” [?], Familienname „Remmeke” [?], Mutter „Koch” [?], zweiter Pate/Patin nicht sicher lesbar."
+        "Jahr des Bahnanschlusses Alfelds widersprüchlich angegeben: hier 1853, auf der Seite von Johann Heinrich Friedrich Christian (*1839) dagegen 1852 für die Strecke Hannover–Alfeld — Diskrepanz noch nicht aufgelöst.",
+        "Quelle der lokalen Bevölkerungszahlen (knapp 600 um 1799, ca. 470 um 1824) sowie des Zitats „Nothstand der ärmeren Volks-Classe” aus der hannoverschen Bekanntmachung von 1816 ist nicht dokumentiert."
       ]
     },
     {
@@ -610,7 +787,7 @@
       "path": ["brunkensen"],
       "prose": "Johanne Sophie Luise Schwarze heiratete 1824 in Brunkensen Johann Heinrich Christoph („Heinrich”) Remmeke {{evt-brunkensen-1824-009-marriage}} und war die Mutter von Johann Heinrich Friedrich Christian Remmeke. Ihr eigener Vorname dürfte später auf ihre Schwiegertochter Hanne übertragen worden sein, die in den Georgsmarienhütte-Kirchenbüchern ebenfalls als „Sophie Luise” erscheint — eine vermutete, nicht belegte Erklärung.",
       "events": [
-        { "id": "evt-brunkensen-1824-009-marriage", "year": 1824, "date_display": "1824 [?]", "type": "marriage", "place_id": "brunkensen", "label": "Heirat mit Johann Heinrich Christoph Remmeke (Beleg noch nicht gesichert)" }
+        { "id": "evt-brunkensen-1824-009-marriage", "year": 1824, "date_display": "1824 [?]", "type": "marriage", "place_id": "brunkensen", "label": "Heirat mit Johann Heinrich Christoph Remmeke" }
       ],
       "facts": [
         "Mutter von Johann Heinrich Friedrich Christian Remmeke (belegt für die Elternschaft).",
@@ -624,31 +801,48 @@
     },
     {
       "id": "johann-ernst-remmeke",
-      "name": "Johann Ernst Remmeke [?]",
-      "birth_year": null,
-      "death_year": null,
-      "profession": "Häusling und Zimmermeister",
+      "name": "Johann Ernst Remmeke",
+      "birth_year": 1764,
+      "death_year": 1825,
+      "profession": "Häusling und Zimmermeister (selbstständiger Handwerksbetrieb)",
       "spouse": "johanne-louise-koch",
       "children": ["heinrich-remmeke"],
       "has_data": true,
       "image": null,
-      "path": ["brunkensen"],
-      "prose": "Johann Ernst Remmeke [?] war Häusling und Zimmermeister in Brunkensen. Er ist als Vater im Taufeintrag seines Sohnes Johann Heinrich Christoph 1799 verzeichnet {{evt-brunkensen-1799-066-birth}} und wird 1824, im Heiratseintrag desselben Sohnes, erneut als dessen Vater genannt — dort erscheint seine Frau Johanne Louise geb. Koch bereits als verstorben.",
-      "events": [],
-      "facts": [
-        "Häusling und Zimmermeister in Brunkensen.",
-        "Vater von Johann Heinrich Christoph („Heinrich”) Remmeke (*1799), belegt über den Taufeintrag 1799 und den Heiratseintrag 1824."
+      "portraits": [
+        { "path": "draft/brunkensen-ortsplan-1772/img-brunkensen-ortsplan-1772_draft.png" }
       ],
-      "historical_context": null,
-      "interpretation": null,
+      "path": ["brunkensen"],
+      "prose": "Johann Ernst Remmeke wurde 1764 in Brunkensen geboren {{evt-brunkensen-1764-birth}}, gut hundert Jahre nachdem der Dreißigjährige Krieg das Dorf fast ausgelöscht hatte. Inzwischen war es wieder gewachsen, doch Land und Hofstellen waren längst verteilt. Als Johann Ernst zehn war, lebten schon wieder 520 Menschen an 51 Feuerstellen. Als 1799 sein Sohn Johann Heinrich Christoph geboren wurde {{evt-brunkensen-1799-066-birth}}, waren es knapp achtzig mehr. Das Dorf wuchs, ohne dass neue Feuerstellen hinzukamen. Mehr Menschen mussten ihren Platz in denselben Häusern und unter derselben alten Ordnung finden.\n\nJohann Ernst war laut Kirchenbuch Häusling. Seine Frau Hanne Louise, geborene Koch, und er hatten keinen Hof, kein eigenes Haus und keinen Anteil an dem Land, das das Dorf gemeinsam nutzte. Wo andere ihr Vieh auf die Hude trieben, Holz aus dem Gemeindewald holten oder bei den Angelegenheiten des Dorfes mitredeten, standen sie am Rand.\n\nAber Johann Ernst war nicht ohne Stellung. Er war Zimmermeister. Er konnte eigene Aufträge annehmen, auf eigene Rechnung arbeiten, Gesellen beschäftigen und Lehrlinge ausbilden. Seine Arbeit steckte in den Häusern, Scheunen und Dachstühlen des Dorfes.\n\n1806, Johann Ernst war zweiundvierzig, besetzten französische Truppen das Herzogtum Braunschweig. Ein Jahr später wurde der jahrhundertealte Staat aufgelöst und Brunkensen Teil des napoleonischen Königreichs Westphalen. Damit verloren die Gutsherren ihr eigenes Gericht, und Recht wurde fortan unter staatlicher Gerichtsbarkeit in Greene gesprochen.\n\nSechs Jahre später brach das Königreich Westphalen zusammen, und Johann Ernst war wieder Braunschweiger.\n\nHanne Louise erlebte die Heirat ihres Sohnes 1824 nicht mehr {{evt-brunkensen-1824-009-marriage}}. Johann Ernst schon. Ein Jahr später, am Morgen des 9. September 1825 um zehn Uhr, starb er, einundsechzig Jahre und sechzehn Tage alt {{evt-brunkensen-1825-death}}. Als Ursache trug der Pfarrer „Entkräftung” ein. Zwei Tage später wurde er nachmittags um vier Uhr still begraben {{evt-brunkensen-1825-burial}}. Der Sterbeeintrag nennt ihn „Ernst August Remmecke” statt „Johann Ernst” — Alter, Beruf, Wohnort und Sterbedatum passen jedoch genau zu ihm, und die Familie geht davon aus, dass es sich um dieselbe Person handelt, auch wenn kein weiteres Dokument beide Namen nebeneinander nennt.\n\nSein Handwerk blieb in der Familie. Johann Heinrich Christoph wurde Zimmermann wie sein Vater, und dessen Sohn später ebenfalls.",
+      "events": [
+        { "id": "evt-brunkensen-1764-birth", "year": 1764, "date_display": "1764-08-24", "type": "birth", "place_id": "brunkensen", "label": "Geburt (errechnet aus dem Sterbealter)" },
+        { "id": "evt-brunkensen-1799-066-birth", "year": 1799, "date_display": "1799-01-09", "type": "child_birth", "place_id": "brunkensen", "label": "Geburt des Sohnes Johann Heinrich Christoph" },
+        { "id": "evt-brunkensen-1825-death", "year": 1825, "date_display": "1825-09-09", "type": "death", "place_id": "brunkensen", "label": "Tod, morgens um 10 Uhr, im Alter von 61 Jahren und 16 Tagen; Ursache laut Pfarrer: „Entkräftung”" },
+        { "id": "evt-brunkensen-1825-burial", "year": 1825, "date_display": "1825-09-11", "type": "burial", "place_id": "brunkensen", "label": "Begräbnis, nachmittags um 16 Uhr" }
+      ],
+      "facts": [
+        "Geboren 1764 in Brunkensen (Tagesdatum 24. August rechnerisch aus dem Sterbealter erschlossen, nicht durch einen eigenen Tauf-/Geburtseintrag belegt).",
+        "Häusling und Zimmermeister in Brunkensen — kein eigener Hof, aber eigenständiger Handwerksbetrieb mit Gesellen und Lehrlingen.",
+        "Ehe mit Hanne Louise, geborene Koch; sie starb vor 1824, er überlebte sie.",
+        "Vater von Johann Heinrich Christoph („Heinrich”) Remmeke (*1799), belegt über den Taufeintrag 1799 und den Heiratseintrag 1824.",
+        "Erlebte 1806 die französische Besetzung des Herzogtums Braunschweig, ab 1807 die Eingliederung Brunkensens ins Königreich Westphalen und ab 1813 die Rückkehr zu Braunschweig.",
+        "Gestorben am 9. September 1825, morgens um 10 Uhr, im Alter von 61 Jahren und 16 Tagen; Todesursache laut Pfarrer „Entkräftung”.",
+        "Begraben am 11. September 1825, nachmittags um 16 Uhr, still.",
+        "Der Sterbeeintrag nennt ihn „Ernst August Remmecke” — abweichend von „Johann Ernst”, wie er in den Einträgen seines Sohnes geführt wird; nach Alter, Beruf, Wohnort und Sterbedatum von der Familie als dieselbe Person angenommen.",
+        "Sein Handwerk (Zimmermann) wurde von Sohn und Enkel fortgeführt."
+      ],
+      "historical_context": "Brunkensen lag von 1807 bis 1813 im napoleonischen Königreich Westphalen; in dieser Zeit ging die Gerichtsbarkeit der Gutsherren an ein staatliches Gericht in Greene über. Ab 1813 gehörte der Ort wieder zum Herzogtum Braunschweig.",
+      "interpretation": "Die Gleichsetzung von „Ernst August Remmecke” (Sterbeeintrag 1825) mit „Johann Ernst Remmeke” (Taufeintrag 1799 und Heiratseintrag 1824 des Sohnes) stützt sich auf die Übereinstimmung von Beruf, Wohnort, Alter und Sterbejahr — kein Dokument nennt beide Namen nebeneinander.",
       "open_questions": [
-        "Name unsicher gelesen (Taufeintrag 1799: „Johann Ernst” [?]).",
-        "Eigene Geburts- und Sterbedaten nicht erfasst."
+        "Genaues Geburtsdatum (24. August 1764) ist rechnerisch aus dem im Sterbeeintrag genannten Alter erschlossen, nicht durch einen eigenen Tauf-/Geburtseintrag belegt.",
+        "Die Gleichsetzung von „Ernst August Remmecke” (Sterbeeintrag) und „Johann Ernst Remmeke” (Vater in den Einträgen des Sohnes) ist eine Arbeitsannahme der Familie, kein abschließend gelöster Identitätsbeweis.",
+        "Archivsignatur (Bild-Nr.) des Sterbeeintrags 1825 ist noch nicht ermittelt.",
+        "Quelle der Orts-/Bevölkerungsstatistik (520 Einwohner/51 Feuerstellen um 1774, ca. 80 mehr bis 1799) ist nicht dokumentiert."
       ]
     },
     {
       "id": "johanne-louise-koch",
-      "name": "Hanne/Johanne Louise Koch [?]",
+      "name": "Hanne/Johanne Louise Koch",
       "birth_year": null,
       "death_year": null,
       "profession": null,
@@ -657,7 +851,7 @@
       "has_data": true,
       "image": null,
       "path": ["brunkensen"],
-      "prose": "Hanne/Johanne Louise Koch [?] war die Mutter von Johann Heinrich Christoph („Heinrich”) Remmeke, geboren 1799 in Brunkensen {{evt-brunkensen-1799-066-birth}}. Im Heiratseintrag ihres Sohnes 1824 wird sie bereits als verstorben geführt; ihre eigenen Lebensdaten sind nicht erfasst.",
+      "prose": "Hanne Louise Koch — im Heiratseintrag ihres Sohnes 1824 als Johanne Louise geführt — war die Mutter von Johann Heinrich Christoph („Heinrich”) Remmeke, geboren 1799 in Brunkensen {{evt-brunkensen-1799-066-birth}}. Der Taufeintrag vermerkt sie als zu Ostern 33 Jahre alt. Im Heiratseintrag ihres Sohnes 1824 wird sie bereits als verstorben geführt; ihre eigenen Lebensdaten sind nicht erfasst.",
       "events": [],
       "facts": [
         "Mutter von Johann Heinrich Christoph („Heinrich”) Remmeke (*1799), belegt über den Taufeintrag 1799 und den Heiratseintrag 1824.",
@@ -666,7 +860,7 @@
       "historical_context": null,
       "interpretation": null,
       "open_questions": [
-        "Name unsicher gelesen (Taufeintrag 1799: „Koch” [?]).",
+        "Vorname im Taufeintrag 1799 als „Hanne”, im Heiratseintrag des Sohnes 1824 als „Johanne” geführt — Namensvarianz, kein Lesefehler.",
         "Eigene Geburts- und Sterbedaten nicht erfasst."
       ]
     },

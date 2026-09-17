@@ -14,7 +14,11 @@ export function sourceById(sourcesData, sourceId) {
 export function primaryScreenshotForEvent(sourcesData, eventId) {
   const shots = screenshotsForEvent(sourcesData, eventId);
   if (!shots.length) return null;
-  return shots.find((s) => s.role === "Doppelseite") || shots[0];
+  // Eine gezielte "Detail"-Nahaufnahme wurde angelegt, weil die Doppelseite
+  // an dieser Stelle schlecht lesbar ist — dann ist sie die bessere Wahl fürs Inline-Bild.
+  return (
+    shots.find((s) => s.role === "Detail") || shots.find((s) => s.role === "Doppelseite") || shots[0]
+  );
 }
 
 export function renderEventSources(sourcesData, eventId, eventLabel) {
