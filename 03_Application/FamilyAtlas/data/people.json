@@ -136,12 +136,6 @@
       "note": "Historischer Kontext, nicht personenbezogen. Kein exaktes Jahr im Text genannt (\"gut hundert Jahre\" vor 1764) — 1648 als übliches Enddatum des Kriegs verwendet. Erwähnt auf der Seite von Johann Ernst Remmeke."
     },
     {
-      "year": 1806,
-      "place_id": "brunkensen",
-      "label": "Französische Truppen besetzen das Herzogtum Braunschweig",
-      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Ernst Remmeke."
-    },
-    {
       "year": 1807,
       "place_id": "brunkensen",
       "label": "Herzogtum Braunschweig aufgelöst; Brunkensen wird Teil des Königreichs Westphalen",
@@ -154,15 +148,9 @@
       "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Ernst Remmeke."
     },
     {
-      "year": 1815,
-      "place_id": "brunkensen",
-      "label": "Ausbruch des Tambora auf Sumbawa",
-      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Heinrich Remmeke (Ursache des Jahrs ohne Sommer 1816)."
-    },
-    {
       "year": 1816,
       "place_id": "brunkensen",
-      "label": "Jahr ohne Sommer: Missernten, steigende Getreidepreise",
+      "label": "Jahr ohne Sommer: Missernten, steigende Getreidepreise (Tambora-Ausbruch 1815)",
       "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Heinrich Remmeke."
     },
     {
@@ -172,34 +160,16 @@
       "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Heinrich Remmeke."
     },
     {
-      "year": 1840,
-      "place_id": "brunkensen",
-      "label": "Typhusepidemie in Brunkensen",
-      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
-    },
-    {
       "year": 1850,
       "place_id": "brunkensen",
       "label": "Choleraepidemie in Brunkensen",
-      "note": "Historischer Kontext, nicht personenbezogen. Jahr aus \"zehn Jahre später\" (nach 1840) abgeleitet. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
+      "note": "Historischer Kontext, nicht personenbezogen. Jahr aus \"zehn Jahre später\" (nach der Typhusepidemie 1840) abgeleitet. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
     },
     {
       "year": 1852,
       "place_id": "brunkensen",
       "label": "Eisenbahnstrecke Hannover–Alfeld eröffnet",
       "note": "Historischer Kontext, nicht personenbezogen. Jahr in Familientexten unterschiedlich angegeben (1852 auf der Seite von Johann Heinrich Friedrich Christian Remmeke, 1853 auf der Seite von Heinrich Remmeke) — noch nicht aufgelöst."
-    },
-    {
-      "year": 1854,
-      "place_id": "brunkensen",
-      "label": "Eisenbahnstrecke Hannover–Alfeld bis Göttingen verlängert",
-      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Johann Heinrich Friedrich Christian Remmeke."
-    },
-    {
-      "year": 1856,
-      "place_id": "georgsmarienhuette",
-      "label": "Gründung der Georgs-Marien-Bergwerks- und Hüttenverein AG",
-      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
     },
     {
       "year": 1860,
@@ -224,18 +194,6 @@
       "place_id": "georgsmarienhuette",
       "label": "Ausrufung des Deutschen Reiches in Versailles",
       "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
-    },
-    {
-      "year": 1898,
-      "place_id": "georgsmarienhuette",
-      "label": "Zeche Piesberg wegen Wasserproblemen aufgegeben",
-      "note": "Historischer Kontext, nicht personenbezogen. Erwähnt auf der Seite von Karl Friedrich Remmecke."
-    },
-    {
-      "year": 1901,
-      "place_id": "gehrden",
-      "label": "Straßenbahn-Überlandnetz Hannover ins Umland fertiggestellt",
-      "note": "Historischer Kontext, nicht personenbezogen. Bauzeit 1898–1901 laut Text; Jahr der Fertigstellung als Pin verwendet. Erwähnt auf der Seite von Karl Friedrich Remmecke."
     },
     {
       "year": 1938,
@@ -539,7 +497,7 @@
         { "path": "portraits/birgit-remmecke/BirgitRemmecke.png", "width": "70%" }
       ],
       "path": ["heide"],
-      "prose": "Dr. med. Birgit Remmecke wurde am 4. Oktober 1950 in Heide (Dithmarschen) geboren {{evt-heide-1950-birth}}. Sie ist Ärztin. Am 7. August 1980 heiratete sie Dr. Hans-Jochen Christoph Remmecke. Neun Tage später, am 16. August 1980, kam die gemeinsame Tochter Friederike zur Welt, später Dr. Friederike Thieringer; am 18. März 1982 folgte der Sohn Philip. Weitere Angaben zu ihrer Herkunft und ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "prose": "Dr. med. Birgit Remmecke wurde am 4. Oktober 1950 in Heide (Dithmarschen) geboren {{evt-heide-1950-birth}}. Sie ist Ärztin. Am 7. August 1980 heiratete sie Dr. Hans-Jochen Christoph Remmecke. Neun Tage später, am 16. August 1980, kam die gemeinsame Tochter Friederike zur Welt, später Dr. Friederike Thieringer; am 18. März 1982 folgte der Sohn Philip.",
       "events": [
         { "id": "evt-heide-1950-birth", "year": 1950, "date_display": "1950-10-04", "type": "birth", "place_id": "heide", "label": "Geburt" }
       ],
@@ -568,7 +526,7 @@
       "has_data": true,
       "image": null,
       "path": [],
-      "prose": "Dr. Friederike Thieringer wurde am 16. August 1980 geboren, neun Tage nach der Heirat ihrer Eltern Dr. Hans-Jochen Christoph Remmecke und Dr. med. Birgit Remmecke. Sie heißt inzwischen Thieringer; weitere Angaben zu ihrem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "prose": "Dr. Friederike Thieringer wurde am 16. August 1980 geboren, neun Tage nach der Heirat ihrer Eltern Dr. Hans-Jochen Christoph Remmecke und Dr. med. Birgit Remmecke. Sie heißt inzwischen Thieringer.",
       "events": [],
       "facts": [
         "Geboren am 16. August 1980.",
@@ -593,7 +551,7 @@
       "has_data": true,
       "image": null,
       "path": [],
-      "prose": "Philip Remmecke wurde am 18. März 1982 geboren, als Sohn von Dr. Hans-Jochen Christoph Remmecke und Dr. med. Birgit Remmecke. Weitere Angaben zu seinem Lebensweg sind in dieser Recherche noch nicht erfasst.",
+      "prose": "Philip Remmecke wurde am 18. März 1982 geboren, als Sohn von Dr. Hans-Jochen Christoph Remmecke und Dr. med. Birgit Remmecke.",
       "events": [],
       "facts": [
         "Geboren am 18. März 1982."

@@ -358,6 +358,10 @@ html, body {
   font-size: 0.85rem;
 }
 
+.timeline-entry:not(.is-regional) {
+  font-weight: 600;
+}
+
 .timeline-entry.is-regional {
   font-style: italic;
 }
