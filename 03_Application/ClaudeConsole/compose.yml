@@ -26,11 +26,17 @@ services:
       # access-token refresh rewrites this file, so a read-only mount would
       # break auth after the first token expiry.
       # ACCEPTED, DELIBERATE SECURITY TRADEOFF: this puts your personal
-      # Claude subscription credentials inside a container. Only this one
-      # file is mounted (not all of ~/.claude/) to minimize exposure, but
-      # the exposure itself is real and knowingly accepted for v1, not
-      # mitigated further. See 03_Application/ClaudeConsole/CLAUDE.md.
-      - /home/linse/.claude/.credentials.json:/root/.claude/.credentials.json
+      # Claude subscription credentials inside a container. This mounts a
+      # DEDICATED MIRROR DIRECTORY (~/.claudeconsole-creds/, containing only
+      # a synced copy of .credentials.json) as the container's whole
+      # /root/.claude — not the real ~/.claude/ (which also holds
+      # cross-project conversation history) and not a single-file mount
+      # (which goes stale across atomic re-login/token-refresh replaces; see
+      # 01_System/ClaudeConsole_CredsSync/README.md for why). The mirror is
+      # kept in sync by a host-side systemd user timer, installed via
+      # 01_System/ClaudeConsole_CredsSync/install.sh. Exposure is still
+      # scoped to just the OAuth token. See 03_Application/ClaudeConsole/CLAUDE.md.
+      - /home/linse/.claudeconsole-creds:/root/.claude
       # Git author identity only — read-only. Deliberately does NOT include
       # SSH keys or push credentials: pushing stays a manual, human step
       # outside ClaudeConsole for v1.

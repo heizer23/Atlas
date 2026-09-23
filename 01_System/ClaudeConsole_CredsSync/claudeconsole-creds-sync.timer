@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic trigger for the ClaudeConsole credentials sync
+
+[Timer]
+OnStartupSec=5s
+OnUnitActiveSec=20s
+Unit=claudeconsole-creds-sync.service
+
+[Install]
+WantedBy=timers.target

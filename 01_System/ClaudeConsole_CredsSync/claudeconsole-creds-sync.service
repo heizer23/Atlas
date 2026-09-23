@@ -1,0 +1,6 @@
+[Unit]
+Description=Sync Claude Code credentials into the ClaudeConsole mirror directory
+
+[Service]
+Type=oneshot
+ExecStart=%h/Prod/Atlas/01_System/ClaudeConsole_CredsSync/sync-claudeconsole-creds.sh
