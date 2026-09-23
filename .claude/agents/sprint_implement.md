@@ -314,19 +314,26 @@ If the sprint introduces a new shell-registered application or adds new API rout
 | `02_Platform/Atlas_Shell/nginx.conf` | `location /api/<prefix>` block proxying to the backend container |
 | `02_Platform/Atlas_Shell/vite.config.ts` | `'/api/<prefix>'` proxy entry (for local dev server only) |
 
-**Shell rebuild trigger — broader than wiring changes:** Rebuild and restart the shell container whenever any of the following are modified:
-- Any file under `03_Application/<Component>/src/` (frontend source)
-- Any of the four shell wiring files above
-- `02_Platform/Atlas_Shell/platform-ui/` (shared UI library)
+**Shell rebuild — mandatory, always executed:** If this sprint touches any frontend file (`src/` under the component) or any of the four shell wiring files, you MUST rebuild and restart the shell container before finishing. This is not optional and must not be skipped even when running as a subagent.
 
-The Shell Dockerfile COPYs `03_Application/<Component>/src/` at build time. Source changes are invisible until the image is rebuilt. This applies to every sprint that touches frontend files, not only sprints that introduce new apps.
+Run these commands in order from the repo root:
 
-Rebuild command (run from repo root, with Atlas env vars sourced):
+```bash
+# Step 1: install any new npm deps (required when package.json changed)
+cd /home/linse/Prod/Atlas/02_Platform/Atlas_Shell && npm install
+
+# Step 2: rebuild and restart the shell container
+cd /home/linse/Prod/Atlas && source 01_System/config.env && \
+  docker compose -f 02_Platform/Atlas_Shell/compose.yml build && \
+  docker compose -f 02_Platform/Atlas_Shell/compose.yml up -d
 ```
-docker compose -f 02_Platform/Atlas_Shell/compose.yml build && docker compose -f 02_Platform/Atlas_Shell/compose.yml up -d
+
+After restarting, verify the container started cleanly:
+```bash
+docker logs atlas-shell 2>&1 | tail -5
 ```
 
-After restarting, verify the app renders correctly at its shell route before marking implementation complete.
+Do not mark implementation complete until this has run successfully. The shell serves pre-built static files from nginx — source changes are invisible in the live UI until the image is rebuilt.
 
 ## `apiFetch` URL convention
 
@@ -373,7 +380,7 @@ Verify:
 9. UI is functional but intentionally simple
 10. If `10_test_spec.md` is present: test functions exist for every scenario and are runnable
 11. If sprint touches shell wiring: `test_shell_proxy.py` exists; `main.tsx`, `Dockerfile`, `nginx.conf` all updated
-12. If sprint modifies any `src/` frontend file: shell container has been rebuilt and restarted; app renders at its shell route
+12. If sprint modifies any `src/` frontend file or shell wiring file: shell container has been rebuilt and restarted (`npm install` + `docker compose build` + `up -d`) and `docker logs atlas-shell` shows no error. **This must be executed, not just checked.**
 
 ---
 

@@ -661,3 +661,54 @@ severity: major
 recurrence_hint: "First observed by this agent; will recur whenever the wall clock is within ~2 days of the 2026-08-28 hardcoded timestamp — a TaskTracker/EssayCards fixture-vs-hardcoded-date smell"
 linked_immediate_artifact: 03_Application/EssayCards/tests/test_examinations.py
 ---
+
+---
+entry_id: EVD-2026-09-21-001
+date: 2026-09-21
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint09_Nuggets
+pattern_name: client_derived_titlemap_incomplete_for_non_local_reference_source
+short_description: The design derives a Markdown-reference title map client-side from a data source (per-section nugget associations) that does not cover all validly-accepted reference sites (main_spine_markdown), so a subset of valid references render as broken.
+evidence: "10_architecture.json contracts.invariants: 'The essay's main_spine_markdown reuses the UNION of every section's nuggets field for its own titleMap (main_spine_markdown may reference a nugget introduced in any section)' — but essaycards.section_nuggets is resynced only from each section's own body_markdown (internal_flow step 4), never from main_spine_markdown, while ingest-time validation (internal_flow step 2) accepts references in main_spine_markdown independently of section co-reference."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: critical
+recurrence_hint: "First observed — general pattern: when a reference-resolution mechanism validates against a broader input set than the association/lookup mechanism populates from, references valid in the gap silently render as unresolved."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint09_Nuggets/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-09-21-002
+date: 2026-09-21
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint09_Nuggets
+pattern_name: backend_tristate_field_without_matching_ui_round_trip
+short_description: POST /flashcards/upsert's nugget_id omit/null/value semantics are fully specified and implemented on the backend (R-CON-AL-04 compliant), but no UI affordance this sprint sends the null (clear) case or lets a user set nugget_id on a pre-existing card, and this gap was not declared as an explicit non-goal.
+evidence: "10_scaffolding.json ui_implementer deferrals list every new UI addition for this sprint; none adds a nugget_id field/control to QuestionOverviewView's existing card-edit form. The only client caller that sets nugget_id is the one-way 'Generate flashcards from a nugget' create flow (always a value, never omitted/null)."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: R-CON-AL-04's backend tri-state discipline is well internalized by this codebase (also seen correctly done in Sprint07/08), but R-CON-AL-05's UI-half of the round trip is not always checked against the same rigor."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint09_Nuggets/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-09-21-003
+date: 2026-09-21
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint09_Nuggets
+pattern_name: parallel_regex_character_class_drift
+short_description: Two regexes governing the same identifier (author-time validation vs. reference-time extraction) were specified with different character classes, making a permitted identifier form permanently unreferenceable.
+evidence: "10_architecture.json contracts.invariants item 4: 'the extraction regex's key character class is lowercase-only ([a-z0-9_-]+), while SLUG_LIKE_RE ... permits mixed case. A nugget_key containing an uppercase letter can therefore never be resolved by a [[nugget:key]] reference in any section/main-spine Markdown.' Self-surfaced in risks per R-OPS-BP-01 but left unfixed as a documented limitation rather than corrected."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: when the same identifier is validated by one regex and matched/extracted by a second regex elsewhere in the same feature, character-class parity between them should be checked explicitly rather than assumed."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint09_Nuggets/11_design_review.md
+---

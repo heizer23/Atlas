@@ -351,6 +351,35 @@ Contains INSERT statements that define the test world. Loaded by `conftest.py` b
 
 ---
 
+## 11. Fast Path for Small, Low-Risk Sprints
+
+The full design → review → correction chain (§§1–5) exists to catch architectural mistakes before code is written. That cost is not always worth paying — several sprints have already bypassed it ad hoc at the human's request (`Sprint05_ReviewQueueOrdering`, `Sprint08_QuestionLevelsAndStructure` in EssayCards; `ClaudeConsole/Sprint01_Core`, logged as a detected conflict in `00_Blueprint/Quality/agent_conflic_evidence.md` precisely because it left no in-sprint-folder record of what was planned). This section makes that an explicit, bounded path instead of a recurring undocumented deviation.
+
+### Trigger
+
+The fast path is only available when the human explicitly requests it for a specific sprint. No agent — including `sprint_orchestrator` — may select it autonomously for a sprint it is processing on its own. This is a human judgment call about a specific piece of work, not a default the process degrades to.
+
+### Eligibility
+
+Before honoring the request, the agent must check the draft against these criteria. If any is exceeded, follow R-OPS-BP-01: name the specific criterion, state the consequence, and ask the human to confirm before proceeding — do not silently grant or silently refuse.
+
+- No new database table (additive columns/constraints on existing tables only, or no schema change at all)
+- Estimated `files_changed` ≤ 5
+- No new or changed shared contract surface (`platform_contracts`, or any Dataset shape consumed by another component)
+- Single component, single layer — no coordinated multi-component change
+
+### Procedure
+
+Replaces the `DRAFT_READY → DESIGN_CREATED → DESIGN_REVIEWED_* → DESIGN_APPROVED` chain in §3 with a direct `DRAFT_READY → IMPLEMENTATION_IN_PROGRESS` transition. Nothing else in this document changes: `10_test_spec.md` remains required under the same condition as §1, and §6 (`/sprint-close` as the only human gate) is unaffected.
+
+1. `00_draft.md` is still required — unchanged, still the only mandatory starting artifact.
+2. Design happens as a Claude Code plan-mode conversation with the human, not via `sprint_design_application`/`sprint_design_platform`, and is not independently reviewed by `sprint_design_reviewer`.
+3. The resulting plan must be saved into the sprint folder as `05_fast_path_plan.md` before implementation starts — this is what the ClaudeConsole deviation got wrong (the plan lived only in `~/.claude/plans/`, outside the sprint folder, leaving no artifact a later agent or audit could inspect per R-CON-BP-01).
+4. Implementation proceeds from `05_fast_path_plan.md`, by `sprint_implement` or directly in the interactive session.
+5. `99_sprint_log.md`'s JSON state block records `"fast_path": true`; the transition log entry for `DRAFT_READY → IMPLEMENTATION_IN_PROGRESS` names which eligibility criteria were checked.
+
+---
+
 ## R-PRO-BP-02 — Review and Audit Artifact Structure
 
 STATUS: ACTIVE

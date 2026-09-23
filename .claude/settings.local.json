@@ -246,7 +246,16 @@
       "Bash(adb version:*)",
       "Bash(adb pair:*)",
       "Bash(adb devices:*)",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(npm ci:*)",
+      "Bash(npx vite:*)",
+      "Bash(wait)",
+      "Skill(schedule)",
+      "WebSearch",
+      "Read(//mnt/data/essaycards/**)",
+      "Bash(sudo -n true)",
+      "Bash(node -e ' *)",
+      "Bash(xargs -I{} echo {})"
     ]
   },
   "hooks": {

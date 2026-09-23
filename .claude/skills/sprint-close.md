@@ -17,7 +17,7 @@ Read `<sprint_folder>/99_sprint_log.md`. Parse the JSON state block to extract:
 - `layer` (`02_Platform` or `03_Application`)
 - `current_state`
 
-**Abort if `current_state` is not `IMPLEMENTATION_IN_PROGRESS`.** State the current state and what must happen first.
+**Abort if `current_state` is not `IMPLEMENTATION_IN_PROGRESS` or `TESTS_PASSING`.** State the current state and what must happen first. Both states are valid entry points for sprint-close: `TESTS_PASSING` when the test stage ran; `IMPLEMENTATION_IN_PROGRESS` when `10_test_spec.md` was absent and the test stage was skipped.
 
 Derive `component_root` from `layer` and `component_name`:
 - `02_Platform/<component_name>`

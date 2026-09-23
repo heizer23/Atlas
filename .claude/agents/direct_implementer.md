@@ -257,6 +257,20 @@ Your job is to leave the code in a state where a reviewer can understand the cha
 
 ---
 
+## Frontend Deployment
+
+If you modified any `.tsx`, `.ts`, or `.css` file under `02_Platform/Atlas_Shell/` or `03_Application/*/src/`, you **must** rebuild and deploy to the live shell before considering the task complete:
+
+```bash
+cd /home/linse/Prod/Atlas/02_Platform/Atlas_Shell
+npx vite build
+docker cp dist/. atlas-shell:/usr/share/nginx/html/
+```
+
+Do not skip this step. The shell serves pre-built static files from nginx; source changes are invisible in the live UI until this runs.
+
+---
+
 ## Memory
 
 **Update your agent memory** as you discover implementation patterns, integration points, recurring code structures, and architectural decisions in this codebase. This builds up institutional knowledge across sprints.

@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-08-28 13:12 UTC
+> Last updated: 2026-09-21 16:38 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -236,9 +236,23 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 **Caller notes:**
 - No 00_architecture yet — stub only.
 
+### ClaudeConsole ⚠️
+
+**Summary:** No 00_architecture yet.
+
+| | |
+|---|---|
+| Container | `atlas-claudeconsole` |
+| Host port | `localhost:8025` |
+| Network | atlas-net |
+| URL prefix | — |
+
+**Caller notes:**
+- Stub — no architecture.json available.
+
 ### EssayCards
 
-**Summary:** Long-form essay reader paired with spaced-repetition flashcards: essays are ingested via a markdown CLI or a JSON HTTP endpoint — both sharing one upsert core — into ordered sections, each section owns flashcards that link back to the passage that taught them, and a due-queue review loop schedules re-review using a deterministic interval algorithm.
+**Summary:** Introduces Nuggets — standalone, independently-learnable concepts reusable across sections/essays without duplicating content, flashcards, or review state — as a new layer between essay sections and flashcards, restructures essays around a compact main spine, and wires explicit [[nugget:key]] Markdown references, navigation, and a matching ChatGPT round-trip through reading, authoring, flashcard generation, exploration, and oral-examination freshness.
 
 | | |
 |---|---|
@@ -249,12 +263,38 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 **Endpoints:**
 ```
-GET /api/essaycards/essays — list all ingested essays; no params; returns Dataset ordered by created_at asc
-GET /api/essaycards/essays/{essay_id} — single essay with its ordered sections embedded; returns Dataset (single row); 404 ApiError if not found
-GET /api/essaycards/flashcards/due — due flashcards, optionally scoped to an essay or a section within an essay; returns Dataset ordered by next_due_at asc
-POST /api/essaycards/flashcards/{flashcard_id}/review — grade a card and persist its next scheduling state; mutation endpoint, returns typed record on success
-POST /api/essaycards/essays/ingest — accepts one JSON payload (title, slug, sections[].{heading, anchor_slug, body_markdown, cards[].{id,q,a}}); creates the essay if slug is new, upserts sections/cards onto an existing essay if slug already exists; calls the same shared upsert core (backend.ingest.upsert_document) as the markdown CLI path; mutation endpoint, returns a typed record on success (200), ApiError on any validation failure (400)
+GET /api/essaycards/nuggets — Dataset list of nuggets (id, nugget_key, title, created_at, updated_at; no body_markdown)
+GET /api/essaycards/nuggets/{id} — Dataset single-row nugget detail including body_markdown; 404 if not found
+POST /api/essaycards/nuggets/upsert — upsert-by-nugget_key mutation; returns a typed record
+GET /api/essaycards/nuggets/{id}/flashcards — Dataset flat list of flashcards currently pointing at this nugget; 404 if nugget not found
+GET /api/essaycards/nuggets/{id}/sections — Dataset list of sections (with essay context) currently referencing this nugget; 404 if nugget not found
+GET /api/essaycards/nuggets/authoring-package — bespoke JSON (Dataset-exempt), context for drafting/revising one nugget via ChatGPT
+GET /api/essaycards/nuggets/{id}/generate-flashcards-package — bespoke JSON (Dataset-exempt), context for generating new flashcards from one nugget via ChatGPT
+POST /api/essaycards/essays/ingest — gains optional top-level main_spine_markdown (JSON path only) and unified [[nugget:key]] reference validation (shared with the markdown CLI path via upsert_document)
+GET /api/essaycards/essays/{essay_id} — gains main_spine_markdown and main_spine_nuggets: [{nugget_key, title}] (nuggets referenced anywhere in main_spine_markdown, resolved live, independent of section co-reference — Minimal Change Set item 2); each embedded section gains nuggets: [{nugget_key, title}]
+GET /api/essaycards/essays/{essay_id}/questions — each row gains section_nuggets: [{nugget_key, title}] and nugget_id (nullable, the card's current nugget assignment — Minimal Change Set item 3, feeds QuestionOverviewView's edit-form nugget control)
+GET /api/essaycards/essays/{essay_id}/export — gains top-level main_spine_markdown and main_spine_nuggets: [{nugget_key, title}]; each section gains nuggets: [{nugget_key, title}]
+GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export — gains top-level main_spine_markdown, main_spine_nuggets: [{nugget_key, title}], and focus_section_nuggets: [{nugget_key, title, body_markdown}] (the focus section's currently required nuggets, full body as ChatGPT context); each section in sections[] gains nuggets: [{nugget_key, title}]
+POST /api/essaycards/flashcards/upsert — card gains optional nugget_id (omit/null/value tri-state per R-CON-AL-04)
+GET /api/essaycards/flashcards/due — rows gain nugget_id (nullable)
+GET /api/essaycards/flashcards/{flashcard_id}/export — gains nugget_id (nullable) alongside card
+GET /api/essaycards/flashcards/{flashcard_id}/exploration-package — context becomes the nugget's body_markdown instead of the section's when the card's nugget_id is set; unchanged (section_body_markdown) for a legacy card
+POST /api/essaycards/examinations/import and GET /api/essaycards/essays/{essay_id}/examination-package — gain per-section nugget_versions / nugget_versions_at echo-through storage (no freshness UI/endpoint surfacing this sprint — see non_goals)
 ```
+
+### FamilyAtlas ⚠️
+
+**Summary:** No 00_architecture yet.
+
+| | |
+|---|---|
+| Container | `atlas-familyatlas` |
+| Host port | — |
+| Network | atlas-net |
+| URL prefix | — |
+
+**Caller notes:**
+- Stub — no architecture.json available.
 
 ### FoodTracker ⚠️
 

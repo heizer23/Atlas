@@ -46,18 +46,19 @@ Extract `scheduled_date` as `YYYY-MM-DD` (the date portion of `start_at`).
 
 ---
 
-## Step 4 — Create calendar event
+## Step 4 — Create calendar event in Atlas Calendar
 
 ```bash
-curl -s -X POST http://localhost:8021/api/calendar/events \
+curl -s -X POST http://localhost:8023/api/cal/events \
   -H "Content-Type: application/json" \
   -d '{
-    "atlas_event_id": "<task_id>",
-    "title": "[Atlas] <title>",
+    "title": "<title>",
     "start_at": "<start_iso>",
     "end_at": "<end_iso>",
-    "description": "Atlas task: https://workout.linspad.net/tasks/<task_id>\n\n<description>",
-    "all_day": false
+    "event_type": "task_block",
+    "source_object_type": "task",
+    "source_object_id": "<task_id>",
+    "notes": null
   }'
 ```
 
