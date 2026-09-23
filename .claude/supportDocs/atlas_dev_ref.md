@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-09-21 16:38 UTC
+> Last updated: 2026-09-23 18:15 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -252,7 +252,7 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 ### EssayCards
 
-**Summary:** Introduces Nuggets — standalone, independently-learnable concepts reusable across sections/essays without duplicating content, flashcards, or review state — as a new layer between essay sections and flashcards, restructures essays around a compact main spine, and wires explicit [[nugget:key]] Markdown references, navigation, and a matching ChatGPT round-trip through reading, authoring, flashcard generation, exploration, and oral-examination freshness.
+**Summary:** Introduces FSRS as a second scheduling algorithm, persistently A/B-assigned 50/50 against the existing Classic scheduler per flashcard, with both algorithms writing next_due_at/review_interval through the existing single interface so the card-selection mechanism is completely untouched, plus a scheduler badge and a first-version experiment comparison dashboard.
 
 | | |
 |---|---|
@@ -263,23 +263,10 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 **Endpoints:**
 ```
-GET /api/essaycards/nuggets — Dataset list of nuggets (id, nugget_key, title, created_at, updated_at; no body_markdown)
-GET /api/essaycards/nuggets/{id} — Dataset single-row nugget detail including body_markdown; 404 if not found
-POST /api/essaycards/nuggets/upsert — upsert-by-nugget_key mutation; returns a typed record
-GET /api/essaycards/nuggets/{id}/flashcards — Dataset flat list of flashcards currently pointing at this nugget; 404 if nugget not found
-GET /api/essaycards/nuggets/{id}/sections — Dataset list of sections (with essay context) currently referencing this nugget; 404 if nugget not found
-GET /api/essaycards/nuggets/authoring-package — bespoke JSON (Dataset-exempt), context for drafting/revising one nugget via ChatGPT
-GET /api/essaycards/nuggets/{id}/generate-flashcards-package — bespoke JSON (Dataset-exempt), context for generating new flashcards from one nugget via ChatGPT
-POST /api/essaycards/essays/ingest — gains optional top-level main_spine_markdown (JSON path only) and unified [[nugget:key]] reference validation (shared with the markdown CLI path via upsert_document)
-GET /api/essaycards/essays/{essay_id} — gains main_spine_markdown and main_spine_nuggets: [{nugget_key, title}] (nuggets referenced anywhere in main_spine_markdown, resolved live, independent of section co-reference — Minimal Change Set item 2); each embedded section gains nuggets: [{nugget_key, title}]
-GET /api/essaycards/essays/{essay_id}/questions — each row gains section_nuggets: [{nugget_key, title}] and nugget_id (nullable, the card's current nugget assignment — Minimal Change Set item 3, feeds QuestionOverviewView's edit-form nugget control)
-GET /api/essaycards/essays/{essay_id}/export — gains top-level main_spine_markdown and main_spine_nuggets: [{nugget_key, title}]; each section gains nuggets: [{nugget_key, title}]
-GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export — gains top-level main_spine_markdown, main_spine_nuggets: [{nugget_key, title}], and focus_section_nuggets: [{nugget_key, title, body_markdown}] (the focus section's currently required nuggets, full body as ChatGPT context); each section in sections[] gains nuggets: [{nugget_key, title}]
-POST /api/essaycards/flashcards/upsert — card gains optional nugget_id (omit/null/value tri-state per R-CON-AL-04)
-GET /api/essaycards/flashcards/due — rows gain nugget_id (nullable)
-GET /api/essaycards/flashcards/{flashcard_id}/export — gains nugget_id (nullable) alongside card
-GET /api/essaycards/flashcards/{flashcard_id}/exploration-package — context becomes the nugget's body_markdown instead of the section's when the card's nugget_id is set; unchanged (section_body_markdown) for a legacy card
-POST /api/essaycards/examinations/import and GET /api/essaycards/essays/{essay_id}/examination-package — gain per-section nugget_versions / nugget_versions_at echo-through storage (no freshness UI/endpoint surfacing this sprint — see non_goals)
+GET /api/essaycards/flashcards/due — rows gain scheduler ('classic' | 'fsrs'), feeding the review screen's badge
+POST /api/essaycards/flashcards/{flashcard_id}/review — unchanged request/response contract; internally dispatches to ClassicScheduler or FSRSScheduler per the card's persisted scheduler and additionally persists fsrs_card_state (fsrs cards only) and one review_events row (every review) in the same transaction
+GET /api/essaycards/experiment/summary — new Dataset endpoint, always exactly two rows ('classic', 'fsrs'), the experiment comparison dashboard's data source
+New-card creation (backend/ingest.py essay/section ingest, POST /flashcards/upsert, POST /flashcards/exploration/import's create_card action) — each of the three existing was_inserted-gated INSERT sites additionally performs a one-time, permanent scheduler assignment; no change to any of their request/response shapes
 ```
 
 ### FamilyAtlas ⚠️

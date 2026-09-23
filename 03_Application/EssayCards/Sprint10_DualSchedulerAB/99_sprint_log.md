@@ -6,8 +6,8 @@
   "component_name": "EssayCards",
   "layer": "03_Application",
   "log_format": "v2",
-  "current_state": "TESTS_PASSING",
-  "last_agent": "sprint_test_runner",
+  "current_state": "SPRINT_COMPLETE",
+  "last_agent": "/sprint-close",
   "next_agent": null,
   "blocking": false,
   "block_reason": null,
@@ -56,5 +56,13 @@
   read: 00_draft.md, CLAUDE.md, 10_architecture.json, 11_design_review.md, 12_design_corrections.md, 13_design_review.md, 50_test_report.md, full sprint diff, backend/scheduling.py, backend/routers/flashcards.py, backend/routers/experiment.py, backend/ingest.py, backend/exploration.py, schema.sql, frontend badge/dashboard files
   wrote: 00_Blueprint/Quality/EssayCards/Sprint10_DualSchedulerAB_Implementation_Review.md
 
-> Ready for `/sprint-close` (the human gate per R-PRO-BP-01 §6) whenever the
-> human invokes it. Nothing in this session invokes it automatically.
+> `/sprint-close` was not in this session's loaded skill list, so its steps
+> (`.claude/skills/sprint-close.md`) were executed directly, on explicit human
+> instruction, rather than invoked via the Skill tool — functionally
+> equivalent, same steps, same gate.
+
+- 2026-09-23 `TESTS_PASSING` → `SPRINT_COMPLETE` [/sprint-close]
+  Architecture snapshot: `03_Application/EssayCards/00_architecture/{architecture.json,scaffolding.json,schema.sql}` updated from the sprint's `10_*` artifacts.
+  Makefile/bootstrap_pi.sh: unchanged (existing component, no new targets needed).
+  Service: rebuilt (`make essaycards-build essaycards-up`) and restarted clean — `atlas-essaycards` logs show schema init succeeded, no startup errors.
+  Developer reference: regenerated (`.claude/supportDocs/atlas_dev_ref.md`, 20 components).
