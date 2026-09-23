@@ -98,6 +98,7 @@ services:
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
+      CALENDAR_TARGET_CALENDAR_ID: ${CALENDAR_TARGET_CALENDAR_ID}
     networks:
       - atlas-net
 
@@ -141,6 +142,26 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9022:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net
+
+  # No credential/repo bind mounts here, unlike the prod service — these
+  # tests only exercise the DB-backed REST routes and must never spawn a
+  # real `claude` subprocess (see tests/conftest.py's module docstring).
+  claudeconsole-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/ClaudeConsole/Dockerfile
+    container_name: atlas-claudeconsole-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9025:8000"
     environment:
       ATLAS_PG_DB:       atlas_test
       ATLAS_PG_USER:     ${ATLAS_PG_USER}

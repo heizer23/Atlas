@@ -293,6 +293,37 @@ storage-schema:
 # endregion
 
 
+# region --- Application: ClaudeConsole
+CONSOLE_DIR=../03_Application/ClaudeConsole
+
+CONSOLE_COMPOSE=docker compose \
+	-f $(CONSOLE_DIR)/compose.yml \
+	$(ENV_FILES)
+
+console-build:
+	$(CONSOLE_COMPOSE) build
+
+console-up:
+	$(CONSOLE_COMPOSE) up -d
+
+console-down:
+	$(CONSOLE_COMPOSE) down
+
+console-logs:
+	$(CONSOLE_COMPOSE) logs -f
+
+console-reboot:
+	$(CONSOLE_COMPOSE) down
+	$(CONSOLE_COMPOSE) up -d
+
+console-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(CONSOLE_DIR)/schema.sql
+
+# endregion
+
+
 # region --- Application: WorkoutTracker
 APP_DIR=../03_Application/WorkoutTracker
 
@@ -692,6 +723,7 @@ net-connect:
 	@docker network connect atlas-net atlas-storagetracker    2>/dev/null || true
 	@docker network connect atlas-net atlas-calendar          2>/dev/null || true
 	@docker network connect atlas-net atlas-essaycards        2>/dev/null || true
+	@docker network connect atlas-net atlas-claudeconsole     2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -724,6 +756,8 @@ up:
 	$(MAKE) cal-app-build    cal-app-up
 	$(MAKE) essaycards-schema
 	$(MAKE) essaycards-build essaycards-up
+	$(MAKE) console-schema
+	$(MAKE) console-build    console-up
 	$(MAKE) cloudflared-up
 	$(MAKE) net-connect
 	$(MAKE) shell-build shell-up
@@ -733,6 +767,7 @@ up:
 down:
 	-$(MAKE) shell-down
 	-$(MAKE) cloudflared-down
+	-$(MAKE) console-down
 	-$(MAKE) essaycards-down
 	-$(MAKE) numeric-down
 	-$(MAKE) linking-down
