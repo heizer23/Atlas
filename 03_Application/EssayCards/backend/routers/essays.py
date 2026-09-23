@@ -26,22 +26,28 @@ allows a re-ingested card to move to a different section — see
 Sprint02_JsonIngestion/10_architecture.json §risks.
 """
 
-import re
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.database import get_db
-from backend.ingest import DEFAULT_ESSAY_STATUS, VALID_ESSAY_STATUSES, upsert_document
+from backend.ingest import (
+    DEFAULT_ESSAY_STATUS,
+    SLUG_LIKE_RE,
+    VALID_ESSAY_STATUSES,
+    IngestionError,
+    extract_nugget_keys,
+    upsert_document,
+)
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
 
 router = APIRouter(prefix="/essays", tags=["essays"])
 
-_SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
-
-# Detail endpoint (GET /essays/{id}) — the base essay columns.
+# Detail endpoint (GET /essays/{id}) — the base essay columns. main_spine_markdown
+# and main_spine_nuggets are embedded on the row like `sections`, not added as
+# ColumnSchema entries (same precedent).
 ESSAY_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="title",      label="Title",    type="string", sortable=True,  filterable=True),
     ColumnSchema(key="slug",       label="Slug",     type="string", sortable=False, filterable=False),
@@ -74,6 +80,12 @@ QUESTION_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="section_anchor_slug", label="Anchor",       type="string", sortable=False, filterable=False),
     ColumnSchema(key="section_heading",     label="Section title", type="string", sortable=False, filterable=False),
     ColumnSchema(key="section_order_index", label="Section order", type="number", sortable=True,  filterable=False),
+    # [NEW Sprint09_Nuggets] The card's current nugget assignment (nullable) —
+    # feeds QuestionOverviewView's edit-form nugget <select> (11_design_review.md
+    # Hard Rule Violation 2 / Minimal Change Set item 3). section_nuggets
+    # ({nugget_key, title} pairs for the row's own section) stays embedded on
+    # the row like the existing section_* fields, not a ColumnSchema entry.
+    ColumnSchema(key="nugget_id",           label="Nugget",        type="string", sortable=False, filterable=True),
 ]
 
 
@@ -98,6 +110,60 @@ def _section_row_to_dict(row: Any) -> dict[str, Any]:
 
 def _dataset_response(dataset: Dataset) -> JSONResponse:
     return JSONResponse(content=dataset.model_dump(by_alias=True, mode="json"))
+
+
+def _nuggets_by_section(cur: Any, section_ids: list[str]) -> dict[str, list[dict[str, str]]]:
+    """
+    Given a list of section ids, returns dict[section_id, list[{nugget_key,
+    title}]] — every nugget currently referenced by each section, ordered by
+    nugget title asc. Reused by get_essay, export_essay, export_section, and
+    list_essay_questions so the section_nuggets join SQL exists in exactly
+    one place (Sprint09_Nuggets/10_architecture.json internal_flow step 8).
+    """
+    if not section_ids:
+        return {}
+
+    cur.execute(
+        """
+        select sn.section_id, n.nugget_key, n.title
+        from essaycards.section_nuggets sn
+        join essaycards.nuggets n on n.id = sn.nugget_id
+        where sn.section_id = any(%s::uuid[])
+        order by n.title asc
+        """,
+        (section_ids,),
+    )
+    result: dict[str, list[dict[str, str]]] = {}
+    for row in cur.fetchall():
+        result.setdefault(str(row["section_id"]), []).append(
+            {"nugget_key": row["nugget_key"], "title": row["title"]}
+        )
+    return result
+
+
+def _main_spine_nuggets(cur: Any, main_spine_markdown: str) -> list[dict[str, str]]:
+    """
+    Resolves every [[nugget:key]] reference in `main_spine_markdown` against
+    essaycards.nuggets (same join shape as _nuggets_by_section, ORDER BY
+    title asc) — independent of whether those keys are also referenced by any
+    section. Reused by get_essay, export_essay, and export_section to attach
+    a top-level main_spine_nuggets field alongside main_spine_markdown.
+    Closes the gap where a nugget referenced only in main_spine_markdown had
+    no title-resolution path (11_design_review.md Hard Rule Violation 1 /
+    Minimal Change Set item 2). Unresolved keys (should not occur through the
+    app — ingestion enforces resolution — but possible via direct SQL) are
+    silently omitted here; rendering-time fallback for that case lives in the
+    frontend's remarkNuggetRefs (nugget-missing:<key>).
+    """
+    keys = extract_nugget_keys(main_spine_markdown)
+    if not keys:
+        return []
+
+    cur.execute(
+        "select nugget_key, title from essaycards.nuggets where nugget_key = any(%s) order by title asc",
+        (list(keys),),
+    )
+    return [{"nugget_key": row["nugget_key"], "title": row["title"]} for row in cur.fetchall()]
 
 
 _OVERVIEW_QUERY = """
@@ -200,7 +266,8 @@ def get_essay(essay_id: str) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, title, slug, category, sort_index, status, created_at, updated_at "
+                "select id, title, slug, category, sort_index, status, "
+                "main_spine_markdown, created_at, updated_at "
                 "from essaycards.essays where id = %s",
                 (essay_id,),
             )
@@ -208,6 +275,7 @@ def get_essay(essay_id: str) -> JSONResponse:
             if not essay_row:
                 return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
             row = _row_to_dict(essay_row)
+            row["main_spine_nuggets"] = _main_spine_nuggets(cur, essay_row["main_spine_markdown"])
 
             cur.execute(
                 """
@@ -218,7 +286,14 @@ def get_essay(essay_id: str) -> JSONResponse:
                 """,
                 (essay_id,),
             )
-            row["sections"] = [_section_row_to_dict(r) for r in cur.fetchall()]
+            section_rows = cur.fetchall()
+            nuggets_by_section = _nuggets_by_section(cur, [str(r["id"]) for r in section_rows])
+            sections = []
+            for r in section_rows:
+                d = _section_row_to_dict(r)
+                d["nuggets"] = nuggets_by_section.get(d["id"], [])
+                sections.append(d)
+            row["sections"] = sections
 
     dataset = Dataset(
         meta=DatasetMeta(
@@ -260,7 +335,7 @@ def list_essay_questions(essay_id: str) -> JSONResponse:
 
             cur.execute(
                 """
-                select f.id, f.card_key, f.question, f.answer, f.level,
+                select f.id, f.card_key, f.question, f.answer, f.level, f.nugget_id,
                        f.section_id, s.anchor_slug as section_anchor_slug,
                        s.heading as section_heading, s.order_index as section_order_index
                 from essaycards.flashcards f
@@ -270,11 +345,17 @@ def list_essay_questions(essay_id: str) -> JSONResponse:
                 """,
                 (essay_id,),
             )
+            question_rows = cur.fetchall()
+            nuggets_by_section = _nuggets_by_section(
+                cur, list({str(r["section_id"]) for r in question_rows})
+            )
             rows = []
-            for r in cur.fetchall():
+            for r in question_rows:
                 d = dict(r)
                 d["id"] = str(d["id"])
                 d["section_id"] = str(d["section_id"])
+                d["nugget_id"] = str(d["nugget_id"]) if d.get("nugget_id") else None
+                d["section_nuggets"] = nuggets_by_section.get(d["section_id"], [])
                 rows.append(d)
 
     dataset = Dataset(
@@ -321,6 +402,8 @@ def _ordered_sections_with_cards(cur: Any, essay_id: str) -> list[dict[str, Any]
             {"id": r["card_key"], "q": r["question"], "a": r["answer"]}
         )
 
+    nuggets_by_section = _nuggets_by_section(cur, [str(r["id"]) for r in section_rows])
+
     return [
         {
             "section_id": str(r["id"]),
@@ -328,6 +411,7 @@ def _ordered_sections_with_cards(cur: Any, essay_id: str) -> list[dict[str, Any]
             "anchor_slug": r["anchor_slug"],
             "body_markdown": r["body_markdown"],
             "cards": cards_by_section.get(str(r["id"]), []),
+            "nuggets": nuggets_by_section.get(str(r["id"]), []),
         }
         for r in section_rows
     ]
@@ -362,7 +446,7 @@ def export_essay(essay_id: str) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select title, slug, category, sort_index, status "
+                "select title, slug, category, sort_index, status, main_spine_markdown "
                 "from essaycards.essays where id = %s",
                 (essay_id,),
             )
@@ -371,6 +455,7 @@ def export_essay(essay_id: str) -> JSONResponse:
                 return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
 
             sections = _ordered_sections_with_cards(cur, essay_id)
+            main_spine_nuggets = _main_spine_nuggets(cur, essay_row["main_spine_markdown"])
 
     package = {
         "export_version": 1,
@@ -379,6 +464,8 @@ def export_essay(essay_id: str) -> JSONResponse:
         "category": essay_row["category"],
         "sort_index": essay_row["sort_index"],
         "status": essay_row["status"],
+        "main_spine_markdown": essay_row["main_spine_markdown"],
+        "main_spine_nuggets": main_spine_nuggets,
         "sections": sections,
     }
     return JSONResponse(content=package)
@@ -429,7 +516,7 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select title, slug, category, sort_index, status "
+                "select title, slug, category, sort_index, status, main_spine_markdown "
                 "from essaycards.essays where id = %s",
                 (essay_id,),
             )
@@ -443,6 +530,27 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
                     "NOT_FOUND", f"Section {section_id} not found in essay {essay_id}", status=404
                 )
 
+            main_spine_nuggets = _main_spine_nuggets(cur, essay_row["main_spine_markdown"])
+
+            # focus_section_nuggets: FULL {nugget_key, title, body_markdown} for
+            # every nugget currently referenced by the focus section only —
+            # richer than the light {nugget_key, title} pairs every section in
+            # `sections` also carries via _ordered_sections_with_cards.
+            cur.execute(
+                """
+                select n.nugget_key, n.title, n.body_markdown
+                from essaycards.section_nuggets sn
+                join essaycards.nuggets n on n.id = sn.nugget_id
+                where sn.section_id = %s
+                order by n.title asc
+                """,
+                (section_id,),
+            )
+            focus_section_nuggets = [
+                {"nugget_key": r["nugget_key"], "title": r["title"], "body_markdown": r["body_markdown"]}
+                for r in cur.fetchall()
+            ]
+
     package = {
         "export_version": 2,
         "focus_section_id": section_id,
@@ -451,6 +559,9 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
         "category": essay_row["category"],
         "sort_index": essay_row["sort_index"],
         "status": essay_row["status"],
+        "main_spine_markdown": essay_row["main_spine_markdown"],
+        "main_spine_nuggets": main_spine_nuggets,
+        "focus_section_nuggets": focus_section_nuggets,
         "sections": sections,
     }
     return JSONResponse(content=package)
@@ -488,7 +599,7 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
     if not isinstance(slug, str) or not slug.strip():
         return None, api_error("VALIDATION_ERROR", "slug is required and must be a non-empty string")
     slug = slug.strip()
-    if not _SLUG_LIKE_RE.match(slug):
+    if not SLUG_LIKE_RE.match(slug):
         return None, api_error("VALIDATION_ERROR", f"slug '{slug}' must match ^[a-zA-Z0-9_-]+$")
 
     # Optional overview-page grouping metadata. category is free text (no fixed
@@ -514,6 +625,65 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
             f"status, if present, must be one of: {', '.join(VALID_ESSAY_STATUSES)}",
         )
 
+    # Optional top-level main spine narrative (Sprint09_Nuggets). Default ''
+    # on omission, same optional-key convention as category/sort_index/status.
+    # Stored verbatim, not stripped — same convention as body_markdown.
+    main_spine_markdown = body.get("main_spine_markdown", "")
+    if not isinstance(main_spine_markdown, str):
+        return None, api_error(
+            "VALIDATION_ERROR", "main_spine_markdown, if present, must be a string"
+        )
+
+    # Optional full-package nuggets (Sprint09_Nuggets follow-up): lets one
+    # payload define the nuggets a fresh essay's [[nugget:key]] references
+    # need, instead of requiring a separate POST /nuggets/upsert call per
+    # nugget before this one. Same field rules as POST /nuggets/upsert
+    # (backend/routers/nuggets.py) — upserted in upsert_document before
+    # reference resolution, so a key defined here is immediately resolvable
+    # by this same payload's main_spine_markdown/sections.
+    nuggets_raw = body.get("nuggets", [])
+    if not isinstance(nuggets_raw, list):
+        return None, api_error("VALIDATION_ERROR", "nuggets, if present, must be a list")
+
+    nuggets: list[dict[str, Any]] = []
+    seen_nugget_keys: set[str] = set()
+    for n_idx, nugget_raw in enumerate(nuggets_raw):
+        if not isinstance(nugget_raw, dict):
+            return None, api_error("VALIDATION_ERROR", f"nuggets[{n_idx}] must be an object")
+
+        nugget_key = nugget_raw.get("nugget_key")
+        if not isinstance(nugget_key, str) or not nugget_key.strip():
+            return None, api_error(
+                "VALIDATION_ERROR", f"nuggets[{n_idx}].nugget_key is required and must be a non-empty string"
+            )
+        nugget_key = nugget_key.strip()
+        if not SLUG_LIKE_RE.match(nugget_key):
+            return None, api_error(
+                "VALIDATION_ERROR", f"nuggets[{n_idx}].nugget_key '{nugget_key}' must match ^[a-zA-Z0-9_-]+$"
+            )
+        if nugget_key in seen_nugget_keys:
+            return None, api_error("VALIDATION_ERROR", f"duplicate nugget_key '{nugget_key}' in payload")
+        seen_nugget_keys.add(nugget_key)
+
+        nugget_title = nugget_raw.get("title")
+        if not isinstance(nugget_title, str) or not nugget_title.strip():
+            return None, api_error(
+                "VALIDATION_ERROR", f"nuggets[{n_idx}].title is required and must be a non-empty string"
+            )
+        nugget_title = nugget_title.strip()
+
+        nugget_body_markdown = nugget_raw.get("body_markdown", "")
+        if not isinstance(nugget_body_markdown, str):
+            return None, api_error(
+                "VALIDATION_ERROR", f"nuggets[{n_idx}].body_markdown, if present, must be a string"
+            )
+
+        nuggets.append({
+            "nugget_key": nugget_key,
+            "title": nugget_title,
+            "body_markdown": nugget_body_markdown,
+        })
+
     sections_raw = body.get("sections")
     if not isinstance(sections_raw, list) or not sections_raw:
         return None, api_error("VALIDATION_ERROR", "sections is required and must be a non-empty list")
@@ -536,7 +706,7 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
                 "VALIDATION_ERROR", f"sections[{s_idx}].anchor_slug is required and must be a non-empty string"
             )
         anchor_slug = anchor_slug.strip()
-        if not _SLUG_LIKE_RE.match(anchor_slug):
+        if not SLUG_LIKE_RE.match(anchor_slug):
             return None, api_error(
                 "VALIDATION_ERROR", f"sections[{s_idx}].anchor_slug '{anchor_slug}' must match ^[a-zA-Z0-9_-]+$"
             )
@@ -562,7 +732,7 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
                     "VALIDATION_ERROR", f"sections[{s_idx}].cards[{c_idx}].id is required and must be a non-empty string"
                 )
             card_id = card_id.strip()
-            if not _SLUG_LIKE_RE.match(card_id):
+            if not SLUG_LIKE_RE.match(card_id):
                 return None, api_error(
                     "VALIDATION_ERROR", f"sections[{s_idx}].cards[{c_idx}].id '{card_id}' must match ^[a-zA-Z0-9_-]+$"
                 )
@@ -612,6 +782,8 @@ def _validate_ingest_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
         "category": category,
         "sort_index": sort_index,
         "status": status,
+        "main_spine_markdown": main_spine_markdown,
+        "nuggets": nuggets,
         "sections": sections,
     }
     return doc, None
@@ -682,11 +854,16 @@ async def ingest_essay(request: Request) -> JSONResponse:
                 if collision_error is not None:
                     return collision_error
 
-        summary = upsert_document(conn, doc)
+        try:
+            summary = upsert_document(conn, doc)
+        except IngestionError as exc:
+            return api_error("VALIDATION_ERROR", str(exc))
 
     return JSONResponse(content={
         "essay_id": summary.essay_id,
         "slug": doc["slug"],
+        "nuggets_created": summary.nuggets_created,
+        "nuggets_updated": summary.nuggets_updated,
         "sections_created": summary.sections_created,
         "sections_updated": summary.sections_updated,
         "cards_created": summary.flashcards_created,

@@ -1,0 +1,631 @@
+{
+  "component_name": "essaycards",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Introduces Nuggets — standalone, independently-learnable concepts reusable across sections/essays without duplicating content, flashcards, or review state — as a new layer between essay sections and flashcards, restructures essays around a compact main spine, and wires explicit [[nugget:key]] Markdown references, navigation, and a matching ChatGPT round-trip through reading, authoring, flashcard generation, exploration, and oral-examination freshness.",
+  "classification": {
+    "why_application": "Nuggets are essaycards-specific domain content — a new layer in this app's own learning-content hierarchy (essay -> section -> nugget -> flashcard), with app-specific validation (nugget-key convention, [[nugget:key]] reference resolution, derived section_nuggets resync), app-specific navigation semantics (reading-position preservation, source navigation from a review session), and app-specific ChatGPT round-trip shapes. None of this is reusable technical capability — it only has meaning within EssayCards' own content model.",
+    "non_goals": [
+      "Knowledge-graph UI or automatic semantic link discovery",
+      "AI-generated relationships between nuggets",
+      "A new spaced-repetition algorithm",
+      "A full essay-editor rewrite",
+      "A generic content-management platform",
+      "A prerequisite recommendation engine",
+      "A standalone nugget scheduling system",
+      "An Atlas Shell refactor",
+      "Automatic conversion of every historical essay to use nuggets",
+      "Automatic reassignment of historical flashcards to nuggets by guessed semantic match — assignment is explicit only, one card at a time, via POST /flashcards/upsert",
+      "A nugget-scoped GET /flashcards/due or GET /flashcards/stats endpoint — reviewing a nugget-linked card for real spaced repetition still goes through the existing essay/section-scoped focus session",
+      "An app-level guard against the flashcards.nugget_id ownership/cascade risk described in this sprint's schema comment and risks below — documented only, by explicit decision",
+      "Nugget-key rename support — nugget_key is upsert-by-key only, with no in-place rename path, same as slug/anchor_slug/card_key",
+      "Markdown-CLI front-matter authoring of essays.main_spine_markdown — JSON/API-ingest-only this sprint (see contracts.invariants)",
+      "A new bulk/atomic flashcard-generation-from-nugget import endpoint — the frontend issues one POST /flashcards/upsert call per generated card, reusing the existing single-card endpoint (see risks)",
+      "Deciding or wiring up where nugget examination-freshness is surfaced in the UI or API — this sprint adds only the storage/echo mechanism and a pure comparison helper; the draft explicitly leaves the surfacing location open"
+    ],
+    "not_platform": "Nugget content, the [[nugget:key]] reference syntax, the resync-on-ingest behavior, and the ChatGPT round-trip prompts are all meaningful only within EssayCards' own content model and its existing ingestion/export conventions. Nothing here is exposed as a reusable capability for other Atlas applications; if another app later needs a similar reusable-content-unit concept, that is the point to consider a platform extraction — not now."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — essaycards schema, unchanged connection mechanism",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema",
+      "platform_errorhandling — api_error helper, exception handlers, request timing, structured logging",
+      "backend.ingest.upsert_document (existing shared upsert core, extended this sprint) — the single place all essaycards essay/section/flashcard/nugget-association upsert SQL lives",
+      "unist-util-visit@5.1.0 as an explicit direct dependency of 02_Platform/Atlas_Shell/package.json (already present transitively via react-markdown's remark dependency chain; this sprint makes the dependency explicit rather than relying on the undeclared transitive resolution)"
+    ],
+    "provides": [
+      "GET /api/essaycards/nuggets — Dataset list of nuggets (id, nugget_key, title, created_at, updated_at; no body_markdown)",
+      "GET /api/essaycards/nuggets/{id} — Dataset single-row nugget detail including body_markdown; 404 if not found",
+      "POST /api/essaycards/nuggets/upsert — upsert-by-nugget_key mutation; returns a typed record",
+      "GET /api/essaycards/nuggets/{id}/flashcards — Dataset flat list of flashcards currently pointing at this nugget; 404 if nugget not found",
+      "GET /api/essaycards/nuggets/{id}/sections — Dataset list of sections (with essay context) currently referencing this nugget; 404 if nugget not found",
+      "GET /api/essaycards/nuggets/authoring-package — bespoke JSON (Dataset-exempt), context for drafting/revising one nugget via ChatGPT",
+      "GET /api/essaycards/nuggets/{id}/generate-flashcards-package — bespoke JSON (Dataset-exempt), context for generating new flashcards from one nugget via ChatGPT",
+      "POST /api/essaycards/essays/ingest — gains optional top-level main_spine_markdown (JSON path only) and unified [[nugget:key]] reference validation (shared with the markdown CLI path via upsert_document)",
+      "GET /api/essaycards/essays/{essay_id} — gains main_spine_markdown and main_spine_nuggets: [{nugget_key, title}] (nuggets referenced anywhere in main_spine_markdown, resolved live, independent of section co-reference — Minimal Change Set item 2); each embedded section gains nuggets: [{nugget_key, title}]",
+      "GET /api/essaycards/essays/{essay_id}/questions — each row gains section_nuggets: [{nugget_key, title}] and nugget_id (nullable, the card's current nugget assignment — Minimal Change Set item 3, feeds QuestionOverviewView's edit-form nugget control)",
+      "GET /api/essaycards/essays/{essay_id}/export — gains top-level main_spine_markdown and main_spine_nuggets: [{nugget_key, title}]; each section gains nuggets: [{nugget_key, title}]",
+      "GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export — gains top-level main_spine_markdown, main_spine_nuggets: [{nugget_key, title}], and focus_section_nuggets: [{nugget_key, title, body_markdown}] (the focus section's currently required nuggets, full body as ChatGPT context); each section in sections[] gains nuggets: [{nugget_key, title}]",
+      "POST /api/essaycards/flashcards/upsert — card gains optional nugget_id (omit/null/value tri-state per R-CON-AL-04)",
+      "GET /api/essaycards/flashcards/due — rows gain nugget_id (nullable)",
+      "GET /api/essaycards/flashcards/{flashcard_id}/export — gains nugget_id (nullable) alongside card",
+      "GET /api/essaycards/flashcards/{flashcard_id}/exploration-package — context becomes the nugget's body_markdown instead of the section's when the card's nugget_id is set; unchanged (section_body_markdown) for a legacy card",
+      "POST /api/essaycards/examinations/import and GET /api/essaycards/essays/{essay_id}/examination-package — gain per-section nugget_versions / nugget_versions_at echo-through storage (no freshness UI/endpoint surfacing this sprint — see non_goals)"
+    ],
+    "invariants": [
+      "nugget_key is globally unique (essaycards.nuggets.nugget_key), author-assigned, validated against SLUG_LIKE_RE (^[a-zA-Z0-9_-]+$, promoted this sprint from essays.py's private _SLUG_LIKE_RE into backend/ingest.py as the one canonical definition — R-CON-BP-07); no code path auto-slugifies or auto-lowercases it.",
+      "Nugget create/update is always upsert-by-nugget_key (`on conflict (nugget_key) do update set title = ..., body_markdown = ..., updated_at = now()`); nugget_key is never a SET column, so a title/body edit can never change the key. There is no nugget-key rename path this sprint.",
+      "essaycards.section_nuggets is derived, never author-maintained: on every section upsert (markdown CLI or JSON API, via the single shared backend.ingest.upsert_document), the section's [[nugget:key]] references are extracted and the association rows are fully resynced — missing ones inserted, stale ones deleted. This is the one explicit exception to the app's general no-delete-on-re-ingest policy; it only ever removes a section_nuggets row, never a nuggets row or a flashcards row.",
+      "extract_nugget_keys(markdown_text) (backend/ingest.py, new) strips fenced code blocks and inline code spans with a regex pass FIRST, then matches \\[\\[nugget:([a-zA-Z0-9_-]+)\\]\\] on what remains — the extraction regex's key character class now matches SLUG_LIKE_RE exactly ([a-zA-Z0-9_-]+), so any valid nugget_key (mixed case included) is always referenceable from a [[nugget:key]] reference in any section/main-spine Markdown. Resolution against a captured key remains exact-match/case-sensitive (no case-folding) — only the set of characters the regex will capture changed, not the comparison semantics. Corrects the character-class mismatch originally specified in 00_draft.md §1/§2, per 11_design_review.md Confirmed Problem 1 / Minimal Change Set item 1.",
+      "backend.ingest.upsert_document's FIRST step (before _upsert_essay is called) collects the union of extract_nugget_keys() over doc.get('main_spine_markdown', '') and every section's body_markdown, resolves them against essaycards.nuggets in one query, and raises IngestionError naming EVERY unresolved key at once (not just the first) if any is missing. Nothing is written before this check runs, so the existing `except Exception: conn.rollback(); raise` wrapper is a harmless no-op rollback on this new failure path too. An unresolved nugget reference is ALWAYS a validation error — no placeholder nugget is ever auto-created.",
+      "This nugget-reference validation is identical on both ingestion paths (markdown CLI and POST /essays/ingest) because it lives inside the single shared upsert_document core — unlike the pre-existing card/section-collision check, which remains exactly as asymmetric as it is today (JSON pre-checks via _check_card_section_collisions, markdown CLI does not). Only the new nugget-reference check is unified; nothing about the existing asymmetry changes.",
+      "backend/routers/essays.py::ingest_essay wraps its upsert_document(conn, doc) call in try/except IngestionError as exc: return api_error('VALIDATION_ERROR', str(exc)) — IngestionError can now be raised by upsert_document itself (the new nugget-resolution step), not only by markdown parsing, so the JSON-path router must catch it. backend/ingest.py's CLI _main() already wraps both _parse_document and upsert_document in one try/except IngestionError block — no change needed there.",
+      "essays.main_spine_markdown is settable via POST /essays/ingest only (optional top-level key, default '' on omission, same optional-key/on-conflict-do-update convention as category/sort_index/status). backend/ingest.py::_parse_front_matter (markdown-CLI grammar) is UNCHANGED this sprint — an essay ingested via the markdown CLI always upserts main_spine_markdown = '' via upsert_document's doc.get('main_spine_markdown', '') default. This is the resolution of the 'main-spine authoring on the CLI path' open question named in 00_draft.md's closing Note.",
+      "POST /flashcards/upsert's card.nugget_id follows R-CON-AL-04/05 exactly: key OMITTED from the card object -> existing assignment untouched (both on update and, vacuously, on create, where there is nothing to touch); key present as JSON null -> assignment cleared; key present with a non-empty string value -> resolved against essaycards.nuggets.id and set, or VALIDATION_ERROR if it does not resolve to an existing row. The SQL implements this with a single INSERT ... ON CONFLICT DO UPDATE whose nugget_id SET expression is `case when <touch_nugget_id> then <resolved_value_or_null> else essaycards.flashcards.nugget_id end` — never a second UPDATE statement and never an omitted-vs-present ambiguity collapsed to the same SQL path.",
+      "flashcards.essay_id and flashcards.section_id remain required and unchanged this sprint — a nugget-linked card is still anchored to exactly one owning essay/section, even though the nugget itself may be referenced from other sections/essays. This is the documented ownership/cascade limitation (see risks) — no app-level guard is added.",
+      "QuestionOverviewView's existing per-question edit form (inline q/a/level fields, POST /flashcards/upsert) gains a nugget assignment control: a <select> populated once per view mount from GET /nuggets plus a 'No nugget' entry, initialized from the question row's now-present nugget_id (GET /essays/{essay_id}/questions). Save ALWAYS sends card.nugget_id explicitly — the selected nugget's id, or JSON null for 'No nugget' — never omitted, mirroring the existing 'level is required on every call, never defaulted' precedent already established for this same form. This completes the R-CON-AL-05 round trip for nugget_id: UI representation of the cleared state = the selectable 'No nugget' option; frontend payload = explicit id or null, never omission; backend interpretation and persisted state were already correct per R-CON-AL-04 and are unchanged. The one-way 'Generate flashcards from a nugget' creation flow (internal_flow step 13) is unaffected — it continues to always set nugget_id to a value at creation time. Closes 11_design_review.md Hard Rule Violation 2 / Minimal Change Set item 3.",
+      "GET /nuggets/{id}/flashcards is a flat, read-only display list (id, card_key, question, answer, level, essay_id, section_id) with NO scheduling fields (no next_due_at, no is_new/is_recent/scheduled_interval_seconds) and is deliberately NOT due-queue-shaped — reviewing a nugget-linked card for real spaced repetition still goes through the existing essay/section-scoped focus session the card already belongs to, identical to a legacy card. GET /flashcards/due and GET /flashcards/stats gain no nugget-scoping parameter this sprint.",
+      "Flashcard source navigation (ReviewSessionView): current.nugget_id set -> 'Flashcard -> Nugget' control, opening an in-page overlay (NOT a route navigation) with a further link to GET /nuggets/{id}/sections ('referenced by'); current.nugget_id null -> unchanged legacy 'Jump to passage' route navigation to ReaderView#anchor_slug. Opening/closing source material from an active review session must never unmount ReviewSessionView or interrupt/reset the session.",
+      "Reading-position preservation (ReaderView): a [[nugget:key]] reference renders as an in-app NuggetLink, never a real <a> tag. Clicking it opens an in-page overlay/panel (component state within ReaderView — an activeNuggetId/nuggetPanelStack, not react-router navigation), so ReaderView never unmounts and the reader's scroll position is preserved with no full page reload when the panel is closed. A nugget's own body_markdown may itself reference further nuggets; the panel supports this recursively via a client-side id stack (push on click-through, pop on back), never leaving the overlay.",
+      "remarkNuggetRefs(titleMap) (new remark plugin, src/ShellEntry.tsx) visits only mdast 'text' nodes (unist-util-visit) — by the time remark hands off, fenced code blocks and inline code spans are already separate code/inlineCode node types, so a [[nugget:...]] written inside either is structurally invisible to a text-node visitor; no hand-written fence/span detection is needed on the frontend (unlike the backend's regex-based extract_nugget_keys, which must do this itself because it operates on raw text, not a parsed AST). Each match in a text node becomes an mdast link node: resolved key -> url 'nugget:<key>', child text = titleMap[key]; unresolved key -> url 'nugget-missing:<key>', child text = the raw key. `components={{ a: NuggetLink }}` branches on the href scheme: nugget: -> in-app overlay open (see above); nugget-missing: -> non-clickable, styled as broken, key text never silently rendered as if valid; anything else -> ordinary <a>, unchanged behavior for normal links/images.",
+      "titleMap for a section's rendering is built client-side from that section's own `nuggets: [{nugget_key, title}]` field on the already-fetched essay-detail response — computed once per section render, never fetched per link. The essay's main_spine_markdown builds its titleMap as the client-side union of every section's nuggets field AND the essay's own main_spine_nuggets: [{nugget_key, title}] field (new this correction round — resolved server-side at read time via extract_nugget_keys(main_spine_markdown) against essaycards.nuggets, independent of section co-reference; see internal_flow's main_spine_nuggets_resolution step) — so a nugget referenced only in main_spine_markdown, never in any section, still resolves to a title instead of rendering as nugget-missing. Closes the R-CON-AL-03 gap identified in 11_design_review.md Hard Rule Violation 1 / Minimal Change Set item 2.",
+      "Section spine revision package drop-detection (IngestView): when ReaderView's 'Export section' action succeeds, the focus section's focus_section_nuggets key set is stashed in sessionStorage keyed by section_id. When IngestView parses a pasted payload whose shape includes focus_section_id, it looks up that stashed key set, extracts the returned section's CURRENT nugget keys via a new client helper extractNuggetKeysClient (a TS mirror of backend/ingest.py::extract_nugget_keys — same strip-fences-then-match-[[nugget:key]] approach), and computes the set difference (previously required minus currently present). A non-empty difference renders a non-blocking warning banner naming the dropped key(s) — SUBMISSION IS NEVER BLOCKED by this check, only a warning is shown, per 00_draft.md §8 ('surfaces, not silently blocks'). The sessionStorage entry is read once and cleared on read.",
+      "backend/exploration.py::build_exploration_package: when the flashcard's nugget_id is set, `context` is `{'nugget_body_markdown': <live nugget body>, 'nugget_key': ..., 'nugget_title': ...}` INSTEAD OF `{'section_body_markdown': ...}` — a replacement, not an addition, per 00_draft.md §8 ('becomes ... instead of'). When nugget_id is null, `context` is unchanged: `{'section_body_markdown': ...}`. This is a discriminated-union response shape on a bespoke, Dataset-exempt, EssayCards-owned JSON contract; the frontend ExplorationPackage TS type and EXPLORE_PROMPT_INTRO/buildExploreClipboardText must branch on which key is present.",
+      "backend/examinations.py::build_export_package adds a per-section `nugget_versions: {nugget_key: <live nuggets.updated_at ISO8601>}` object (current references only) alongside the existing `section_version` field. validate_import_body accepts an OPTIONAL per-result `nugget_versions` key (a JSON object mapping nugget_key -> ISO-8601 timestamp string, or absent/null); import_results stores it VERBATIM into the new section_examinations.nugget_versions_at column — never recomputed at import time, same echo-through-import handling as section_version_at. Absent/null on import -> stored null ('predates this feature' semantics is preserved even for a fresh import that simply omits the key, e.g. a hand-crafted or legacy-shaped result).",
+      "A pure helper backend/examinations.py::nugget_freshness_flags(recorded: dict | None, current: dict) -> list[str] implements the §9 comparison rule (recorded is None -> [] / skip; else any key in current missing from recorded, or present with a different value, is flagged) but is NOT wired into any endpoint or UI this sprint — the draft explicitly leaves 'wherever ultimately surfaced' open. Its inputs and output are fully realizable from data already stored (R-CON-BP-11/R-CON-AL-03); only its call site is deferred.",
+      "All new/changed GET endpoints returning UI-visible tabular data return Dataset per R-CON-BP-04: GET /nuggets, GET /nuggets/{id}, GET /nuggets/{id}/flashcards, GET /nuggets/{id}/sections. GET /nuggets/authoring-package and GET /nuggets/{id}/generate-flashcards-package are bespoke-JSON Dataset exemptions on the same rationale class already documented for GET /essays/{id}/examination-package and GET /flashcards/{id}/exploration-package (self-contained interchange artifacts copied to the clipboard for an external LLM, not rendered by a Dataset-consuming UI component)."
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — POST /essays/ingest or the markdown CLI referencing an unresolved [[nugget:key]] (one message naming every missing key at once) — 400 ApiError (JSON path) / IngestionError, no DB write (both paths)",
+      "VALIDATION_ERROR — POST /nuggets/upsert with a missing/blank nugget_key or title, or a nugget_key not matching SLUG_LIKE_RE — 400 ApiError, no write",
+      "VALIDATION_ERROR — POST /flashcards/upsert with card.nugget_id present (non-null) but not resolving to an existing essaycards.nuggets row, or not a well-formed id — 400 ApiError, no write",
+      "NOT_FOUND — GET /nuggets/{id}, GET /nuggets/{id}/flashcards, GET /nuggets/{id}/sections, GET /nuggets/{id}/generate-flashcards-package with an unknown nugget id — 404 ApiError",
+      "NOT_FOUND — GET /nuggets/authoring-package / GET /nuggets/{id}/generate-flashcards-package with an unknown essay_id, a section_id not belonging to that essay, or (authoring-package only) an unknown nugget_id when one is supplied — 404 ApiError",
+      "Broken/unresolved nugget reference in ALREADY-STORED Markdown (a nugget referenced at ingest time later has no row — cannot occur through the app itself since resolution is enforced at ingest and nuggets are never deleted by the app, but is possible via direct SQL): remarkNuggetRefs renders it as a non-clickable 'nugget-missing:<key>' link, never silently as if valid. This is a rendering-time fallback, not a new ingest-time failure mode.",
+      "Partial-application risk (documented, not solved) — 'Flashcard generation from a nugget' import issues one POST /flashcards/upsert call per AI-generated card (no new bulk/atomic endpoint, reusing the existing single-card endpoint per 00_draft.md §8 and the non-goals list); if call N of M fails, cards 1..N-1 are already saved while N..M are not. See risks.",
+      "Ownership/cascade gap (documented, not guarded) — deleting the essay/section that owns a nugget-linked flashcard removes the card even if another essay still references the same nugget. No delete endpoint exists anywhere in the app today, so this has no live trigger; see risks."
+    ]
+  },
+  "shared_views": {
+    "consumes": ["platform_contracts.Dataset", "platform_contracts.DatasetMeta", "platform_contracts.ColumnSchema"],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor, unchanged",
+      "platform_contracts, platform_errorhandling — unchanged",
+      "Starlette Request.json() — used by POST /nuggets/upsert (new) on the same raw-body/no-Pydantic precedent as POST /essays/ingest, POST /flashcards/upsert, POST /flashcards/{id}/review, POST /examinations/import, POST /flashcards/exploration/import",
+      "unist-util-visit@5.1.0 — new explicit direct frontend dependency, used only by remarkNuggetRefs"
+    ],
+    "provides": [
+      "HTTP API mounted at /api/essaycards (FastAPI, uvicorn) — unchanged mount, methods (GET, POST), and CORS policy",
+      "backend.routers.nuggets — a new router (prefix /nuggets) included by main.py alongside essays/flashcards/exploration/examinations/images",
+      "backend.ingest.extract_nugget_keys and backend.ingest.SLUG_LIKE_RE — new/promoted public symbols consumed by backend/routers/essays.py, backend/routers/nuggets.py, and backend/ingest.py's own upsert_document"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/nuggets",
+        "purpose": "List all nuggets (list-view row shape, no body_markdown).",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — no parameters",
+          "ordering": "title asc, nugget_key asc (stable tiebreak)",
+          "grouping": "none",
+          "time_basis": "not applicable — no time-dependent filtering",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "valid — rows: [], meta.total: 0, meta.object_type: 'nugget'",
+          "zero_fill_behavior": "not applicable — flat list, not a time series",
+          "row_shape": "id, nugget_key, title, created_at (isoformat), updated_at (isoformat). No body_markdown."
+        },
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/nuggets/{id}",
+        "purpose": "Single nugget detail including body_markdown.",
+        "ui_contract": "Dataset | ApiError",
+        "params": { "id": "path param, uuid, required — essaycards.nuggets primary key" },
+        "responses": "200: Dataset, single row, schema includes body_markdown (detail_visible). 404: ApiError NOT_FOUND if id does not exist.",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/nuggets/upsert",
+        "purpose": "Create or update exactly one nugget, upsert-by-nugget_key.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record {id, nugget_key, title, created: bool} on success (200), ApiError VALIDATION_ERROR (400) on any invalid shape.",
+        "body": "{nugget_key: string (required, non-empty, must match SLUG_LIKE_RE), title: string (required, non-empty), body_markdown: string (optional, default '')}",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/nuggets/{id}/flashcards",
+        "purpose": "Flat, read-only list of flashcards currently pointing at this nugget, for the nugget view.",
+        "ui_contract": "Dataset | ApiError",
+        "params": { "id": "path param, uuid, required" },
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a",
+          "ordering": "created_at asc, id asc",
+          "grouping": "none",
+          "time_basis": "not applicable — no scheduling fields, no time filtering",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "valid (nugget exists, no cards yet) — rows: [], meta.total: 0",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "id, card_key, question, answer, level, essay_id, section_id. Deliberately no scheduling fields (see contracts.invariants)."
+        },
+        "responses": "200: Dataset. 404: ApiError NOT_FOUND if the nugget id does not exist.",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/nuggets/{id}/sections",
+        "purpose": "Sections (with essay context) currently referencing this nugget, for the nugget view's 'referenced by' list.",
+        "ui_contract": "Dataset | ApiError",
+        "params": { "id": "path param, uuid, required" },
+        "query_behavior": {
+          "supported_parameters": "none",
+          "ordering": "essay title asc, section order_index asc",
+          "time_basis": "not applicable",
+          "empty_result_behavior": "valid (nugget exists, referenced nowhere) — rows: []",
+          "row_shape": "section_id, anchor_slug, heading, order_index, essay_id, essay_title, essay_slug"
+        },
+        "responses": "200: Dataset. 404: ApiError NOT_FOUND if the nugget id does not exist.",
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/nuggets/authoring-package",
+        "purpose": "Self-contained JSON context (current essay title + main spine, current section + its spine, the target nugget or a blank/creating placeholder, and its prerequisite/connected nuggets) for drafting or revising ONE nugget with an external LLM. Applies via POST /nuggets/upsert.",
+        "ui_contract": "none — NOT a Dataset; R-CON-BP-04 exemption on the same rationale class as GET /essays/{id}/examination-package and GET /flashcards/{id}/exploration-package.",
+        "params": {
+          "essay_id": "query param, uuid, required",
+          "section_id": "query param, uuid, required — must belong to essay_id",
+          "nugget_id": "query param, uuid, optional — omitted when drafting a brand-new nugget"
+        },
+        "responses": "200: {export_version: 1, essay: {slug, title, main_spine_markdown}, section: {id, anchor_slug, heading, body_markdown}, nugget: {id, nugget_key, title, body_markdown} | null, connected_nuggets: [{nugget_key, title}]}. connected_nuggets is [] when nugget is null (nothing to resolve prerequisites from yet) and is otherwise extract_nugget_keys() resolved over the target nugget's own body_markdown. 404 ApiError NOT_FOUND if essay_id, section_id (under essay_id), or a supplied nugget_id does not resolve.",
+        "query_behavior": {
+          "supported_parameters": "essay_id (required), section_id (required), nugget_id (optional)",
+          "defaults": "nugget_id omitted -> nugget: null, connected_nuggets: []; no other parameter has a default (essay_id/section_id are required)",
+          "allowed_combinations": "essay_id and section_id must always both be present; nugget_id may be present or absent independently — there is no other allowed/forbidden combination",
+          "ordering": "not applicable — single object response, not a list",
+          "grouping": "not applicable",
+          "time_basis": "server time — all fields are read live at request time (R-CON-AL-06); no client-supplied time value is accepted or echoed",
+          "boundary_construction": "not applicable — no time-window filtering",
+          "empty_result_behavior": "not applicable to the object itself; connected_nuggets: [] is valid (either nugget is null, or the existing nugget's body_markdown references no other nugget)",
+          "zero_fill_behavior": "not applicable"
+        },
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/nuggets/{id}/generate-flashcards-package",
+        "purpose": "Self-contained JSON context (the nugget's own content plus its existing flashcards) for generating new flashcards from ONE nugget with an external LLM. Reimports by looping POST /flashcards/upsert once per returned card (see risks — not a single atomic bulk endpoint).",
+        "ui_contract": "none — NOT a Dataset; same R-CON-BP-04 exemption class as above.",
+        "params": {
+          "id": "path param, uuid, required — the nugget",
+          "essay_id": "query param, uuid, required — anchor essay for newly generated cards",
+          "section_id": "query param, uuid, required — anchor section for newly generated cards; must belong to essay_id"
+        },
+        "responses": "200: {export_version: 1, nugget: {nugget_key, title, body_markdown}, existing_flashcards: [{id, card_key, question, answer, level}], context: {essay_slug, section_id}}. 404 ApiError NOT_FOUND if the nugget id, essay_id, or section_id (under essay_id) does not resolve.",
+        "query_behavior": {
+          "supported_parameters": "essay_id (required), section_id (required)",
+          "defaults": "none — both required",
+          "allowed_combinations": "essay_id and section_id must always both be present",
+          "ordering": "existing_flashcards ordered created_at asc, id asc — identical ordering to GET /nuggets/{id}/flashcards",
+          "grouping": "none",
+          "time_basis": "server time — nugget/flashcard content read live at request time (R-CON-AL-06)",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "existing_flashcards: [] is valid (a nugget with no linked cards yet)",
+          "zero_fill_behavior": "not applicable"
+        },
+        "change": "new"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/essays/ingest",
+        "purpose": "Unchanged endpoint, extended: optional top-level main_spine_markdown; unified [[nugget:key]] reference validation via the shared upsert core; IngestionError from upsert_document is now caught and returned as VALIDATION_ERROR.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; unchanged response shape.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}",
+        "purpose": "Unchanged endpoint, extended: main_spine_markdown and main_spine_nuggets: [{nugget_key, title}] (nuggets referenced anywhere in main_spine_markdown, resolved live via _main_spine_nuggets, independent of section co-reference — Minimal Change Set item 2) on the essay row; each embedded section gains nuggets: [{nugget_key, title}].",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/questions",
+        "purpose": "Unchanged endpoint, extended: each row gains section_nuggets: [{nugget_key, title}] (duplicated per row within the same section — Datasets are flat by contract) and nugget_id (nullable, the card's current nugget assignment — Minimal Change Set item 3, consumed by QuestionOverviewView's edit-form nugget control).",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/export",
+        "purpose": "Unchanged endpoint, extended: top-level main_spine_markdown and main_spine_nuggets: [{nugget_key, title}]; each section gains nuggets: [{nugget_key, title}].",
+        "ui_contract": "none — bespoke JSON, unchanged R-CON-BP-04 exemption.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/sections/{section_id}/export",
+        "purpose": "Unchanged endpoint, extended: top-level main_spine_markdown, main_spine_nuggets: [{nugget_key, title}], and focus_section_nuggets: [{nugget_key, title, body_markdown}] (full body, focus section only); each section in sections[] gains nuggets: [{nugget_key, title}] (light pairs, all sections, same as the essay export).",
+        "ui_contract": "none — bespoke JSON, unchanged R-CON-BP-04 exemption.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/flashcards/upsert",
+        "purpose": "Unchanged endpoint, extended: card.nugget_id (optional, tri-state omit/null/value).",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04; unchanged response shape plus nugget_id echoed where relevant.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/due",
+        "purpose": "Unchanged endpoint and unchanged eligibility/ordering, extended: rows gain nugget_id (nullable).",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/{flashcard_id}/export",
+        "purpose": "Unchanged endpoint, extended: card gains nugget_id (nullable).",
+        "ui_contract": "none — bespoke JSON, unchanged R-CON-BP-04 exemption.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/{flashcard_id}/exploration-package",
+        "purpose": "Unchanged endpoint, extended: context becomes {nugget_body_markdown, nugget_key, nugget_title} instead of {section_body_markdown} when the card's nugget_id is set; unchanged for a legacy card.",
+        "ui_contract": "none — bespoke JSON, unchanged R-CON-BP-04 exemption.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/examination-package",
+        "purpose": "Unchanged endpoint, extended: each section gains nugget_versions: {nugget_key: live nuggets.updated_at}.",
+        "ui_contract": "none — bespoke JSON, unchanged R-CON-BP-04 exemption.",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/examinations/import",
+        "purpose": "Unchanged endpoint, extended: each result accepts an optional nugget_versions object, echoed verbatim into the new nugget_versions_at column.",
+        "ui_contract": "none — mutation endpoint per R-CON-BP-04, unchanged response shape.",
+        "change": "changed"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "extract_nugget_keys",
+      "description": "backend/ingest.py::extract_nugget_keys(markdown_text) strips fenced code blocks (```...```) and inline code spans (`...`) with a regex pass, then matches \\[\\[nugget:([a-zA-Z0-9_-]+)\\]\\] on the remainder, returning the set of referenced keys. Pure, no DB access. Character class corrected to match SLUG_LIKE_RE per 11_design_review.md Minimal Change Set item 1.",
+      "inputs": ["markdown_text: str"],
+      "outputs": ["set[str] of referenced nugget keys"],
+      "change": "new"
+    },
+    {
+      "step": 2,
+      "name": "nugget_reference_resolution",
+      "description": "upsert_document's new first step (before _upsert_essay): compute the union of extract_nugget_keys() over doc.get('main_spine_markdown', '') and every section's body_markdown; one query `select id, nugget_key from essaycards.nuggets where nugget_key = any(%s)`; any key in the union not present in the result set is collected and, if non-empty, raised as a single IngestionError naming every missing key. Nothing is written before this point.",
+      "inputs": ["doc: dict (as parsed/validated by either ingestion path)", "cur: an open cursor within upsert_document's transaction"],
+      "outputs": ["nugget_id_by_key: dict[str, str] (only reached if no key is missing) | raises IngestionError"],
+      "change": "new"
+    },
+    {
+      "step": 3,
+      "name": "essay_upsert_with_main_spine",
+      "description": "_upsert_essay (extended) now also writes main_spine_markdown (doc.get('main_spine_markdown', '')) in both the INSERT and the ON CONFLICT DO UPDATE SET list.",
+      "inputs": ["title, slug, category, sort_index, status, main_spine_markdown"],
+      "outputs": ["essay_id, was_inserted"],
+      "change": "changed"
+    },
+    {
+      "step": 4,
+      "name": "section_nuggets_resync",
+      "description": "Per section, once _upsert_section returns section_id: compute that section's own extract_nugget_keys(body_markdown), map to nugget ids via the nugget_id_by_key built in step 2, then `insert into section_nuggets (section_id, nugget_id) select %s, unnest(%s::uuid[]) on conflict do nothing` followed by `delete from section_nuggets where section_id = %s and not (nugget_id = any(%s::uuid[]))` (the empty-array case correctly deletes every existing association when a section no longer references any nugget). Only ever removes section_nuggets rows, never nuggets or flashcards rows.",
+      "inputs": ["section_id", "section's referenced nugget ids (subset of nugget_id_by_key)"],
+      "outputs": ["section_nuggets rows resynced to exactly the section's current references"],
+      "change": "new"
+    },
+    {
+      "step": 5,
+      "name": "ingest_essay_error_translation",
+      "description": "backend/routers/essays.py::ingest_essay now wraps its upsert_document(conn, doc) call in try/except IngestionError as exc: return api_error('VALIDATION_ERROR', str(exc)) — the new failure path from step 2 must surface as a 400 ApiError on the JSON path, exactly like every other _validate_ingest_body failure.",
+      "inputs": ["doc (already structurally validated by _validate_ingest_body, now including main_spine_markdown)", "conn"],
+      "outputs": ["typed ingest-summary record (200) | ApiError VALIDATION_ERROR (400, either from pre-write structural validation or from the new nugget-resolution step)"],
+      "change": "changed"
+    },
+    {
+      "step": 6,
+      "name": "nugget_upsert",
+      "description": "POST /nuggets/upsert validates {nugget_key, title, body_markdown?} then `insert into essaycards.nuggets (nugget_key, title, body_markdown) values (...) on conflict (nugget_key) do update set title = excluded.title, body_markdown = excluded.body_markdown, updated_at = now() returning id, created_at, (xmax = 0) as was_inserted`.",
+      "inputs": ["nugget_key: str", "title: str", "body_markdown: str (default '')"],
+      "outputs": ["{id, nugget_key, title, created: bool} (200) | ApiError VALIDATION_ERROR (400)"],
+      "change": "new"
+    },
+    {
+      "step": 7,
+      "name": "flashcard_upsert_nugget_tristate",
+      "description": "backend/routers/flashcards.py::_validate_upsert_body reads card_raw.get('nugget_id', _UNSET) to distinguish omitted from present. If present and non-null, must be a non-empty, well-formed-uuid string. _upsert_question then, if the key was present, resolves it against essaycards.nuggets (VALIDATION_ERROR if it does not exist) and issues a single INSERT ... ON CONFLICT DO UPDATE whose nugget_id SET clause is `case when %s then %s else essaycards.flashcards.nugget_id end` (touch flag, resolved-value-or-null) — so an omitted key never disturbs an existing assignment and an explicit null always clears it.",
+      "inputs": ["card.nugget_id: str | null | omitted"],
+      "outputs": ["flashcards.nugget_id set/cleared/untouched per R-CON-AL-04 | ApiError VALIDATION_ERROR if a supplied id does not resolve"],
+      "change": "changed"
+    },
+    {
+      "step": 8,
+      "name": "nuggets_by_section_lookup",
+      "description": "A new private helper (backend/routers/essays.py::_nuggets_by_section(cur, section_ids) -> dict[str, list[dict]]) joins section_nuggets to nuggets for a set of section ids, ordered by nugget title asc, and is reused by get_essay, export_essay, export_section, and list_essay_questions to attach each section's {nugget_key, title} pairs without duplicating the join SQL four times.",
+      "inputs": ["cur", "section_ids: list[str]"],
+      "outputs": ["dict[section_id, list[{nugget_key, title}]]"],
+      "change": "new"
+    },
+    {
+      "step": 9,
+      "name": "section_export_nugget_context",
+      "description": "export_section additionally selects the essay's main_spine_markdown and, scoped to focus_section_id only, the FULL {nugget_key, title, body_markdown} for every currently-referenced nugget (`join section_nuggets ... where section_id = %s`) as focus_section_nuggets — richer than the generic light {nugget_key, title} pairs step 8 attaches to every section in the array.",
+      "inputs": ["essay_id", "focus section_id"],
+      "outputs": ["package gains main_spine_markdown (top-level) and focus_section_nuggets (top-level, focus section only)"],
+      "change": "new"
+    },
+    {
+      "step": 10,
+      "name": "section_export_drop_detection_client",
+      "description": "Frontend-only: ReaderView.handleExportSection stashes sessionStorage['essaycards:sectionExport:'+sectionId] = JSON.stringify(pkg.focus_section_nuggets.map(n => n.nugget_key)) right before copying the clipboard text. IngestView, on parsing a pasted payload that has a focus_section_id field, reads and clears that sessionStorage entry, extracts the returned focus section's CURRENT nugget keys via extractNuggetKeysClient (TS mirror of extract_nugget_keys), and renders a non-blocking warning banner naming any previously-required key no longer present. Never blocks submission.",
+      "inputs": ["pasted JSON payload (client-side, parsed but not yet submitted)", "sessionStorage entry stashed at export time"],
+      "outputs": ["optional warning banner text; no effect on whether Submit is enabled"],
+      "change": "new"
+    },
+    {
+      "step": 11,
+      "name": "nugget_authoring_package",
+      "description": "GET /nuggets/authoring-package resolves essay_id/section_id (404 if either fails, or section does not belong to essay), optionally resolves nugget_id (404 if given but unresolvable), reads the essay's title/main_spine_markdown, the section's anchor_slug/heading/body_markdown, and — if nugget_id was given — the nugget's own row plus extract_nugget_keys() resolved over its body_markdown as connected_nuggets ({nugget_key, title} pairs); nugget is null and connected_nuggets is [] when nugget_id was omitted (drafting a brand-new nugget). Read-only.",
+      "inputs": ["essay_id", "section_id", "nugget_id (optional)"],
+      "outputs": ["bespoke JSON package (200) | ApiError NOT_FOUND (404)"],
+      "change": "new"
+    },
+    {
+      "step": 12,
+      "name": "generate_flashcards_package",
+      "description": "GET /nuggets/{id}/generate-flashcards-package resolves the nugget (404 if missing) and the essay_id/section_id context (404 if either fails), reads the nugget's {nugget_key, title, body_markdown}, and the nugget's current flashcards via the same query as GET /nuggets/{id}/flashcards (adding question/answer for AI context) as existing_flashcards. Read-only.",
+      "inputs": ["nugget id (path)", "essay_id, section_id (query, context anchor for cards to be created)"],
+      "outputs": ["bespoke JSON package (200) | ApiError NOT_FOUND (404)"],
+      "change": "new"
+    },
+    {
+      "step": 13,
+      "name": "generate_flashcards_import_client",
+      "description": "Frontend-only: the AI reply is parsed client-side as {cards: [{level, q, a}, ...]}; for each entry the frontend issues one POST /flashcards/upsert with {essay_slug: pkg.context.essay_slug, section_id: pkg.context.section_id, card: {level, q, a, nugget_id: <the nugget id already known from the route/component state>}}, sequentially, collecting per-card success/failure. No new backend endpoint — reuses POST /flashcards/upsert once per card (see risks: not atomic across the batch).",
+      "inputs": ["AI-returned cards array (client-parsed)", "pkg.context.essay_slug / section_id", "nugget id (already known client-side)"],
+      "outputs": ["N sequential POST /flashcards/upsert results, each with nugget_id pre-set to the source nugget"],
+      "change": "new"
+    },
+    {
+      "step": 14,
+      "name": "exploration_context_by_nugget",
+      "description": "backend/exploration.py::build_exploration_package, after reading the flashcard row (now including nugget_id), branches: if nugget_id is set, join essaycards.nuggets and set context = {nugget_body_markdown, nugget_key, nugget_title} (no section_body_markdown key present); else context = {section_body_markdown} exactly as before.",
+      "inputs": ["flashcard_id"],
+      "outputs": ["export package (200) whose context shape depends on nugget_id | None if flashcard_id invalid/not found (mapped to 404 by the router, unchanged)"],
+      "change": "changed"
+    },
+    {
+      "step": 15,
+      "name": "examination_export_nugget_versions",
+      "description": "backend/examinations.py::build_export_package additionally selects, per section, the currently-referenced nuggets' {nugget_key: updated_at} via section_nuggets/nuggets, attached as nugget_versions on each section dict alongside the existing section_version.",
+      "inputs": ["essay_id"],
+      "outputs": ["package sections gain nugget_versions: {nugget_key: ISO8601}"],
+      "change": "changed"
+    },
+    {
+      "step": 16,
+      "name": "examination_import_nugget_versions_echo",
+      "description": "validate_import_body accepts an optional per-result nugget_versions (dict[str,str] of nugget_key -> ISO-8601 timestamp, or absent/null); import_results stores it verbatim as section_examinations.nugget_versions_at (jsonb) in the same INSERT as the existing columns. Never recomputed; absent/null stored as SQL null.",
+      "inputs": ["results[idx].nugget_versions (optional)"],
+      "outputs": ["section_examinations.nugget_versions_at populated (or null) on the new row"],
+      "change": "changed"
+    },
+    {
+      "step": 17,
+      "name": "nugget_freshness_helper",
+      "description": "backend/examinations.py::nugget_freshness_flags(recorded, current) -> list[str]: recorded is None -> [] (predates feature, skip); else every key in current missing from recorded, or whose recorded value differs from current[key], is included in the returned (sorted) list. Pure function, no DB access, not called by any endpoint or UI this sprint.",
+      "inputs": ["recorded: dict[str,str] | None (from a stored nugget_versions_at)", "current: dict[str,str] (freshly computed live nugget_versions for the same section)"],
+      "outputs": ["list[str] of stale/changed nugget_keys"],
+      "change": "new"
+    },
+    {
+      "step": 18,
+      "name": "reader_main_spine_and_section_rendering",
+      "description": "ReaderView renders essay.main_spine_markdown and each section.body_markdown through <ReactMarkdown remarkPlugins={[remarkNuggetRefs(titleMap)]} components={{a: NuggetLink}}>. Section titleMap is that section's own nuggets field; main-spine titleMap is the client-side union of every section's nuggets field. Clicking a resolved NuggetLink opens the NuggetPanel overlay (activeNugget/stack state within ReaderView) instead of navigating.",
+      "inputs": ["essay detail response (already fetched)"],
+      "outputs": ["rendered Markdown with in-app nugget links; overlay panel state, never a route change"],
+      "change": "new"
+    },
+    {
+      "step": 19,
+      "name": "review_session_nugget_source_nav",
+      "description": "ReviewSessionView's revealed-answer area branches on current.nugget_id: set -> a 'Flashcard -> Nugget' control opens the same NuggetPanel overlay (fetching GET /nuggets/{id}, GET /nuggets/{id}/flashcards, and offering a further link to GET /nuggets/{id}/sections) without navigating away; null -> the existing 'Jump to passage' navigate(...) is unchanged.",
+      "inputs": ["current.nugget_id (from the /due row already carrying it)"],
+      "outputs": ["overlay opened in place (nugget case) | unchanged route navigation (legacy case)"],
+      "change": "changed"
+    },
+    {
+      "step": 20,
+      "name": "main_spine_nuggets_resolution",
+      "description": "A new private helper (backend/routers/essays.py::_main_spine_nuggets(cur, main_spine_markdown) -> list[{nugget_key, title}]) computes extract_nugget_keys(main_spine_markdown) (imported from backend.ingest) and resolves the result against essaycards.nuggets (same join shape as _nuggets_by_section, ORDER BY title asc), independent of whether those keys are also referenced by any section. Reused by get_essay, export_essay, and export_section to attach a top-level main_spine_nuggets field alongside main_spine_markdown. Closes the gap where a nugget referenced only in main_spine_markdown had no title-resolution path (11_design_review.md Hard Rule Violation 1 / Minimal Change Set item 2).",
+      "inputs": ["cur", "main_spine_markdown: str"],
+      "outputs": ["list[{nugget_key, title}], possibly empty"],
+      "change": "new"
+    },
+    {
+      "step": 21,
+      "name": "question_row_nugget_id_and_edit_ui",
+      "description": "backend/routers/essays.py::list_essay_questions's SELECT and row mapping gain flashcards.nugget_id (nullable) alongside the existing card_key/level/section_* columns — QUESTION_SCHEMA gains a nugget_id ColumnSchema entry. Frontend: QuestionOverviewView's per-question edit form (QuestionItem, existing inline q/a/level fields) gains a nugget <select> — options fetched once per view mount from GET /nuggets plus a 'No nugget' entry, initialized from the row's nugget_id. Save always sends card.nugget_id explicitly (chosen id or JSON null, never omitted) in the existing POST /flashcards/upsert call. Closes the R-CON-AL-05 gap identified in 11_design_review.md Hard Rule Violation 2 / Minimal Change Set item 3 — no new endpoint, no new component; reuses GET /nuggets (already specified) and POST /flashcards/upsert's existing tri-state handling (already correct per R-CON-AL-04).",
+      "inputs": ["GET /nuggets response (fetched once per view mount)", "question row's nugget_id"],
+      "outputs": ["POST /flashcards/upsert body always carries card.nugget_id explicitly (chosen id or null)"],
+      "change": "new"
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres instance — EssayCards owns the essaycards schema, including the new nuggets/section_nuggets tables and additive columns"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema for every new/changed Dataset-returning endpoint"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error helper, exception handlers, request timing, structured logging — unchanged"},
+      {"component": "02_Platform/Atlas_Shell", "role": "Hosts src/ShellEntry.tsx and src/shellConfig.ts; package.json gains an explicit unist-util-visit dependency this sprint"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pyyaml", "role": "Markdown-CLI ingestion only, unchanged", "reuse_existing": true},
+      {"name": "react-markdown", "role": "Renders main_spine_markdown, section body_markdown, and flashcard q/a; gains remarkPlugins/components usage this sprint (previously used bare)", "reuse_existing": true},
+      {"name": "unist-util-visit", "role": "[NEW] Used only by remarkNuggetRefs to visit mdast text nodes. Already present transitively via react-markdown's remark chain; made an explicit direct dependency this sprint per 00_draft.md §3.", "reuse_existing": false}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling Postgres directly",
+      "Re-implementing platform_contracts or platform_errorhandling locally",
+      "Auto-generating nugget_key from title content, or auto-lowercasing/auto-slugifying it — always author-assigned",
+      "Auto-creating a placeholder nuggets row for an unresolved [[nugget:key]] reference — always a validation error",
+      "Author-maintaining essaycards.section_nuggets directly (e.g. a dedicated CRUD endpoint for it) — it is exclusively derived/resynced from Markdown by upsert_document",
+      "Duplicating the nugget-reference resolution or resync SQL between the markdown CLI path and the JSON API path — both must go through the single shared backend.ingest.upsert_document",
+      "Adding a nugget-scoped parameter to GET /flashcards/due or GET /flashcards/stats this sprint",
+      "Adding an app-level guard for the flashcards.nugget_id ownership/cascade gap — documented only, by explicit decision",
+      "Adding a markdown-CLI front-matter key for main_spine_markdown this sprint — JSON/API-ingest-only",
+      "A route-navigation implementation of nugget click-through from ReaderView or ReviewSessionView — must be an in-page overlay/panel that does not unmount the hosting view",
+      "A new bulk/atomic flashcard-generation-from-nugget backend endpoint — reuse POST /flashcards/upsert per card",
+      "Wiring backend/examinations.py::nugget_freshness_flags into any endpoint or UI this sprint — infrastructure only, surfacing is explicitly deferred",
+      "Hand-written fence/inline-code-span detection in the frontend remarkNuggetRefs plugin — it must rely on remark's own text/code/inlineCode node typing, not reimplement the backend's regex-based stripping",
+      "Adding rehype-raw, a urlTransform override, or any additional ReactMarkdown component override beyond `a: NuggetLink` — unchanged from the Sprint03_Images precedent"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state",
+    "notes": "New tables essaycards.nuggets and essaycards.section_nuggets, plus additive columns flashcards.nugget_id, essays.main_spine_markdown, and section_examinations.nugget_versions_at — all private EssayCards state, none exposed as a shared view. 10_schema.sql is this sprint's full design copy; the implementer folds it verbatim into the canonical runtime schema at 03_Application/EssayCards/schema.sql (the single path loaded idempotently at startup and by tests/conftest.py, per R-CON-BP-07) before the closing commit."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "backend/ingest.py: promote the existing essays.py-local `_SLUG_LIKE_RE = re.compile(r'^[a-zA-Z0-9_-]+$')` into this module as a public `SLUG_LIKE_RE` alongside VALID_ESSAY_STATUSES/DEFAULT_ESSAY_STATUS; update essays.py to import it and remove its private copy. Do NOT touch flashcards.py's separate `_CARD_ID_RE` (same pattern, different name, not in scope for this promotion per 00_draft.md §1).",
+      "backend/ingest.py: add `extract_nugget_keys(markdown_text: str) -> set[str]` per internal_flow step 1 — strip fenced code blocks and inline code spans FIRST with a regex pass, then match `\\[\\[nugget:([a-zA-Z0-9_-]+)\\]\\]` on the remainder (character class matches SLUG_LIKE_RE exactly — 11_design_review.md Minimal Change Set item 1).",
+      "backend/ingest.py: extend `_upsert_essay` to accept and write `main_spine_markdown`; extend `upsert_document` with the new first step (internal_flow step 2) and the per-section resync step (internal_flow step 4), using `nugget_id_by_key` built once at the start rather than re-querying per section. Use `insert ... select %s, unnest(%s::uuid[]) on conflict (section_id, nugget_id) do nothing` and `delete ... where section_id = %s and not (nugget_id = any(%s::uuid[]))` exactly as specified (the `not (... = any(empty_array))` form correctly clears all associations when a section references zero nuggets).",
+      "backend/ingest.py: do NOT add a `main_spine_markdown` key to `_parse_front_matter` — the markdown-CLI grammar is unchanged this sprint (see contracts.invariants).",
+      "backend/routers/essays.py: import SLUG_LIKE_RE from backend.ingest instead of defining `_SLUG_LIKE_RE` locally. Add optional top-level `main_spine_markdown` (string, default '', not stripped — same verbatim-storage convention as body_markdown) to `_validate_ingest_body`'s accepted/produced doc shape. Wrap the `upsert_document(conn, doc)` call in `ingest_essay` in `try/except IngestionError as exc: return api_error('VALIDATION_ERROR', str(exc))`.",
+      "backend/routers/essays.py: add a private `_nuggets_by_section(cur, section_ids) -> dict[str, list[dict]]` helper (internal_flow step 8) using `= any(%s::uuid[])`, and use it from get_essay, export_essay, export_section, and list_essay_questions to attach `nuggets`/`section_nuggets` fields. Add `main_spine_markdown` to the SELECTs and response shapes of get_essay and export_essay. Extend export_section with `main_spine_markdown` and `focus_section_nuggets` (internal_flow step 9) — full `{nugget_key, title, body_markdown}` scoped to focus_section_id only, distinct from the light per-section `nuggets` pairs every section in the array also gets.",
+      "backend/routers/essays.py: add a private `_main_spine_nuggets(cur, main_spine_markdown) -> list[{nugget_key, title}]` helper (internal_flow step 20) — import `extract_nugget_keys` from `backend.ingest`, resolve the result against `essaycards.nuggets` (same join shape as `_nuggets_by_section`, `ORDER BY title asc`), independent of section co-reference. Wire it into `get_essay`, `export_essay`, and `export_section` to attach a top-level `main_spine_nuggets` field alongside `main_spine_markdown` (11_design_review.md Minimal Change Set item 2).",
+      "backend/routers/essays.py: add `nugget_id` (nullable) to `list_essay_questions`'s SELECT/row mapping and to `QUESTION_SCHEMA` (internal_flow step 21) — a straight column addition to the existing flashcards join, no new query (11_design_review.md Minimal Change Set item 3).",
+      "backend/routers/nuggets.py (new): implement the seven endpoints exactly as specified in interfaces.exposed_surfaces and internal_flow steps 6, 11, 12 — GET '' (list), GET '/{id}' (detail), POST '/upsert', GET '/{id}/flashcards', GET '/{id}/sections', GET '/authoring-package', GET '/{id}/generate-flashcards-package'. Register the router with `router = APIRouter(prefix='/nuggets', tags=['nuggets'])`. FastAPI/Starlette matches routes in registration order, and '/authoring-package' is a single literal path segment exactly like '/{id}' — it MUST be registered BEFORE GET '/{id}', or a request to /nuggets/authoring-package would instead match '/{id}' with id='authoring-package'. '/upsert' (POST, different method) has no such risk but is conventionally also registered before '/{id}' for readability, mirroring the '/due', '/stats', '/upsert' before '/{flashcard_id}/...' comment precedent already in backend/routers/flashcards.py.",
+      "backend/routers/flashcards.py: add `nugget_id` to DUE_SCHEMA and the due-row SELECT/mapping; implement the omit/null/value tri-state for `card.nugget_id` in `_validate_upsert_body` (sentinel-based `card_raw.get('nugget_id', _UNSET)`) and `_upsert_question` (internal_flow step 7 — the single `case when <touch> then <value> else nugget_id end` SET expression; validate a supplied non-null id both for well-formed-uuid shape and existence against essaycards.nuggets, VALIDATION_ERROR on either failure); add `nugget_id` to `export_question`'s package.",
+      "backend/exploration.py: extend `build_exploration_package` per internal_flow step 14 — branch the `context` shape on the flashcard row's `nugget_id` (join essaycards.nuggets only when set).",
+      "backend/examinations.py: extend `build_export_package` per internal_flow step 15 (per-section `nugget_versions`); extend `validate_import_body` to accept an optional per-result `nugget_versions` (dict[str,str] or absent/null — validate each value is a non-empty string if the key is present); extend `import_results`' INSERT to include `nugget_versions_at` (verbatim, psycopg2 Json-adapted or json.dumps as appropriate for the jsonb column). Add the new pure `nugget_freshness_flags(recorded, current) -> list[str]` helper (internal_flow step 17) — do not call it from any endpoint this sprint.",
+      "backend/main.py: `from backend.routers import ... nuggets` and `app.include_router(nuggets.router, prefix='/api/essaycards')` alongside the existing includes.",
+      "Fold 10_schema.sql verbatim (including every comment) into 03_Application/EssayCards/schema.sql before the closing commit.",
+      "02_Platform/Atlas_Shell/package.json: add `unist-util-visit` (`^5.1.0`) to dependencies as an explicit direct dependency.",
+      "tests/conftest.py: extend clean_tables to `truncate essaycards.essays, essaycards.images, essaycards.nuggets cascade` (nuggets has no FK to essays, so it is not cleared by the existing truncate; section_nuggets is cascade-cleared transitively via either essay_sections or nuggets).",
+      "tests/fixtures.sql: add a compact nugget fixture set (ids/keys prefixed `fix-nugget-`) — at minimum: two nuggets, one referenced by two different fixture sections (to exercise reuse-without-duplication and GET /nuggets/{id}/sections returning two rows), one fixture flashcard with nugget_id set (to exercise GET /nuggets/{id}/flashcards, the due-row nugget_id field, and the exploration-package branch), and section_nuggets rows consistent with those fixture sections' body_markdown (so a resync-from-re-ingest test, if any, starts from a known-consistent state). Also add (11_design_review.md correction round): one fixture nugget referenced ONLY in a fixture essay's main_spine_markdown and never in any of that essay's fixture sections (Minimal Change Set item 2), and one fixture nugget whose nugget_key contains an uppercase letter, referenced by matching case in a fixture section's body_markdown (Minimal Change Set item 1).",
+      "Ingest the §10 Rationalism demonstration content (main spine, Descartes section, six nuggets) against the RUNNING service (not tests/fixtures.sql) via POST /nuggets/upsert and POST /essays/ingest, as non-destructive demonstration data, to manually walk the end-to-end flow described in 00_draft.md §10. Do not overwrite the existing why-libraries-of-alexandria-burned content or any other production essay.",
+      "Add a 'Nuggets' section to CLAUDE.md's Glossary (nugget / section_nuggets / [[nugget:key]] / nugget_key) and Sprint scope list, and a 'Known gap' bullet for the flashcards.nugget_id ownership/cascade limitation, matching the existing no-paragraph-linkage / images-not-backed-up bullet style."
+    ],
+    "ui_implementer": [
+      "src/ShellEntry.tsx: add `remarkNuggetRefs(titleMap: Record<string,string>)` (unist-util-visit on mdast 'text' nodes) and a `NuggetLink` component branching on href scheme (`nugget:` / `nugget-missing:` / other) per contracts.invariants and internal_flow step 18. Apply `remarkPlugins={[remarkNuggetRefs(titleMap)]} components={{a: NuggetLink}}` to the ReactMarkdown instances rendering essay.main_spine_markdown and section.body_markdown in ReaderView (NOT to flashcard question/answer rendering in ReviewSessionView, which has no nugget-reference syntax of its own).",
+      "src/ShellEntry.tsx: add a `NuggetPanel` (or equivalently named) overlay component with its own id-stack state for recursive nugget-to-nugget navigation (push on click-through, pop on back, close clears the stack), rendered conditionally within ReaderView (opened by a resolved NuggetLink click) and reused within ReviewSessionView (opened by a new 'Flashcard -> Nugget' control shown only when current.nugget_id is set — legacy 'Jump to passage' unchanged for current.nugget_id null). The panel fetches GET /nuggets/{id}, GET /nuggets/{id}/flashcards, and offers a link to GET /nuggets/{id}/sections. Must never be implemented as a react-router navigation — the hosting view (ReaderView / ReviewSessionView) must not unmount.",
+      "src/ShellEntry.tsx: render essay.main_spine_markdown in ReaderView (above the sections list) through the same ReactMarkdown+remarkNuggetRefs treatment, with titleMap = the client-side union of every section's `nuggets` field AND the essay's own `main_spine_nuggets` field on the fetched essay-detail response (11_design_review.md Minimal Change Set item 2 — a main-spine-only reference must resolve to a title too).",
+      "src/ShellEntry.tsx: QuestionOverviewView's per-question edit form (QuestionItem, existing inline q/a/level fields) gains a nugget `<select>` — options fetched once per view mount from `GET /nuggets` plus a 'No nugget' entry, initialized from the row's now-present `nugget_id`. Save always includes `card.nugget_id` explicitly in the existing `POST /flashcards/upsert` call (chosen id or JSON `null`, never omitted) — same 'always explicit, never defaulted' precedent as the form's existing `level` field (11_design_review.md Hard Rule Violation 2 / Minimal Change Set item 3).",
+      "src/ShellEntry.tsx: add `extractNuggetKeysClient(markdown: string): Set<string>` (TS mirror of backend/ingest.py::extract_nugget_keys) and wire the section-export drop-detection flow (internal_flow step 10) into ReaderView.handleExportSection (stash) and IngestView (read/compare/warn, never block).",
+      "src/ShellEntry.tsx: add a nugget authoring entry point (e.g. a '+ New nugget' / 'Edit nugget' action reachable from the NuggetPanel and/or ReaderView) that fetches GET /nuggets/authoring-package?essay_id=&section_id=&nugget_id= (nugget_id omitted for a new nugget), builds a ChatGPT prompt+package clipboard payload (new NUGGET_AUTHORING_PROMPT_INTRO constant, same placeholder-value-as-instructions convention as STUB_PROMPT for the blank/creating case), and a corresponding import view that posts the pasted reply to POST /nuggets/upsert. Exact button placement/labels are implementer's choice, following the existing Export/Import toggle pattern (see ReaderView's handleExportEssay/handleExportSection).",
+      "src/ShellEntry.tsx: add a 'Generate flashcards from this nugget' action (from the NuggetPanel) that fetches GET /nuggets/{id}/generate-flashcards-package?essay_id=&section_id= (context = the essay/section the panel was opened from), builds a clipboard payload (new prompt constant instructing the AI to reply `{cards: [{level, q, a}, ...]}`), and a corresponding import view implementing internal_flow step 13 (sequential POST /flashcards/upsert per card, each with nugget_id pre-set; report per-card success/failure, non-atomic — see risks).",
+      "src/ShellEntry.tsx: extend the ExplorationPackage TS type and EXPLORE_PROMPT_INTRO/buildExploreClipboardText to branch on whether `context.section_body_markdown` or `context.nugget_body_markdown` is present (internal_flow step 14's discriminated-union response shape).",
+      "src/ShellEntry.tsx: extend SectionExportPackage/EssayExportPackage TS types with the new fields (main_spine_markdown, main_spine_nuggets, nuggets, focus_section_nuggets) and EssayDetailRow/SectionRow with main_spine_markdown/main_spine_nuggets/nuggets; extend QuestionRow with section_nuggets and nugget_id (11_design_review.md Minimal Change Set item 3); extend DueCardRow and the export-question package type with nugget_id.",
+      "After any .tsx/.ts/.css edit: rebuild and redeploy the shell (`npx vite build` in 02_Platform/Atlas_Shell + `docker cp dist/. atlas-shell:/usr/share/nginx/html/`).",
+      "10_test_spec.md's [UI] and [UI — manual] scenarios: if no tests/ui/ Playwright suite exists yet for this component (confirmed absent as of Sprint03_Images), record the [UI] scenario as untested (not passing) per R-PRO-BP-01 §10, and verify [UI — manual] scenarios by hand."
+    ],
+    "test_writer": [
+      "Map every scenario in 10_test_spec.md to a concrete pytest function, split across tests/test_nuggets.py (new) and additions to tests/test_ingest.py, tests/test_ingest_endpoint.py (or test_essays.py, matching existing file boundaries), tests/test_flashcards.py, and tests/test_exploration.py / tests/test_examinations.py as appropriate.",
+      "Cover extract_nugget_keys directly (unit-level): fenced-code-block and inline-code-span stripping, multiple references, no references, a reference inside a fence being ignored, and a mixed-case key (e.g. containing an uppercase letter) being captured and resolved — the character-class fix from 11_design_review.md Minimal Change Set item 1.",
+      "Cover upsert_document's new nugget-resolution step on BOTH ingestion paths: a well-formed reference to an existing nugget succeeds; an unresolved reference is rejected with every missing key named in one message and NO row written (essay/section/card); this must be demonstrated identically via a direct ingest() call (markdown fixture) and via POST /essays/ingest (JSON body) — the unification is the thing under test.",
+      "Cover section_nuggets resync: re-ingesting a section whose body_markdown drops a previously-referenced key removes exactly that association row (and only that row) without deleting the nuggets row or any flashcards row; re-ingesting with an added reference inserts exactly the new association.",
+      "Cover POST /nuggets/upsert: create, then update-by-key with a different title/body leaving the key and id unchanged (upsert-by-key, no rename path); VALIDATION_ERROR for a missing/blank nugget_key or title, and for a nugget_key violating SLUG_LIKE_RE.",
+      "Cover POST /flashcards/upsert's nugget_id tri-state: omitted leaves an existing assignment untouched; explicit null clears it; a valid id sets it; an id that does not resolve to an existing nugget is rejected VALIDATION_ERROR and the card's prior nugget_id is unchanged.",
+      "Cover GET /nuggets, GET /nuggets/{id} (found/404), GET /nuggets/{id}/flashcards (rows shape has no scheduling fields; 404 for unknown id; empty valid), GET /nuggets/{id}/sections (two-section reuse case from the fixture; 404 for unknown id; empty valid).",
+      "Cover GET /nuggets/authoring-package and GET /nuggets/{id}/generate-flashcards-package: success shape for both the 'editing an existing nugget' and 'nugget_id omitted / creating' cases (authoring-package only); 404 for an unresolvable essay_id/section_id/nugget_id combination.",
+      "Cover GET /flashcards/due and GET /flashcards/{id}/export both carrying nugget_id (null for a legacy card, set for a nugget-linked fixture card).",
+      "Cover backend/exploration.py::build_exploration_package's context branch: a nugget-linked fixture card yields {nugget_body_markdown, nugget_key, nugget_title} with no section_body_markdown key; a legacy card is unchanged.",
+      "Cover backend/examinations.py: build_export_package's per-section nugget_versions reflects the fixture's currently-referenced nuggets' updated_at; POST /examinations/import with nugget_versions present stores it verbatim into nugget_versions_at; import with the key absent stores null.",
+      "Cover backend/examinations.py::nugget_freshness_flags directly (unit-level, no HTTP): recorded=None -> []; a key present in current but missing from recorded is flagged; a key whose recorded value differs from current's is flagged; a key present and matching is not flagged.",
+      "Cover main_spine_nuggets (11_design_review.md Minimal Change Set item 2): GET /essays/{id}, GET /essays/{id}/export, and GET /essays/{id}/sections/{id}/export all resolve a nugget referenced ONLY in main_spine_markdown (not in any fixture section's body_markdown) into main_spine_nuggets: [{nugget_key, title}].",
+      "Cover nugget_id on question rows (11_design_review.md Minimal Change Set item 3): GET /essays/{id}/questions rows carry nugget_id (null for an unlinked fixture card, set for a nugget-linked one).",
+      "[UI] and [UI — manual] scenarios per 10_test_spec.md — see ui_implementer deferral re: current absence of tests/ui/ Playwright infrastructure."
+    ],
+    "reviewer": [
+      "Verify the nugget-reference validation step in upsert_document runs and fully fails BEFORE any write on both ingestion paths, and that a rejected ingest leaves zero new rows (essay, section, card, nugget, or section_nuggets).",
+      "Verify section_nuggets resync never deletes a nuggets row or a flashcards row — only association rows — and that the resync SQL correctly handles the zero-references case (full deletion of existing associations for that section).",
+      "Verify POST /flashcards/upsert's nugget_id SET clause genuinely distinguishes omitted/null/value at the SQL level (a single statement with a conditional SET expression, not two code paths that could diverge) and that a card with an existing nugget_id survives an omit-only update unchanged.",
+      "Verify flashcards.essay_id/section_id remain required and unchanged this sprint, and that the ownership/cascade gap is documented in exactly the three places specified (schema.sql comment, CLAUDE.md, this architecture.json's risks) with no app-level guard code added.",
+      "Verify GET /nuggets/{id}/flashcards truly carries no scheduling fields and that no nugget-scoping parameter was added to GET /flashcards/due or GET /flashcards/stats.",
+      "Verify the NuggetPanel overlay implementation does not unmount ReaderView or ReviewSessionView on open/close (no react-router navigate() call in the nugget click-through or 'Flashcard -> Nugget' paths).",
+      "Verify remarkNuggetRefs relies on remark's text/code/inlineCode node typing rather than reimplementing fence/span stripping by hand, and that no rehype-raw/urlTransform/extra component override was added.",
+      "Verify the section-export drop-detection banner is genuinely non-blocking (Submit remains enabled/functional regardless of the warning).",
+      "Verify build_exploration_package's context shape is a true replacement (nugget case has no section_body_markdown key at all) rather than an additive superset, matching 00_draft.md §8's 'instead of' wording.",
+      "Verify nugget_versions_at is stored verbatim (never recomputed) on import, mirroring section_version_at's existing handling, and that nugget_freshness_flags is not called from any endpoint this sprint.",
+      "Verify SLUG_LIKE_RE was promoted (not duplicated) and that flashcards.py's separate _CARD_ID_RE was left untouched.",
+      "Verify the 'Flashcard generation from a nugget' import path is documented as non-atomic (per-card POSTs) and that this is stated in the UI's own messaging/error handling, not silently assumed atomic.",
+      "Verify extract_nugget_keys's character class genuinely matches SLUG_LIKE_RE ([a-zA-Z0-9_-]+) and that a mixed-case nugget_key resolves correctly end to end (11_design_review.md Minimal Change Set item 1).",
+      "Verify main_spine_nuggets is populated independent of section co-reference (a main-spine-only reference must appear) on all three of GET /essays/{id}, GET /essays/{id}/export, and GET /essays/{id}/sections/{id}/export (11_design_review.md Minimal Change Set item 2).",
+      "Verify QuestionOverviewView's edit form always sends card.nugget_id explicitly (id or null, never omitted) on Save, so the nugget selector genuinely satisfies R-CON-AL-05's round-trip completeness rather than silently degrading to omit-only behavior (11_design_review.md Minimal Change Set item 3)."
+    ]
+  },
+  "deferred_decisions": [
+    "Exact button labels/placement for the new nugget-authoring and generate-flashcards entry points in ReaderView/NuggetPanel — implementer's choice, following the existing Export/Import toggle visual pattern.",
+    "Whether NuggetPanel is implemented as a modal, a side drawer, or an inline expand-in-place region — any of these satisfy the 'does not unmount the hosting view' requirement; implementer's choice.",
+    "Exact prompt wording for NUGGET_AUTHORING_PROMPT_INTRO and the new flashcard-generation prompt constant — must instruct (per 00_draft.md §8) that a nugget must stay independently understandable and must not reproduce the whole essay, and that generated cards should follow the existing level/card-key conventions; exact phrasing is implementer's choice, following the house style of EXAM_PROMPT_INTRO/EXPLORE_PROMPT_INTRO/STUB_PROMPT.",
+    "Where (if anywhere) nugget_freshness_flags is eventually surfaced in the UI or API — explicitly out of scope this sprint (see non_goals and forbidden).",
+    "Whether GET /nuggets should paginate — not required this sprint (small personal knowledge base, unfiltered list).",
+    "src/ShellEntry.tsx's continued growth as a single file (already ~2960 lines before this sprint) — a future split into multiple files is not addressed by this sprint; out of scope."
+  ],
+  "risks": [
+    {
+      "risk": "flashcards.nugget_id ownership/cascade gap: a flashcard reachable via a shared nugget from another essay is still owned by only its own essay_id/section_id; deleting that owning section/essay would remove the card even though another essay still references it via the nugget.",
+      "impact": "Data loss for the OTHER essay's apparent access to that card if the owning essay/section were ever deleted. The app has no delete endpoint anywhere today (essays/sections/flashcards/images are all upsert-only), so this risk has no live trigger through the app; it is latent, not exercised. Documented in three places (schema.sql, CLAUDE.md, here) per explicit decision, with no app-level guard added — same pattern as the Sprint02 card/section-move asymmetry already tracked in this app's architecture history."
+    },
+    {
+      "risk": "'Flashcard generation from a nugget' import issues one POST /flashcards/upsert call per AI-generated card, not a single atomic bulk operation.",
+      "impact": "If call N of M fails (e.g. a malformed card partway through the AI's reply), cards 1..N-1 are already saved while N..M are not, leaving a partially-applied batch. No new bulk/atomic endpoint is introduced this sprint (see non_goals/forbidden) — the UI must report per-card success/failure so the user can retry only the failed cards; this is a documented limitation, not a defect."
+    },
+    {
+      "risk": "src/ShellEntry.tsx grows further from its already-large single-file size (~2960 lines pre-sprint) with this sprint's substantial additions (NuggetPanel, remarkNuggetRefs, multiple new export/import views).",
+      "impact": "Continued maintainability pressure on a single file. No split is performed this sprint (see deferred_decisions) — consistent with every prior EssayCards sprint's convention of extending this one file."
+    },
+    {
+      "risk": "Recursive nugget-to-nugget references (a nugget's own body_markdown referencing another nugget) inside the NuggetPanel overlay have no depth limit specified.",
+      "impact": "A pathological authoring mistake (nugget A references B references A) could let a user push/pop the panel's id stack indefinitely without a cycle, though each push is a deliberate user click (not automatic), so this is a UX nuisance at worst, not an infinite-loop bug. No cycle detection is added this sprint; not called out in 00_draft.md and treated as out of scope rather than silently guarded."
+    },
+    {
+      "risk": "The seed baseline this sprint builds from (essays.py, flashcards.py, ingest.py as read for this design) already reflects Sprint08_QuestionLevelsAndStructure's direct-implementation (no closed sprint folder — see 03_Application/EssayCards/Sprint08_QuestionLevelsAndStructure/), so this design's 'unchanged this sprint' statements about level/question-overview behavior are read from the live code, not from a prior architecture.json.",
+      "impact": "Consistent with the Sprint03_Images precedent of noting when a baseline sprint has no closed architecture artifact of its own. /sprint-close should ensure the developer reference reflects this sprint's additions on top of that live-code baseline."
+    },
+    {
+      "risk": "PROCESS DEVIATION (surfaced per R-OPS-BP-01, not silently normalized): 03_Application/EssayCards/00_architecture/architecture.json and scaffolding.json — the repo's seed baseline for the 'copy into the sprint folder, then mark this sprint's deltas' process — predate Sprints 03 (images), 06 (flashcard exploration), 07 (roadmap/focus/review), and 08 (question levels/overview). Sprint03_Images/10_architecture.json already flagged this exact staleness in its own risks section and deferred the fix to a future /sprint-close. It was not fixed since. Copying that seed forward and marking only this sprint's own deltas with [NEW]/[CHANGED] would produce a 10_architecture.json that either fabricates marks for four sprints of already-shipped, unrelated functionality (misattributing it to Sprint09) or silently omits it (an inaccurate description of the current system, violating R-CON-BP-01/R-CON-BP-09).",
+      "impact": "This design does NOT seed from 00_architecture/. Instead 10_architecture.json and 10_scaffolding.json describe the full, accurate current-plus-this-sprint state directly (as a new-component-style full description would), using per-item 'change': 'new'/'changed' markers only where this sprint itself makes a change, and prose 'Unchanged this sprint' markers elsewhere. This is a deliberate deviation from the seed-copy convention in R-PRO-BP-01, made because the alternative was actively misleading, not because the convention was skipped for convenience. /sprint-close should treat this as the opportunity to finally regenerate 00_architecture/ from the full current state (all of Sprints 03/06/07/08/09), resolving the staleness this and the prior sprint both flagged."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Confirm the exact wording/placement of the nugget-authoring and generate-flashcards entry-point buttons is acceptable as an implementer choice (deferred_decisions), rather than needing product sign-off before implementation.",
+      "owner": "product"
+    },
+    {
+      "question": "Confirm that leaving nugget_freshness_flags unwired (infrastructure only, no UI/endpoint surfacing) satisfies the intent of 00_draft.md §9, given the draft's own 'wherever ultimately surfaced' phrasing reads as deliberately open rather than as an oversight.",
+      "owner": "architecture"
+    }
+  ]
+}

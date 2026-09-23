@@ -44,6 +44,14 @@ import yaml
 VALID_ESSAY_STATUSES = ("planned", "complete")
 DEFAULT_ESSAY_STATUS = "complete"
 
+# Author-assigned slug-like identity convention shared by essays.slug,
+# essay_sections.anchor_slug, flashcards.card_key, and (Sprint09_Nuggets)
+# nuggets.nugget_key. Promoted here (R-CON-BP-07 — one canonical definition)
+# from what was previously a private copy in backend/routers/essays.py;
+# flashcards.py's separate _CARD_ID_RE (same pattern, different name) is NOT
+# part of this promotion.
+SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
 
 class IngestionError(Exception):
     """Raised for any parse/validation failure before a database write is attempted."""
@@ -53,6 +61,8 @@ class IngestionError(Exception):
 class IngestSummary:
     essay_created:       bool = False
     essay_id:            str = ""
+    nuggets_created:     int = 0
+    nuggets_updated:     int = 0
     sections_created:    int = 0
     sections_updated:    int = 0
     flashcards_created:  int = 0
@@ -79,20 +89,54 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
     """
     Shared upsert core — extracted from what was previously inline inside
     ingest(). Opens one transaction on `conn` and upserts the essay (keyed by
-    slug), each section (keyed by essay_id+anchor_slug), and each card (keyed
-    by essay_id+card_key). Commits on success; rolls back and re-raises on any
-    database error.
+    slug, now including main_spine_markdown), each section (keyed by
+    essay_id+anchor_slug), and each card (keyed by essay_id+card_key).
+    Commits on success; rolls back and re-raises on any database error.
+
+    Sprint09_Nuggets: before anything is written, every [[nugget:key]]
+    reference across doc.get('main_spine_markdown', '') and every section's
+    body_markdown is resolved against essaycards.nuggets in one query
+    (_resolve_nugget_references) — an unresolved key raises IngestionError
+    naming EVERY missing key at once, and nothing is written (the existing
+    `except Exception: conn.rollback(); raise` wrapper is a harmless no-op
+    rollback on this failure path too, since the raise happens before any
+    write). Then, per section, once its id is known, essaycards.section_nuggets
+    is resynced to that section's current references (_resync_section_nuggets)
+    — this only ever removes an association row, never a nuggets row or a
+    flashcards row.
+
+    Full-package ingest: doc.get('nuggets', []) — each {nugget_key, title,
+    body_markdown?} — is upserted FIRST, in the same transaction, before
+    reference resolution, so a single payload can define a nugget and
+    reference it via [[nugget:key]] in the same call. Reusing an existing
+    nugget_key here updates that nugget's title/body_markdown in place
+    (affecting every essay/section that already links to it) — same
+    upsert-by-key semantics as POST /nuggets/upsert, not a separate code path.
 
     Called by ingest() (markdown/CLI path) and by POST /essays/ingest (JSON/API
     path, backend/routers/essays.py) — the single place all essaycards upsert
-    SQL lives.
+    SQL lives, which is what makes the nugget-reference validation above
+    identical on both ingestion paths.
     """
     summary = IngestSummary()
     try:
         with conn.cursor() as cur:
+            for nugget in doc.get("nuggets", []):
+                nugget_inserted = _upsert_nugget(cur, nugget)
+                if nugget_inserted:
+                    summary.nuggets_created += 1
+                else:
+                    summary.nuggets_updated += 1
+
+            referenced_keys: set[str] = set(extract_nugget_keys(doc.get("main_spine_markdown", "")))
+            for section in doc["sections"]:
+                referenced_keys |= extract_nugget_keys(section.get("body_markdown", ""))
+            nugget_id_by_key = _resolve_nugget_references(cur, referenced_keys)
+
             essay_id, essay_inserted = _upsert_essay(
                 cur, doc["title"], doc["slug"], doc.get("category"),
                 doc.get("sort_index", 0), doc.get("status", DEFAULT_ESSAY_STATUS),
+                doc.get("main_spine_markdown", ""),
             )
             summary.essay_created = essay_inserted
             summary.essay_id = str(essay_id)
@@ -103,6 +147,10 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
                     summary.sections_created += 1
                 else:
                     summary.sections_updated += 1
+
+                section_keys = extract_nugget_keys(section.get("body_markdown", ""))
+                section_nugget_ids = [nugget_id_by_key[k] for k in section_keys]
+                _resync_section_nuggets(cur, section_id, section_nugget_ids)
 
                 for card in section["cards"]:
                     card_inserted = _upsert_flashcard(cur, essay_id, section_id, card)
@@ -116,6 +164,107 @@ def upsert_document(conn: Any, doc: dict[str, Any]) -> "IngestSummary":
         raise
 
     return summary
+
+
+# ── Nugget references (Sprint09_Nuggets) ─────────────────────────────────────
+
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+_NUGGET_REF_RE = re.compile(r"\[\[nugget:([a-zA-Z0-9_-]+)\]\]")
+
+
+def extract_nugget_keys(markdown_text: str) -> set[str]:
+    """
+    Returns the set of nugget keys referenced via `[[nugget:key]]` in
+    `markdown_text`. Fenced code blocks (```...```) and inline code spans
+    (`...`) are stripped FIRST with a regex pass, so a reference written
+    inside either is never captured — a pragmatic, regex-based mirror of the
+    code-safety guarantee the frontend gets for free from operating on a
+    parsed Markdown AST (see remarkNuggetRefs, src/ShellEntry.tsx). The
+    capture character class matches SLUG_LIKE_RE exactly
+    ([a-zA-Z0-9_-]+), so any valid nugget_key (mixed case included) is
+    referenceable. Resolution against a captured key remains exact-match/
+    case-sensitive — only the accepted character set is widened here, not
+    the comparison semantics.
+    """
+    stripped = _FENCED_CODE_RE.sub("", markdown_text)
+    stripped = _INLINE_CODE_RE.sub("", stripped)
+    return set(_NUGGET_REF_RE.findall(stripped))
+
+
+def _resolve_nugget_references(cur: Any, keys: set[str]) -> dict[str, str]:
+    """
+    Resolves `keys` against essaycards.nuggets in one query. Raises
+    IngestionError naming EVERY unresolved key at once (not just the first)
+    if any is missing — never auto-creates a placeholder nugget. Returns
+    dict[nugget_key, nugget_id] for every key on success. Called once at the
+    start of upsert_document, before any write.
+    """
+    if not keys:
+        return {}
+
+    cur.execute(
+        "select id, nugget_key from essaycards.nuggets where nugget_key = any(%s)",
+        (list(keys),),
+    )
+    nugget_id_by_key = {row["nugget_key"]: row["id"] for row in cur.fetchall()}
+
+    missing = sorted(keys - nugget_id_by_key.keys())
+    if missing:
+        raise IngestionError(
+            "Unresolved nugget reference(s): " + ", ".join(f"[[nugget:{k}]]" for k in missing)
+        )
+
+    return nugget_id_by_key
+
+
+def _resync_section_nuggets(cur: Any, section_id: str, nugget_ids: list[str]) -> None:
+    """
+    Fully resyncs essaycards.section_nuggets for `section_id` to exactly
+    `nugget_ids` — inserts missing associations, deletes stale ones. Never
+    touches a nuggets row or a flashcards row. The `not (... = any(empty
+    array))` form of the DELETE correctly clears every existing association
+    when the section now references zero nuggets.
+    """
+    cur.execute(
+        """
+        insert into essaycards.section_nuggets (section_id, nugget_id)
+        select %s, unnest(%s::uuid[])
+        on conflict (section_id, nugget_id) do nothing
+        """,
+        (section_id, nugget_ids),
+    )
+    cur.execute(
+        """
+        delete from essaycards.section_nuggets
+        where section_id = %s and not (nugget_id = any(%s::uuid[]))
+        """,
+        (section_id, nugget_ids),
+    )
+
+
+def _upsert_nugget(cur: Any, nugget: dict[str, Any]) -> bool:
+    """
+    Upsert-by-nugget_key, same SQL as POST /nuggets/upsert
+    (backend/routers/nuggets.py) — kept as a separate literal statement rather
+    than a shared function because the two call sites validate their input
+    independently (this one already trusts a doc validated by
+    _validate_ingest_body or the (currently nugget-less) markdown parser) and
+    return different shapes. Returns True if inserted, False if updated.
+    """
+    cur.execute(
+        """
+        insert into essaycards.nuggets (nugget_key, title, body_markdown)
+        values (%s, %s, %s)
+        on conflict (nugget_key) do update
+            set title         = excluded.title,
+                body_markdown = excluded.body_markdown,
+                updated_at    = now()
+        returning (xmax = 0) as was_inserted
+        """,
+        (nugget["nugget_key"], nugget["title"], nugget.get("body_markdown", "")),
+    )
+    return cur.fetchone()["was_inserted"]
 
 
 # ── Front matter ──────────────────────────────────────────────────────────────
@@ -338,21 +487,23 @@ def _parse_document(text: str) -> dict[str, Any]:
 # ── DB upserts ──────────────────────────────────────────────────────────────────
 
 def _upsert_essay(
-    cur: Any, title: str, slug: str, category: str | None, sort_index: int, status: str
+    cur: Any, title: str, slug: str, category: str | None, sort_index: int, status: str,
+    main_spine_markdown: str = "",
 ) -> tuple[str, bool]:
     cur.execute(
         """
-        insert into essaycards.essays (title, slug, category, sort_index, status)
-        values (%s, %s, %s, %s, %s)
+        insert into essaycards.essays (title, slug, category, sort_index, status, main_spine_markdown)
+        values (%s, %s, %s, %s, %s, %s)
         on conflict (slug) do update
-            set title      = excluded.title,
-                category   = excluded.category,
-                sort_index = excluded.sort_index,
-                status     = excluded.status,
-                updated_at = now()
+            set title               = excluded.title,
+                category            = excluded.category,
+                sort_index          = excluded.sort_index,
+                status              = excluded.status,
+                main_spine_markdown = excluded.main_spine_markdown,
+                updated_at          = now()
         returning id, (xmax = 0) as was_inserted
         """,
-        (title, slug, category, sort_index, status),
+        (title, slug, category, sort_index, status, main_spine_markdown),
     )
     row = cur.fetchone()
     return row["id"], row["was_inserted"]

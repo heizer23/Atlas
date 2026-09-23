@@ -1,0 +1,428 @@
+{
+  "sprint_note": "Adds essaycards.nuggets + essaycards.section_nuggets, a new backend/routers/nuggets.py (7 endpoints), extends backend/ingest.py (extract_nugget_keys, promoted SLUG_LIKE_RE, nugget-reference validation + section_nuggets resync inside upsert_document, main_spine_markdown), extends backend/routers/essays.py (main_spine_markdown, per-section nugget pairs, section-export nugget context), extends backend/routers/flashcards.py (card.nugget_id tri-state, due/export rows gain nugget_id), extends backend/exploration.py (nugget-sourced context) and backend/examinations.py (nugget_versions echo-through + a pure freshness helper), and extends src/ShellEntry.tsx with nugget rendering/navigation and three new ChatGPT round trips. NOTE: 00_architecture/architecture.json and scaffolding.json (the repo's seed baseline) predate Sprints 03/06/07/08 (images, exploration, examinations, roadmap, question levels) and are too stale to seed this sprint's artifacts from without misrepresenting five sprints of live functionality as either absent or new — see 10_architecture.json §risks. This file therefore describes the full accurate current + this-sprint file set directly, using per-file \"change\" markers for what this sprint touches, rather than diffing against that stale seed.",
+  "component_name": "essaycards",
+  "target_root": "03_Application/EssayCards",
+  "directories": [
+    "03_Application/EssayCards",
+    "03_Application/EssayCards/backend",
+    "03_Application/EssayCards/backend/routers",
+    "03_Application/EssayCards/src",
+    "03_Application/EssayCards/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/EssayCards/backend/ingest.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Markdown ingestion CLI plus the shared upsert core. This sprint: promotes SLUG_LIKE_RE (from essays.py's private copy) to a public module constant; adds extract_nugget_keys(); extends upsert_document with a new first step (nugget-reference resolution against essaycards.nuggets, raising IngestionError naming every missing key) and a per-section section_nuggets resync step; extends _upsert_essay to read/write main_spine_markdown. _parse_front_matter is UNCHANGED (no main_spine_markdown front-matter key this sprint).",
+      "public_objects": [
+        {"kind": "constant", "name": "VALID_ESSAY_STATUSES", "pattern": "constant", "purpose": "Unchanged."},
+        {"kind": "constant", "name": "DEFAULT_ESSAY_STATUS", "pattern": "constant", "purpose": "Unchanged."},
+        {"kind": "constant", "name": "SLUG_LIKE_RE", "pattern": "constant", "purpose": "[NEW] Compiled ^[a-zA-Z0-9_-]+$ — promoted from essays.py's private _SLUG_LIKE_RE (R-CON-BP-07, one canonical definition). Used for slug/anchor_slug/card-id validation (essays.py) and nugget_key validation (nuggets.py)."},
+        {"kind": "class", "name": "IngestionError", "pattern": "data_model", "methods": [], "purpose": "Unchanged. Now also raised by upsert_document's new nugget-resolution step, not only by markdown parsing functions."},
+        {
+          "kind": "function", "name": "ingest", "pattern": "service",
+          "methods": [{"name": "ingest", "visibility": "public", "args": ["path: str", "conn"], "returns": "IngestSummary", "purpose": "Unchanged signature/behavior — delegates to _parse_document then upsert_document."}]
+        },
+        {
+          "kind": "function", "name": "upsert_document", "pattern": "service",
+          "methods": [{"name": "upsert_document", "visibility": "public", "args": ["conn", "doc: dict"], "returns": "IngestSummary", "purpose": "[CHANGED] Now: (1) resolves every [[nugget:key]] reference across doc.get('main_spine_markdown','') and every section's body_markdown against essaycards.nuggets BEFORE any write, raising IngestionError naming all missing keys at once; (2) upserts the essay including main_spine_markdown; (3) per section, after _upsert_section, resyncs essaycards.section_nuggets to that section's current references."}]
+        },
+        {"kind": "class", "name": "IngestSummary", "pattern": "data_model", "methods": [], "purpose": "Unchanged fields."},
+        {
+          "kind": "function", "name": "extract_nugget_keys", "pattern": "validator",
+          "methods": [{"name": "extract_nugget_keys", "visibility": "public", "args": ["markdown_text: str"], "returns": "set[str]", "purpose": "[NEW] Strip fenced code blocks and inline code spans with a regex pass, then match \\[\\[nugget:([a-zA-Z0-9_-]+)\\]\\] on the remainder; return the set of referenced keys. Character class matches SLUG_LIKE_RE exactly (11_design_review.md Minimal Change Set item 1)."}]
+        }
+      ],
+      "private_objects": [
+        {"kind": "function", "name": "_parse_front_matter", "purpose": "Unchanged — no main_spine_markdown key added to the markdown-CLI grammar this sprint."},
+        {"kind": "function", "name": "_split_sections", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_split_body_and_cards", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_parse_cards_yaml", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_validate_uniqueness", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_upsert_essay", "purpose": "[CHANGED] Signature gains main_spine_markdown; INSERT and ON CONFLICT DO UPDATE SET both include it."},
+        {"kind": "function", "name": "_upsert_section", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_upsert_flashcard", "purpose": "Unchanged — nugget_id is never touched by ingestion (set exclusively by POST /flashcards/upsert)."},
+        {"kind": "function", "name": "_resolve_nugget_references", "purpose": "[NEW] Given cur and the union of referenced keys, SELECT id, nugget_key FROM essaycards.nuggets WHERE nugget_key = any(%s); raise IngestionError naming every unresolved key if any; else return dict[key, id]. Called once at the start of upsert_document (internal_flow step 2)."},
+        {"kind": "function", "name": "_resync_section_nuggets", "purpose": "[NEW] Given cur, section_id, and that section's resolved nugget ids: INSERT ... SELECT %s, unnest(%s::uuid[]) ON CONFLICT (section_id, nugget_id) DO NOTHING, then DELETE ... WHERE section_id = %s AND NOT (nugget_id = any(%s::uuid[])). Called once per section in the upsert_document loop (internal_flow step 4)."}
+      ],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/essays.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] GET /essays, GET /essays/{id}, GET /essays/{id}/questions, GET /essays/{id}/export, GET /essays/{id}/sections/{section_id}/export, POST /essays/ingest. This sprint: imports SLUG_LIKE_RE from backend.ingest instead of defining it locally; main_spine_markdown added to ingest payload/detail/export; every section-bearing read gains light {nugget_key, title} pairs via a new shared helper; export_section additionally gains main_spine_markdown and focus_section_nuggets (full body); ingest_essay now catches IngestionError from upsert_document. Correction round (11_design_review.md): get_essay/export_essay/export_section additionally gain a top-level main_spine_nuggets field (nuggets referenced only in main_spine_markdown, resolved via a new _main_spine_nuggets helper, independent of section co-reference — Minimal Change Set item 2); list_essay_questions rows gain nugget_id, feeding QuestionOverviewView's new edit-form nugget control (Minimal Change Set item 3).",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "purpose": "Unchanged — APIRouter(prefix='/essays', tags=['essays'])."}
+      ],
+      "private_objects": [
+        {"kind": "constant", "name": "ESSAY_SCHEMA", "purpose": "Unchanged column list — main_spine_markdown and main_spine_nuggets are embedded on the row like `sections`, not added as ColumnSchema entries (same precedent; main_spine_nuggets added 11_design_review.md Minimal Change Set item 2)."},
+        {"kind": "constant", "name": "ESSAY_OVERVIEW_SCHEMA", "purpose": "Unchanged."},
+        {"kind": "constant", "name": "QUESTION_SCHEMA", "purpose": "[CHANGED] Gains a nugget_id ColumnSchema entry (nullable, the card's current nugget assignment) — section_nuggets remains embedded on the row like the existing section_* fields, not a ColumnSchema entry (11_design_review.md Minimal Change Set item 3)."},
+        {"kind": "function", "name": "_row_to_dict", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_section_row_to_dict", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_dataset_response", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_nuggets_by_section", "purpose": "[NEW] Given cur and a list of section ids, JOIN section_nuggets to nuggets (ORDER BY nugget title asc), return dict[section_id, list[{nugget_key, title}]]. Reused by get_essay, export_essay, export_section, and list_essay_questions — the join SQL exists in exactly one place."},
+        {"kind": "function", "name": "_main_spine_nuggets", "purpose": "[NEW] Given cur and a main_spine_markdown string: extract_nugget_keys(main_spine_markdown) (imported from backend.ingest) resolved against essaycards.nuggets (same join shape as _nuggets_by_section, ORDER BY title asc), independent of section co-reference. Returns list[{nugget_key, title}]. Reused by get_essay, export_essay, and export_section to attach a top-level main_spine_nuggets field (11_design_review.md Minimal Change Set item 2 / Hard Rule Violation 1)."},
+        {"kind": "function", "name": "_validate_ingest_body", "purpose": "[CHANGED] Gains optional top-level main_spine_markdown (string, default '', not stripped — same verbatim convention as body_markdown)."},
+        {"kind": "function", "name": "_check_card_section_collisions", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_ordered_sections_with_cards", "purpose": "[CHANGED] Each returned section dict gains nuggets: [{nugget_key, title}] via _nuggets_by_section."}
+      ],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/flashcards.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] GET /flashcards/due, GET /flashcards/stats, POST /flashcards/upsert, GET /flashcards/{id}/export, POST /flashcards/{id}/review. This sprint: DUE_SCHEMA and the due-row query gain nugget_id; POST /upsert's card gains tri-state nugget_id (omit/null/value); GET /{id}/export's package gains nugget_id.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "purpose": "Unchanged."}
+      ],
+      "private_objects": [
+        {"kind": "constant", "name": "DUE_SCHEMA", "purpose": "[CHANGED] Gains a nugget_id column (type string, nullable)."},
+        {"kind": "constant", "name": "STATS_SCHEMA", "purpose": "Unchanged."},
+        {"kind": "constant", "name": "STATS_BUCKETS", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_due_row_to_dict", "purpose": "[CHANGED] Passes through nugget_id (str or None)."},
+        {"kind": "function", "name": "_dataset_response", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_due_dataset", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_validate_upsert_body", "purpose": "[CHANGED] Reads card_raw.get('nugget_id', _UNSET) to distinguish omitted from present; validates a present non-null value is a non-empty, well-formed-uuid string."},
+        {"kind": "constant", "name": "_UNSET", "purpose": "[NEW] Sentinel object distinguishing 'key absent' from 'key present as null' for card.nugget_id (R-CON-AL-04)."},
+        {"kind": "function", "name": "_new_card_key", "purpose": "Unchanged."},
+        {"kind": "function", "name": "_upsert_question", "purpose": "[CHANGED] Gains touch_nugget_id/nugget_id params; if touched and non-null, resolves against essaycards.nuggets (VALIDATION_ERROR if unresolved); single INSERT ... ON CONFLICT DO UPDATE whose nugget_id SET clause is `case when %s then %s else essaycards.flashcards.nugget_id end`."},
+        {"kind": "function", "name": "_parse_review_grade", "purpose": "Unchanged."}
+      ],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/nuggets.py",
+      "stub_kind": "python_module",
+      "role": "[NEW] The nuggets router: GET '' (list), GET '/{id}' (detail), POST '/upsert', GET '/{id}/flashcards', GET '/{id}/sections', GET '/authoring-package', GET '/{id}/generate-flashcards-package'. Module docstring states the R-CON-BP-04 exemption for the two bespoke-JSON package endpoints (same rationale class as backend/routers/examinations.py's export endpoint) AND states that '/authoring-package' must be registered before GET '/{id}' (both are single literal-vs-param path segments; registering '/{id}' first would shadow '/authoring-package', matching it as id='authoring-package') — same registration-order concern already documented in backend/routers/flashcards.py for '/due'/'/stats'/'/upsert' before '/{flashcard_id}/...'.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "purpose": "APIRouter(prefix='/nuggets', tags=['nuggets']) — included by main.py under /api/essaycards. Carries all seven endpoints listed in the role above."}
+      ],
+      "private_objects": [
+        {"kind": "constant", "name": "NUGGET_LIST_SCHEMA", "purpose": "ColumnSchema list for GET /nuggets: nugget_key, title, created_at, updated_at."},
+        {"kind": "constant", "name": "NUGGET_DETAIL_SCHEMA", "purpose": "NUGGET_LIST_SCHEMA plus body_markdown (detail_visible=True)."},
+        {"kind": "constant", "name": "NUGGET_FLASHCARDS_SCHEMA", "purpose": "ColumnSchema list for GET /nuggets/{id}/flashcards: card_key, question, answer, level, essay_id, section_id."},
+        {"kind": "constant", "name": "NUGGET_SECTIONS_SCHEMA", "purpose": "ColumnSchema list for GET /nuggets/{id}/sections: heading, anchor_slug, order_index, essay_title, essay_slug."},
+        {"kind": "function", "name": "_row_to_dict", "purpose": "essaycards.nuggets RealDictRow -> JSON-serializable dict with created_at/updated_at isoformat()."},
+        {"kind": "function", "name": "_dataset_response", "purpose": "Same pattern as essays.py/flashcards.py's private helper of the same name."},
+        {"kind": "function", "name": "_resolve_essay_and_section", "purpose": "Given cur, essay_id, section_id: 404 ApiError NOT_FOUND if essay_id does not exist or section_id does not belong to it; else returns (essay_row, section_row). Shared by GET /authoring-package and GET /{id}/generate-flashcards-package."}
+      ],
+      "change": "new"
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/examinations.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged this sprint — no route signature or handler-level SQL changes; the new per-section nugget_versions field and the optional import-time nugget_versions echo are entirely inside backend/examinations.py's helper functions, which this router already calls unchanged.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "purpose": "Unchanged."}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/backend/examinations.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] build_export_package / validate_import_body / import_results behind routers/examinations.py. This sprint: per-section nugget_versions on export; optional per-result nugget_versions accepted and echoed verbatim into the new nugget_versions_at column on import; new pure nugget_freshness_flags helper (not wired to any endpoint).",
+      "public_objects": [
+        {
+          "kind": "function", "name": "build_export_package", "pattern": "service",
+          "methods": [{"name": "build_export_package", "visibility": "public", "args": ["cur", "essay_id: str"], "returns": "dict | None", "purpose": "[CHANGED] Each section dict gains nugget_versions: {nugget_key: live nuggets.updated_at ISO8601} for that section's currently-referenced nuggets, alongside the existing section_version."}]
+        },
+        {
+          "kind": "function", "name": "validate_import_body", "pattern": "validator",
+          "methods": [{"name": "validate_import_body", "visibility": "public", "args": ["body"], "returns": "tuple[list[dict] | None, Any]", "purpose": "[CHANGED] Each result accepts an optional nugget_versions (dict[str,str] or absent/null); if present and not null, every value must be a non-empty string."}]
+        },
+        {
+          "kind": "function", "name": "import_results", "pattern": "service",
+          "methods": [{"name": "import_results", "visibility": "public", "args": ["cur", "results: list[dict]"], "returns": "tuple[list[dict] | None, Any]", "purpose": "[CHANGED] INSERT gains nugget_versions_at, stored verbatim (json-adapted) from each result's nugget_versions, or SQL null if absent."}]
+        },
+        {
+          "kind": "function", "name": "nugget_freshness_flags", "pattern": "validator",
+          "methods": [{"name": "nugget_freshness_flags", "visibility": "public", "args": ["recorded: dict[str, str] | None", "current: dict[str, str]"], "returns": "list[str]", "purpose": "[NEW] recorded is None -> [] (predates feature, skip). Else: every key in current missing from recorded, or whose recorded value differs from current[key], is included (sorted). Pure — no DB access. Not called by any endpoint or UI this sprint (see 10_architecture.json deferred_decisions)."}]
+        }
+      ],
+      "private_objects": [
+        {"kind": "function", "name": "_parse_timestamp", "purpose": "Unchanged."}
+      ],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/backend/exploration.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] build_exploration_package / validate_import_body / resolve_and_plan / execute_plan behind routers/exploration.py. This sprint: build_exploration_package's context shape branches on the flashcard's nugget_id.",
+      "public_objects": [
+        {
+          "kind": "function", "name": "build_exploration_package", "pattern": "service",
+          "methods": [{"name": "build_exploration_package", "visibility": "public", "args": ["cur", "flashcard_id: str"], "returns": "dict | None", "purpose": "[CHANGED] If the flashcard's nugget_id is set, context = {nugget_body_markdown, nugget_key, nugget_title} (JOIN essaycards.nuggets) INSTEAD OF {section_body_markdown} — a replacement, not an addition. Unchanged for nugget_id null."}]
+        },
+        {"kind": "function", "name": "validate_import_body", "pattern": "validator", "methods": [], "purpose": "Unchanged."},
+        {"kind": "function", "name": "resolve_and_plan", "pattern": "service", "methods": [], "purpose": "Unchanged."},
+        {"kind": "function", "name": "execute_plan", "pattern": "service", "methods": [], "purpose": "Unchanged."},
+        {"kind": "function", "name": "plan_to_public", "pattern": "mapper", "methods": [], "purpose": "Unchanged."}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/backend/routers/exploration.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged this sprint — no route signature changes; the context-shape branch is entirely inside backend/exploration.py::build_exploration_package.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "purpose": "Unchanged."}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] FastAPI application entry point. This sprint: import backend.routers.nuggets and add app.include_router(nuggets.router, prefix='/api/essaycards') alongside the existing essays / flashcards / exploration / examinations / images includes.",
+      "public_objects": [
+        {"kind": "constant", "name": "app", "pattern": "fastapi_app", "purpose": "FastAPI instance; on startup calls init_pool() then init_schema(). Router set gains nuggets.router this sprint."}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/schema.sql",
+      "stub_kind": "sql",
+      "role": "[CHANGED] Canonical runtime schema DDL, loaded idempotently at startup and by tests/conftest.py. This sprint: fold Sprint09_Nuggets/10_schema.sql verbatim (essaycards.nuggets, essaycards.section_nuggets, ix_nuggets_created_at, ix_section_nuggets_nugget_id, flashcards.nugget_id + its partial index, essays.main_spine_markdown, section_examinations.nugget_versions_at) before the closing commit.",
+      "public_objects": [],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/pyproject.toml",
+      "stub_kind": "config",
+      "role": "Unchanged this sprint — no new Python dependency.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/CLAUDE.md",
+      "stub_kind": "doc",
+      "role": "[CHANGED] App-local guidance. This sprint: add a 'Nuggets' Glossary entry (nugget / section_nuggets / [[nugget:key]] / nugget_key), a Sprint scope line for Sprint09, and a 'Known gap' bullet for the flashcards.nugget_id ownership/cascade limitation (same style as the existing no-paragraph-linkage / images-not-backed-up bullets).",
+      "public_objects": [],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/src/ShellEntry.tsx",
+      "stub_kind": "tsx_module",
+      "role": "[CHANGED] React entry point (single-file, ~2960 lines pre-sprint). This sprint: (1) remarkNuggetRefs plugin + NuggetLink component + NuggetPanel overlay (recursive id-stack, never a route change); (2) ReaderView renders main_spine_markdown and section body_markdown through ReactMarkdown+remarkNuggetRefs (main-spine titleMap = client-side union of every section's nuggets field AND the essay's own main_spine_nuggets field, so a main-spine-only reference resolves to a title — 11_design_review.md Minimal Change Set item 2), opens NuggetPanel on a resolved nugget link instead of navigating; (3) ReviewSessionView's source-nav branches on current.nugget_id — set opens NuggetPanel via a new 'Flashcard -> Nugget' control, null keeps the unchanged 'Jump to passage' navigate(); (4) extractNuggetKeysClient helper + section-export drop-detection wiring in ReaderView.handleExportSection (stash) and IngestView (read/compare/warn banner, never blocks submit); (5) new nugget-authoring export/import views (GET /nuggets/authoring-package -> POST /nuggets/upsert); (6) new generate-flashcards-from-nugget export/import view (GET /nuggets/{id}/generate-flashcards-package -> N sequential POST /flashcards/upsert calls); (7) ExplorationPackage type + EXPLORE_PROMPT_INTRO/buildExploreClipboardText branch on context.section_body_markdown vs context.nugget_body_markdown; (8) SectionExportPackage/EssayExportPackage/EssayDetailRow/SectionRow/QuestionRow/DueCardRow/QuestionExportPackage TS types extended with the new fields (main_spine_markdown, main_spine_nuggets, nuggets, focus_section_nuggets, section_nuggets, nugget_id); (9) QuestionOverviewView's per-question edit form gains a nugget <select> control (options fetched once per view mount from GET /nuggets, plus a 'No nugget' entry, initialized from the row's nugget_id) whose Save always sends card.nugget_id explicitly (chosen id or null, never omitted) in the existing POST /flashcards/upsert call — completes the R-CON-AL-05 round trip for manually assigning/unlinking a nugget on an existing card (11_design_review.md Hard Rule Violation 2 / Minimal Change Set item 3).",
+      "public_objects": [
+        {"kind": "function", "name": "default", "pattern": "react_component", "methods": [], "purpose": "Default export: Routes wiring for essay list, reader, question overview, question import, review session, ingest, examinations import, explore import, images, and [NEW] nugget-authoring-import (/essaycards/nuggets/import) and generate-flashcards-import (/essaycards/nuggets/generate-flashcards/import) routes. Internal view/helper components (EssayListView, ReaderView, ReviewSessionView, IngestView, QuestionOverviewView, ImagesView, [NEW] NuggetPanel, NuggetLink, remarkNuggetRefs, extractNuggetKeysClient, [NEW] NuggetAuthoringImportView, [NEW] GenerateFlashcardsImportView) are not individually enumerated, per this scaffold's existing convention (see Sprint03_Images/10_scaffolding.json)."}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/src/shellConfig.ts",
+      "stub_kind": "ts_module",
+      "role": "Unchanged this sprint — the new nugget views are reached from ReaderView/NuggetPanel buttons and their own /essaycards/nuggets/... routes, not new top-level nav entries (same precedent as the Sprint03_Images Images view).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/package.json",
+      "stub_kind": "config",
+      "role": "[CHANGED] Add unist-util-visit (^5.1.0) to dependencies as an explicit direct dependency (already present transitively via react-markdown's remark chain; used only by src/ShellEntry.tsx's remarkNuggetRefs). No other dependency change.",
+      "public_objects": [],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged — empty package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/conftest.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] clean_tables gains essaycards.nuggets in its truncate list (no FK to essays, so `truncate essays, images cascade` does not clear it; section_nuggets is cascade-cleared transitively via either essay_sections or nuggets once nuggets is included).",
+      "public_objects": [
+        {"kind": "function", "name": "db_conn", "pattern": "pytest_fixture", "methods": [], "purpose": "Unchanged."},
+        {"kind": "function", "name": "setup_schema", "pattern": "pytest_fixture", "methods": [], "purpose": "Unchanged."},
+        {"kind": "function", "name": "clean_tables", "pattern": "pytest_fixture", "methods": [], "purpose": "[CHANGED] `truncate essaycards.essays, essaycards.images, essaycards.nuggets cascade`, then reload tests/fixtures.sql."},
+        {"kind": "function", "name": "app", "pattern": "pytest_fixture", "methods": [], "purpose": "Unchanged."},
+        {"kind": "function", "name": "client", "pattern": "pytest_fixture", "methods": [], "purpose": "Unchanged."}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/fixtures.sql",
+      "stub_kind": "sql",
+      "role": "[CHANGED] Add a compact nugget fixture set (ids/keys prefixed fix-nugget-): at least two nuggets, one referenced by two different fixture sections (reuse-without-duplication + GET /nuggets/{id}/sections multi-row), consistent section_nuggets rows, and one fixture flashcard with nugget_id set (for GET /nuggets/{id}/flashcards, the due-row/export nugget_id field, and the exploration-package branch). Existing essay/section/flashcard fixtures are unchanged. Correction round (11_design_review.md): add one fixture nugget referenced ONLY in a fixture essay's main_spine_markdown, not in any of that essay's fixture sections (Minimal Change Set item 2), and one fixture nugget whose nugget_key contains an uppercase letter, referenced by matching case in a fixture section's body_markdown (Minimal Change Set item 1).",
+      "public_objects": [],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_nuggets.py",
+      "stub_kind": "python_module",
+      "role": "[NEW] Pytest tests (HTTP level via the TestClient) for the nuggets router and its DB-level behavior.",
+      "public_objects": [
+        {"kind": "function", "name": "test_list_nuggets_returns_dataset_ordered_by_title", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: List nuggets returns a Dataset ordered by title"},
+        {"kind": "function", "name": "test_list_nuggets_empty_is_valid", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: List nuggets with none created returns an empty Dataset"},
+        {"kind": "function", "name": "test_nugget_detail_includes_body_markdown", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget detail includes body_markdown"},
+        {"kind": "function", "name": "test_nugget_detail_not_found", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget detail for an unknown id returns 404"},
+        {"kind": "function", "name": "test_nugget_upsert_creates_then_updates_by_key", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget upsert creates a nugget, then updating by the same key changes title/body but not id or key"},
+        {"kind": "function", "name": "test_nugget_upsert_rejects_missing_key_or_title", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget upsert rejects a missing/blank nugget_key or title"},
+        {"kind": "function", "name": "test_nugget_upsert_rejects_key_violating_slug_pattern", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget upsert rejects a nugget_key that does not match SLUG_LIKE_RE"},
+        {"kind": "function", "name": "test_nugget_flashcards_lists_linked_cards_no_scheduling_fields", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget flashcards list carries no scheduling fields"},
+        {"kind": "function", "name": "test_nugget_flashcards_not_found", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget flashcards for an unknown nugget id returns 404"},
+        {"kind": "function", "name": "test_nugget_sections_lists_multiple_referencing_sections", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget sections lists every section referencing a shared nugget, across two essays"},
+        {"kind": "function", "name": "test_nugget_sections_not_found", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Nugget sections for an unknown nugget id returns 404"},
+        {"kind": "function", "name": "test_authoring_package_existing_nugget_includes_connected_nuggets", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Authoring package for an existing nugget includes its resolved connected nuggets"},
+        {"kind": "function", "name": "test_authoring_package_new_nugget_has_null_nugget_and_empty_connected", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Authoring package with nugget_id omitted returns nugget: null and connected_nuggets: []"},
+        {"kind": "function", "name": "test_authoring_package_unresolvable_context_returns_404", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Authoring package with an unknown essay_id, section_id, or nugget_id returns 404"},
+        {"kind": "function", "name": "test_generate_flashcards_package_includes_existing_flashcards", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Generate-flashcards package includes the nugget's current flashcards"},
+        {"kind": "function", "name": "test_generate_flashcards_package_unresolvable_context_returns_404", "pattern": "pytest_test", "methods": [], "purpose": "Scenario: Generate-flashcards package with an unknown nugget/essay/section returns 404"}
+      ],
+      "private_objects": [],
+      "change": "new"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_ingest.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Pytest tests calling backend.ingest.ingest()/upsert_document directly. This sprint: adds nugget-reference resolution and extract_nugget_keys coverage.",
+      "public_objects": [
+        {"kind": "function", "name": "test_ingest_creates_essay_sections_and_cards", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_reingest_preserves_review_state", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_reingest_updates_changed_text_only", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_missing_anchor_rejected", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_malformed_flashcards_yaml_rejected", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_multiple_flashcards_blocks_rejected", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_duplicate_card_key_rejected", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_extract_nugget_keys_strips_fences_and_inline_code", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: extract_nugget_keys ignores references inside fenced code blocks and inline code spans"},
+        {"kind": "function", "name": "test_extract_nugget_keys_captures_mixed_case_key", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Markdown reference resolves a mixed-case nugget_key (11_design_review.md Minimal Change Set item 1) — extract_nugget_keys captures a key containing an uppercase letter"},
+        {"kind": "function", "name": "test_ingest_markdown_resolves_existing_nugget_reference", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Markdown ingest with a resolvable [[nugget:key]] reference succeeds and resyncs section_nuggets"},
+        {"kind": "function", "name": "test_ingest_markdown_unresolved_nugget_reference_rejected_writes_nothing", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Markdown ingest referencing an unknown nugget key aborts with every missing key named, no rows written"},
+        {"kind": "function", "name": "test_reingest_dropping_nugget_reference_removes_only_the_association", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Re-ingesting a section whose body no longer references a nugget deletes exactly that section_nuggets row, not the nuggets row"},
+        {"kind": "function", "name": "test_ingest_markdown_resolves_mixed_case_nugget_reference", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Markdown ingest with a [[nugget:key]] reference whose key contains an uppercase letter, matching an existing mixed-case nugget_key, resolves and resyncs section_nuggets (11_design_review.md Minimal Change Set item 1)"}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_ingest_endpoint.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Pytest tests for POST /api/essaycards/essays/ingest (HTTP level). This sprint: adds main_spine_markdown round-trip and the JSON-path nugget-reference validation scenario (unifies with test_ingest.py's markdown-path scenario).",
+      "public_objects": [
+        {"kind": "function", "name": "test_ingest_json_creates_new_essay", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_upserts_onto_existing_essay_preserves_review_state", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_order_index_follows_payload_array_order", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_malformed_payload_writes_nothing", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_duplicate_anchor_slug_in_payload", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_duplicate_card_id_in_payload", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_card_id_collision_with_different_existing_section", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_unparsable_json_body", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_missing_required_top_level_field", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_rejects_empty_sections_array", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_ingest_json_round_trips_main_spine_markdown", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Ingest with main_spine_markdown persists it and GET /essays/{id} returns it back"},
+        {"kind": "function", "name": "test_ingest_json_unresolved_nugget_reference_returns_validation_error", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: JSON ingest referencing an unknown nugget key returns VALIDATION_ERROR naming the missing key, no rows written"}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_essays.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Pytest tests for GET /essays, GET /essays/{id}, GET /essays/{id}/questions, GET /essays/{id}/export, GET /essays/{id}/sections/{section_id}/export. This sprint: adds per-section nuggets/section_nuggets field coverage and the export_section nugget-context fields.",
+      "public_objects": [
+        {"kind": "function", "name": "test_list_essays_returns_dataset", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_list_essays_empty", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_essay_detail_returns_ordered_sections", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_essay_detail_not_found", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_essay_detail_sections_carry_referenced_nuggets", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Essay detail's embedded sections carry their referenced nuggets as {nugget_key, title} pairs"},
+        {"kind": "function", "name": "test_questions_rows_carry_section_nuggets", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Question overview rows carry their section's referenced nuggets"},
+        {"kind": "function", "name": "test_questions_rows_carry_nugget_id", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Question overview rows carry each card's current nugget_id (null for an unlinked fixture card, set for a nugget-linked one) (11_design_review.md Minimal Change Set item 3)"},
+        {"kind": "function", "name": "test_export_section_includes_main_spine_and_focus_section_nuggets", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Section export includes the essay's main spine and the focus section's full-body nugget context"},
+        {"kind": "function", "name": "test_essay_detail_main_spine_nuggets_resolves_main_spine_only_reference", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Essay detail's main_spine_nuggets resolves a main-spine-only reference (11_design_review.md Hard Rule Violation 1 / Minimal Change Set item 2) — a nugget referenced only in main_spine_markdown, not in any section, still appears with its title"},
+        {"kind": "function", "name": "test_essay_export_and_section_export_carry_main_spine_nuggets", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Essay export and section export both carry top-level main_spine_nuggets, including a main-spine-only reference"}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_flashcards.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Pytest tests for GET /flashcards/due, GET /flashcards/stats, POST /flashcards/upsert, POST /flashcards/{id}/review. This sprint: adds the nugget_id tri-state scenarios and the due-row nugget_id field.",
+      "public_objects": [
+        {"kind": "function", "name": "test_due_no_params_returns_system_wide", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_due_scoped_to_essay", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_due_scoped_to_section", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_due_section_without_essay_rejected", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_due_excludes_not_yet_due_cards", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_due_empty_result", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_review_again_schedules_five_seconds", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_review_good_first_time_uses_floor", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_review_good_repeat_uses_doubled_elapsed", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_review_invalid_grade_rejected", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_review_unknown_flashcard_not_found", "pattern": "pytest_test", "methods": [], "purpose": "Unchanged scenario."},
+        {"kind": "function", "name": "test_due_rows_carry_nugget_id", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Due rows carry nugget_id (null for a legacy card, set for a nugget-linked fixture card)"},
+        {"kind": "function", "name": "test_upsert_omitted_nugget_id_leaves_existing_assignment_untouched", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Upsert with card.nugget_id omitted leaves an existing assignment untouched"},
+        {"kind": "function", "name": "test_upsert_explicit_null_nugget_id_clears_assignment", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Upsert with card.nugget_id explicit null clears an existing assignment"},
+        {"kind": "function", "name": "test_upsert_valid_nugget_id_sets_assignment", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Upsert with a resolvable card.nugget_id sets the assignment"},
+        {"kind": "function", "name": "test_upsert_unresolvable_nugget_id_rejected_assignment_unchanged", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Upsert with a card.nugget_id that does not resolve is rejected VALIDATION_ERROR and the card's prior nugget_id is unchanged"},
+        {"kind": "function", "name": "test_export_question_includes_nugget_id", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Single-question export includes nugget_id"}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_examinations.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Pytest tests for the oral-examinations endpoints. This sprint: adds nugget_versions export/import-echo coverage and direct unit coverage of nugget_freshness_flags.",
+      "public_objects": [
+        {"kind": "function", "name": "test_examination_package_includes_nugget_versions_per_section", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Examination package's sections carry nugget_versions reflecting current nugget updated_at values"},
+        {"kind": "function", "name": "test_examination_import_stores_nugget_versions_verbatim", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Importing a result with nugget_versions stores it verbatim in nugget_versions_at"},
+        {"kind": "function", "name": "test_examination_import_without_nugget_versions_stores_null", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Importing a result with nugget_versions absent stores null in nugget_versions_at"},
+        {"kind": "function", "name": "test_nugget_freshness_flags_none_recorded_skips_check", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: nugget_freshness_flags returns [] when recorded is None"},
+        {"kind": "function", "name": "test_nugget_freshness_flags_detects_changed_and_missing_keys", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: nugget_freshness_flags flags a changed value and a key missing from recorded, and does not flag a matching key"}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_exploration.py",
+      "stub_kind": "python_module",
+      "role": "[CHANGED] Pytest tests for the flashcard-exploration endpoints. This sprint: adds the nugget-sourced context branch.",
+      "public_objects": [
+        {"kind": "function", "name": "test_exploration_package_nugget_linked_card_uses_nugget_context", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Exploration package for a nugget-linked card carries {nugget_body_markdown, nugget_key, nugget_title} and no section_body_markdown key"},
+        {"kind": "function", "name": "test_exploration_package_legacy_card_unchanged", "pattern": "pytest_test", "methods": [], "purpose": "[NEW] Scenario: Exploration package for a legacy (nugget_id null) card is unchanged (section_body_markdown context)"}
+      ],
+      "private_objects": [],
+      "change": "changed"
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_questions.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged this sprint — Sprint08 question-overview/upsert endpoint tests, not touched.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_scheduling.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged this sprint.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_images.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged this sprint.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_shell_proxy.py",
+      "stub_kind": "python_module",
+      "role": "Unchanged this sprint.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

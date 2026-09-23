@@ -71,9 +71,11 @@ def clean_tables(db_conn):
     Every test starts from the exact same known state defined in fixtures.sql.
     """
     with db_conn.cursor() as cur:
-        # essaycards.images has no FK to essays, so `truncate essays cascade`
-        # does not clear it — truncate it explicitly for test isolation.
-        cur.execute("truncate essaycards.essays, essaycards.images cascade")
+        # essaycards.images and essaycards.nuggets have no FK to essays, so
+        # `truncate essays cascade` does not clear either — truncate both
+        # explicitly for test isolation. essaycards.section_nuggets is
+        # cascade-cleared transitively via either essay_sections or nuggets.
+        cur.execute("truncate essaycards.essays, essaycards.images, essaycards.nuggets cascade")
 
     fixtures_path = os.path.join(os.path.dirname(__file__), "fixtures.sql")
     if os.path.exists(fixtures_path):

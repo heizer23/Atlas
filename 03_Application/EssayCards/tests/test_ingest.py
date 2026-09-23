@@ -10,9 +10,13 @@ import os
 
 import pytest
 
-from backend.ingest import IngestionError, ingest
+from backend.ingest import IngestionError, extract_nugget_keys, ingest
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures_md")
+
+# ── Fixture nugget IDs (tests/fixtures.sql) ───────────────────────────────────
+NUGGET_COGITO_ID = "ee000001-0000-0000-0000-000000000001"
+NUGGET_MIXEDCASE_ID = "ee000004-0000-0000-0000-000000000004"
 
 
 def _path(name: str) -> str:
@@ -221,3 +225,95 @@ def test_ingest_duplicate_anchor_slug_rejected(db_conn):
         ingest(_path("duplicate_anchor_slug.md"), db_conn)
 
     assert _essay_count(db_conn, "dup-anchor-essay") == 0
+
+
+# ── Nugget references (Sprint09_Nuggets) ─────────────────────────────────────
+
+def test_extract_nugget_keys_strips_fences_and_inline_code(db_conn):
+    text = (
+        "Real reference: [[nugget:real-key]].\n\n"
+        "```\n"
+        "Fenced reference (ignored): [[nugget:fenced-key]]\n"
+        "```\n\n"
+        "Inline reference (ignored): `[[nugget:inline-key]]` and another "
+        "real one: [[nugget:another-real-key]]."
+    )
+    assert extract_nugget_keys(text) == {"real-key", "another-real-key"}
+
+
+def test_extract_nugget_keys_captures_mixed_case_key(db_conn):
+    assert extract_nugget_keys("References [[nugget:fix-nugget-MixedCase]].") == {"fix-nugget-MixedCase"}
+
+
+def test_ingest_markdown_resolves_existing_nugget_reference(db_conn):
+    summary = ingest(_path("nugget_reference.md"), db_conn)
+    assert summary.essay_created is True
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select s.id from essaycards.essay_sections s "
+            "join essaycards.essays e on e.id = s.essay_id "
+            "where e.slug = 'nugget-reference-essay' and s.anchor_slug = 'only'"
+        )
+        section_id = cur.fetchone()["id"]
+        cur.execute(
+            "select 1 from essaycards.section_nuggets where section_id = %s and nugget_id = %s",
+            (section_id, NUGGET_COGITO_ID),
+        )
+        assert cur.fetchone() is not None
+
+
+def test_ingest_markdown_unresolved_nugget_reference_rejected_writes_nothing(db_conn):
+    with pytest.raises(IngestionError) as exc_info:
+        ingest(_path("nugget_reference_unresolved.md"), db_conn)
+
+    message = str(exc_info.value)
+    assert "does-not-exist" in message
+    assert "also-missing" in message
+    assert _essay_count(db_conn, "unresolved-nugget-essay") == 0
+
+
+def test_ingest_markdown_resolves_mixed_case_nugget_reference(db_conn):
+    ingest(_path("nugget_reference_mixed_case.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select s.id from essaycards.essay_sections s "
+            "join essaycards.essays e on e.id = s.essay_id "
+            "where e.slug = 'mixed-case-nugget-essay' and s.anchor_slug = 'only'"
+        )
+        section_id = cur.fetchone()["id"]
+        cur.execute(
+            "select 1 from essaycards.section_nuggets where section_id = %s and nugget_id = %s",
+            (section_id, NUGGET_MIXEDCASE_ID),
+        )
+        assert cur.fetchone() is not None
+
+
+def test_reingest_dropping_nugget_reference_removes_only_the_association(db_conn):
+    ingest(_path("nugget_reference.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select s.id from essaycards.essay_sections s "
+            "join essaycards.essays e on e.id = s.essay_id "
+            "where e.slug = 'nugget-reference-essay' and s.anchor_slug = 'only'"
+        )
+        section_id = cur.fetchone()["id"]
+        cur.execute(
+            "select 1 from essaycards.section_nuggets where section_id = %s and nugget_id = %s",
+            (section_id, NUGGET_COGITO_ID),
+        )
+        assert cur.fetchone() is not None
+
+    ingest(_path("nugget_reference_dropped.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select 1 from essaycards.section_nuggets where section_id = %s and nugget_id = %s",
+            (section_id, NUGGET_COGITO_ID),
+        )
+        assert cur.fetchone() is None
+
+        cur.execute("select 1 from essaycards.nuggets where id = %s", (NUGGET_COGITO_ID,))
+        assert cur.fetchone() is not None

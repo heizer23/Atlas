@@ -37,6 +37,37 @@ they must be built.
   other endpoint (including essay/section ingest) reads or writes it. See
   `## Question levels and overview`.
 
+### Nuggets (Sprint09)
+- **nugget** — a standalone, independently-learnable concept (`essaycards.nuggets`),
+  NOT owned by one essay or section — a new layer between section and flashcard.
+  `essay (main spine) -> section (sub-spine) -> nugget -> flashcard`. The same nugget
+  can be referenced by any number of sections/essays without duplicating its content,
+  its flashcards, or their review state.
+- **`nugget_key`** — the nugget's stable, author-assigned identity, same convention as
+  `slug` / `anchor_slug` / `card_key`: validated against `SLUG_LIKE_RE`
+  (`^[a-zA-Z0-9_-]+$`, case-sensitive, no auto-slugify/lowercase), globally unique.
+  Create/update is always upsert-by-key — the key is never a `SET` column, so a
+  title/body edit can never rename it. No key-rename path.
+- **`[[nugget:key]]`** — the Markdown reference syntax, usable in
+  `essays.main_spine_markdown` and `essay_sections.body_markdown`. Resolved through
+  the stable `nugget_key`; the rendered title always comes live from `nuggets.title`,
+  never duplicated as a separate copy in the referencing Markdown. An unresolved
+  reference is always an ingest-time validation error — no placeholder nugget is ever
+  auto-created.
+- **`section_nuggets`** — the many-to-many association between a section and the
+  nuggets it currently references. DERIVED, NOT AUTHOR-MAINTAINED: a section's
+  Markdown is the sole source of truth, and the association rows are fully resynced
+  (insert missing, delete stale) on every section upsert by
+  `backend/ingest.py::upsert_document`. This is the one explicit exception to the
+  app's general no-delete-on-re-ingest policy — it only ever removes an association
+  row, never a `nuggets` row or a `flashcards` row.
+- **`flashcards.nugget_id`** — a card's optional link to the one nugget it tests.
+  Nullable; set exclusively via `POST /flashcards/upsert`'s `nugget_id` field
+  (omit/null/value tri-state — an omitted key never disturbs an existing assignment).
+  No ingestion path ever reads or writes it. When set, a card's exploration context
+  (`GET /flashcards/{id}/exploration-package`) becomes the nugget's own
+  `body_markdown` instead of the containing section's.
+
 ### Card scheduling
 - **open** — the scheduler currently considers the card showable:
   `next_due_at <= now()`. Also called *due*. Not changed by the Roadmap sprint.
@@ -100,6 +131,10 @@ they must be built.
 - Sprint 8: card `level`, question-overview screen, single-question maintenance
   (edit/add/export/import) decoupled from essay ingest, single-essay export (see
   `## Question levels and overview`).
+- Sprint 9: nuggets (`essaycards.nuggets`, `section_nuggets`), `essays.main_spine_markdown`,
+  unified `[[nugget:key]]` reference validation across both ingestion paths, `flashcards.nugget_id`,
+  nugget-aware flashcard exploration context, examination `nugget_versions` echo-through, and
+  in-app nugget rendering/navigation (see `## Glossary` "Nuggets" and `## Nuggets` below).
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys
@@ -451,6 +486,95 @@ has always taken exactly one `slug` per call: this fills the previously-missing
 capability to export an *existing* essay's current content (as opposed to `STUB_PROMPT`,
 which is a blank fill-in template for a brand new essay).
 
+## Nuggets (Sprint09)
+See `## Glossary` "Nuggets (Sprint09)" for the core vocabulary. This section is the
+implementation contract.
+
+**Schema.** `essaycards.nuggets` (`id`, `nugget_key` unique, `title`, `body_markdown`,
+`created_at`/`updated_at`) and `essaycards.section_nuggets` (many-to-many,
+`(section_id, nugget_id)` composite PK, both FKs `on delete cascade`) are new tables.
+`flashcards.nugget_id` (nullable, `on delete set null`) and
+`essays.main_spine_markdown` (`not null default ''`) are additive columns. All
+additive/idempotent, per the existing `create table if not exists` /
+`alter table ... add column if not exists` pattern.
+
+**Reference resolution and resync.** `backend/ingest.py::extract_nugget_keys` strips
+fenced code blocks and inline code spans, then matches `\[\[nugget:([a-zA-Z0-9_-]+)\]\]`
+— the character class matches `SLUG_LIKE_RE` exactly, so any valid `nugget_key` (mixed
+case included) is referenceable. `upsert_document`'s first step (before any write)
+resolves the union of every referenced key across `main_spine_markdown` and every
+section's `body_markdown` against `essaycards.nuggets`, raising `IngestionError` naming
+every unresolved key at once if any is missing — identical on both the markdown CLI and
+`POST /essays/ingest` JSON paths, because both share this one core. No placeholder
+nugget is ever auto-created. Once a section's id is known, `section_nuggets` is fully
+resynced to that section's current references (insert missing, delete stale) — the one
+explicit exception to the app's general no-delete-on-re-ingest policy; it only ever
+removes an association row, never a `nuggets` or `flashcards` row.
+
+**`SLUG_LIKE_RE`** (`^[a-zA-Z0-9_-]+$`) lives in `backend/ingest.py`, promoted from what
+was previously a private copy in `essays.py` — the one canonical definition
+(`essays.py`, `nuggets.py` both import it; `flashcards.py`'s separate `_CARD_ID_RE`,
+same pattern, is untouched).
+
+**`essays.main_spine_markdown`** is settable via `POST /essays/ingest` only (optional
+top-level key, default `''` on omission, same convention as `category`/`sort_index`/
+`status`). The markdown-CLI front-matter grammar is unchanged — an essay ingested via
+the CLI keeps `main_spine_markdown = ''` until edited through the JSON path.
+
+**API** (`backend/routers/nuggets.py`, mounted at `/api/essaycards/nuggets`):
+`GET ''` (list, no `body_markdown`), `GET '/{id}'` (detail), `POST '/upsert'`
+(upsert-by-`nugget_key`), `GET '/{id}/flashcards'` (flat, no scheduling fields —
+reviewing a nugget-linked card for real spaced repetition still goes through the
+existing essay/section-scoped focus session; no nugget-scoped `/due` or `/stats` this
+sprint), `GET '/{id}/sections'` ("referenced by"), `GET '/authoring-package'` and
+`GET '/{id}/generate-flashcards-package'` (bespoke JSON, Dataset-exempt — ChatGPT round
+trips, see below). Existing endpoints extended: essay detail/export/section-export gain
+`main_spine_markdown`/`main_spine_nuggets`/per-section `nuggets`; question-overview rows
+gain `section_nuggets`/`nugget_id`; `POST /flashcards/upsert` gains `nugget_id`
+(omit/null/value tri-state, R-CON-AL-04); `GET /flashcards/due` and single-question
+export gain `nugget_id`.
+
+**Frontend rendering.** `remarkNuggetRefs` (a remark plugin, `src/ShellEntry.tsx`)
+visits mdast `text` nodes and turns a resolved `[[nugget:key]]` into an in-app link
+(`NuggetLink`, `href="nugget:<key>"`) or a non-clickable broken-link span for an
+unresolved one (`href="nugget-missing:<key>"`) — fenced/inline code is already a
+separate node type by the time remark hands off, so no hand-written stripping is
+needed on the frontend (unlike the backend's regex-based `extract_nugget_keys`).
+Clicking a resolved link opens `NuggetPanel`, an in-page overlay with its own
+click-through id-stack — never a route navigation, so `ReaderView`/`ReviewSessionView`
+never unmount and reading position / review-session state survive opening and closing
+it. `ReviewSessionView`'s revealed-answer area shows "Flashcard → Nugget" (opens the
+same overlay) when the current card's `nugget_id` is set, else the unchanged "Jump to
+passage" route navigation.
+
+**ChatGPT round trips**, same export → copy → discuss → paste → apply pattern as every
+other round trip in this app: nugget authoring (`GET /nuggets/authoring-package` →
+`POST /nuggets/upsert`, reachable via "+ New nugget" in `ReaderView` / "Edit nugget" in
+`NuggetPanel`) and flashcard generation from a nugget (`GET
+/nuggets/{id}/generate-flashcards-package` → one `POST /flashcards/upsert` per
+AI-returned card, sequential, each pre-set with `nugget_id` — not atomic across the
+batch, see Known gap below). The section spine-revision package
+(`GET .../sections/{id}/export`) additionally carries `main_spine_markdown`,
+`main_spine_nuggets`, and `focus_section_nuggets` (full body, focus section only); on
+reimport, `IngestView` compares the returned focus section's current nugget keys
+against a set stashed in `sessionStorage` at export time and shows a non-blocking
+warning banner naming any accidentally-dropped reference (submission is never blocked).
+
+**Known gap — ownership/cascade (documented, not guarded).** A flashcard reachable
+through a shared nugget from another essay is still only *owned* by its own
+`essay_id`/`section_id` (`flashcards.nugget_id` does not change this — see schema.sql's
+comment on the column). Deleting the owning section or essay would remove the card even
+though another essay still references it via the nugget. The app has no delete endpoint
+anywhere today (essays/sections/flashcards/images are all upsert-only), so this risk has
+no live trigger through the app; it is latent, not exercised. No app-level guard is
+added — an explicit decision, same pattern as the Sprint02 card/section-move asymmetry.
+
+**Known gap — non-atomic flashcard generation.** "Generate flashcards from a nugget"
+issues one `POST /flashcards/upsert` per AI-generated card, not a single atomic batch —
+if card *N* of *M* fails, cards `1..N-1` are already saved while `N..M` are not. The
+import view reports per-card success/failure so a failed card can be retried
+individually.
+
 ## Single-section export / insert
 Revise one section, or insert a new one, with ChatGPT — without a dedicated import
 endpoint. Deliberately reuses the whole-essay JSON round trip (`## Content ingestion`):
@@ -525,6 +649,18 @@ Dataset-consuming UI component. `GET /sections/{id}/examinations` (the plain his
 list shown under each section in ReaderView) IS real UI-visible tabular data and
 returns a proper Dataset.
 
+**Nugget freshness (Sprint09, infrastructure only — not surfaced).** The export
+package's `build_export_package` also attaches per-section `nugget_versions:
+{nugget_key: live nuggets.updated_at}` for that section's currently-referenced
+nuggets, mirroring the existing `section_version` field. Import accepts an optional
+per-result `nugget_versions` and stores it **verbatim** (never recomputed) into the
+new `section_examinations.nugget_versions_at` column — `null` means "predates this
+feature" and skips the nugget-level check; absent on import stores `null` too. A pure
+helper, `backend/examinations.py::nugget_freshness_flags(recorded, current)`, compares
+a stored value against a freshly computed one and returns the changed/missing keys —
+it exists and is tested, but is **not called by any endpoint or UI this sprint**; where
+it is eventually surfaced is explicitly deferred.
+
 ## Flashcard exploration (Sprint06)
 Explore a *single* flashcard with ChatGPT — deliberately action-neutral at export
 time (the user does not pre-decide whether the problem is their own
@@ -534,9 +670,13 @@ emerges from the conversation).
 - **Export.** `GET /api/essaycards/flashcards/{flashcard_id}/exploration-package`
   returns a bespoke JSON blob (`export_version: 1`) — the card (identified by its
   **uuid** `card_id`, with `card_key` echoed for readability), its essay/section
-  metadata, and `context.section_body_markdown`. EssayCards has **no
-  card→paragraph linkage**; the whole containing section is the finest context
-  available. Same R-CON-BP-04 exemption rationale as `examination-package`. The
+  metadata, and a `context` object. EssayCards has **no card→paragraph linkage**;
+  the finest context available is either the whole containing section
+  (`context.section_body_markdown`, a legacy card whose `nugget_id` is null) or, for
+  a nugget-linked card (Sprint09), the nugget's own independent explanation
+  INSTEAD OF the section (`context.nugget_body_markdown` +
+  `context.nugget_key`/`context.nugget_title` — a replacement, not an addition; see
+  `## Nuggets`). Same R-CON-BP-04 exemption rationale as `examination-package`. The
   **Explore** button on the revealed answer in `ReviewSessionView` fetches it and
   copies it + `EXPLORE_PROMPT_INTRO` (src/ShellEntry.tsx) to the clipboard
   ("Copied for ChatGPT"). Read-only — never touches review/scheduling state. It

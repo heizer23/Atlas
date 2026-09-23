@@ -1,131 +1,134 @@
+-- Sprint09_Nuggets — additive schema changes only. No existing table is
+-- recreated; no flashcard identity, review state, discussion/revision
+-- history, or examination history is reset or deleted. Follows the existing
+-- `create table if not exists` / `alter table ... add column if not exists` /
+-- guarded-constraint idiom already used in 03_Application/EssayCards/schema.sql.
+--
+-- This file is a design copy. The implementer folds it into the canonical
+-- runtime schema at 03_Application/EssayCards/schema.sql (loaded idempotently
+-- at startup and by tests/conftest.py) — see 10_scaffolding.json.
+
 begin;
 
-create schema if not exists essaycards;
-
-create table if not exists essaycards.essays (
-    id         uuid        primary key default gen_random_uuid(),
-    title      text        not null,
-    slug       text        not null,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    constraint uq_essays_slug unique (slug)
-);
-
-create table if not exists essaycards.essay_sections (
+-- ── essaycards.nuggets ───────────────────────────────────────────────────────
+--
+-- A standalone, independently-learnable concept — NOT owned by one essay or
+-- section (see CLAUDE.md "Nuggets" / Sprint09_Nuggets/00_draft.md §0). The
+-- same nugget can be referenced by multiple sections/essays without
+-- duplicating its content, its flashcards, or their review state.
+--
+-- nugget_key is the stable, author-assigned identity — same convention as
+-- essays.slug / essay_sections.anchor_slug / flashcards.card_key: validated
+-- against SLUG_LIKE_RE (backend/ingest.py, promoted from the essays.py-local
+-- copy this sprint), no auto-slugify, no auto-lowercasing, GLOBALLY unique
+-- (no per-essay scoping). Create/update is upsert-by-key
+-- (`on conflict (nugget_key) do update set title = ..., body_markdown = ...`)
+-- — the key is always the WHERE, never a SET column, so a title edit can
+-- never change the key. No key-rename support this sprint.
+create table if not exists essaycards.nuggets (
     id            uuid        primary key default gen_random_uuid(),
-    essay_id      uuid        not null references essaycards.essays(id) on delete cascade,
-    order_index   integer     not null,
-    heading       text        not null,
-    anchor_slug   text        not null,
+    nugget_key    text        not null,
+    title         text        not null,
     body_markdown text        not null default '',
     created_at    timestamptz not null default now(),
     updated_at    timestamptz not null default now(),
-    constraint uq_essay_sections_anchor unique (essay_id, anchor_slug)
+    constraint uq_nuggets_nugget_key unique (nugget_key)
 );
 
-create index if not exists ix_essay_sections_essay_order
-    on essaycards.essay_sections(essay_id, order_index);
+-- GET /nuggets orders by title/nugget_key (see backend/routers/nuggets.py);
+-- created_at is indexed for a possible future recency view, mirroring the
+-- precedent set by ix_essays_category_sort / ix_images_created_at.
+create index if not exists ix_nuggets_created_at on essaycards.nuggets(created_at);
 
-create table if not exists essaycards.flashcards (
-    id         uuid        primary key default gen_random_uuid(),
-    essay_id   uuid        not null references essaycards.essays(id) on delete cascade,
-    section_id uuid        not null references essaycards.essay_sections(id) on delete cascade,
-    card_key   text        not null,
-    question   text        not null,
-    answer     text        not null,
-    created_at timestamptz not null default now(),
-    updated_at timestamptz not null default now(),
-    constraint uq_flashcards_card_key unique (essay_id, card_key)
-);
-
-create index if not exists ix_flashcards_essay_id
-    on essaycards.flashcards(essay_id);
-
-create index if not exists ix_flashcards_section_id
-    on essaycards.flashcards(section_id);
-
-create table if not exists essaycards.flashcard_review_state (
-    flashcard_id      uuid        primary key references essaycards.flashcards(id) on delete cascade,
-    last_reviewed_at  timestamptz,
-    next_due_at       timestamptz not null,
-    updated_at        timestamptz not null default now()
-);
-
--- Supports both the global due queue (no filter) and the essay/section-scoped
--- due queue (WHERE next_due_at <= now() AND essay_id = ... AND section_id = ...)
-create index if not exists ix_review_state_next_due
-    on essaycards.flashcard_review_state(next_due_at);
-
--- Historical oral-examination results. Append-only: the app never updates or
--- deletes a row here. "Current understanding" of a section is always derived
--- by querying the latest row per section_id — there is no separate stored
--- current-score field anywhere in the schema.
+-- ── essaycards.section_nuggets ───────────────────────────────────────────────
 --
--- section_version_at is a snapshot of essay_sections.updated_at captured at
--- export time, so a later re-read of that column tells you whether the
--- section has been edited since this examination. It is a timestamp
--- equality/inequality check, not a precise content diff: an essay re-ingested
--- with byte-identical content still bumps updated_at (a false positive on
--- "changed", never a false negative).
-create table if not exists essaycards.section_examinations (
-    id                 uuid        primary key default gen_random_uuid(),
-    essay_id           uuid        not null references essaycards.essays(id) on delete cascade,
-    section_id         uuid        not null references essaycards.essay_sections(id) on delete cascade,
-    section_version_at timestamptz not null,
-    examined_at        timestamptz not null,
-    question           text        not null,
-    answer_transcript  text        not null,
-    score              smallint    not null,
-    feedback           text,
-    created_at         timestamptz not null default now(),
-    constraint ck_section_examinations_score check (score between 0 and 6)
+-- Many-to-many association between a section and the nuggets its
+-- body_markdown currently references via `[[nugget:key]]`. DERIVED, NOT
+-- AUTHOR-MAINTAINED: a section's Markdown is the sole source of truth. Rows
+-- are fully resynced (insert missing, delete stale) on every section upsert
+-- by backend/ingest.py::upsert_document — see Sprint09_Nuggets/00_draft.md §2.
+--
+-- This resync is an explicit, documented exception to the app's general
+-- no-delete-on-re-ingest policy (see CLAUDE.md "Content ingestion"): it only
+-- ever removes an ASSOCIATION row here, never a nuggets row or a flashcards
+-- row.
+create table if not exists essaycards.section_nuggets (
+    section_id uuid not null references essaycards.essay_sections(id) on delete cascade,
+    nugget_id  uuid not null references essaycards.nuggets(id) on delete cascade,
+    primary key (section_id, nugget_id)
 );
 
--- Supports both "history for this section, most recent first" and the
--- distinct-on latest-per-section query used to build the export package.
-create index if not exists ix_section_examinations_section_examined
-    on essaycards.section_examinations(section_id, examined_at desc);
+-- Supports GET /nuggets/{id}/sections (the nugget view's "referenced by"
+-- list) and the freshness/rendering lookups keyed by nugget_id; lookup by
+-- section_id is already covered by the primary key's leading column.
+create index if not exists ix_section_nuggets_nugget_id on essaycards.section_nuggets(nugget_id);
 
-create index if not exists ix_section_examinations_essay
-    on essaycards.section_examinations(essay_id);
+-- ── essaycards.flashcards.nugget_id ─────────────────────────────────────────
+--
+-- Nullable: existing flashcards remain valid with no nugget. Assignment is
+-- always explicit, via POST /flashcards/upsert's optional card.nugget_id
+-- (backend/routers/flashcards.py) — no ingestion path, and no other endpoint,
+-- ever reads or writes it (same "set exclusively by one endpoint" pattern
+-- already established for flashcards.level, Sprint08). essay_id/section_id
+-- remain required and unchanged this sprint.
+--
+-- KNOWN GAP — documented, not guarded (Sprint09_Nuggets/00_draft.md §1;
+-- Sprint09_Nuggets/10_architecture.json §risks; CLAUDE.md "Known gaps"): a
+-- flashcard reachable through a shared nugget from another essay is still
+-- only OWNED by its own essay_id/section_id. A cascading delete of that
+-- owning section or essay (essay_id/section_id are both `on delete cascade`)
+-- would remove the card even though another essay still references it via
+-- the nugget. The app has no delete endpoint anywhere today (essays,
+-- sections, flashcards, and images are all upsert-only), so this risk has no
+-- live trigger through the app; it is latent, not exercised. No app-level
+-- guard is added this sprint — an explicit decision, not an oversight.
+--
+-- `on delete set null` (rather than cascade or restrict) governs only the
+-- hypothetical case of a nuggets row itself being removed by direct SQL
+-- (the app never deletes a nugget) — a card simply loses its nugget link
+-- rather than being deleted.
+alter table essaycards.flashcards
+    add column if not exists nugget_id uuid references essaycards.nuggets(id) on delete set null;
 
--- ── Sprint06_FlashcardExploration ───────────────────────────────────────────
--- Outcome of exploring a single flashcard with ChatGPT. The returned JSON is
--- transport only and is decomposed into these relational rows on import.
--- flashcard_discussions: one row per completed exploration, with pre-edit
--- snapshots of the live card. flashcard_revisions: one row per question/answer
--- edit, storing both old and new values of both fields plus a mandatory reason;
--- historical values live only here so an edited-away question never reappears
--- in GET /flashcards/due.
-create table if not exists essaycards.flashcard_discussions (
-    id                   uuid        primary key default gen_random_uuid(),
-    card_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
-    section_id_at_time   uuid        not null references essaycards.essay_sections(id) on delete cascade,
-    question_at_time     text        not null,
-    answer_at_time       text        not null,
-    exploration_question text        not null,
-    discussion_summary   text        not null,
-    resolution           text        not null,
-    knowledge_gap        text,
-    created_at           timestamptz not null default now()
-);
+-- Supports GET /nuggets/{id}/flashcards. Partial: nugget_id is null for the
+-- large majority of legacy cards.
+create index if not exists ix_flashcards_nugget_id
+    on essaycards.flashcards(nugget_id) where nugget_id is not null;
 
-create index if not exists ix_flashcard_discussions_card
-    on essaycards.flashcard_discussions(card_id, created_at desc);
+-- ── essaycards.essays.main_spine_markdown ───────────────────────────────────
+--
+-- The compact, memorizable "main spine" narrative of the essay — the top
+-- level of the essay / section / nugget / flashcard hierarchy (see CLAUDE.md
+-- "Nuggets"). References nuggets via the same `[[nugget:key]]` syntax as a
+-- section's body_markdown (backend/ingest.py::extract_nugget_keys).
+--
+-- JSON/API-ingest-only this sprint: POST /essays/ingest gains an optional
+-- top-level `main_spine_markdown` key (default '' on omission, same
+-- optional-key convention as category/sort_index/status). The markdown-CLI
+-- front-matter grammar (backend/ingest.py::_parse_front_matter) is UNCHANGED
+-- this sprint — an essay ingested via the markdown CLI keeps
+-- main_spine_markdown = '' until edited through the JSON path. This is the
+-- resolution of the "main-spine authoring on the CLI path" open question
+-- referenced in Sprint09_Nuggets/00_draft.md's closing Note: folded into §4's
+-- essays.py-only description rather than into the CLI grammar.
+alter table essaycards.essays
+    add column if not exists main_spine_markdown text not null default '';
 
-create table if not exists essaycards.flashcard_revisions (
-    id                   uuid        primary key default gen_random_uuid(),
-    card_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
-    source_discussion_id uuid        references essaycards.flashcard_discussions(id) on delete set null,
-    old_question         text        not null,
-    new_question         text        not null,
-    old_answer           text        not null,
-    new_answer           text        not null,
-    reason               text        not null,
-    changed_at           timestamptz not null default now()
-);
-
-create index if not exists ix_flashcard_revisions_card
-    on essaycards.flashcard_revisions(card_id, changed_at desc);
+-- ── essaycards.section_examinations.nugget_versions_at ──────────────────────
+--
+-- Nugget-aware examination freshness (Sprint09_Nuggets/00_draft.md §9).
+-- NULL means "predates this feature" — an existing row stays fully readable
+-- (no backfill, no discard) and the nugget-level freshness check is skipped
+-- for it. '{}'::jsonb means "this section referenced zero nuggets at exam
+-- time." Populated by backend/examinations.py::build_export_package at
+-- export time ({nugget_key: nuggets.updated_at} for the section's
+-- then-current references) and echoed back verbatim into this column by
+-- backend/examinations.py::import_results — NOT recomputed at import time,
+-- the same echo-through-import handling already used for
+-- section_version_at. Accepts the same known false-positive-on-byte-
+-- identical-re-save limitation the section-level check already has (see the
+-- section_version_at comment above) — not solved here, just not made worse.
+alter table essaycards.section_examinations
+    add column if not exists nugget_versions_at jsonb;
 
 commit;

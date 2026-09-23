@@ -21,7 +21,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import { visit } from 'unist-util-visit';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
@@ -43,15 +44,26 @@ interface EssayRow {
   oral_date: string | null;
 }
 
+// {nugget_key, title} — the light pair shape every nugget-reference field
+// carries (never the full body_markdown, to keep list/overview responses
+// lightweight). See CLAUDE.md "Nuggets" (Sprint09_Nuggets).
+interface NuggetRef {
+  nugget_key: string;
+  title: string;
+}
+
 interface SectionRow {
   id: string;
   heading: string;
   anchor_slug: string;
   order_index: number;
   body_markdown: string;
+  nuggets: NuggetRef[];
 }
 
 interface EssayDetailRow extends EssayRow {
+  main_spine_markdown: string;
+  main_spine_nuggets: NuggetRef[];
   sections: SectionRow[];
 }
 
@@ -67,6 +79,7 @@ interface DueCardRow {
   is_new: boolean;
   is_recent: boolean;
   scheduled_interval_seconds: number;
+  nugget_id: string | null;
 }
 
 interface ReviewResult {
@@ -129,7 +142,13 @@ interface ExplorationPackage {
     question: string;
     answer: string;
   };
-  context: { section_body_markdown: string };
+  // Sprint09_Nuggets: a discriminated union — a nugget-linked card's context
+  // is {nugget_body_markdown, nugget_key, nugget_title} INSTEAD OF
+  // {section_body_markdown} (a replacement, not an addition). A legacy card
+  // (no nugget) keeps the unchanged section-body shape.
+  context:
+    | { section_body_markdown: string }
+    | { nugget_body_markdown: string; nugget_key: string | null; nugget_title: string | null };
 }
 
 interface ExplorePreview {
@@ -194,12 +213,23 @@ interface SectionExportPackage {
   category: string | null;
   sort_index: number;
   status: string;
+  // Sprint09_Nuggets additions: the essay's main spine narrative — a
+  // top-level field on POST /essays/ingest, same optional-key/round-trip
+  // convention as category/sort_index/status, so an unedited reimport of
+  // this package preserves it and an edited one updates it — plus its
+  // resolved nuggets (read-only, server-computed) and the focus section's
+  // FULL {nugget_key, title, body_markdown} nugget context (richer than the
+  // light `nuggets` pairs every section also carries).
+  main_spine_markdown: string;
+  main_spine_nuggets: NuggetRef[];
+  focus_section_nuggets: { nugget_key: string; title: string; body_markdown: string }[];
   sections: {
     section_id: string;
     heading: string;
     anchor_slug: string;
     body_markdown: string;
     cards: { id: string; q: string; a: string }[];
+    nuggets: NuggetRef[];
   }[];
 }
 
@@ -216,12 +246,15 @@ interface EssayExportPackage {
   category: string | null;
   sort_index: number;
   status: string;
+  main_spine_markdown: string;
+  main_spine_nuggets: NuggetRef[];
   sections: {
     section_id: string;
     heading: string;
     anchor_slug: string;
     body_markdown: string;
     cards: { id: string; q: string; a: string }[];
+    nuggets: NuggetRef[];
   }[];
 }
 
@@ -241,6 +274,11 @@ interface QuestionRow {
   section_anchor_slug: string;
   section_heading: string;
   section_order_index: number;
+  // Sprint09_Nuggets: the row's own section's referenced nuggets (duplicated
+  // per row within the same section — Datasets are flat by contract), and
+  // the card's current nugget assignment (nullable).
+  section_nuggets: NuggetRef[];
+  nugget_id: string | null;
 }
 
 // GET /flashcards/{id}/export — essay_slug/essay_title/section_* are
@@ -254,7 +292,63 @@ interface QuestionExportPackage {
   section_anchor_slug: string;
   section_heading: string;
   section_body_markdown: string;
-  card: { id: string; level: number; q: string; a: string };
+  card: { id: string; level: number; q: string; a: string; nugget_id: string | null };
+}
+
+// ── Nuggets (Sprint09_Nuggets) ───────────────────────────────────────────────
+
+interface NuggetListRow {
+  id: string;
+  nugget_key: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface NuggetDetailRow extends NuggetListRow {
+  body_markdown: string;
+}
+
+interface NuggetFlashcardRow {
+  id: string;
+  card_key: string;
+  question: string;
+  answer: string;
+  level: number;
+  essay_id: string;
+  section_id: string;
+}
+
+interface NuggetSectionRow {
+  section_id: string;
+  anchor_slug: string;
+  heading: string;
+  order_index: number;
+  essay_id: string;
+  essay_title: string;
+  essay_slug: string;
+}
+
+interface NuggetAuthoringPackage {
+  export_version: number;
+  essay: { slug: string; title: string; main_spine_markdown: string };
+  section: { id: string; anchor_slug: string; heading: string; body_markdown: string };
+  nugget: { id: string; nugget_key: string; title: string; body_markdown: string } | null;
+  connected_nuggets: NuggetRef[];
+}
+
+interface NuggetUpsertResult {
+  id: string;
+  nugget_key: string;
+  title: string;
+  created: boolean;
+}
+
+interface GenerateFlashcardsPackage {
+  export_version: number;
+  nugget: { nugget_key: string; title: string; body_markdown: string };
+  existing_flashcards: { id: string; card_key: string; question: string; answer: string; level: number }[];
+  context: { essay_slug: string; section_id: string };
 }
 
 interface QuestionUpsertResult {
@@ -485,7 +579,7 @@ function buildExamClipboardText(pkg: ExaminationPackage): string {
 
 const EXPLORE_PROMPT_INTRO = `This is an EssayCards flashcard exploration package.
 
-Use the card and source context below as authoritative local context. "card.answer" is the current canonical answer; "context.section_body_markdown" is the essay section the card was written from (EssayCards has no finer-grained paragraph link, so the whole section is the context).
+Use the card and source context below as authoritative local context. "card.answer" is the current canonical answer. The "context" object has one of two shapes: either "context.section_body_markdown" (the essay section the card was written from — EssayCards has no finer-grained paragraph link, so the whole section is the context), or, for a card linked to a reusable "nugget" concept, "context.nugget_body_markdown" plus "context.nugget_key"/"context.nugget_title" (the nugget's own independent explanation, standing in for the section in this case).
 
 I will now discuss this question with you naturally. I may have misunderstood the underlying concept, the question or answer may be poorly formulated, or the discussion may reveal another distinction worth its own card. Do NOT decide in advance which of these is the case — let it emerge from the conversation.
 
@@ -605,6 +699,7 @@ function buildInsertPlaceholderSection(): SectionExportPackage['sections'][numbe
     cards: [
       { id: 'a-new-unique-card-id', q: 'a flashcard question drawn from this new section', a: 'its answer' },
     ],
+    nuggets: [],
   };
 }
 
@@ -677,6 +772,358 @@ Here is the question package:
 
 function buildQuestionExportClipboardText(pkg: QuestionExportPackage): string {
   return QUESTION_EXPORT_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+// ── Nugget authoring / generate-flashcards prompts (Sprint09_Nuggets) ──────
+//
+// Copied to the clipboard by NuggetAuthoringImportView / GenerateFlashcards-
+// ImportView. Every field named here must stay in sync with
+// backend/routers/nuggets.py's POST /upsert body shape and
+// backend/routers/flashcards.py::_validate_upsert_body's card shape.
+
+const NUGGET_AUTHORING_PROMPT_INTRO = `You are helping write or revise ONE reusable "nugget" — a small, independently-learnable concept — for an app called EssayCards. Below this prompt is a JSON "authoring package": the current essay's title and main spine, the current section and its own spine narrative (context only, for continuity — you are not revising these), the target nugget ("nugget": null if you are drafting a brand-new one), and "connected_nuggets" (other nuggets the target nugget's own text already references, for context).
+
+A nugget must stay INDEPENDENTLY UNDERSTANDABLE — someone who has never read this essay must be able to learn the concept from the nugget's own body_markdown alone. Do NOT reproduce the whole essay or section inside it; write the concept's own explanation, roughly 100-400 words. You may reference another nugget by writing "[[nugget:its-key]]" inline (only for keys that already exist — check "connected_nuggets" and the essay/section context for known keys; never invent a reference to a key you have not been told exists).
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+
+{
+  "nugget_key": "a short url-safe id, letters/digits/\\"_\\"/\\"-\\" only — KEEP THE EXISTING KEY if you were revising an existing nugget (copy it verbatim from \\"nugget.nugget_key\\" above); invent a new, not-already-used one only when drafting a brand-new nugget",
+  "title": "a short display title",
+  "body_markdown": "the nugget's own independent explanation, in Markdown"
+}
+
+Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the authoring package:
+
+`;
+
+function buildNuggetAuthoringClipboardText(pkg: NuggetAuthoringPackage): string {
+  return NUGGET_AUTHORING_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+const GENERATE_FLASHCARDS_PROMPT_INTRO = `You are generating new flashcards for ONE reusable "nugget" in an app called EssayCards. Below this prompt is a JSON package: the nugget's own content ("nugget") and its existing flashcards ("existing_flashcards", for context — do not duplicate what they already test).
+
+Write flashcards that test recall/understanding of THIS nugget's own content only. Each card needs a "level" (1 = foundational/spine, 2 = building/explanatory structure, 3 = decorating/example/detail — 1-3 is the current convention, open-ended upward), a "q" (question) and an "a" (answer).
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+
+{
+  "cards": [
+    { "level": 2, "q": "a flashcard question", "a": "its answer" }
+  ]
+}
+
+Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the package:
+
+`;
+
+function buildGenerateFlashcardsClipboardText(pkg: GenerateFlashcardsPackage): string {
+  return GENERATE_FLASHCARDS_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+// ── Nugget rendering / navigation (Sprint09_Nuggets) ────────────────────────
+//
+// [[nugget:key]] references inside essay.main_spine_markdown and
+// section.body_markdown render as in-app links via remarkNuggetRefs +
+// NuggetLink, opening the NuggetPanel overlay instead of navigating — so
+// ReaderView/ReviewSessionView never unmount and reading position / review
+// session state are preserved (00_draft.md §7).
+
+// TS mirror of backend/ingest.py::extract_nugget_keys — same strip-fences-
+// then-match-[[nugget:key]] approach. Used only by IngestView's section
+// spine-revision drop-detection (client-side, no DB access).
+const NUGGET_REF_RE_CLIENT = /\[\[nugget:([a-zA-Z0-9_-]+)\]\]/g;
+
+function extractNuggetKeysClient(markdown: string): Set<string> {
+  const stripped = markdown
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]*`/g, '');
+  const keys = new Set<string>();
+  let m: RegExpExecArray | null;
+  NUGGET_REF_RE_CLIENT.lastIndex = 0;
+  while ((m = NUGGET_REF_RE_CLIENT.exec(stripped)) !== null) keys.add(m[1]);
+  return keys;
+}
+
+// remarkNuggetRefs visits only mdast 'text' nodes — by the time remark hands
+// off, fenced code blocks and inline code spans are already separate
+// code/inlineCode node types, so a [[nugget:...]] written inside either is
+// structurally invisible to a text-node visitor. No hand-written fence/span
+// detection needed (unlike extractNuggetKeysClient above, which operates on
+// raw text and must strip them itself).
+function remarkNuggetRefs(titleMap: Record<string, string>) {
+  return (tree: any) => {
+    visit(tree, 'text', (node: any, index: number | undefined, parent: any) => {
+      if (!parent || index === undefined) return;
+      const value: string = node.value;
+      const re = /\[\[nugget:([a-zA-Z0-9_-]+)\]\]/g;
+      let match: RegExpExecArray | null;
+      let lastIndex = 0;
+      let found = false;
+      const newNodes: any[] = [];
+      while ((match = re.exec(value)) !== null) {
+        found = true;
+        if (match.index > lastIndex) {
+          newNodes.push({ type: 'text', value: value.slice(lastIndex, match.index) });
+        }
+        const key = match[1];
+        const title = titleMap[key];
+        newNodes.push(
+          title
+            ? { type: 'link', url: `nugget:${key}`, children: [{ type: 'text', value: title }] }
+            : { type: 'link', url: `nugget-missing:${key}`, children: [{ type: 'text', value: key }] },
+        );
+        lastIndex = match.index + match[0].length;
+      }
+      if (!found) return;
+      if (lastIndex < value.length) newNodes.push({ type: 'text', value: value.slice(lastIndex) });
+      parent.children.splice(index, 1, ...newNodes);
+      return index + newNodes.length;
+    });
+  };
+}
+
+// react-markdown's default urlTransform only passes through
+// https?/ircs?/mailto/xmpp schemes and silently rewrites anything else
+// (including our nugget:/nugget-missing: scheme) to '' before NuggetLink ever
+// sees it — so every nugget link would fall through to NuggetLink's plain-<a>
+// branch with an empty href. Pass nugget refs through untouched; defer to the
+// default sanitizer for everything else.
+function nuggetAwareUrlTransform(url: string): string {
+  return url.startsWith('nugget:') || url.startsWith('nugget-missing:') ? url : defaultUrlTransform(url);
+}
+
+// href scheme branch for ReactMarkdown's `a` component override: `nugget:` ->
+// in-app overlay open (never a real navigation — a full page nav would break
+// reading-position preservation); `nugget-missing:` -> non-clickable, styled
+// as broken, key text never silently rendered as if valid; anything else ->
+// ordinary <a>, unchanged behavior for normal links/images.
+function NuggetLink({ href, children, onOpenNugget }: {
+  href?: string;
+  children?: React.ReactNode;
+  onOpenNugget: (key: string) => void;
+}) {
+  if (href?.startsWith('nugget:')) {
+    const key = href.slice('nugget:'.length);
+    return (
+      <a
+        href="#"
+        onClick={e => { e.preventDefault(); onOpenNugget(key); }}
+        style={{ color: 'var(--md-sys-color-primary)', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}
+      >
+        {children}
+      </a>
+    );
+  }
+  if (href?.startsWith('nugget-missing:')) {
+    const key = href.slice('nugget-missing:'.length);
+    return (
+      <span
+        title={`Unresolved nugget reference: [[nugget:${key}]]`}
+        style={{ color: '#b00020', textDecoration: 'line-through', cursor: 'not-allowed' }}
+      >
+        {children}
+      </span>
+    );
+  }
+  return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+}
+
+// Cached key -> {id, title} index built from GET /nuggets (small, unfiltered
+// list — see 10_architecture.json deferred_decisions). Used ONLY to resolve a
+// clicked [[nugget:key]] reference's id at click time (never per-render) and
+// to render a nugget's OWN body_markdown inside NuggetPanel, which has no
+// pre-fetched titleMap of its own the way a section/main-spine render does.
+let nuggetIndexCache: Promise<Record<string, { id: string; title: string }>> | null = null;
+
+function loadNuggetIndex(): Promise<Record<string, { id: string; title: string }>> {
+  if (!nuggetIndexCache) {
+    nuggetIndexCache = (async () => {
+      const res = await apiFetch<Dataset<NuggetListRow>>('/essaycards/nuggets');
+      if (isApiError(res)) {
+        nuggetIndexCache = null;
+        return {};
+      }
+      return Object.fromEntries(res.rows.map(r => [r.nugget_key, { id: r.id, title: r.title }]));
+    })();
+  }
+  return nuggetIndexCache;
+}
+
+const nuggetPanelOverlayStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,0.45)',
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'flex-start',
+  padding: '5vh 16px',
+  zIndex: 1000,
+  overflowY: 'auto',
+};
+
+const nuggetPanelStyle: React.CSSProperties = {
+  background: 'var(--md-sys-color-surface)',
+  borderRadius: 'var(--radius-card, 12px)',
+  padding: 20,
+  maxWidth: 640,
+  width: '100%',
+  boxShadow: 'var(--elevation-1)',
+};
+
+// In-page overlay/panel (component state, never a route change) — ReaderView
+// and ReviewSessionView keep rendering underneath while it is open. Owns its
+// own id-stack for recursive nugget-to-nugget navigation: pushed on
+// click-through inside the panel's own body_markdown, popped on "← Back".
+function NuggetPanel({ initialNuggetId, essayId, sectionId, onClose }: {
+  initialNuggetId: string;
+  essayId: string;
+  sectionId: string;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const [stack, setStack] = useState<string[]>([initialNuggetId]);
+  const currentId = stack[stack.length - 1];
+
+  const [nugget, setNugget] = useState<NuggetDetailRow | null>(null);
+  const [flashcards, setFlashcards] = useState<NuggetFlashcardRow[]>([]);
+  const [sections, setSections] = useState<NuggetSectionRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [titleMap, setTitleMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    (async () => {
+      const idx = await loadNuggetIndex();
+      setTitleMap(Object.fromEntries(Object.entries(idx).map(([k, v]) => [k, v.title])));
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setError(null);
+      setSections(null);
+      const [detailRes, flashcardsRes] = await Promise.all([
+        apiFetch<Dataset<NuggetDetailRow>>(`/essaycards/nuggets/${currentId}`),
+        apiFetch<Dataset<NuggetFlashcardRow>>(`/essaycards/nuggets/${currentId}/flashcards`),
+      ]);
+      setLoading(false);
+      if (isApiError(detailRes)) { setError(detailRes); return; }
+      setNugget(detailRes.rows[0] ?? null);
+      setFlashcards(isApiError(flashcardsRes) ? [] : flashcardsRes.rows);
+    })();
+  }, [currentId]);
+
+  const openNested = async (key: string) => {
+    const idx = await loadNuggetIndex();
+    const entry = idx[key];
+    if (entry) setStack(s => [...s, entry.id]);
+  };
+
+  const loadReferencedBy = async () => {
+    const res = await apiFetch<Dataset<NuggetSectionRow>>(`/essaycards/nuggets/${currentId}/sections`);
+    if (!isApiError(res)) setSections(res.rows);
+  };
+
+  return (
+    <div style={nuggetPanelOverlayStyle} onClick={onClose}>
+      <div style={nuggetPanelStyle} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          {stack.length > 1 ? (
+            <button style={btnStyle} onClick={() => setStack(s => s.slice(0, -1))}>← Back</button>
+          ) : <span />}
+          <button style={btnStyle} onClick={onClose}>Close ✕</button>
+        </div>
+
+        {loading && <Skeleton />}
+        {error && <ErrorCard error={error} />}
+
+        {!loading && !error && nugget && (
+          <>
+            <h3 style={{ marginTop: 0 }}>{nugget.title}</h3>
+            <div className="essaycards-section-body">
+              <ReactMarkdown
+                remarkPlugins={[[remarkNuggetRefs, titleMap]]}
+                urlTransform={nuggetAwareUrlTransform}
+                components={{ a: (p: any) => <NuggetLink {...p} onOpenNugget={openNested} /> }}
+              >
+                {nugget.body_markdown}
+              </ReactMarkdown>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Flashcards</div>
+              {flashcards.length === 0 ? (
+                <div style={{ color: '#888', fontSize: 13 }}>No flashcards yet for this nugget.</div>
+              ) : (
+                flashcards.map(fc => (
+                  <div key={fc.id} style={{ fontSize: 13, marginBottom: 6 }}>
+                    <strong>Q:</strong> {fc.question} <br /><strong>A:</strong> {fc.answer}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+              <button style={btnStyle} onClick={loadReferencedBy}>Referenced by…</button>
+              <button
+                style={btnStyle}
+                onClick={() => navigate(
+                  `/essaycards/nuggets/authoring?essay_id=${essayId}&section_id=${sectionId}&nugget_id=${nugget.id}`,
+                )}
+              >
+                Edit nugget
+              </button>
+              <button
+                style={btnStyle}
+                onClick={() => navigate(
+                  `/essaycards/nuggets/${nugget.id}/generate-flashcards?essay_id=${essayId}&section_id=${sectionId}`,
+                )}
+              >
+                Generate flashcards
+              </button>
+            </div>
+
+            {sections && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Referenced by</div>
+                {sections.length === 0 ? (
+                  <div style={{ color: '#888', fontSize: 13 }}>Not referenced by any section yet.</div>
+                ) : (
+                  sections.map(s => (
+                    <div
+                      key={s.section_id}
+                      style={{ fontSize: 13, marginBottom: 4, cursor: 'pointer', color: 'var(--md-sys-color-primary)' }}
+                      onClick={() => navigate(`/essaycards/essays/${s.essay_id}#${s.anchor_slug}`)}
+                    >
+                      {s.essay_title} — {s.heading}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The main spine's titleMap is the client-side union of every section's own
+// `nuggets` field AND the essay's own `main_spine_nuggets` field — so a
+// nugget referenced only in main_spine_markdown, never in any section, still
+// resolves to a title instead of rendering as nugget-missing (11_design_
+// review.md Minimal Change Set item 2).
+function mainSpineTitleMap(essay: EssayDetailRow): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const section of essay.sections) for (const n of section.nuggets) map[n.nugget_key] = n.title;
+  for (const n of essay.main_spine_nuggets) map[n.nugget_key] = n.title;
+  return map;
 }
 
 // ── Essay List View ───────────────────────────────────────────────────────────
@@ -928,6 +1375,19 @@ function ReaderView() {
   const [essay, setEssay] = useState<EssayDetailRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
+  // Sprint09_Nuggets: the currently-open NuggetPanel (null = closed), plus
+  // the essay/section context it was opened from (needed by the panel's
+  // "Edit nugget" / "Generate flashcards" entry points).
+  const [activeNugget, setActiveNugget] = useState<{ nuggetId: string; sectionId: string } | null>(null);
+
+  // Resolves a clicked [[nugget:key]] reference's id (via the cached
+  // key->id index) and opens the panel — never a route navigation, so
+  // ReaderView itself never unmounts and scroll position is preserved.
+  const openNuggetByKey = useCallback(async (key: string, sectionId: string) => {
+    const idx = await loadNuggetIndex();
+    const entry = idx[key];
+    if (entry) setActiveNugget({ nuggetId: entry.id, sectionId });
+  }, []);
   // "Export section" / "Insert section after" — one message slot, keyed to
   // the section and action it was shown for, since only one is ever in
   // flight at a time. `ok` drives the button's copied -> "Import" toggle;
@@ -972,6 +1432,17 @@ function ReaderView() {
       setSectionActionMsg({ sectionId, kind: 'export', ok: false, text: `Export failed: ${res.error.message}` });
       return;
     }
+    // Stash this section's CURRENTLY required nugget keys, keyed by
+    // section_id, so IngestView can later detect an accidental drop (see
+    // extractNuggetKeysClient / internal_flow step 10). Read once and
+    // cleared by IngestView on parse.
+    try {
+      sessionStorage.setItem(
+        `essaycards:sectionExport:${sectionId}`,
+        JSON.stringify(res.focus_section_nuggets.map(n => n.nugget_key)),
+      );
+    } catch { /* sessionStorage unavailable — drop-detection degrades gracefully to no-op */ }
+
     const err = await writeClipboard(buildSectionExportClipboardText(res));
     setSectionActionMsg({
       sectionId,
@@ -1051,11 +1522,44 @@ function ReaderView() {
         >
           {essayExportMsg?.ok ? 'Import →' : 'Export essay'}
         </button>
+        {essay.sections.length > 0 && (
+          <button
+            style={btnStyle}
+            onClick={() => navigate(
+              `/essaycards/nuggets/authoring?essay_id=${essay.id}&section_id=${essay.sections[0].id}`,
+            )}
+          >
+            + New nugget
+          </button>
+        )}
       </div>
       {essayExportMsg && (
         <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{essayExportMsg.text}</div>
       )}
-      <h1 style={{ marginBottom: 24 }}>{essay.title}</h1>
+      <h1 style={{ marginBottom: 12 }}>{essay.title}</h1>
+
+      {essay.main_spine_markdown.trim() !== '' && (
+        <div
+          className="essaycards-section-body"
+          style={{
+            marginBottom: 24,
+            padding: '12px 16px',
+            borderLeft: '3px solid var(--md-sys-color-primary)',
+            background: 'var(--md-sys-color-surface-variant, transparent)',
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: '#888', marginBottom: 4 }}>
+            Main spine
+          </div>
+          <ReactMarkdown
+            remarkPlugins={[[remarkNuggetRefs, mainSpineTitleMap(essay)]]}
+            urlTransform={nuggetAwareUrlTransform}
+            components={{ a: (p: any) => <NuggetLink {...p} onOpenNugget={key => openNuggetByKey(key, essay.sections[0]?.id ?? '')} /> }}
+          >
+            {essay.main_spine_markdown}
+          </ReactMarkdown>
+        </div>
+      )}
 
       {essay.sections.length === 0 && (
         <div style={{ color: '#888', fontSize: 14 }}>This essay has no sections yet.</div>
@@ -1065,7 +1569,13 @@ function ReaderView() {
         <section key={section.id} id={section.anchor_slug} style={{ marginBottom: 32 }}>
           <h2>{section.heading}</h2>
           <div className="essaycards-section-body">
-            <ReactMarkdown>{section.body_markdown}</ReactMarkdown>
+            <ReactMarkdown
+              remarkPlugins={[[remarkNuggetRefs, Object.fromEntries(section.nuggets.map(n => [n.nugget_key, n.title]))]]}
+              urlTransform={nuggetAwareUrlTransform}
+              components={{ a: (p: any) => <NuggetLink {...p} onOpenNugget={key => openNuggetByKey(key, section.id)} /> }}
+            >
+              {section.body_markdown}
+            </ReactMarkdown>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button
@@ -1101,6 +1611,15 @@ function ReaderView() {
           <SectionExaminationHistory sectionId={section.id} />
         </section>
       ))}
+
+      {activeNugget && (
+        <NuggetPanel
+          initialNuggetId={activeNugget.nuggetId}
+          essayId={essay.id}
+          sectionId={activeNugget.sectionId}
+          onClose={() => setActiveNugget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1181,6 +1700,7 @@ function QuestionOverviewView() {
   const navigate = useNavigate();
   const [essay, setEssay] = useState<EssayDetailRow | null>(null);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [nuggets, setNuggets] = useState<NuggetListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -1200,6 +1720,16 @@ function QuestionOverviewView() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Nugget options for the edit form's nugget <select> — fetched once per
+  // view mount (not per question), per 11_design_review.md Minimal Change
+  // Set item 3.
+  useEffect(() => {
+    (async () => {
+      const res = await apiFetch<Dataset<NuggetListRow>>('/essaycards/nuggets');
+      if (!isApiError(res)) setNuggets(res.rows);
+    })();
+  }, []);
 
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
   if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
@@ -1229,6 +1759,7 @@ function QuestionOverviewView() {
           key={group.section.id}
           essaySlug={essay.slug}
           group={group}
+          nuggets={nuggets}
           onChanged={load}
         />
       ))}
@@ -1236,9 +1767,10 @@ function QuestionOverviewView() {
   );
 }
 
-function SectionQuestionGroupView({ essaySlug, group, onChanged }: {
+function SectionQuestionGroupView({ essaySlug, group, nuggets, onChanged }: {
   essaySlug: string;
   group: SectionQuestionGroup;
+  nuggets: NuggetListRow[];
   onChanged: () => void;
 }) {
   const [addingLevel, setAddingLevel] = useState<number | null>(null);
@@ -1256,7 +1788,7 @@ function SectionQuestionGroupView({ essaySlug, group, onChanged }: {
             <div style={{ color: '#aaa', fontSize: 13, marginBottom: 6 }}>No questions at this level yet.</div>
           ) : (
             questions.map(q => (
-              <QuestionItem key={q.id} essaySlug={essaySlug} question={q} onChanged={onChanged} />
+              <QuestionItem key={q.id} essaySlug={essaySlug} question={q} nuggets={nuggets} onChanged={onChanged} />
             ))
           )}
           <button
@@ -1279,9 +1811,10 @@ function SectionQuestionGroupView({ essaySlug, group, onChanged }: {
   );
 }
 
-function QuestionItem({ essaySlug, question, onChanged }: {
+function QuestionItem({ essaySlug, question, nuggets, onChanged }: {
   essaySlug: string;
   question: QuestionRow;
+  nuggets: NuggetListRow[];
   onChanged: () => void;
 }) {
   const navigate = useNavigate();
@@ -1289,6 +1822,11 @@ function QuestionItem({ essaySlug, question, onChanged }: {
   const [q, setQ] = useState(question.question);
   const [a, setA] = useState(question.answer);
   const [level, setLevel] = useState(question.level);
+  // '' represents "No nugget" in the <select> — mapped to explicit null on
+  // save, never omitted (R-CON-AL-05 round trip: UI representation of the
+  // cleared state = the selectable "No nugget" option; payload = explicit
+  // id or null, never omission).
+  const [nuggetId, setNuggetId] = useState<string>(question.nugget_id ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [exportMsg, setExportMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -1297,6 +1835,7 @@ function QuestionItem({ essaySlug, question, onChanged }: {
     setQ(question.question);
     setA(question.answer);
     setLevel(question.level);
+    setNuggetId(question.nugget_id ?? '');
     setError(null);
     setEditing(true);
   };
@@ -1309,7 +1848,7 @@ function QuestionItem({ essaySlug, question, onChanged }: {
       body: JSON.stringify({
         essay_slug: essaySlug,
         section_id: question.section_id,
-        card: { id: question.card_key, level, q, a },
+        card: { id: question.card_key, level, q, a, nugget_id: nuggetId === '' ? null : nuggetId },
       }),
     });
     setSaving(false);
@@ -1375,6 +1914,19 @@ function QuestionItem({ essaySlug, question, onChanged }: {
           onChange={e => setLevel(Math.max(1, parseInt(e.target.value, 10) || 1))}
           style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6 }}
         />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <label style={{ fontSize: 12 }}>Nugget</label>
+        <select
+          value={nuggetId}
+          onChange={e => setNuggetId(e.target.value)}
+          style={{ fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6, flex: 1 }}
+        >
+          <option value="">No nugget</option>
+          {nuggets.map(n => (
+            <option key={n.id} value={n.id}>{n.title}</option>
+          ))}
+        </select>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <button style={primaryBtnStyle} disabled={saving || !q.trim() || !a.trim()} onClick={handleSave}>
@@ -1821,6 +2373,11 @@ function ReviewSessionView() {
   // Once the package is on the clipboard, the Explore button becomes an
   // "Import result" button routing to ExploreImportView — reset on the next card.
   const [exported, setExported] = useState(false);
+  // Sprint09_Nuggets — source navigation: current.nugget_id set opens
+  // NuggetPanel as an overlay (never navigate() — that would unmount this
+  // view and interrupt the session); current.nugget_id null keeps the
+  // unchanged "Jump to passage" route navigation below.
+  const [nuggetPanelOpen, setNuggetPanelOpen] = useState(false);
 
   const dueUrl = useCallback(() => {
     const qs = new URLSearchParams();
@@ -1902,6 +2459,7 @@ function ReviewSessionView() {
     setFlipped(false);
     setExploreMsg(null);
     setExported(false);
+    setNuggetPanelOpen(false);
     setStatsRefresh(n => n + 1);
     if (grade === 'again') setAgainIds(s => new Set(s).add(card.flashcard_id));
 
@@ -2002,12 +2560,18 @@ function ReviewSessionView() {
             >
               <ReactMarkdown>{current.answer}</ReactMarkdown>
             </div>
-            <button
-              style={jumpBtnStyle}
-              onClick={() => navigate(`/essaycards/essays/${current.essay_id}#${current.anchor_slug}`)}
-            >
-              Jump to passage →
-            </button>
+            {current.nugget_id ? (
+              <button style={jumpBtnStyle} onClick={() => setNuggetPanelOpen(true)}>
+                Flashcard → Nugget
+              </button>
+            ) : (
+              <button
+                style={jumpBtnStyle}
+                onClick={() => navigate(`/essaycards/essays/${current.essay_id}#${current.anchor_slug}`)}
+              >
+                Jump to passage →
+              </button>
+            )}
             {exported ? (
               <button
                 style={{ ...jumpBtnStyle, marginLeft: 20 }}
@@ -2066,6 +2630,15 @@ function ReviewSessionView() {
           </strong>
         </div>
       </div>
+
+      {nuggetPanelOpen && current.nugget_id && (
+        <NuggetPanel
+          initialNuggetId={current.nugget_id}
+          essayId={current.essay_id}
+          sectionId={current.section_id}
+          onClose={() => setNuggetPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -2079,7 +2652,7 @@ function ReviewSessionView() {
 // the backend's actual manual validation in backend/routers/essays.py.
 const STUB_PROMPT = `You are generating a JSON payload for an app called EssayCards. It will be submitted verbatim as the raw HTTP body of POST /api/essaycards/essays/ingest. Reply with ONLY the JSON object — no markdown code fences (no \`\`\`), no commentary before or after, nothing but the JSON.
 
-Fill in the template below. Every value is an instruction describing what belongs there — replace each one with real content, and remove these instructions from your reply:
+Fill in the template below. Every value is an instruction describing what belongs there — replace each one with real content, and remove these instructions from your reply. This is a FULL PACKAGE: the main spine, every nugget it needs, every section, and every flashcard, all in one JSON object, so one submit creates the whole essay in one step.
 
 {
   "title": "the essay's display title, e.g. \\"Why Rome Fell\\" — do NOT put a leading sequence number in here; use sort_index for ordering",
@@ -2087,11 +2660,19 @@ Fill in the template below. Every value is an instruction describing what belong
   "category": "the overview-page group this essay belongs under — one of \\"Art\\", \\"History\\", \\"Philosophy\\" (omit the key entirely if none applies)",
   "sort_index": "integer position of this essay within its category, ascending (e.g. 1, 2, 3) — this replaces writing a number into the title; omit for 0",
   "status": "\\"complete\\" for a finished essay (the default — omit the key), or \\"planned\\" if this is a stub whose body is just planning notes",
+  "main_spine_markdown": "a short (roughly 100-250 word) overview in Markdown tying the whole essay's sections together into one narrative arc — read on its own, before any section. May reference a nugget from the \\"nuggets\\" list below via [[nugget:key]] the same way section body_markdown does. Omit the key, or use an empty string, if the essay doesn't need a spine overview.",
+  "nuggets": [
+    {
+      "nugget_key": "a url-safe stable id for this ONE standalone concept: letters, digits, underscore, hyphen only, GLOBALLY unique across the whole app, not just this essay — e.g. cogito. Check \\"Existing nugget keys\\" below before inventing one, so you don't accidentally create a near-duplicate of a concept that already exists.",
+      "title": "the nugget's short display title, e.g. \\"Cogito\\"",
+      "body_markdown": "a self-contained explanation of this ONE concept in Markdown, written so it makes sense read on its own — independent of whichever essay/section links to it. This is what a reader sees when they click the concept anywhere it's referenced."
+    }
+  ],
   "sections": [
     {
       "heading": "this section's display heading, e.g. \\"The Economic Causes\\"",
       "anchor_slug": "a url-safe stable id for this section, unique within the essay, e.g. economic-causes — used for \\"jump to passage\\" links, so keep it short and don't rename it on a later update",
-      "body_markdown": "the ACTUAL essay text for this section, written in Markdown, roughly 300-600 words ('about one page') — this is what the reader reads. Do not summarize; write the real prose. Flashcards are NOT marked inline in this text (that inline-fence convention is only used by this app's separate offline markdown-file ingestion path, not this JSON format) — flashcards go in the sibling 'cards' list below instead. You may embed images as Markdown image references here — see the Images rule below.",
+      "body_markdown": "the ACTUAL essay text for this section, written in Markdown, roughly 300-600 words ('about one page') — this is what the reader reads. Do not summarize; write the real prose. Flashcards are NOT marked inline in this text (that inline-fence convention is only used by this app's separate offline markdown-file ingestion path, not this JSON format) — flashcards go in the sibling 'cards' list below instead. Reference a nugget from the \\"nuggets\\" list above inline via [[nugget:key]] instead of re-explaining a substantial, independently-meaningful concept in place — see the Nuggets rule below. You may also embed images as Markdown image references here — see the Images rule below.",
       "cards": [
         {
           "id": "a url-safe stable id for this card, UNIQUE ACROSS THE WHOLE ESSAY (not just this section) — e.g. economic-causes-1",
@@ -2109,14 +2690,18 @@ Rules that don't fit cleanly inline above:
 - "sections" must have at least 1 entry; a section's "cards" list may be empty, but aim for 2-5 cards per section.
 - "category", "sort_index" and "status" are optional essay-level metadata for the overview page. Never encode a sequence number in "title" — put it in "sort_index". Omit "category" entirely if the topic given doesn't clearly fit one. Use "status": "planned" only for a stub essay whose body is just planning notes; a normal finished essay omits "status".
 - The order of the "sections" array IS the reading order (there is no separate order field); same for the order you list "cards" within a section.
-- This is an upsert, never a wholesale replace: if you're updating an existing essay, sections/cards you omit from the payload are left untouched, not deleted.
+- This is an upsert, never a wholesale replace: if you're updating an existing essay, sections/cards you omit from the payload are left untouched, not deleted. The same is true of "nuggets": reusing an existing nugget_key here UPDATES that nugget's title/body_markdown in place, which affects every essay/section that already links to it — only reuse a key you actually intend to revise.
 - Repeat the section object for every section of the essay — a real essay should have several sections, not just one.
+- Nuggets. "nuggets" is optional — omit it, or use an empty list, if this essay doesn't need any standalone/reusable concepts. Every [[nugget:key]] you write anywhere in "main_spine_markdown" or any section's "body_markdown" MUST have a matching entry in "nuggets" in THIS SAME payload, unless that key already exists from an earlier import — an unresolved reference fails the entire import, nothing gets saved. Don't create a nugget for something discussed in only one place that isn't independently meaningful on its own — plain prose in body_markdown is fine for that; nuggets are specifically for concepts substantial and reusable enough to deserve their own standalone explanation.
 - Images. To place an image, write a standard Markdown image reference ![short alt text](/api/essaycards/images/SLUG) on its own line (a blank line before and after) inside a body_markdown value, or inline inside a card "q" or "a". SLUG must be one of the slugs under "Available images" below. The ingest endpoint does NOT validate image references — an invented or misspelled slug silently renders as a broken image, so use only the slugs listed. Add an image only where it genuinely illustrates the adjacent prose, and keep the alt text short. If "Available images" is empty, do not write any image references.
+
+Existing nugget keys (key — title), so you don't accidentally duplicate one that already exists elsewhere in the app:
+- (none yet — before using this prompt, replace this line with one entry per existing nugget you want available for reuse, e.g. "cogito — Cogito". Leave empty if none should be reused.)
 
 Available images (slug — what it depicts):
 - (none yet — before using this prompt, replace this line with one entry per imported image, e.g. "denarius-debasement-chart — line chart of the denarius's silver content, 0-270 AD". Leave empty to use no images.)
 
-Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell" — do not reuse this content, it's here only to show the pattern):
+Worked mini-example (2 sections, one nugget, realistic content, for the topic "Why Rome Fell" — do not reuse this content, it's here only to show the pattern):
 
 {
   "title": "Why Rome Fell",
@@ -2124,11 +2709,19 @@ Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell
   "category": "History",
   "sort_index": 1,
   "status": "complete",
+  "main_spine_markdown": "Rome's fall was not one event but a slow compounding of pressures: a currency crisis that undercut trust and trade, met by frontier pressure the state could no longer afford to answer. Central to both is the [[nugget:fiscal-military-spiral]] that made each problem worsen the other.",
+  "nuggets": [
+    {
+      "nugget_key": "fiscal-military-spiral",
+      "title": "The Fiscal-Military Spiral",
+      "body_markdown": "A self-reinforcing cycle: falling tax revenue forces debasement of the currency to pay the army, debasement drives inflation and further erodes real tax revenue, and the shrinking real budget cannot fund the frontier defense that rising external pressure demands — each turn of the cycle leaves the state weaker going into the next."
+    }
+  ],
   "sections": [
     {
       "heading": "The Economic Causes",
       "anchor_slug": "economic-causes",
-      "body_markdown": "By the 3rd century, Rome's currency had been debased so many times that contemporaries spoke of a \\"debasement crisis\\" eroding trust in coinage across the empire.\\n\\n![Silver content of the denarius, 0-270 AD](/api/essaycards/images/denarius-debasement-chart)\\n\\nTax revenue fell as trade contracted, while the cost of defending an ever-longer frontier kept rising...",
+      "body_markdown": "By the 3rd century, Rome's currency had been debased so many times that contemporaries spoke of a \\"debasement crisis\\" eroding trust in coinage across the empire.\\n\\n![Silver content of the denarius, 0-270 AD](/api/essaycards/images/denarius-debasement-chart)\\n\\nTax revenue fell as trade contracted, while the cost of defending an ever-longer frontier kept rising — the [[nugget:fiscal-military-spiral]] driving both at once.",
       "cards": [
         { "id": "economic-causes-1", "q": "What did contemporaries call the currency problem of the 3rd century?", "a": "The \\"debasement crisis\\" — repeated debasement of the currency, which drove inflation." },
         { "id": "economic-causes-2", "q": "Why did tax revenue decline even as military costs rose?", "a": "Trade contracted, shrinking the tax base, while frontier defense grew more expensive." }
@@ -2137,7 +2730,7 @@ Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell
     {
       "heading": "Pressure on the Frontiers",
       "anchor_slug": "frontier-pressure",
-      "body_markdown": "Migrating and invading groups pressed on the Rhine and Danube frontiers with increasing frequency from the late 4th century onward...",
+      "body_markdown": "Migrating and invading groups pressed on the Rhine and Danube frontiers with increasing frequency from the late 4th century onward, straining a treasury already caught in the [[nugget:fiscal-military-spiral]]...",
       "cards": [
         { "id": "frontier-pressure-1", "q": "Which two rivers marked the frontiers under increasing pressure from the late 4th century?", "a": "The Rhine and the Danube." }
       ]
@@ -2145,7 +2738,7 @@ Worked mini-example (2 sections, realistic content, for the topic "Why Rome Fell
   ]
 }
 
-Now write a complete essay with flashcards on the topic I give you, following every rule above exactly, and reply with only the JSON.`;
+Now write a complete essay — main spine, nuggets, sections, and flashcards — on the topic I give you, following every rule above exactly, and reply with only the JSON.`;
 
 // Shown as the textarea's empty-state placeholder — same self-documenting
 // style as STUB_PROMPT's template (values ARE the instructions). Shows TWO
@@ -2158,11 +2751,15 @@ const PLACEHOLDER_JSON = `{
   "category": "Art | History | Philosophy (optional)",
   "sort_index": 1,
   "status": "complete | planned (optional, default complete)",
+  "main_spine_markdown": "optional short overview tying the sections together, in Markdown — may use [[nugget:key]]",
+  "nuggets": [
+    { "nugget_key": "url-safe id, globally unique across the app", "title": "short display title", "body_markdown": "self-contained explanation of this one concept" }
+  ],
   "sections": [
     {
       "heading": "first section's heading",
       "anchor_slug": "url-safe id for this section, unique in the essay",
-      "body_markdown": "this section's essay text, in Markdown",
+      "body_markdown": "this section's essay text, in Markdown — may reference [[nugget:key]] from the nuggets list above",
       "cards": [
         { "id": "unique id for this card (whole essay, not just section)", "q": "question about THIS section", "a": "answer" }
       ]
@@ -2177,15 +2774,60 @@ const PLACEHOLDER_JSON = `{
     }
   ]
 }
-// a card belongs to whichever section it's nested inside above — there is no separate section-linking field`;
+// a card belongs to whichever section it's nested inside above — there is no separate section-linking field
+// "nuggets" is optional — every [[nugget:key]] used above must have a matching entry here (or already exist)`;
 
 interface IngestSummary {
   essay_id: string;
   slug: string;
+  nuggets_created: number;
+  nuggets_updated: number;
   sections_created: number;
   sections_updated: number;
   cards_created: number;
   cards_updated: number;
+}
+
+// Sprint09_Nuggets — section spine revision drop-detection (internal_flow
+// step 10): when a pasted payload has a focus_section_id, compares the
+// stashed key set from ReaderView.handleExportSection (stored in
+// sessionStorage, read once and cleared here) against the returned focus
+// section's CURRENT nugget keys. A non-empty difference is surfaced as a
+// non-blocking warning — submission is never blocked by this check, only a
+// warning is shown (00_draft.md §8 "surfaces, not silently blocks").
+function detectDroppedNuggetKeys(pastedText: string): string[] | null {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(pastedText);
+  } catch {
+    return null;
+  }
+  const focusSectionId = parsed?.focus_section_id;
+  if (typeof focusSectionId !== 'string' || !Array.isArray(parsed?.sections)) return null;
+
+  let stashed: string | null;
+  try {
+    stashed = sessionStorage.getItem(`essaycards:sectionExport:${focusSectionId}`);
+    if (stashed !== null) sessionStorage.removeItem(`essaycards:sectionExport:${focusSectionId}`);
+  } catch {
+    return null;
+  }
+  if (!stashed) return null;
+
+  let previouslyRequired: unknown;
+  try {
+    previouslyRequired = JSON.parse(stashed);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(previouslyRequired) || previouslyRequired.length === 0) return null;
+
+  const focusSection = parsed.sections.find((s: any) => s?.section_id === focusSectionId);
+  if (!focusSection || typeof focusSection.body_markdown !== 'string') return null;
+
+  const currentKeys = extractNuggetKeysClient(focusSection.body_markdown);
+  const dropped = (previouslyRequired as string[]).filter(k => !currentKeys.has(k));
+  return dropped.length > 0 ? dropped : null;
 }
 
 function IngestView() {
@@ -2195,6 +2837,18 @@ function IngestView() {
   const [error, setError] = useState<ApiError | null>(null);
   const [result, setResult] = useState<IngestSummary | null>(null);
   const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
+  const [dropWarning, setDropWarning] = useState<string | null>(null);
+
+  const checkNuggetDrop = (pastedText: string) => {
+    const dropped = detectDroppedNuggetKeys(pastedText);
+    setDropWarning(
+      dropped
+        ? `Warning: this section previously required nugget${dropped.length > 1 ? 's' : ''} ` +
+          `${dropped.map(k => `[[nugget:${k}]]`).join(', ')}, which no longer appear${dropped.length === 1 ? 's' : ''} ` +
+          'in the returned text. If this was intentional, ignore this — submission is not blocked.'
+        : null,
+    );
+  };
 
   const handleCopyStub = async () => {
     const err = await writeClipboard(STUB_PROMPT);
@@ -2212,6 +2866,7 @@ function IngestView() {
     }
     setText(res.text);
     setClipboardMsg(null);
+    checkNuggetDrop(res.text);
   };
 
   const handleSubmit = async () => {
@@ -2237,14 +2892,17 @@ function IngestView() {
     <div style={pageStyle}>
       <h2 style={{ marginTop: 0 }}>Add / Update Essay</h2>
       <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
-        Paste a JSON payload describing an essay, its sections, and their
-        flashcards. Each flashcard lives inside its section's own "cards"
-        list — that nesting is what ties a question to the passage it tests,
-        there's no separate field pointing a card at a section. If the slug
-        already exists, its sections and cards are upserted; nothing is
-        deleted. No idea how to write that JSON by hand? Copy the fill-in
-        prompt below, hand it to an LLM with your topic, and paste its reply
-        back in.
+        Paste one JSON payload with the whole essay: its main spine, any new
+        nuggets it needs, its sections, and their flashcards — one submit
+        creates or updates all of it together. Each flashcard lives inside
+        its section's own "cards" list — that nesting is what ties a question
+        to the passage it tests, there's no separate field pointing a card at
+        a section. A section may reference a nugget defined in this same
+        payload's "nuggets" list via [[nugget:key]] — nuggets are upserted
+        first, so the reference always resolves. If the slug already exists,
+        its sections and cards are upserted; nothing is deleted. No idea how
+        to write that JSON by hand? Copy the fill-in prompt below, hand it to
+        an LLM with your topic, and paste its reply back in.
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -2258,6 +2916,10 @@ function IngestView() {
       <textarea
         value={text}
         onChange={e => setText(e.target.value)}
+        onPaste={e => {
+          const pasted = e.clipboardData?.getData('text');
+          if (pasted) checkNuggetDrop(pasted);
+        }}
         rows={16}
         style={{
           width: '100%',
@@ -2270,6 +2932,10 @@ function IngestView() {
         }}
         placeholder={PLACEHOLDER_JSON}
       />
+
+      {dropWarning && (
+        <div style={{ fontSize: 12, color: '#b06a00', marginTop: 8 }}>{dropWarning}</div>
+      )}
 
       <div style={{ marginTop: 12 }}>
         <button style={primaryBtnStyle} disabled={submitting || !text.trim()} onClick={handleSubmit}>
@@ -2292,6 +2958,8 @@ function IngestView() {
         }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Ingest succeeded</div>
           <div style={{ fontSize: 13, color: '#555' }}>
+            Nuggets: +{result.nuggets_created} created, ~{result.nuggets_updated} updated
+            <br />
             Sections: +{result.sections_created} created, ~{result.sections_updated} updated
             <br />
             Cards: +{result.cards_created} created, ~{result.cards_updated} updated
@@ -2936,6 +3604,321 @@ function ImagesView() {
   );
 }
 
+// ── Nugget authoring import view (Sprint09_Nuggets) ─────────────────────────
+//
+// Self-contained: fetches its own export package (GET /nuggets/authoring-
+// package) on mount and offers both the "Copy prompt" step and the
+// paste-JSON-reply/submit step on one page — unlike the essay/section/
+// question export flows (which fetch+copy from a *source* page, e.g.
+// ReaderView, then toggle to a *separate* Import view), a brand-new nugget
+// has no existing "source" page to fetch+copy from. Reached from ReaderView's
+// "+ New nugget" button (nugget_id omitted) or NuggetPanel's "Edit nugget"
+// button (nugget_id set).
+
+const NUGGET_JSON_PLACEHOLDER = `{
+  "nugget_key": "...",
+  "title": "...",
+  "body_markdown": "..."
+}`;
+
+function NuggetAuthoringImportView() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const essayId = searchParams.get('essay_id') ?? '';
+  const sectionId = searchParams.get('section_id') ?? '';
+  const nuggetId = searchParams.get('nugget_id');
+
+  const [pkg, setPkg] = useState<NuggetAuthoringPackage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<ApiError | null>(null);
+  const [result, setResult] = useState<NuggetUpsertResult | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      if (!essayId || !sectionId) {
+        setLoading(false);
+        setError({ error: { code: 'VALIDATION_ERROR', message: 'essay_id and section_id are required', request_id: '' } });
+        return;
+      }
+      setLoading(true);
+      const qs = new URLSearchParams({ essay_id: essayId, section_id: sectionId });
+      if (nuggetId) qs.set('nugget_id', nuggetId);
+      const res = await apiFetch<NuggetAuthoringPackage>(`/essaycards/nuggets/authoring-package?${qs.toString()}`);
+      setLoading(false);
+      if (isApiError(res)) { setError(res); return; }
+      setPkg(res);
+    })();
+  }, [essayId, sectionId, nuggetId]);
+
+  const handleCopyPrompt = async () => {
+    if (!pkg) return;
+    const err = await writeClipboard(buildNuggetAuthoringClipboardText(pkg));
+    setClipboardMsg(
+      err ??
+        'Copied. Paste into ChatGPT (or similar), have it draft/revise the nugget, then paste its JSON reply below and Submit.',
+    );
+  };
+
+  const handlePasteFromClipboard = async () => {
+    const res = await readClipboard();
+    if ('error' in res) { setClipboardMsg(res.error); return; }
+    setText(res.text);
+    setClipboardMsg(null);
+  };
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    setResult(null);
+    const res = await apiFetch<NuggetUpsertResult>('/essaycards/nuggets/upsert', {
+      method: 'POST',
+      body: text,
+    });
+    setSubmitting(false);
+    if (isApiError(res)) { setSubmitError(res); return; }
+    setResult(res);
+  };
+
+  return (
+    <div style={pageStyle}>
+      <button style={{ ...btnStyle, marginBottom: 12 }} onClick={() => navigate(`/essaycards/essays/${essayId}`)}>
+        ← Back to reader
+      </button>
+      <h2 style={{ marginTop: 0 }}>{pkg?.nugget ? 'Edit Nugget' : 'New Nugget'}</h2>
+
+      {loading && <Skeleton />}
+      {error && <ErrorCard error={error} />}
+
+      {pkg && (
+        <>
+          <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+            {pkg.nugget
+              ? `Revising "${pkg.nugget.title}" (${pkg.nugget.nugget_key}).`
+              : 'Drafting a brand-new nugget, in the context of this essay/section.'}
+            {' '}Copy the prompt, discuss/draft with ChatGPT (or similar), then paste its JSON reply below.
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button style={btnStyle} onClick={handleCopyPrompt}>Copy prompt</button>
+            <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
+          </div>
+          {clipboardMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>}
+
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={12}
+            style={{
+              width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 8,
+              boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: 6,
+            }}
+            placeholder={NUGGET_JSON_PLACEHOLDER}
+          />
+
+          <div style={{ marginTop: 12 }}>
+            <button style={primaryBtnStyle} disabled={submitting || !text.trim()} onClick={handleSubmit}>
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          </div>
+
+          {submitError && <div style={{ marginTop: 16 }}><ErrorCard error={submitError} /></div>}
+
+          {result && (
+            <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid #e0e0e0' }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                {result.created ? 'Nugget created' : 'Nugget updated'}
+              </div>
+              <div style={{ fontSize: 13, color: '#555' }}>
+                {result.title} ({result.nugget_key})
+              </div>
+              <button
+                style={{ ...btnStyle, marginTop: 12 }}
+                onClick={() => navigate(`/essaycards/essays/${essayId}`)}
+              >
+                Back to reader
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Generate flashcards from a nugget (Sprint09_Nuggets) ────────────────────
+//
+// Self-contained, same shape as NuggetAuthoringImportView above. Import
+// issues one POST /flashcards/upsert per generated card, SEQUENTIALLY, each
+// with nugget_id pre-set to the source nugget — no new bulk/atomic backend
+// endpoint (10_architecture.json risks: not atomic across the batch). Reports
+// per-card success/failure so the user can retry only the failed ones.
+
+const GENERATE_FLASHCARDS_JSON_PLACEHOLDER = `{
+  "cards": [
+    { "level": 2, "q": "...", "a": "..." }
+  ]
+}`;
+
+interface GeneratedCardResult {
+  q: string;
+  ok: boolean;
+  message: string;
+}
+
+function GenerateFlashcardsImportView() {
+  const { id: nuggetId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const essayId = searchParams.get('essay_id') ?? '';
+  const sectionId = searchParams.get('section_id') ?? '';
+
+  const [pkg, setPkg] = useState<GenerateFlashcardsPackage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [clipboardMsg, setClipboardMsg] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [results, setResults] = useState<GeneratedCardResult[] | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      if (!nuggetId || !essayId || !sectionId) {
+        setLoading(false);
+        setError({ error: { code: 'VALIDATION_ERROR', message: 'nugget id, essay_id and section_id are required', request_id: '' } });
+        return;
+      }
+      setLoading(true);
+      const qs = new URLSearchParams({ essay_id: essayId, section_id: sectionId });
+      const res = await apiFetch<GenerateFlashcardsPackage>(
+        `/essaycards/nuggets/${nuggetId}/generate-flashcards-package?${qs.toString()}`,
+      );
+      setLoading(false);
+      if (isApiError(res)) { setError(res); return; }
+      setPkg(res);
+    })();
+  }, [nuggetId, essayId, sectionId]);
+
+  const handleCopyPrompt = async () => {
+    if (!pkg) return;
+    const err = await writeClipboard(buildGenerateFlashcardsClipboardText(pkg));
+    setClipboardMsg(
+      err ?? 'Copied. Paste into ChatGPT (or similar), generate the cards, then paste its JSON reply below and Submit.',
+    );
+  };
+
+  const handlePasteFromClipboard = async () => {
+    const res = await readClipboard();
+    if ('error' in res) { setClipboardMsg(res.error); return; }
+    setText(res.text);
+    setClipboardMsg(null);
+  };
+
+  const handleSubmit = async () => {
+    setSubmitError(null);
+    setResults(null);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      setSubmitError('That is not valid JSON.');
+      return;
+    }
+    if (!Array.isArray(parsed?.cards) || parsed.cards.length === 0) {
+      setSubmitError('Expected a JSON object of the shape {"cards": [{"level", "q", "a"}, ...]}.');
+      return;
+    }
+
+    setSubmitting(true);
+    const outcomes: GeneratedCardResult[] = [];
+    // Sequential — reuses the existing single-card endpoint, one POST per
+    // card, not atomic across the batch (see module docstring).
+    for (const card of parsed.cards) {
+      const res = await apiFetch<QuestionUpsertResult>('/essaycards/flashcards/upsert', {
+        method: 'POST',
+        body: JSON.stringify({
+          essay_slug: pkg!.context.essay_slug,
+          section_id: pkg!.context.section_id,
+          card: { level: card?.level, q: card?.q, a: card?.a, nugget_id: nuggetId },
+        }),
+      });
+      outcomes.push(
+        isApiError(res)
+          ? { q: String(card?.q ?? '(unknown)'), ok: false, message: res.error.message }
+          : { q: String(card?.q ?? '(unknown)'), ok: true, message: 'Saved' },
+      );
+    }
+    setSubmitting(false);
+    setResults(outcomes);
+  };
+
+  return (
+    <div style={pageStyle}>
+      <button style={{ ...btnStyle, marginBottom: 12 }} onClick={() => navigate(`/essaycards/essays/${essayId}`)}>
+        ← Back to reader
+      </button>
+      <h2 style={{ marginTop: 0 }}>Generate Flashcards From Nugget</h2>
+
+      {loading && <Skeleton />}
+      {error && <ErrorCard error={error} />}
+
+      {pkg && (
+        <>
+          <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+            Generating cards for "{pkg.nugget.title}" ({pkg.nugget.nugget_key}) — {pkg.existing_flashcards.length} existing card(s).
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button style={btnStyle} onClick={handleCopyPrompt}>Copy prompt</button>
+            <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
+          </div>
+          {clipboardMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>}
+
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={12}
+            style={{
+              width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 8,
+              boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: 6,
+            }}
+            placeholder={GENERATE_FLASHCARDS_JSON_PLACEHOLDER}
+          />
+
+          <div style={{ marginTop: 12 }}>
+            <button style={primaryBtnStyle} disabled={submitting || !text.trim()} onClick={handleSubmit}>
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          </div>
+
+          {submitError && <div style={{ marginTop: 12, fontSize: 13, color: '#b00020' }}>{submitError}</div>}
+
+          {results && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                {results.filter(r => r.ok).length} / {results.length} card(s) saved
+              </div>
+              {results.map((r, i) => (
+                <div key={i} style={{ fontSize: 13, color: r.ok ? '#3a7a3a' : '#b00020', marginBottom: 4 }}>
+                  {r.ok ? '✓' : '✗'} {r.q} — {r.message}
+                </div>
+              ))}
+              <button
+                style={{ ...btnStyle, marginTop: 12 }}
+                onClick={() => navigate(`/essaycards/essays/${essayId}`)}
+              >
+                Back to reader
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function EssayCardsApp() {
@@ -2952,6 +3935,8 @@ export default function EssayCardsApp() {
         <Route path="/examinations/import" element={<ImportExaminationsView />} />
         <Route path="/explore/import" element={<ExploreImportView />} />
         <Route path="/images" element={<ImagesView />} />
+        <Route path="/nuggets/authoring" element={<NuggetAuthoringImportView />} />
+        <Route path="/nuggets/:id/generate-flashcards" element={<GenerateFlashcardsImportView />} />
       </Routes>
     </>
   );

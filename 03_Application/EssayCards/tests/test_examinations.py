@@ -18,6 +18,15 @@ SECTION_STRUCTURE_ID = "ec000002-0000-0000-0000-000000000002"
 EXPORT_URL = f"/api/essaycards/essays/{ESSAY_A_ID}/examination-package"
 IMPORT_URL = "/api/essaycards/examinations/import"
 
+# Nuggets (Sprint09_Nuggets) — fixture essay F ('essay-f-nuggets', ea000006) /
+# section F1 (ec000007, anchor 'f-nuggets') references fix-nugget-cogito
+# (ee000001).
+ESSAY_F_ID = "ea000006-0000-0000-0000-000000000006"
+ESSAY_F_SLUG = "essay-f-nuggets"
+SECTION_F1_ID = "ec000007-0000-0000-0000-000000000007"
+SECTION_F1_ANCHOR = "f-nuggets"
+NUGGET_COGITO_ID = "ee000001-0000-0000-0000-000000000001"
+
 
 def _history_url(section_id: str) -> str:
     return f"/api/essaycards/sections/{section_id}/examinations"
@@ -342,3 +351,90 @@ def test_section_history_not_found(client):
     r = client.get(_history_url("00000000-0000-0000-0000-000000000000"))
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+# ── Nugget versions (Sprint09_Nuggets) ────────────────────────────────────────
+
+def _f1_section_version(client):
+    detail = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}")
+    section = next(s for s in detail.json()["rows"][0]["sections"] if s["id"] == SECTION_F1_ID)
+    return section["updated_at"]
+
+
+def test_examination_package_includes_nugget_versions_per_section(client):
+    """Scenario: Examination package includes nugget_versions per section."""
+    r = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/examination-package")
+    assert r.status_code == 200
+    body = r.json()
+    section = next(s for s in body["sections"] if s["section_id"] == SECTION_F1_ID)
+
+    nugget_row = client.get(f"/api/essaycards/nuggets/{NUGGET_COGITO_ID}").json()["rows"][0]
+    assert section["nugget_versions"]["fix-nugget-cogito"] == nugget_row["updated_at"]
+
+
+def test_examination_import_stores_nugget_versions_verbatim(client, db_conn):
+    """Scenario: Examination import stores nugget_versions verbatim."""
+    payload = {
+        "results": [
+            {
+                "essay_slug": ESSAY_F_SLUG,
+                "section_anchor_slug": SECTION_F1_ANCHOR,
+                "section_version": _f1_section_version(client),
+                "examined_at": "2026-08-28T14:30:00Z",
+                "question": "Q", "answer_transcript": "A", "score": 4,
+                "nugget_versions": {"fix-nugget-cogito": "2026-01-01T00:00:00Z"},
+            }
+        ]
+    }
+    r = client.post(IMPORT_URL, json=payload)
+    assert r.status_code == 200, r.text
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select nugget_versions_at from essaycards.section_examinations "
+            "where section_id = %s order by created_at desc limit 1",
+            (SECTION_F1_ID,),
+        )
+        row = cur.fetchone()
+        assert row["nugget_versions_at"] == {"fix-nugget-cogito": "2026-01-01T00:00:00Z"}
+
+
+def test_examination_import_without_nugget_versions_stores_null(client, db_conn):
+    """Scenario: Examination import without nugget_versions stores null."""
+    payload = {
+        "results": [
+            {
+                "essay_slug": ESSAY_F_SLUG,
+                "section_anchor_slug": SECTION_F1_ANCHOR,
+                "section_version": _f1_section_version(client),
+                "examined_at": "2026-08-28T14:30:00Z",
+                "question": "Q", "answer_transcript": "A", "score": 4,
+            }
+        ]
+    }
+    r = client.post(IMPORT_URL, json=payload)
+    assert r.status_code == 200, r.text
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select nugget_versions_at from essaycards.section_examinations "
+            "where section_id = %s order by created_at desc limit 1",
+            (SECTION_F1_ID,),
+        )
+        assert cur.fetchone()["nugget_versions_at"] is None
+
+
+def test_nugget_freshness_flags_none_recorded_skips_check():
+    """Scenario: nugget_freshness_flags with no recorded versions skips the check."""
+    from backend.examinations import nugget_freshness_flags
+
+    assert nugget_freshness_flags(None, {"a": "t1"}) == []
+
+
+def test_nugget_freshness_flags_detects_changed_and_missing_keys():
+    """Scenario: nugget_freshness_flags flags changed and missing keys, not matching ones."""
+    from backend.examinations import nugget_freshness_flags
+
+    recorded = {"a": "t1", "b": "t2"}
+    current = {"a": "t1", "b": "t2-changed", "c": "t3"}
+    assert nugget_freshness_flags(recorded, current) == ["b", "c"]

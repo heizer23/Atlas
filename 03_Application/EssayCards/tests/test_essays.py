@@ -357,3 +357,78 @@ def test_insert_flow_splices_new_section_at_correct_position(client):
     ]
     new_section = next(s for s in ordered if s["anchor_slug"] == "ins-essay-new")
     assert new_section["body_markdown"] == "brand new section"
+
+
+# ── Nuggets (Sprint09_Nuggets) ─────────────────────────────────────────────────
+#
+# Fixture essay F ('essay-f-nuggets', ea000006) has main_spine_markdown
+# referencing fix-nugget-adequacy (main-spine-only, never in a section) and
+# section F1 (ec000007) referencing fix-nugget-cogito + fix-nugget-MixedCase.
+# Fixture flashcard fc-nugget-linked (fc000021) in section F1 is linked to
+# fix-nugget-cogito; fc-nugget-unlinked (fc000022) in the same section is not.
+
+ESSAY_F_ID = "ea000006-0000-0000-0000-000000000006"
+SECTION_F1_ID = "ec000007-0000-0000-0000-000000000007"
+NUGGET_COGITO_ID = "ee000001-0000-0000-0000-000000000001"
+NUGGET_ADEQUACY_ID = "ee000003-0000-0000-0000-000000000003"
+FC_NUGGET_LINKED_ID = "fc000021-0000-0000-0000-000000000021"
+FC_NUGGET_UNLINKED_ID = "fc000022-0000-0000-0000-000000000022"
+
+
+def test_essay_detail_sections_carry_referenced_nuggets(client):
+    """Scenario: Essay detail sections carry their referenced nuggets."""
+    detail = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}").json()["rows"][0]
+    section = next(s for s in detail["sections"] if s["id"] == SECTION_F1_ID)
+    assert {"nugget_key": "fix-nugget-cogito", "title": "Cogito"} in section["nuggets"]
+
+
+def test_questions_rows_carry_section_nuggets(client):
+    """Scenario: Question overview rows carry their section's referenced nuggets."""
+    rows = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/questions").json()["rows"]
+    f1_rows = [r for r in rows if r["section_id"] == SECTION_F1_ID]
+    assert f1_rows
+    for row in f1_rows:
+        assert {"nugget_key": "fix-nugget-cogito", "title": "Cogito"} in row["section_nuggets"]
+
+
+def test_questions_rows_carry_nugget_id(client):
+    """Scenario: Question overview rows carry each card's current nugget_id."""
+    rows = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/questions").json()["rows"]
+    linked = next(r for r in rows if r["id"] == FC_NUGGET_LINKED_ID)
+    unlinked = next(r for r in rows if r["id"] == FC_NUGGET_UNLINKED_ID)
+    assert linked["nugget_id"] == NUGGET_COGITO_ID
+    assert unlinked["nugget_id"] is None
+
+
+def test_export_section_includes_main_spine_and_focus_section_nuggets(client):
+    """Scenario: Section export includes the main spine and focus-section nugget context."""
+    r = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/sections/{SECTION_F1_ID}/export")
+    assert r.status_code == 200
+    pkg = r.json()
+
+    assert pkg["main_spine_markdown"]
+    assert "[[nugget:fix-nugget-adequacy]]" in pkg["main_spine_markdown"]
+
+    cogito = next(n for n in pkg["focus_section_nuggets"] if n["nugget_key"] == "fix-nugget-cogito")
+    assert cogito["title"] == "Cogito"
+    assert cogito["body_markdown"]
+
+
+def test_essay_detail_main_spine_nuggets_resolves_main_spine_only_reference(client):
+    """Scenario: Essay detail's main_spine_nuggets resolves a main-spine-only reference."""
+    detail = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}").json()["rows"][0]
+    assert {"nugget_key": "fix-nugget-adequacy", "title": "Adequacy"} in detail["main_spine_nuggets"]
+    # Not present via any section's own nuggets field.
+    for section in detail["sections"]:
+        assert all(n["nugget_key"] != "fix-nugget-adequacy" for n in section["nuggets"])
+
+
+def test_essay_export_and_section_export_carry_main_spine_nuggets(client):
+    """Scenario: Essay export and section export carry main_spine_nuggets."""
+    export = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/export").json()
+    assert {"nugget_key": "fix-nugget-adequacy", "title": "Adequacy"} in export["main_spine_nuggets"]
+
+    section_export = client.get(
+        f"/api/essaycards/essays/{ESSAY_F_ID}/sections/{SECTION_F1_ID}/export"
+    ).json()
+    assert {"nugget_key": "fix-nugget-adequacy", "title": "Adequacy"} in section_export["main_spine_nuggets"]

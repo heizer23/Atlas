@@ -32,6 +32,7 @@ export default defineConfig({
       '@fullcalendar/timegrid':     path.resolve(__dirname, 'node_modules/@fullcalendar/timegrid'),
       '@fullcalendar/interaction':  path.resolve(__dirname, 'node_modules/@fullcalendar/interaction'),
       'react-markdown':  path.resolve(__dirname, 'node_modules/react-markdown'),
+      'unist-util-visit': path.resolve(__dirname, 'node_modules/unist-util-visit'),
     },
   },
   server: {

@@ -331,7 +331,9 @@ def test_export_question_includes_context_and_card(client):
     assert pkg["essay_slug"] == "export-q-essay"
     assert pkg["section_anchor_slug"] == "eq-one"
     assert pkg["section_body_markdown"] == "body eq-one"
-    assert pkg["card"] == {"id": "eq-1", "level": 2, "q": "q1", "a": "a1"}
+    # nugget_id is additive (Sprint09_Nuggets, R-CON-BP-04) — null for a card
+    # with no nugget assignment.
+    assert pkg["card"] == {"id": "eq-1", "level": 2, "q": "q1", "a": "a1", "nugget_id": None}
 
 
 def test_export_question_not_found(client):

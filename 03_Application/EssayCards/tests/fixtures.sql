@@ -155,3 +155,79 @@ INSERT INTO essaycards.images
     'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01', 'alpha.png', now() - interval '2 hours'),
   ('fix-img-beta',  'fix-img-beta.jpg',  'image/jpeg', 2048, 200, 150,
     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb02', 'beta.jpg',  now() - interval '1 hour');
+
+-- ── Nuggets (Sprint09_Nuggets) ────────────────────────────────────────────────
+--
+-- fix-nugget-cogito    (ee000001): referenced by TWO fixture sections across
+--                       TWO different essays (essay F / section F1, essay G /
+--                       section G1) — exercises reuse-without-duplication and
+--                       GET /nuggets/{id}/sections returning two rows. Also
+--                       has one linked fixture flashcard (fc000021).
+-- fix-nugget-wax       (ee000002): its own body_markdown references
+--                       [[nugget:fix-nugget-cogito]] — exercises the
+--                       authoring-package's connected_nuggets resolution.
+--                       Not referenced by any fixture section itself.
+-- fix-nugget-adequacy  (ee000003): referenced ONLY by essay F's
+--                       main_spine_markdown, never by any of essay F's
+--                       sections — exercises main_spine_nuggets resolving a
+--                       main-spine-only reference (11_design_review.md Hard
+--                       Rule Violation 1 / Minimal Change Set item 2).
+-- fix-nugget-MixedCase (ee000004): nugget_key contains an uppercase letter,
+--                       referenced by matching case in section F1's
+--                       body_markdown — exercises extract_nugget_keys'
+--                       character-class fix (Minimal Change Set item 1).
+INSERT INTO essaycards.nuggets (id, nugget_key, title, body_markdown, created_at, updated_at) VALUES
+  ('ee000001-0000-0000-0000-000000000001', 'fix-nugget-cogito', 'Cogito',
+    'The cogito is not inferred from a syllogism; it is directly, immediately evident to the thinker.',
+    now() - interval '5 days', now() - interval '5 days'),
+  ('ee000002-0000-0000-0000-000000000002', 'fix-nugget-wax', 'Wax and the Intellect',
+    'The wax argument builds on [[nugget:fix-nugget-cogito]] to show that the intellect, not the senses, perceives the wax''s true nature.',
+    now() - interval '4 days', now() - interval '4 days'),
+  ('ee000003-0000-0000-0000-000000000003', 'fix-nugget-adequacy', 'Adequacy',
+    'An adequate idea represents its object fully and without confusion.',
+    now() - interval '3 days', now() - interval '3 days'),
+  ('ee000004-0000-0000-0000-000000000004', 'fix-nugget-MixedCase', 'Mixed Case Nugget',
+    'Demonstrates that a nugget_key containing an uppercase letter is referenceable and resolved case-sensitively.',
+    now() - interval '2 days', now() - interval '2 days');
+
+-- ── Essays F/G (nugget-referencing fixture content) ──────────────────────────
+--
+-- Essay F's main_spine_markdown references fix-nugget-adequacy (main-spine-
+-- only — not referenced by section F1). Section F1 references
+-- fix-nugget-cogito and fix-nugget-MixedCase. Essay G / section G1 also
+-- references fix-nugget-cogito, so GET /nuggets/{cogito}/sections returns two
+-- rows across these two essays.
+INSERT INTO essaycards.essays (id, title, slug, main_spine_markdown, created_at, updated_at) VALUES
+  ('ea000006-0000-0000-0000-000000000006', 'Essay F (nuggets)', 'essay-f-nuggets',
+    'The spine connects the ideas: [[nugget:fix-nugget-adequacy]] grounds the rest.',
+    now() - interval '4 days', now() - interval '4 days'),
+  ('ea000007-0000-0000-0000-000000000007', 'Essay G (nuggets)', 'essay-g-nuggets',
+    '', now() - interval '4 days', now() - interval '4 days');
+
+INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, anchor_slug, body_markdown) VALUES
+  ('ec000007-0000-0000-0000-000000000007', 'ea000006-0000-0000-0000-000000000006', 0, 'F Nuggets Section', 'f-nuggets',
+    'This section references [[nugget:fix-nugget-cogito]] and [[nugget:fix-nugget-MixedCase]].'),
+  ('ec000008-0000-0000-0000-000000000008', 'ea000007-0000-0000-0000-000000000007', 0, 'G Nuggets Section', 'g-nuggets',
+    'This section also references [[nugget:fix-nugget-cogito]].');
+
+INSERT INTO essaycards.section_nuggets (section_id, nugget_id) VALUES
+  ('ec000007-0000-0000-0000-000000000007', 'ee000001-0000-0000-0000-000000000001'),  -- F1 -> cogito
+  ('ec000007-0000-0000-0000-000000000007', 'ee000004-0000-0000-0000-000000000004'),  -- F1 -> MixedCase
+  ('ec000008-0000-0000-0000-000000000008', 'ee000001-0000-0000-0000-000000000001');  -- G1 -> cogito
+
+-- fc-nugget-linked: nugget_id set to fix-nugget-cogito. Exercises
+-- GET /nuggets/{id}/flashcards, the due-row/export/questions nugget_id
+-- field, and the exploration-package nugget-sourced context branch.
+-- fc-nugget-unlinked: nugget_id null (legacy) in the SAME essay, for the
+-- "one linked + one unlinked card in the same essay" question-overview and
+-- due-row scenarios; also the target of the "set a valid nugget_id" upsert
+-- scenario.
+INSERT INTO essaycards.flashcards (id, essay_id, section_id, card_key, question, answer, nugget_id) VALUES
+  ('fc000021-0000-0000-0000-000000000021', 'ea000006-0000-0000-0000-000000000006', 'ec000007-0000-0000-0000-000000000007',
+    'fc-nugget-linked', 'What is directly evident to the thinker?', 'The cogito.', 'ee000001-0000-0000-0000-000000000001'),
+  ('fc000022-0000-0000-0000-000000000022', 'ea000006-0000-0000-0000-000000000006', 'ec000007-0000-0000-0000-000000000007',
+    'fc-nugget-unlinked', 'What does the wax argument show?', 'That the intellect, not the senses, perceives.', null);
+
+INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at) VALUES
+  ('fc000021-0000-0000-0000-000000000021', null, now() - interval '10 minutes'),
+  ('fc000022-0000-0000-0000-000000000022', null, now() - interval '10 minutes');

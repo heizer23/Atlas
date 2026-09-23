@@ -30,6 +30,7 @@ any future single-segment route.
 
 import re
 import secrets
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -43,6 +44,21 @@ from platform_errorhandling import api_error
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 
 _CARD_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# Sentinel distinguishing "card.nugget_id key absent from the payload" from
+# "card.nugget_id present as JSON null" (R-CON-AL-04). dict.get(key, _UNSET)
+# returns this object only when the key itself was never sent.
+_UNSET = object()
+
+
+def _is_uuid(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        uuid.UUID(value)
+        return True
+    except ValueError:
+        return False
 
 DUE_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="question",    label="Question", type="string",  sortable=False, filterable=False),
@@ -69,6 +85,10 @@ DUE_SCHEMA: list[ColumnSchema] = [
     # Additive, non-breaking; shown in the review screen's diagnostics frame
     # ("this card's last interval").
     ColumnSchema(key="scheduled_interval_seconds", label="Interval (s)", type="number", sortable=False, filterable=False),
+    # [NEW Sprint09_Nuggets] The card's current nugget assignment (nullable).
+    # Feeds the review screen's source-navigation branch: set -> "Flashcard ->
+    # Nugget" overlay; null -> unchanged legacy "Jump to passage" navigation.
+    ColumnSchema(key="nugget_id", label="Nugget", type="string", sortable=False, filterable=True),
 ]
 
 STATS_SCHEMA: list[ColumnSchema] = [
@@ -97,6 +117,7 @@ def _due_row_to_dict(row: Any) -> dict[str, Any]:
     d["flashcard_id"] = str(d["flashcard_id"])
     d["essay_id"] = str(d["essay_id"])
     d["section_id"] = str(d["section_id"])
+    d["nugget_id"] = str(d["nugget_id"]) if d.get("nugget_id") else None
     if d.get("next_due_at"):
         d["next_due_at"] = d["next_due_at"].isoformat()
     return d
@@ -221,7 +242,7 @@ def list_due_flashcards(
             cur.execute(
                 f"""
                 select f.id as flashcard_id, f.question, f.answer, f.essay_id, f.section_id,
-                       s.anchor_slug, frs.next_due_at,
+                       f.nugget_id, s.anchor_slug, frs.next_due_at,
                        (frs.last_reviewed_at is null) as is_new,
                        coalesce(frs.last_reviewed_at >= now() - interval '24 hours', false)
                            as is_recent,
@@ -430,6 +451,21 @@ def _validate_upsert_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
     if not isinstance(a, str) or not a.strip():
         return None, api_error("VALIDATION_ERROR", "card.a is required and must be a non-empty string")
 
+    # nugget_id tri-state (R-CON-AL-04, Sprint09_Nuggets): key OMITTED from
+    # card ->  leave any existing assignment untouched; key present as JSON
+    # null -> clear the assignment; key present with a value -> must be a
+    # well-formed uuid string (existence is checked against the DB in
+    # _upsert_question, inside the transaction).
+    nugget_id_raw = card_raw.get("nugget_id", _UNSET)
+    touch_nugget_id = nugget_id_raw is not _UNSET
+    nugget_id: str | None = None
+    if touch_nugget_id and nugget_id_raw is not None:
+        if not _is_uuid(nugget_id_raw):
+            return None, api_error(
+                "VALIDATION_ERROR", "card.nugget_id, if present and non-null, must be a well-formed uuid string"
+            )
+        nugget_id = nugget_id_raw
+
     return {
         "essay_slug": essay_slug,
         "section_id": section_id,
@@ -437,6 +473,8 @@ def _validate_upsert_body(body: Any) -> tuple[dict[str, Any] | None, JSONRespons
         "level": level,
         "question": q,
         "answer": a,
+        "touch_nugget_id": touch_nugget_id,
+        "nugget_id": nugget_id,
     }, None
 
 
@@ -461,6 +499,7 @@ def _new_card_key(cur: Any, essay_id: str) -> str:
 def _upsert_question(
     cur: Any, essay_slug: str, section_id: str, card_id: str | None,
     level: int, question: str, answer: str,
+    touch_nugget_id: bool = False, nugget_id: str | None = None,
 ) -> tuple[dict[str, Any] | None, JSONResponse | None]:
     """
     Create or update exactly one flashcard. Returns (result, None) or
@@ -476,7 +515,23 @@ def _upsert_question(
     (mirrors essays.py::_check_card_section_collisions) — section_id is not
     in the UPDATE's SET clause, so this endpoint cannot move a card between
     sections even by accident.
+
+    nugget_id tri-state (R-CON-AL-04, Sprint09_Nuggets): touch_nugget_id
+    False -> the SET clause's `case` leaves the existing nugget_id
+    untouched (also vacuously true on create — nothing to touch, so the
+    INSERT column is simply null in that case). touch_nugget_id True and
+    nugget_id None -> clears the assignment. touch_nugget_id True and
+    nugget_id a value -> resolved against essaycards.nuggets first
+    (VALIDATION_ERROR if it does not exist) and set. Implemented as a single
+    INSERT ... ON CONFLICT DO UPDATE whose nugget_id SET expression is one
+    `case` — never two divergent code paths.
     """
+    if touch_nugget_id and nugget_id is not None:
+        cur.execute("select 1 from essaycards.nuggets where id = %s", (nugget_id,))
+        if not cur.fetchone():
+            return None, api_error(
+                "VALIDATION_ERROR", f"card.nugget_id '{nugget_id}' does not resolve to an existing nugget"
+            )
     cur.execute("select id from essaycards.essays where slug = %s", (essay_slug,))
     essay_row = cur.fetchone()
     if not essay_row:
@@ -507,18 +562,21 @@ def _upsert_question(
     else:
         card_id = _new_card_key(cur, str(essay_id))
 
+    insert_nugget_id = nugget_id if touch_nugget_id else None
     cur.execute(
         """
-        insert into essaycards.flashcards (essay_id, section_id, card_key, question, answer, level)
-        values (%s, %s, %s, %s, %s, %s)
+        insert into essaycards.flashcards (essay_id, section_id, card_key, question, answer, level, nugget_id)
+        values (%s, %s, %s, %s, %s, %s, %s)
         on conflict (essay_id, card_key) do update
             set question   = excluded.question,
                 answer     = excluded.answer,
                 level      = excluded.level,
+                nugget_id  = case when %s then excluded.nugget_id
+                                  else essaycards.flashcards.nugget_id end,
                 updated_at = now()
-        returning id, created_at, (xmax = 0) as was_inserted
+        returning id, created_at, nugget_id, (xmax = 0) as was_inserted
         """,
-        (essay_id, section_id, card_id, question, answer, level),
+        (essay_id, section_id, card_id, question, answer, level, insert_nugget_id, touch_nugget_id),
     )
     row = cur.fetchone()
 
@@ -535,6 +593,7 @@ def _upsert_question(
         "essay_id": str(essay_id),
         "section_id": section_id,
         "level": level,
+        "nugget_id": str(row["nugget_id"]) if row.get("nugget_id") else None,
         "created": row["was_inserted"],
     }, None
 
@@ -571,6 +630,7 @@ async def upsert_flashcard(request: Request) -> JSONResponse:
             result, error = _upsert_question(
                 cur, parsed["essay_slug"], parsed["section_id"], parsed["card_id"],
                 parsed["level"], parsed["question"], parsed["answer"],
+                parsed["touch_nugget_id"], parsed["nugget_id"],
             )
             if error is not None:
                 return error
@@ -598,7 +658,7 @@ def export_question(flashcard_id: str) -> JSONResponse:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select f.card_key, f.question, f.answer, f.level,
+                select f.card_key, f.question, f.answer, f.level, f.nugget_id,
                        f.section_id, s.anchor_slug as section_anchor_slug,
                        s.heading as section_heading, s.body_markdown as section_body_markdown,
                        e.slug as essay_slug, e.title as essay_title
@@ -626,6 +686,7 @@ def export_question(flashcard_id: str) -> JSONResponse:
             "level": row["level"],
             "q": row["question"],
             "a": row["answer"],
+            "nugget_id": str(row["nugget_id"]) if row["nugget_id"] else None,
         },
     }
     return JSONResponse(content=package)

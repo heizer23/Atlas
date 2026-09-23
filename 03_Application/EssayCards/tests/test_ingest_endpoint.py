@@ -401,3 +401,55 @@ def test_ingest_json_rejects_unknown_status(client):
     r = client.post(INGEST_URL, json=_minimal_payload("status-bad", status="draft"))
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# ── Ingest — main_spine_markdown / nugget references (Sprint09_Nuggets) ──────
+
+NUGGET_COGITO_ID = "ee000001-0000-0000-0000-000000000001"
+
+
+def test_ingest_json_round_trips_main_spine_markdown(client):
+    payload = _minimal_payload("spine-roundtrip", **{"main_spine_markdown": "The spine narrative."})
+    r = client.post(INGEST_URL, json=payload)
+    assert r.status_code == 200, r.text
+    essay_id = r.json()["essay_id"]
+
+    detail = client.get(f"/api/essaycards/essays/{essay_id}")
+    assert detail.status_code == 200
+    assert detail.json()["rows"][0]["main_spine_markdown"] == "The spine narrative."
+
+
+def test_ingest_json_unresolved_nugget_reference_returns_validation_error(client, db_conn):
+    payload = {
+        "title": "JSON Unresolved Nugget", "slug": "json-unresolved-nugget",
+        "sections": [
+            {"heading": "S", "anchor_slug": "json-unresolved-nugget-s",
+             "body_markdown": "References [[nugget:does-not-exist]].", "cards": []}
+        ],
+    }
+    r = client.post(INGEST_URL, json=payload)
+    assert r.status_code == 400
+    body = r.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "does-not-exist" in body["error"]["message"]
+
+    with db_conn.cursor() as cur:
+        cur.execute("select count(*) as n from essaycards.essays where slug = 'json-unresolved-nugget'")
+        assert cur.fetchone()["n"] == 0
+
+
+def test_ingest_json_resolves_existing_nugget_reference(client):
+    payload = {
+        "title": "JSON Resolved Nugget", "slug": "json-resolved-nugget",
+        "sections": [
+            {"heading": "S", "anchor_slug": "json-resolved-nugget-s",
+             "body_markdown": "References [[nugget:fix-nugget-cogito]].", "cards": []}
+        ],
+    }
+    r = client.post(INGEST_URL, json=payload)
+    assert r.status_code == 200, r.text
+    essay_id = r.json()["essay_id"]
+
+    detail = client.get(f"/api/essaycards/essays/{essay_id}")
+    section = detail.json()["rows"][0]["sections"][0]
+    assert {"nugget_key": "fix-nugget-cogito", "title": "Cogito"} in section["nuggets"]

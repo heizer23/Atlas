@@ -461,7 +461,10 @@ def test_stats_system_wide_partitions_all_bands(client):
 
     counts = _stats_counts(body["rows"])
     assert counts == {
-        "due_now": 13,  # 4 from essays A/B + 9 eligible Essay E ordering cards (Sprint05)
+        # 4 from essays A/B + 9 eligible Essay E ordering cards (Sprint05) + 2
+        # fixture Essay F nugget cards (fc-nugget-linked/-unlinked, Sprint09,
+        # due 10 minutes ago, never reviewed).
+        "due_now": 15,
         "within_10_min": 1,
         "within_1_day": 2,
         "within_7_days": 1,
@@ -469,7 +472,7 @@ def test_stats_system_wide_partitions_all_bands(client):
         "within_90_days": 1,   # fc-stats-60day
         "beyond_90_days": 1,   # fc-stats-120day
     }
-    assert sum(counts.values()) == 20  # every scheduled card lands in exactly one band
+    assert sum(counts.values()) == 22  # every scheduled card lands in exactly one band
 
 
 def test_stats_scoped_to_essay(client):
@@ -536,3 +539,83 @@ def test_stats_unknown_scope_is_zero_filled(client):
     assert [row["bucket"] for row in body["rows"]] == STATS_BUCKET_ORDER
     assert all(row["count"] == 0 for row in body["rows"])
     assert body["meta"]["total"] == 7
+
+
+# ── Nuggets (Sprint09_Nuggets) ─────────────────────────────────────────────────
+#
+# Fixture essay F ('essay-f-nuggets', ea000006) / section F1 (ec000007) has
+# fc-nugget-linked (fc000021, linked to fix-nugget-cogito, ee000001) and
+# fc-nugget-unlinked (fc000022, no nugget). Both are due, never reviewed.
+
+ESSAY_F_SLUG = "essay-f-nuggets"
+SECTION_F1_ID = "ec000007-0000-0000-0000-000000000007"
+FC_NUGGET_LINKED = "fc000021-0000-0000-0000-000000000021"
+FC_NUGGET_UNLINKED = "fc000022-0000-0000-0000-000000000022"
+NUGGET_COGITO_ID = "ee000001-0000-0000-0000-000000000001"
+NUGGET_WAX_ID = "ee000002-0000-0000-0000-000000000002"
+
+
+def _current_nugget_id(client, flashcard_id):
+    return client.get(f"/api/essaycards/flashcards/{flashcard_id}/export").json()["card"]["nugget_id"]
+
+
+def test_due_rows_carry_nugget_id(client):
+    """Scenario: Due rows carry nugget_id."""
+    rows = client.get(
+        "/api/essaycards/flashcards/due",
+        params={"essay_id": "ea000006-0000-0000-0000-000000000006"},
+    ).json()["rows"]
+    linked = next(r for r in rows if r["flashcard_id"] == FC_NUGGET_LINKED)
+    unlinked = next(r for r in rows if r["flashcard_id"] == FC_NUGGET_UNLINKED)
+    assert linked["nugget_id"] == NUGGET_COGITO_ID
+    assert unlinked["nugget_id"] is None
+
+
+def test_upsert_omitted_nugget_id_leaves_existing_assignment_untouched(client):
+    """Scenario: Flashcard upsert with nugget_id omitted leaves an existing assignment untouched."""
+    r = client.post("/api/essaycards/flashcards/upsert", json={
+        "essay_slug": ESSAY_F_SLUG, "section_id": SECTION_F1_ID,
+        "card": {"id": "fc-nugget-linked", "level": 2, "q": "q edited", "a": "a edited"},
+    })
+    assert r.status_code == 200, r.text
+    assert _current_nugget_id(client, FC_NUGGET_LINKED) == NUGGET_COGITO_ID
+
+
+def test_upsert_explicit_null_nugget_id_clears_assignment(client):
+    """Scenario: Flashcard upsert with nugget_id explicit null clears an existing assignment."""
+    r = client.post("/api/essaycards/flashcards/upsert", json={
+        "essay_slug": ESSAY_F_SLUG, "section_id": SECTION_F1_ID,
+        "card": {"id": "fc-nugget-linked", "level": 2, "q": "q", "a": "a", "nugget_id": None},
+    })
+    assert r.status_code == 200, r.text
+    assert _current_nugget_id(client, FC_NUGGET_LINKED) is None
+
+
+def test_upsert_valid_nugget_id_sets_assignment(client):
+    """Scenario: Flashcard upsert with a valid nugget_id sets the assignment."""
+    assert _current_nugget_id(client, FC_NUGGET_UNLINKED) is None
+    r = client.post("/api/essaycards/flashcards/upsert", json={
+        "essay_slug": ESSAY_F_SLUG, "section_id": SECTION_F1_ID,
+        "card": {"id": "fc-nugget-unlinked", "level": 2, "q": "q", "a": "a", "nugget_id": NUGGET_WAX_ID},
+    })
+    assert r.status_code == 200, r.text
+    assert _current_nugget_id(client, FC_NUGGET_UNLINKED) == NUGGET_WAX_ID
+
+
+def test_upsert_unresolvable_nugget_id_rejected_assignment_unchanged(client):
+    """Scenario: Flashcard upsert with an unresolvable nugget_id is rejected without side effects."""
+    bogus = "00000000-0000-0000-0000-000000000000"
+    r = client.post("/api/essaycards/flashcards/upsert", json={
+        "essay_slug": ESSAY_F_SLUG, "section_id": SECTION_F1_ID,
+        "card": {"id": "fc-nugget-linked", "level": 2, "q": "q", "a": "a", "nugget_id": bogus},
+    })
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert _current_nugget_id(client, FC_NUGGET_LINKED) == NUGGET_COGITO_ID
+
+
+def test_export_question_includes_nugget_id(client):
+    """Scenario: Single-question export includes nugget_id."""
+    r = client.get(f"/api/essaycards/flashcards/{FC_NUGGET_LINKED}/export")
+    assert r.status_code == 200
+    assert r.json()["card"]["nugget_id"] == NUGGET_COGITO_ID

@@ -88,7 +88,7 @@ def build_exploration_package(cur: Any, flashcard_id: str) -> dict[str, Any] | N
     cur.execute(
         """
         select f.id, f.card_key, f.question, f.answer,
-               f.section_id,
+               f.section_id, f.nugget_id,
                s.anchor_slug   as section_anchor_slug,
                s.heading       as section_heading,
                s.body_markdown as section_body_markdown,
@@ -104,6 +104,28 @@ def build_exploration_package(cur: Any, flashcard_id: str) -> dict[str, Any] | N
     if not row:
         return None
 
+    # Sprint09_Nuggets: when the card's nugget_id is set, context becomes the
+    # nugget's own body_markdown INSTEAD OF the containing section's — a
+    # replacement, not an addition (00_draft.md §8 "becomes ... instead of").
+    # Legacy cards (nugget_id null) keep the unchanged section-body context.
+    if row["nugget_id"]:
+        cur.execute(
+            "select nugget_key, title, body_markdown from essaycards.nuggets where id = %s",
+            (row["nugget_id"],),
+        )
+        nugget_row = cur.fetchone()
+        context = {
+            "nugget_body_markdown": nugget_row["body_markdown"] if nugget_row else "",
+            "nugget_key": nugget_row["nugget_key"] if nugget_row else None,
+            "nugget_title": nugget_row["title"] if nugget_row else None,
+        }
+    else:
+        context = {
+            # EssayCards has no card->paragraph link; the whole containing
+            # section is the finest context that exists.
+            "section_body_markdown": row["section_body_markdown"],
+        }
+
     return {
         "export_version": 1,
         "card": {
@@ -117,11 +139,7 @@ def build_exploration_package(cur: Any, flashcard_id: str) -> dict[str, Any] | N
             "question": row["question"],
             "answer": row["answer"],
         },
-        "context": {
-            # EssayCards has no card->paragraph link; the whole containing
-            # section is the finest context that exists.
-            "section_body_markdown": row["section_body_markdown"],
-        },
+        "context": context,
     }
 
 

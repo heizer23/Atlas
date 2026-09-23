@@ -416,3 +416,33 @@ def test_two_update_cards_same_id_rejected(client):
     r = client.post(IMPORT_URL, json=payload)
     assert r.status_code == 400
     assert "more than one update_card" in r.json()["error"]["message"]
+
+
+# ── Nugget-sourced context (Sprint09_Nuggets) ────────────────────────────────
+#
+# fc-nugget-linked (fc000021) is linked to fix-nugget-cogito (ee000001);
+# FC_ORIGINS_1 (declared above) has nugget_id null (legacy).
+
+FC_NUGGET_LINKED = "fc000021-0000-0000-0000-000000000021"
+NUGGET_COGITO_ID = "ee000001-0000-0000-0000-000000000001"
+
+
+def test_exploration_package_nugget_linked_card_uses_nugget_context(client):
+    """Scenario: Exploration package for a nugget-linked card uses nugget context."""
+    r = client.get(f"/api/essaycards/flashcards/{FC_NUGGET_LINKED}/exploration-package")
+    assert r.status_code == 200
+    context = r.json()["context"]
+
+    nugget_row = client.get(f"/api/essaycards/nuggets/{NUGGET_COGITO_ID}").json()["rows"][0]
+    assert context["nugget_body_markdown"] == nugget_row["body_markdown"]
+    assert context["nugget_key"] == "fix-nugget-cogito"
+    assert context["nugget_title"] == "Cogito"
+    assert "section_body_markdown" not in context
+
+
+def test_exploration_package_legacy_card_unchanged(client):
+    """Scenario: Exploration package for a legacy card is unchanged."""
+    r = client.get(f"/api/essaycards/flashcards/{FC_ORIGINS_1}/exploration-package")
+    assert r.status_code == 200
+    context = r.json()["context"]
+    assert set(context.keys()) == {"section_body_markdown"}
