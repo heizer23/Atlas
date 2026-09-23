@@ -18,6 +18,9 @@ ATLAS uses four layers:
 
 Do not place components outside this structure unless explicitly requested.
 
+### Explicit exceptions
+- `04_Zettelkasten/` — personal knowledge notes (philosophy, history, art, religion, science) built through conversation with Claude. Not a software layer; user-requested. See `04_Zettelkasten/CLAUDE.md`.
+
 ## Global rules
 - Prefer concise, information-dense responses.
 - Infer the simplest solution consistent with the existing structure.
