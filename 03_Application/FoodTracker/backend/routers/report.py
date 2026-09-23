@@ -18,7 +18,7 @@ Changes from Sprint 02:
 - New per-meal-type breakdown columns:
     kcal_breakfast, kcal_lunch, kcal_dinner, kcal_snack, kcal_alcohol, kcal_total
     protein_breakfast, protein_lunch, protein_dinner, protein_snack, protein_total
-  kcal_alcohol = kcal for entries where alcohol_g > 0 (pseudo-meal-type, not a new meal_type value).
+  kcal_alcohol = kcal for entries where meal_type = 'drink' AND alcohol_g > 0.
 - Year scope: returns kcal_avg / protein_avg per bucket row (rolling avg over reported days only).
 - reported_days added to dataset meta extras (count of distinct days with at least one entry).
 - week scope: supports aggregated mode (removed the old restriction).
@@ -267,7 +267,7 @@ def _query_logs(
         reported_days  (count of distinct calendar days with at least one entry in bucket)
     }
 
-    kcal_alcohol = SUM(kcal) WHERE alcohol_g > 0 (pseudo-meal-type, not tied to meal_type).
+    kcal_alcohol = SUM(kcal) WHERE meal_type = 'drink' AND alcohol_g > 0.
     alcohol_g_total = SUM(alcohol_g) for all entries in bucket.
     """
 
@@ -277,16 +277,16 @@ def _query_logs(
     sql = f"""
         SELECT
             {group_expr} AS bucket_id,
-            SUM(CASE WHEN meal_type = 'breakfast' AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN kcal ELSE 0 END) AS kcal_breakfast,
-            SUM(CASE WHEN meal_type = 'lunch'     AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN kcal ELSE 0 END) AS kcal_lunch,
-            SUM(CASE WHEN meal_type = 'dinner'    AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN kcal ELSE 0 END) AS kcal_dinner,
-            SUM(CASE WHEN meal_type = 'snack'     AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN kcal ELSE 0 END) AS kcal_snack,
-            SUM(CASE WHEN alcohol_g > 0                                                    THEN kcal ELSE 0 END) AS kcal_alcohol,
+            SUM(CASE WHEN meal_type = 'breakfast'                         THEN kcal ELSE 0 END) AS kcal_breakfast,
+            SUM(CASE WHEN meal_type = 'lunch'                             THEN kcal ELSE 0 END) AS kcal_lunch,
+            SUM(CASE WHEN meal_type = 'dinner'                            THEN kcal ELSE 0 END) AS kcal_dinner,
+            SUM(CASE WHEN meal_type = 'snack'                             THEN kcal ELSE 0 END) AS kcal_snack,
+            SUM(CASE WHEN meal_type = 'drink' AND alcohol_g > 0           THEN kcal ELSE 0 END) AS kcal_alcohol,
             SUM(kcal) AS kcal_total,
-            SUM(CASE WHEN meal_type = 'breakfast' AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN protein_g ELSE 0 END) AS protein_breakfast,
-            SUM(CASE WHEN meal_type = 'lunch'     AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN protein_g ELSE 0 END) AS protein_lunch,
-            SUM(CASE WHEN meal_type = 'dinner'    AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN protein_g ELSE 0 END) AS protein_dinner,
-            SUM(CASE WHEN meal_type = 'snack'     AND (alcohol_g = 0 OR alcohol_g IS NULL) THEN protein_g ELSE 0 END) AS protein_snack,
+            SUM(CASE WHEN meal_type = 'breakfast' THEN protein_g ELSE 0 END) AS protein_breakfast,
+            SUM(CASE WHEN meal_type = 'lunch'     THEN protein_g ELSE 0 END) AS protein_lunch,
+            SUM(CASE WHEN meal_type = 'dinner'    THEN protein_g ELSE 0 END) AS protein_dinner,
+            SUM(CASE WHEN meal_type = 'snack'     THEN protein_g ELSE 0 END) AS protein_snack,
             SUM(protein_g) AS protein_total,
             SUM(alcohol_g) AS alcohol_g_total,
             COUNT(DISTINCT logged_at::date) AS reported_days
