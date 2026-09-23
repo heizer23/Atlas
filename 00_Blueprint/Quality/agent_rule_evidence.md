@@ -712,3 +712,54 @@ severity: major
 recurrence_hint: "First observed — general pattern: when the same identifier is validated by one regex and matched/extracted by a second regex elsewhere in the same feature, character-class parity between them should be checked explicitly rather than assumed."
 linked_immediate_artifact: 03_Application/EssayCards/Sprint09_Nuggets/11_design_review.md
 ---
+
+---
+entry_id: EVD-2026-09-23-001
+date: 2026-09-23
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint10_DualSchedulerAB
+pattern_name: derived_flag_defeated_by_unchanged_upstream_eligibility_invariant
+short_description: A new per-review flag (was_due) was defined to separate rapid-retry reviews from genuine retention evidence, but the flag's truth condition is guaranteed true by an unrelated, correctly-preserved upstream eligibility invariant, so it can never actually evaluate false in production.
+evidence: "10_architecture.json contracts.invariants: 'review_events.was_due is computed as (the card's next_due_at BEFORE this review) <= (the single now() read for this review) ... the field the experiment dashboard uses to separate ordinary due-review recall from non-ordinary reviews (mission §7)' — but GET /flashcards/due's unchanged base eligibility (frs.next_due_at <= now(), applies to both Review and Focus sessions per CLAUDE.md) means every card POST /review is ever called on, including RECENT-category rapid-retry resurfacing, already satisfies next_due_at <= now() at review time by construction."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: a newly-introduced derived flag intended to distinguish two cases should be checked against every other invariant already governing when the underlying action (here, a review) can occur, not just against the flag's own local definition."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint10_DualSchedulerAB/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-09-23-002
+date: 2026-09-23
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint10_DualSchedulerAB
+pattern_name: test_client_fixture_retriggers_guarded_once_only_migration_per_test
+short_description: "tests/conftest.py's function-scoped `client` fixture enters a fresh TestClient(app) context per test, which re-fires FastAPI's startup handler (and therefore backend/database.py::init_schema()) on every single test — turning a migration backfill designed to run once, ever, in production into something that reruns dozens of times per test session against whatever fixtures.sql just (re)inserted. Implementer fix: tests/fixtures.sql now ends its pre-Sprint10 fixture block with an explicit UPDATE pinning every row to scheduler='classic' with a non-null scheduler_assigned_at (legacy_retained_classic / migrated_never_reviewed_random as appropriate, deliberately overriding the hash outcome for test determinism), so the migration's WHERE scheduler_assigned_at IS NULL clause never matches these rows again regardless of rerun count; every new Sprint10-specific fixture row likewise sets its own scheduler_assigned_at explicitly at INSERT time."
+evidence: "Sprint10_DualSchedulerAB/10_scaffolding.json's tests/fixtures.sql role text asserted 'Existing fixture rows ... will pick up scheduler=classic via the migration backfill's legacy_retained_classic / migrated_never_reviewed_random paths automatically at test schema init' — implying the backfill runs once, deterministically, against a stable fixture world. In fact conftest.py's `client` fixture (function-scoped, `with TestClient(app) as c:`) triggers backend/main.py's `@app.on_event('startup')` handler, which calls init_schema(), on every test — and since the never-reviewed migration branch uses a 50/50 hashtext(flashcard_id::text) hash (not a fixed 'classic' outcome), a pre-existing never-reviewed fixture card (e.g. fc000001/FC_ORIGINS_1) could deterministically hash to 'fsrs', silently breaking every pre-Sprint10 Classic-formula regression test that hardcodes that id — reproduced directly: `pytest tests/test_flashcards.py -k test_review_again_schedules_five_seconds` failed with a 60s FSRS learning-step interval instead of Classic's flat 5s, traced to fc000001 landing on scheduler='fsrs' via exactly this mechanism."
+likely_root_cause: definition_quality
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: a design that assumes a schema-migration backfill runs exactly once per test session should verify that assumption against the actual conftest.py fixture lifecycle (which apps in this repo trigger FastAPI's startup handler per-test vs. per-session) before relying on it for test determinism."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint10_DualSchedulerAB/99_sprint_log.md
+---
+
+---
+entry_id: EVD-2026-09-23-003
+date: 2026-09-23
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint10_DualSchedulerAB
+pattern_name: new_fixture_rows_shift_preexisting_unscoped_exact_count_assertion
+short_description: "Adding new flashcard fixtures (required by the test spec's FSRS/mix-scheduler scenarios) unavoidably changed the total row count GET /flashcards/stats (system-wide, unscoped, no opt-out) reports, breaking a pre-existing test's exact-count assertion. Implementer fix (not a design change, and not a test the sprint's scaffolding listed as new/changed): updated test_stats_system_wide_partitions_all_bands's expected due_now/within_1_day/sum values to the new, verified-against-a-fresh-fixture-load totals (19/5/29), with an inline comment explaining the Sprint10 Essay H contribution. Every new Essay H card was otherwise deliberately kept out of the stricter unscoped /due REVIEW query's own exact-match assertion by construction; only /stats, which has no scope-based opt-out at all, required updating an existing assertion."
+evidence: "tests/test_flashcards.py::test_stats_system_wide_partitions_all_bands asserted an exact system-wide bucket-count dict (due_now: 15, within_1_day: 2, sum 22) with no scope parameter. GET /flashcards/stats has no per-card opt-out — every flashcard_review_state row in the database is counted when no scope is given. The test spec (10_test_spec.md) and scaffolding (10_scaffolding.json) both directed extending tests/fixtures.sql with new FSRS-cohort/classic-cohort/mix cards for the due-queue-agnostic and dashboard scenarios; several of those new cards are unavoidably due (next_due_at <= now()) to exercise RECENT/BACKLOG ordering, so they necessarily added to due_now (+4) and, for the two deliberately-not-due established cards, to within_1_day (+3) once /stats counts them — neither artifact anticipated or flagged this interaction."
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — general pattern: when a test spec directs adding new fixture rows for scoped-query scenarios, any pre-existing UNSCOPED exact-count/exact-sum assertion elsewhere in the suite is a hidden coupling point that should be checked, since an unscoped aggregate has no way to exclude new fixture data by construction."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint10_DualSchedulerAB/99_sprint_log.md
+---

@@ -317,3 +317,58 @@ def test_reingest_dropping_nugget_reference_removes_only_the_association(db_conn
 
         cur.execute("select 1 from essaycards.nuggets where id = %s", (NUGGET_COGITO_ID,))
         assert cur.fetchone() is not None
+
+
+# ── Sprint10_DualSchedulerAB — scheduler assignment at the ingest creation gate ──
+
+def test_ingest_new_card_receives_scheduler_assignment(db_conn):
+    """Scenario: New card creation assigns a scheduler permanently — via
+    essay/section markdown ingest, each newly-created card's
+    flashcard_review_state row is seeded with scheduler, scheduler_assigned_at,
+    scheduler_assignment_reason='new_card_random', experiment_version='sprint10_v1'."""
+    ingest(_path("well_formed.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select rs.scheduler, rs.scheduler_assigned_at, rs.scheduler_assignment_reason, "
+            "rs.experiment_version "
+            "from essaycards.flashcard_review_state rs "
+            "join essaycards.flashcards f on f.id = rs.flashcard_id "
+            "where f.card_key = 'fc-test-1'"
+        )
+        row = cur.fetchone()
+
+    assert row["scheduler"] in ("classic", "fsrs")
+    assert row["scheduler_assigned_at"] is not None
+    assert row["scheduler_assignment_reason"] == "new_card_random"
+    assert row["experiment_version"] == "sprint10_v1"
+
+
+def test_reingest_never_changes_existing_card_scheduler_assignment(db_conn):
+    """Scenario: Editing an existing card never reassigns its scheduler —
+    re-ingesting the same essay/section (even with changed text) never
+    changes an already-assigned card's scheduler/scheduler_assigned_at/
+    scheduler_assignment_reason."""
+    ingest(_path("well_formed.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select rs.scheduler, rs.scheduler_assigned_at, rs.scheduler_assignment_reason "
+            "from essaycards.flashcard_review_state rs "
+            "join essaycards.flashcards f on f.id = rs.flashcard_id "
+            "where f.card_key = 'fc-test-1'"
+        )
+        before = cur.fetchone()
+
+    ingest(_path("well_formed.md"), db_conn)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select rs.scheduler, rs.scheduler_assigned_at, rs.scheduler_assignment_reason "
+            "from essaycards.flashcard_review_state rs "
+            "join essaycards.flashcards f on f.id = rs.flashcard_id "
+            "where f.card_key = 'fc-test-1'"
+        )
+        after = cur.fetchone()
+
+    assert after == before

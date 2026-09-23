@@ -368,6 +368,28 @@ def test_create_card_unknown_section_404_writes_nothing(client, db_conn):
         assert cur.fetchone()["n"] == 0
 
 
+def test_create_card_via_exploration_import_receives_scheduler_assignment(client, db_conn):
+    """Scenario: New card creation assigns a scheduler permanently — a card
+    created via the flashcard-exploration import's create_card action gets
+    the same permanent server-side assignment as every other creation site."""
+    r = client.post(IMPORT_URL, json={"actions": [_discussion(), _create()]})
+    assert r.status_code == 200, r.text
+    new_id = r.json()["created_cards"][0]["id"]
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version "
+            "from essaycards.flashcard_review_state where flashcard_id = %s",
+            (new_id,),
+        )
+        row = cur.fetchone()
+
+    assert row["scheduler"] in ("classic", "fsrs")
+    assert row["scheduler_assigned_at"] is not None
+    assert row["scheduler_assignment_reason"] == "new_card_random"
+    assert row["experiment_version"] == "sprint10_v1"
+
+
 def test_create_card_anchor_mismatch_rejected(client):
     r = client.post(IMPORT_URL, json={"actions": [_discussion(), _create(anchor="structure")]})
     assert r.status_code == 400

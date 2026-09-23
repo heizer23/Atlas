@@ -7,6 +7,9 @@
  *   /essaycards/review         → ReviewSessionView (no query = review/maintenance;
  *                                 query topic? | essay_id? [+ section_id?] = focus session)
  *   /essaycards/ingest         → IngestView (Sprint02: paste-JSON add/update essay)
+ *   /essaycards/experiment     → ExperimentDashboardView (Sprint10_DualSchedulerAB:
+ *                                 Classic vs FSRS scheduler comparison, real recorded
+ *                                 data only — see GET /experiment/summary)
  *
  * Review session note: the due queue is re-fetched from GET /flashcards/due
  * after every grade (and via a manual "Check again" on the completion screen).
@@ -80,6 +83,26 @@ interface DueCardRow {
   is_recent: boolean;
   scheduled_interval_seconds: number;
   nugget_id: string | null;
+  // Sprint10_DualSchedulerAB — the card's permanent scheduler assignment.
+  // Never a sort/filter key; feeds SchedulerBadge only.
+  scheduler: 'classic' | 'fsrs';
+}
+
+// Sprint10_DualSchedulerAB — GET /experiment/summary row shape, mirroring
+// backend/routers/experiment.py::EXPERIMENT_SUMMARY_SCHEMA.
+interface ExperimentSummaryRow {
+  scheduler: 'classic' | 'fsrs';
+  assigned_cards: number;
+  new_cards_assigned: number;
+  migrated_cards_assigned: number;
+  cards_new: number;
+  cards_learning: number;
+  cards_established: number;
+  reviewed_cards: number;
+  completed_reviews: number;
+  ordinary_due_reviews: number;
+  recall_rate: number | null;
+  failures: number;
 }
 
 interface ReviewResult {
@@ -397,7 +420,31 @@ const reviewCardStyle: React.CSSProperties = {
   margin: '16px 0',
   minHeight: 140,
   boxShadow: 'var(--elevation-1)',
+  position: 'relative',
 };
+
+// Sprint10_DualSchedulerAB — small pill in the question card's top corner,
+// visible both before and after reveal. Existing Material 3 tokens only
+// (surface-variant, same as ReviewStatsPanel); no new visual tokens. Shows
+// exactly the persisted algorithm name — 'Classic' or 'FSRS' — never
+// FSRS-native vocabulary.
+const schedulerBadgeStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 12,
+  right: 12,
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+  padding: '3px 8px',
+  borderRadius: 999,
+  background: 'var(--md-sys-color-surface-variant)',
+  color: 'var(--md-sys-color-on-surface-variant)',
+};
+
+function SchedulerBadge({ scheduler }: { scheduler: 'classic' | 'fsrs' }) {
+  return <span style={schedulerBadgeStyle}>{scheduler === 'fsrs' ? 'FSRS' : 'Classic'}</span>;
+}
 
 // Full-width primary action after reading the question (goal 1).
 const flipBtnStyle: React.CSSProperties = {
@@ -2545,6 +2592,7 @@ function ReviewSessionView() {
             : reviewCardStyle
         }
       >
+        <SchedulerBadge scheduler={current.scheduler} />
         <div className="type-title" style={{ lineHeight: 1.5 }}>
           <ReactMarkdown>{current.question}</ReactMarkdown>
         </div>
@@ -3919,6 +3967,98 @@ function GenerateFlashcardsImportView() {
   );
 }
 
+// ── Experiment dashboard (Sprint10_DualSchedulerAB) ──────────────────────────
+//
+// First version: a compact two-row comparison table over GET /experiment/summary
+// — real recorded per-scheduler data only, never theoretical predictions (mission
+// §7). No new fetch pattern: same apiFetch<Dataset<T>>/isApiError/ErrorCard/
+// Skeleton convention already used throughout this file (e.g. ImagesView above).
+// Plain algorithm names only ('Classic' / 'FSRS') — no FSRS-native vocabulary.
+
+const EXPERIMENT_METRIC_ROWS: { key: keyof ExperimentSummaryRow; label: string }[] = [
+  { key: 'assigned_cards', label: 'Assigned cards' },
+  { key: 'new_cards_assigned', label: 'New cards assigned' },
+  { key: 'migrated_cards_assigned', label: 'Migrated cards assigned' },
+  { key: 'cards_new', label: 'New' },
+  { key: 'cards_learning', label: 'Learning' },
+  { key: 'cards_established', label: 'Established' },
+  { key: 'reviewed_cards', label: 'Reviewed cards' },
+  { key: 'completed_reviews', label: 'Completed reviews' },
+  { key: 'ordinary_due_reviews', label: 'Ordinary due reviews (sample size)' },
+  { key: 'recall_rate', label: 'Recall rate' },
+  { key: 'failures', label: 'Failures' },
+];
+
+function formatExperimentValue(key: keyof ExperimentSummaryRow, value: number | null): string {
+  if (key === 'recall_rate') {
+    return value == null ? '—' : `${Math.round(value * 100)}%`;
+  }
+  return String(value);
+}
+
+function ExperimentDashboardView() {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<ExperimentSummaryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const res = await apiFetch<Dataset<ExperimentSummaryRow>>('/essaycards/experiment/summary');
+      setLoading(false);
+      if (isApiError(res)) {
+        setError(res);
+        return;
+      }
+      setError(null);
+      setRows(res.rows);
+    })();
+  }, []);
+
+  const classic = rows.find(r => r.scheduler === 'classic');
+  const fsrs = rows.find(r => r.scheduler === 'fsrs');
+
+  return (
+    <div style={pageStyle}>
+      <button style={jumpBtnStyle} onClick={() => navigate('/essaycards')}>← Back to all essays</button>
+      <h2 style={{ marginTop: 16 }}>Scheduler experiment</h2>
+      <p style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>
+        Real recorded data only. "Ordinary due reviews" is the sample size behind
+        recall rate — immediate relearning and rapid retries are excluded.
+      </p>
+
+      {loading && <Skeleton />}
+      {error && <ErrorCard error={error} />}
+
+      {!loading && !error && classic && fsrs && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 16 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--md-sys-color-outline-variant)' }}>
+              <th style={{ textAlign: 'left', padding: '8px 4px', fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>Metric</th>
+              <th style={{ textAlign: 'right', padding: '8px 4px', fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>Classic</th>
+              <th style={{ textAlign: 'right', padding: '8px 4px', fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>FSRS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {EXPERIMENT_METRIC_ROWS.map(({ key, label }) => (
+              <tr key={key} style={{ borderBottom: '1px solid var(--md-sys-color-outline-variant)' }}>
+                <td style={{ padding: '8px 4px', fontSize: 13 }}>{label}</td>
+                <td style={{ padding: '8px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {formatExperimentValue(key, classic[key])}
+                </td>
+                <td style={{ padding: '8px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                  {formatExperimentValue(key, fsrs[key])}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function EssayCardsApp() {
@@ -3937,6 +4077,7 @@ export default function EssayCardsApp() {
         <Route path="/images" element={<ImagesView />} />
         <Route path="/nuggets/authoring" element={<NuggetAuthoringImportView />} />
         <Route path="/nuggets/:id/generate-flashcards" element={<GenerateFlashcardsImportView />} />
+        <Route path="/experiment" element={<ExperimentDashboardView />} />
       </Routes>
     </>
   );

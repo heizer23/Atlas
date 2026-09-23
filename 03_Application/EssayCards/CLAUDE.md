@@ -135,6 +135,9 @@ they must be built.
   unified `[[nugget:key]]` reference validation across both ingestion paths, `flashcards.nugget_id`,
   nugget-aware flashcard exploration context, examination `nugget_versions` echo-through, and
   in-app nugget rendering/navigation (see `## Glossary` "Nuggets" and `## Nuggets` below).
+- Sprint 10: FSRS as a second, persistently 50/50 A/B-assigned scheduling algorithm alongside
+  Classic, a scheduler badge on the review card, and a first-version experiment dashboard (see
+  `## Dual scheduler A/B (Sprint10)` below).
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys
@@ -711,6 +714,87 @@ emerges from the conversation).
 - Backend: `backend/exploration.py` (build/validate/plan/execute) +
   `backend/routers/exploration.py` (registered after `flashcards.router`).
 
+## Dual scheduler A/B (Sprint10)
+A persistent, 50/50 A/B experiment comparing the original Classic scheduler
+against FSRS (`fsrs` PyPI package, FSRS-6), scoped narrowly: the existing
+due-queue selection/ordering mechanism (`## Due-queue ordering`, `## Queue
+stats`, Focus/Review eligibility, the 24-hour learning/established threshold)
+is completely untouched. Only `next_due_at` / `review_interval` /
+`last_reviewed_at` ever differ between the two schedulers — both write
+through the exact same three `flashcard_review_state` columns via the exact
+same single `UPDATE` statement shape as before this sprint.
+
+**`backend/scheduling.py`.** `compute_next_due_at` and `VALID_GRADES` are
+byte-for-byte unchanged. New: `ClassicScheduler` (a thin pass-through to
+`compute_next_due_at`) and `FSRSScheduler` (loads or creates an `fsrs.Card`,
+drives a module-level `fsrs.Scheduler(desired_retention=0.9)`, library-default
+parameters/learning_steps/relearning_steps — no personalized optimization
+this sprint), both returning the same `SchedulerResult(next_due_at,
+review_interval, extra_state)` shape. FSRS's own memory state (stability,
+difficulty, its internal Learning/Review/Relearning state, step) is a
+SEPARATE, additional persisted concept (`essaycards.fsrs_card_state`) — never
+confused with or substituted for `review_interval`. Rating mapping is a
+direct 1:1 name match (`again`/`hard`/`good`/`easy` ->
+`fsrs.Rating.Again`/`Hard`/`Good`/`Easy`); every datetime handed to the
+library is normalized to exactly `.astimezone(timezone.utc)` first.
+
+**Assignment.** `decide_scheduler_assignment(flashcard_id,
+migrated_never_reviewed=False)` decides once, permanently, at the existing
+`if was_inserted:` gate already present at all three card-creation call sites
+(`backend/ingest.py`, `backend/routers/flashcards.py::_upsert_question`,
+`backend/exploration.py::execute_plan`'s `create_card` branch) — never on
+update/re-ingest/regeneration, and no endpoint request body anywhere accepts
+a `scheduler` field. A stable hash of the flashcard id splits ~50/50 between
+`classic`/`fsrs`, unless `ESSAYCARDS_FSRS_EXPERIMENT_ENABLED` (read fresh
+from `os.environ` every call, default true) is false, which forces
+`classic` unconditionally (the kill switch — stops new assignment only, no
+effect on already-assigned cards). `flashcard_review_state.scheduler` /
+`scheduler_assigned_at` / `scheduler_assignment_reason` /
+`experiment_version` are additive columns; `scheduler_assignment_reason` is a
+closed 4-value vocabulary: `new_card_random`, `assignment_disabled_classic`
+(both from the creation-time gate), `migrated_never_reviewed_random`,
+`legacy_retained_classic` (both from the one-time migration backfill below).
+
+**Migration.** A one-time, sentinel-guarded backfill folded into `schema.sql`
+(idempotent — reruns on every startup are a no-op once a row has a non-null
+`scheduler_assigned_at`): every pre-Sprint10 row with real review history
+(`last_reviewed_at is not null`) is forced to `classic` /
+`legacy_retained_classic`, unconditionally — py-fsrs has no way to reliably
+initialize FSRS state without a full per-review rating history, which this
+app has never persisted. Every pre-Sprint10 never-reviewed row is assigned
+via the identical balanced mechanism as a brand-new card (Postgres-native
+`hashtext()`, not the Python `sha256`-based helper — a deliberate, safe
+divergence between two disjoint cohorts that never need cross-language hash
+parity). Neither migration `UPDATE`'s `SET` list touches `next_due_at`,
+`review_interval`, or `last_reviewed_at` — a pre-existing card's schedule is
+never altered.
+
+**Review transaction.** `POST /flashcards/{id}/review` reads the card's
+persisted `scheduler`, dispatches to `ClassicScheduler` or `FSRSScheduler`,
+then — inside the same transaction as the existing `flashcard_review_state`
+`UPDATE` — upserts `essaycards.fsrs_card_state` (fsrs cards only) and always
+inserts one `essaycards.review_events` row (both schedulers, append-only). A
+review can never persist its new due date while failing to persist its
+scheduler state or its review-event record.
+
+**Badge.** The review card shows a small pill in its top corner reading
+exactly `Classic` or `FSRS` (`SchedulerBadge` in `src/ShellEntry.tsx`) —
+plain algorithm names only, no FSRS-native vocabulary (stability,
+difficulty, FSRS state names) anywhere in the UI.
+
+**Experiment dashboard.** `GET /api/essaycards/experiment/summary`
+(`backend/routers/experiment.py`) — always exactly two rows, `classic` then
+`fsrs`. `ordinary_due_reviews` / `recall_rate` / `failures` are filtered on
+`review_events.prior_review_interval >= interval '24 hours'` — mirroring the
+app's existing learning/established threshold — NOT on `review_events.was_due`,
+which is true for virtually every reachable review (the due-queue's own base
+eligibility, `next_due_at <= now()`, already requires it for every session
+type) and therefore cannot by itself separate ordinary due-review evidence
+from immediate-relearning/rapid-retry reviews. `recall_rate` is `null` (not
+`0`) when a scheduler has zero ordinary-due reviews — "no data yet" and "0%
+recall" are different facts. Reachable at `/essaycards/experiment`
+(`ExperimentDashboardView`).
+
 ## Port
 EssayCards backend runs on host port 8024 (container port 8000).
 
@@ -719,7 +803,10 @@ essaycards schema in the shared Atlas Postgres instance.
 Tables: essaycards.essays, essaycards.essay_sections, essaycards.flashcards,
 essaycards.flashcard_review_state, essaycards.section_examinations (append-only),
 essaycards.flashcard_discussions, essaycards.flashcard_revisions (Sprint06 —
-flashcard exploration; the app never updates/deletes rows in either).
+flashcard exploration; the app never updates/deletes rows in either),
+essaycards.fsrs_card_state, essaycards.review_events (Sprint10 — dual
+scheduler A/B; review_events is append-only, the app never updates/deletes a
+row there either — see `## Dual scheduler A/B (Sprint10)`).
 Schema initialized idempotently at startup from schema.sql.
 
 `00_architecture/schema.sql` is a design copy that `make essaycards-schema` feeds

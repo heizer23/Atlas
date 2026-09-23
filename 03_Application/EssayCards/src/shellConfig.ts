@@ -18,11 +18,13 @@ AppRegistry.register({
     { id: 'essaycards-essays', label: 'Essays',           path: '/essaycards',        order: 1 },
     { id: 'essaycards-due',    label: 'Due for review',   path: '/essaycards/review', order: 2 },
     { id: 'essaycards-ingest', label: 'Add / Update Essay', path: '/essaycards/ingest', order: 3 },
+    { id: 'essaycards-experiment', label: 'Experiment', path: '/essaycards/experiment', order: 4 },
   ],
 
   desktopNav: [
     { id: 'essaycards-essays', label: 'Essays',           path: '/essaycards',        order: 1 },
     { id: 'essaycards-due',    label: 'Due for review',   path: '/essaycards/review', order: 2 },
     { id: 'essaycards-ingest', label: 'Add / Update Essay', path: '/essaycards/ingest', order: 3 },
+    { id: 'essaycards-experiment', label: 'Experiment', path: '/essaycards/experiment', order: 4 },
   ],
 });
