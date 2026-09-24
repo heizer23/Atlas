@@ -1,0 +1,369 @@
+{
+  "component_name": "storyreader",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "A mobile-first markdown story reader that captures fast, no-confirmation, tap-to-save passage reactions (positive/negative/neutral/unclear) against immutable append-only story versions published by an external agent (Codex) via a CLI ingestion command, and exposes a bespoke read-only annotation export for that same agent to discuss the marked passages later.",
+  "naming_note": "The draft flagged 'StoryReader' as a placeholder open to renaming. A stronger candidate name considered during this design pass: 'Marginalia' (thematically apt for margin-note-style passage reactions). NOT applied: this agent has no filesystem move/delete tool available, and a rename requires moving the sprint folder and every path reference atomically — attempting it with only Read/Write would leave an orphaned duplicate 00_draft.md at the old path with no way to remove it. Surfaced per R-OPS-BP-01 rather than silently done or silently skipped. Component name retained as 'storyreader' / 'StoryReader' for this design pass; rename is a human decision (e.g. a quick `git mv`) to make before or after this design is approved, if desired.",
+  "classification": {
+    "why_application": "Passage-level reader reactions, story publishing/versioning semantics, and the Codex-facing annotation export are meaningful only in terms of this app's own domain vocabulary (story, version, annotation, reaction). This is app-specific behavior and data ownership, not a reusable technical capability.",
+    "non_goals": [
+      "Any comment or free-text field on an annotation — reaction only",
+      "In-app story authoring/editing UI — content only arrives via the content folder + CLI ingestion",
+      "Any AI analysis, summarization, or chat inside StoryReader itself — Codex does that out of band",
+      "Reconciling or re-anchoring annotations across versions — an annotation belongs to the exact version it was made on",
+      "Multi-user accounts, sharing, or permissions",
+      "Notifications, reading progress tracking, statistics/analytics on reactions",
+      "Deleting a story or a version through the UI or API — ingestion is append-only",
+      "Overlap reconciliation between annotations covering overlapping spans"
+    ],
+    "not_platform": "The paragraph-split renderer, the reaction vocabulary, and the annotation-location model exist only to answer 'what did the reader mark and what does it mean to StoryReader' — they are not exposed or intended for reuse by any other Atlas application. If another app later needs markdown-paragraph rendering or passage annotation, that is a platform-extraction question to raise then, not now."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — storyreader schema, psycopg2 pool, RealDictCursor (StorageTracker/EssayCards pattern)",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema (02_Platform/packages/platform_contracts/contracts.py)",
+      "platform_errorhandling — setup_logging, install_exception_handlers, install_request_timing",
+      "Content folder mounted read-only into the container at the fixed path /app/content, sourced on the host from the STORYREADER_CONTENT_DIR env var (compose.yml volume mapping only — the Python app never reads this env var itself; it always reads /app/content, so the host-side source can be repointed in compose.yml with no code change)"
+    ],
+    "provides": [
+      "GET /api/storyreader/stories — story list with marked-passage counts for the latest version",
+      "GET /api/storyreader/stories/{story_id} — story detail plus the full list of existing version numbers",
+      "GET /api/storyreader/stories/{story_id}/versions/{version} — one immutable version's markdown rendered as an ordered paragraph array",
+      "GET /api/storyreader/stories/{story_id}/versions/{version}/annotations — one version's annotations in reading order",
+      "POST /api/storyreader/annotations — create a new annotation, or change the reaction on an existing exact-span annotation in place",
+      "DELETE /api/storyreader/annotations/{annotation_id} — remove an annotation (the toggle-off path)",
+      "GET /api/storyreader/stories/{story_id}/versions/{version}/annotations/export — bespoke JSON annotation export for Codex",
+      "docker exec atlas-storyreader python -m backend.ingest content/<slug>.md — one-shot CLI ingestion, the only way content enters the app"
+    ],
+    "invariants": [
+      "Annotation location is always relative to one immutable version's rendered plain text (paragraph_index + char_start/char_end into backend/paragraphs.py::split_paragraphs(body_markdown)[paragraph_index]), never to raw markdown source. Because a version's body_markdown never changes after insert, re-running split_paragraphs on it at any later read always reproduces the exact same paragraph array — no re-mapping is ever needed within a version.",
+      "backend/paragraphs.py::split_paragraphs is the single canonical paragraph-split function. It is imported, never re-implemented, by both backend/ingest.py (front-matter/slug validation path — it does not need paragraphs itself, but shares the module for future-proofing and so ingestion and reads can never drift) and backend/routers/stories.py (version-content endpoint and POST /annotations bounds validation).",
+      "split_paragraphs algorithm (exact, no undeclared steps): (1) normalize line endings to \\n and strip leading/trailing whitespace from the whole text; (2) split on any run of one-or-more blank (whitespace-only) lines into ordered raw blocks — a document with no blank line anywhere is exactly one block; (3) for each block, strip a single matching prefix from the start of each of its lines, checked in this fixed order: heading marker ^#{1,6}\\s+, blockquote marker ^>\\s? (applied repeatedly per line for nested quotes), unordered list marker ^[-*+]\\s+, ordered list marker ^\\d+\\.\\s+, or a fenced-code delimiter line ^```.*$ (the delimiter line itself is dropped entirely, its content lines pass through unchanged); (4) strip inline emphasis markers **, *, _, `, ~~ (removing the marker characters, keeping the enclosed text) and rewrite [text](url) to text; (5) join the block's processed lines with a single space to produce one paragraph string. This means a multi-line list or blockquote block renders as exactly ONE paragraph (one paragraph_index), not one per line/item — the explicit resolution of the draft's open question. A code block is likewise one paragraph, its fence markers dropped and its content lines space-joined as literal text. paragraph_index is the 0-based position of a block in this final ordered list.",
+      "context_before/context_after are computed by the frontend at selection time from the SAME paragraphs array already returned by GET .../versions/{version} (never recomputed or re-derived server-side) using this exact rule: context_before = up to 200 characters of the same paragraph's text immediately preceding char_start; if that same-paragraph remainder is empty (char_start == 0) and a paragraph at paragraph_index - 1 exists, take up to 200 characters from the END of that previous paragraph's text instead; otherwise ''. context_after is the mirror rule looking forward (up to 200 chars after char_end in the same paragraph; spill into the START of paragraph_index + 1 only if the same-paragraph remainder is empty and a next paragraph exists; otherwise ''). Truncation is a plain character-count cutoff — no word-boundary snapping. The backend does not re-derive or validate this rule; it stores the two strings as received, defensively truncated to 500 characters each (schema check constraint) purely as an abuse/bug guard, not as the authoritative window definition.",
+      "selected_text is always verified server-side (POST /annotations) to equal split_paragraphs(version.body_markdown)[paragraph_index][char_start:char_end] exactly, before insert — this is what makes the Data Model's 'verbatim substring' guarantee actually true rather than merely asserted.",
+      "story_id path segments are strictly the surrogate uuid (storyreader.stories.id) everywhere in this API. No endpoint accepts a slug as an alternative — resolved open design question. Rationale: id is a uuid and slug is also an arbitrary string, so there is no reliable type-based way to accept either in one path segment without ambiguity (R-CON-BP-08); Codex instead learns the story_id directly from the ingestion CLI's stdout on every publish (see internal_flow ingest_cli step), and can resolve slug -> story_id at any time via GET /stories, which always carries slug per row.",
+      "A story's slug is never updatable once created: backend/ingest.py's upsert logic uses slug only in WHERE/lookup position, never in any UPDATE ... SET list — the same structural-omission pattern EssayCards uses for nugget_key/card_key (03_Application/EssayCards/CLAUDE.md). There is no code path capable of renaming an existing story's slug.",
+      "Ingestion additionally validates that the front-matter slug exactly equals the filename-derived slug (the CLI argument's basename with .md stripped) before doing anything else — this is the concrete, checkable form of 'a slug change is rejected as an ingestion error': it catches a Codex-side drift between a file's name and its own declared identity within one publish action. It is not a mechanism for detecting or blocking renames across different files/slugs, because two different slugs are, by definition, two different stories.",
+      "Re-ingestion idempotency is keyed on content_sha256 (sha256 of the exact body_markdown text after the front-matter block is removed) compared against the story's CURRENT latest version only (via stories.latest_version), never against the full version history — running ingestion twice unchanged is a no-op both times.",
+      "story_versions rows are never updated after insert (no UPDATE statement in the codebase ever targets story_versions) — immutability is structurally enforced by omission, not by a trigger or runtime check.",
+      "Publishing a new version never touches, migrates, or re-anchors any existing annotations.storyreader row. A brand-new version starts with zero annotations until the user marks it.",
+      "created_at/updated_at on every table are set from Postgres now() at write time. No endpoint accepts a client-supplied timestamp anywhere in this app (R-CON-AL-06)."
+    ],
+    "failure_modes": [
+      "NOT_FOUND — story_id does not exist (GET /stories/{id}, GET version, GET annotations list, POST /annotations, GET export)",
+      "NOT_FOUND — version does not exist for an otherwise-existing story (GET version with a numeric version or literal 'latest' that resolves to nothing; GET annotations list and GET export with a non-existent version number; POST /annotations with a non-existent version)",
+      "VALIDATION_ERROR — GET version's {version} path segment is neither the literal string 'latest' nor a positive integer",
+      "VALIDATION_ERROR — GET annotations-list / GET export's {version} path segment is not a positive integer (the literal 'latest' is explicitly NOT accepted on these two endpoints — the caller must already know the exact version, per contracts.invariants)",
+      "VALIDATION_ERROR — POST /annotations: reaction not one of positive/negative/neutral/unclear",
+      "VALIDATION_ERROR — POST /annotations: char_start < 0, or char_end <= char_start",
+      "VALIDATION_ERROR — POST /annotations: paragraph_index outside [0, len(paragraphs)) for that exact version",
+      "VALIDATION_ERROR — POST /annotations: char_end exceeds the length of that paragraph's rendered text",
+      "VALIDATION_ERROR — POST /annotations: selected_text does not exactly equal the paragraph substring at [char_start, char_end)",
+      "NOT_FOUND — DELETE /annotations/{id} with an unknown annotation_id",
+      "Ingestion (CLI, not an HTTP failure mode) — missing/unreadable file at the given content-relative path: non-zero exit, message on stderr, no DB write",
+      "Ingestion — missing or unparsable YAML front matter, or front matter missing title or slug: non-zero exit, no DB write",
+      "Ingestion — front-matter slug does not match the filename-derived slug: non-zero exit, no DB write (see contracts.invariants)"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor, same pattern as StorageTracker/EssayCards backend/database.py",
+      "platform_contracts, platform_errorhandling — unchanged platform packages",
+      "PyYAML (front-matter parsing in backend/ingest.py)"
+    ],
+    "provides": [
+      "HTTP API mounted at /api/storyreader (FastAPI, uvicorn), bound to 127.0.0.1 only on the host (least exposure, R-OPS-BP-02) — reached by the browser through Atlas Shell's nginx reverse proxy over atlas-net (same mechanism as every other app; the loopback host-port binding only affects direct host access, e.g. Codex's own curl-over-SSH, not the internal Docker-network shell proxy path) and by Codex directly via curl to 127.0.0.1:8026 over its own SSH session",
+      "backend.paragraphs.split_paragraphs — the single public paragraph-rendering function, importable by any other module in this component",
+      "backend.ingest.upsert_story — the ingestion core, invoked by the CLI entrypoint (backend/ingest.py run as __main__)",
+      "Atlas Shell registration (src/shellConfig.ts) with mobilePrimaryNav as the primary target — this app is designed for one-handed phone use while reading"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/storyreader/stories",
+        "purpose": "Story list view — every story, its latest version number, and how many passages are marked on that latest version.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a — no parameters",
+          "allowed_combinations": "n/a",
+          "ordering": "updated_at desc (most recently published first)",
+          "grouping": "none",
+          "time_basis": "not time-window-scoped; updated_at is a stored column value, not compared against now()",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "valid — no stories ingested yet; rows: []",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "{ id (uuid), slug, title, latest_version (int), marked_passage_count (int — count of storyreader.annotations where story_id=id and version=latest_version), created_at, updated_at }"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/storyreader/stories/{story_id}",
+        "purpose": "Story detail plus the full version list, for the Reader's version switcher.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "story_id (path, uuid, required)",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a — single path parameter",
+          "ordering": "single row; versions column is an ascending integer array",
+          "grouping": "none",
+          "time_basis": "n/a",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "not applicable to rows (always exactly 1 row on success); 404 ApiError NOT_FOUND if story_id does not exist",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "{ id, slug, title, latest_version, versions (int[], ascending, e.g. [1,2,3]), created_at, updated_at }"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/storyreader/stories/{story_id}/versions/{version}",
+        "purpose": "Render one immutable version's markdown as an ordered plain-text paragraph array for the Reader.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "story_id (path, uuid, required); version (path, required — either the literal string 'latest' or a positive integer string)",
+          "defaults": "version='latest' resolves server-side to stories.latest_version at request time; an explicit integer always means that exact version",
+          "allowed_combinations": "'latest' or an explicit positive integer — no other value is valid",
+          "ordering": "paragraphs array is document order (array position == paragraph_index); not independently sortable",
+          "grouping": "none",
+          "time_basis": "n/a — reads immutable stored content, no now() comparison",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "a version whose body_markdown renders to zero paragraphs (e.g. blank body) is valid: paragraphs: []",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "{ id (uuid — the resolved version's own story_versions.id, required per R-CON-BP-04's Dataset row identity rule), story_id, version (the resolved integer, never the literal 'latest'), title, paragraphs: [{ paragraph_index, text }], created_at }. 404 ApiError NOT_FOUND if story_id or the resolved version does not exist. VALIDATION_ERROR if the version path segment is neither 'latest' nor a positive integer string."
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/storyreader/stories/{story_id}/versions/{version}/annotations",
+        "purpose": "One version's annotations in reading order, for the Feedback list and for the Reader's highlight overlay.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "story_id (path, uuid, required); version (path, required, positive integer only — 'latest' is NOT accepted here, no implicit fallback)",
+          "defaults": "none — version must be stated explicitly",
+          "allowed_combinations": "n/a — two required path parameters, no query parameters",
+          "ordering": "paragraph_index asc, char_start asc (reading order)",
+          "grouping": "none",
+          "time_basis": "n/a",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "valid — nothing marked yet on this version; rows: []; still 200, not 404, as long as story_id and version both exist",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "{ id, story_id, version, paragraph_index, char_start, char_end, selected_text, context_before, context_after, reaction, created_at, updated_at }. 404 ApiError NOT_FOUND if story_id or version does not exist. VALIDATION_ERROR if version is not a positive integer string."
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/storyreader/annotations",
+        "purpose": "Create a new passage reaction, or change the reaction on an already-annotated exact span, in place. No confirmation step; no partial-field updates — every field is required on every call.",
+        "ui_contract": "none — mutation endpoint, R-CON-BP-04 exempt. Success returns the typed annotation record (same row shape as the annotations-list endpoint), 201 if this call inserted a new row, 200 if it updated an existing row's reaction in place. Failure returns ApiError."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/storyreader/annotations/{annotation_id}",
+        "purpose": "Remove an annotation outright — the toggle-off path when the currently-active reaction is tapped again. Never a toggle-detecting upsert; the frontend already knows the id from the annotations list it already fetched.",
+        "ui_contract": "none — mutation endpoint, R-CON-BP-04 exempt. 204 on success, ApiError NOT_FOUND if annotation_id is unknown."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/storyreader/stories/{story_id}/versions/{version}/annotations/export",
+        "purpose": "Codex-facing, self-contained JSON export of one version's annotations for an out-of-band discussion round trip.",
+        "ui_contract": "none — R-CON-BP-04 exempt on the success path, same rationale as EssayCards' exploration-package/examination-package: built for an external LLM to read via curl/SSH, not for a Dataset-consuming UI component. Failure still returns ApiError (this exemption covers only the success response shape, not the error contract).",
+        "query_behavior": {
+          "supported_parameters": "story_id (path, uuid, required); version (path, required, positive integer only — same no-'latest' rule as the annotations-list endpoint)",
+          "defaults": "none",
+          "allowed_combinations": "n/a",
+          "ordering": "annotations array ordered paragraph_index asc, char_start asc (reading order)",
+          "grouping": "none",
+          "time_basis": "n/a",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "valid — annotations: [] when the version exists but nothing is marked yet",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "{ slug, title, version, annotation_count, annotations: [{ paragraph_index, selected_text, context_before, context_after, reaction, created_at, updated_at }] }. 404 ApiError NOT_FOUND if story_id or version does not exist. VALIDATION_ERROR if version is not a positive integer string."
+        }
+      },
+      {
+        "type": "cli_command",
+        "name": "python -m backend.ingest content/<slug>.md",
+        "purpose": "Codex's one-shot publish command, run via docker exec over its own SSH session. No upload endpoint exists or is needed.",
+        "ui_contract": "none — CLI, prints a one-line JSON summary to stdout on success ({\"action\": \"created\"|\"unchanged\"|\"new_version\", \"slug\", \"story_id\", \"version\"}) and exits non-zero with a message on stderr on any failure mode listed in contracts.failure_modes."
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "split_paragraphs",
+      "description": "Pure function, no I/O: renders a version's full body_markdown into an ordered list of plain-text paragraph strings per the exact algorithm in contracts.invariants. Used both by the version-content read endpoint and by POST /annotations' bounds validation.",
+      "inputs": ["body_markdown: str"],
+      "outputs": ["paragraphs: list[str], 0-indexed by position"]
+    },
+    {
+      "step": 2,
+      "name": "ingest_cli",
+      "description": "backend/ingest.py, run as `python -m backend.ingest <path-relative-to-/app>`. Reads the file, splits YAML front matter from body, validates front-matter slug == filename-derived slug (basename minus .md), validates required keys (title, slug) are present, computes content_sha256 = sha256(body_markdown after front matter is stripped). Looks up storyreader.stories by slug (the sole lookup key; never appears in an UPDATE ... SET list, so it can never be renamed). If no story: INSERT stories(slug, title, latest_version=1) and story_versions(story_id, version=1, body_markdown, content_sha256); print action=created. If story exists: compare content_sha256 against the CURRENT latest version's content_sha256 (looked up via stories.latest_version). Unchanged: UPDATE stories.title/updated_at only if title differs; print action=unchanged. Changed: INSERT story_versions(story_id, version=latest_version+1, body_markdown, content_sha256); UPDATE stories SET latest_version=latest_version+1, title=<new title>, updated_at=now(); print action=new_version. All DB writes for one ingestion call happen inside a single transaction.",
+      "inputs": ["file path argument (relative to /app/content)", "STORYREADER content mounted at /app/content (read-only)"],
+      "outputs": ["stories row (created or updated title/latest_version)", "story_versions row (version 1, or a new appended version, or none if unchanged)", "one-line JSON stdout summary, or a non-zero exit with a stderr message"]
+    },
+    {
+      "step": 3,
+      "name": "list_stories",
+      "description": "GET /stories: SELECT s.*, (SELECT count(*) FROM storyreader.annotations a WHERE a.story_id = s.id AND a.version = s.latest_version) AS marked_passage_count FROM storyreader.stories s ORDER BY updated_at DESC.",
+      "inputs": [],
+      "outputs": ["Dataset rows per exposed_surfaces row_shape"]
+    },
+    {
+      "step": 4,
+      "name": "get_story_detail",
+      "description": "GET /stories/{story_id}: fetch the story row (404 if missing), then SELECT version FROM storyreader.story_versions WHERE story_id=$1 ORDER BY version ASC to build the versions array.",
+      "inputs": ["story_id"],
+      "outputs": ["Dataset single row, or 404 ApiError"]
+    },
+    {
+      "step": 5,
+      "name": "get_version_content",
+      "description": "GET /stories/{story_id}/versions/{version}: resolve story_id (404 if missing). Resolve version: if the path segment is exactly 'latest', use stories.latest_version; else parse as a positive integer (VALIDATION_ERROR if it does not parse). Fetch the matching story_versions row, including its own id column (404 if that exact (story_id, version) does not exist). Call split_paragraphs(body_markdown); wrap each element with its 0-based index into { paragraph_index, text }. The response row's id field is the fetched story_versions.id (R-CON-BP-04 Dataset row identity requirement).",
+      "inputs": ["story_id", "version path segment ('latest' or integer string)"],
+      "outputs": ["Dataset single row per exposed_surfaces row_shape, or ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "list_annotations",
+      "description": "GET /stories/{story_id}/versions/{version}/annotations: version must parse as a positive integer (VALIDATION_ERROR otherwise). Confirm the story exists (404) and that story_versions has that exact (story_id, version) row (404 otherwise). SELECT * FROM storyreader.annotations WHERE story_id=$1 AND version=$2 ORDER BY paragraph_index ASC, char_start ASC.",
+      "inputs": ["story_id", "version (integer)"],
+      "outputs": ["Dataset rows, or ApiError"]
+    },
+    {
+      "step": 7,
+      "name": "create_or_update_annotation",
+      "description": "POST /annotations. Validation order (first failure wins, VALIDATION_ERROR unless noted): (1) story exists (404 NOT_FOUND otherwise); (2) story_versions has that exact (story_id, version) row (404 NOT_FOUND otherwise); (3) reaction is one of the four fixed values; (4) char_start >= 0; (5) char_end > char_start; (6) paragraph_index is in range for split_paragraphs(that version's body_markdown); (7) char_end <= len(that paragraph's text); (8) selected_text == that paragraph's text[char_start:char_end] exactly. context_before/context_after are truncated to 500 characters each if longer (defensive bound only). Then: INSERT INTO storyreader.annotations (...) VALUES (...) ON CONFLICT (story_id, version, paragraph_index, char_start, char_end) DO UPDATE SET reaction = excluded.reaction, context_before = excluded.context_before, context_after = excluded.context_after, selected_text = excluded.selected_text, updated_at = now() RETURNING *, (xmax = 0) AS was_inserted. Response is the full row; HTTP status is 201 if was_inserted else 200.",
+      "inputs": ["POST body: story_id, version, paragraph_index, char_start, char_end, selected_text, context_before, context_after, reaction"],
+      "outputs": ["annotation record + was_inserted flag, or ApiError"]
+    },
+    {
+      "step": 8,
+      "name": "delete_annotation",
+      "description": "DELETE /annotations/{annotation_id}: DELETE FROM storyreader.annotations WHERE id = $1 RETURNING id. 204 if a row was deleted, 404 ApiError NOT_FOUND otherwise.",
+      "inputs": ["annotation_id"],
+      "outputs": ["204, or 404 ApiError"]
+    },
+    {
+      "step": 9,
+      "name": "export_annotations",
+      "description": "GET .../annotations/export: identical resolution/validation as list_annotations (step 6), then additionally fetches the story's slug/title, and shapes the response per exposed_surfaces row_shape (paragraph_index, selected_text, context_before, context_after, reaction, created_at, updated_at per annotation; annotation_count = len(annotations)). Returns the bespoke JSON body directly (not wrapped in Dataset) on success; ApiError on any of the failure modes shared with list_annotations.",
+      "inputs": ["story_id", "version (integer)"],
+      "outputs": ["bespoke JSON body, or ApiError"]
+    },
+    {
+      "step": 10,
+      "name": "reader_selection_and_reaction_ui",
+      "description": "Frontend only. On text selection inside the Reader, the app already holds the current version's paragraphs (step 5's response) and the current version's annotations (step 6's response) in memory. It locates the selected span's paragraph_index/char_start/char_end (via window.getSelection() mapped back to the rendered paragraph node) and computes context_before/context_after per the exact windowing rule in contracts.invariants. It then checks the in-memory annotations list for an existing row with that EXACT (paragraph_index, char_start, char_end) tuple: none -> reveal the four reaction buttons, tapping one calls POST /annotations (create); existing with a DIFFERENT reaction tapped -> POST /annotations (update in place, same row); existing with the SAME reaction tapped again -> DELETE /annotations/{id} (remove). All three call paths refresh the in-memory annotations list from the POST/DELETE response (or a lightweight refetch) so the highlight overlay stays correct without a full page reload.",
+      "inputs": ["current version's paragraphs (step 5)", "current version's annotations (step 6)", "user's text selection"],
+      "outputs": ["POST or DELETE call; updated in-memory annotation state; updated highlight overlay"]
+    },
+    {
+      "step": 11,
+      "name": "feedback_list_jump",
+      "description": "Frontend only. Tapping a Feedback-list row navigates to the Reader route for the same story_id/version carrying the tapped annotation's id (e.g. as a query param), scrolls the corresponding paragraph/span into view using the same paragraph_index/char_start already held from step 6's fetch, and applies a brief highlight animation. No new backend endpoint is needed — everything required is already present in the already-fetched annotations list.",
+      "inputs": ["tapped annotation row (id, paragraph_index, char_start)"],
+      "outputs": ["route navigation + scroll + transient highlight, purely client-side"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP API framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request body validation models", "reuse_existing": true},
+      {"name": "PyYAML", "role": "Parse the YAML front-matter block in ingested markdown files", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "An HTTP upload endpoint for story content — ingestion is CLI-only per the draft (Codex has direct shell access; no upload path is needed)",
+      "A free-text/comment field on Annotation",
+      "Any code path that updates an existing story_versions row's body_markdown, content_sha256, or version after insert",
+      "Any code path that updates storyreader.stories.slug",
+      "Any endpoint or annotation-migration logic that re-anchors an annotation onto a different version's text",
+      "Accepting a client-supplied created_at/updated_at anywhere",
+      "Accepting a slug as an alternative to story_id in any URL path"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement backend/paragraphs.py::split_paragraphs exactly per contracts.invariants — this is the one function both ingestion and the version-content endpoint import; do not re-implement it a second time anywhere.",
+      "Implement backend/ingest.py as both an importable module (upsert_story(conn, file_path) -> dict core) and a `python -m backend.ingest <path>` CLI entrypoint that prints the one-line JSON summary to stdout and exits non-zero with a stderr message on any failure — see internal_flow step 2.",
+      "Implement backend/routers/stories.py per internal_flow steps 3-9, including the exact validation order in step 7 and the ON CONFLICT ... RETURNING *, (xmax = 0) AS was_inserted pattern for 200-vs-201 status.",
+      "Add the storyreader compose.yml service: host port 127.0.0.1:8026:8000 (least exposure, R-OPS-BP-02), content volume `${STORYREADER_CONTENT_DIR}:/app/content:ro`, logs volume `${DATA_ROOT}/storyreader/logs:/app/logs`, ATLAS_PG_* env vars — same shape as StorageTracker's compose.yml. Add STORYREADER_CONTENT_DIR to the repo's top-level .env (or equivalent) once the real content directory location is known; until then any placeholder host path works since ingestion is invoked manually, not on a schedule.",
+      "Add a `location /api/storyreader { set $upstream_storyreader atlas-storyreader:8000; proxy_pass http://$upstream_storyreader; ... }` block to 02_Platform/Atlas_Shell/nginx.conf, matching the existing per-app block shape (see e.g. the /api/essaycards block) — required for the browser-facing UI to reach the API through the shell; independent of and unaffected by the loopback-only host port binding.",
+      "Write the component's CLAUDE.md restating the Codex Integration section (ingestion command, export curl command, slug/story_id resolution rule) as the authoritative reference for both the human and Codex, EssayCards-style.",
+      "Confirm gen_random_uuid() is available (pgcrypto extension) in the shared Postgres instance the same way it already is for StorageTracker/EssayCards; do not add a redundant CREATE EXTENSION if one already exists at the instance level."
+    ],
+    "ui_implementer": [
+      "Story list (`/storyreader`): title, latest_version, marked_passage_count per row (from GET /stories); tap navigates to the Reader at version='latest'.",
+      "Reader (`/storyreader/stories/:id`, optional `?version=`): fetch GET /stories/{id}/versions/{version or 'latest'} and GET .../annotations for that resolved version on mount. Render paragraphs as the whole-screen story text, minimal chrome. Implement selection handling, the exact context_before/context_after windowing rule, and the create/update/delete decision tree exactly per internal_flow step 10 — do not invent a different toggle rule.",
+      "Highlight treatment: one quiet highlight style used for all four reactions, distinguished by a small inline reaction icon per the draft's UI section — not four highlight colors.",
+      "Version switcher: visible only when GET /stories/{id}'s versions array has more than one entry.",
+      "Feedback list (`/storyreader/stories/:id/feedback`): fetch GET .../annotations for the version in view; render reading-order rows (reaction icon, selected_text, context_before/context_after); tapping a row implements internal_flow step 11 exactly (no new endpoint).",
+      "src/shellConfig.ts: register with AppRegistry, basePath '/storyreader', and mobilePrimaryNav entries for Stories/Reader-in-progress-story/Feedback as appropriate — this app's primary target is mobilePrimaryNav (one-handed phone reading), per the draft's UI section; also provide desktopNav for consistency with every other app's shellConfig.ts.",
+      "Add the required side-effect import for src/shellConfig.ts to 02_Platform/Atlas_Shell/src/shell/main.tsx's REGISTER APPLICATION SHELLS block: `import '../../../../03_Application/StoryReader/src/shellConfig';` — matching the existing per-app import shape used by every currently-registered app (e.g. StorageTracker's import at main.tsx, since both apps use mobilePrimaryNav as their primary target; R-CON-BP-06). Without this import, AppRegistry.register() for storyreader never executes, so the app is never listed by AppRegistry.getAll()/getByPath() and is unreachable through the shell despite a healthy backend and a correctly built frontend bundle.",
+      "Do not add a comment/free-text input anywhere on the reaction UI — out of scope this sprint."
+    ],
+    "test_writer": [
+      "Cover every scenario in 10_test_spec.md as a concrete pytest function following the StorageTracker/EssayCards tests/ convention (conftest.py schema setup/teardown, fixtures.sql with fix- prefixed rows).",
+      "Include a direct unit test of backend/paragraphs.py::split_paragraphs covering: blank-line-separated plain paragraphs, a multi-line unordered list rendering as one paragraph, a multi-line blockquote rendering as one paragraph, a fenced code block rendering as one paragraph with its fence lines dropped, and a document with no blank lines rendering as exactly one paragraph.",
+      "Include a test of the ON CONFLICT create-vs-update status code distinction (201 on first POST for a span, 200 on a second POST changing the reaction at the same exact span).",
+      "Include a test asserting POST /annotations rejects a selected_text that does not match the paragraph substring at the given offsets.",
+      "Include a test of the ingestion CLI's slug/filename-mismatch rejection and its unchanged-content no-op (running the same file twice creates no second version row)."
+    ],
+    "reviewer": [
+      "Confirm split_paragraphs is imported (not duplicated) everywhere paragraph rendering happens.",
+      "Confirm no UPDATE statement anywhere targets storyreader.stories.slug or any story_versions column.",
+      "Confirm story_id is never accepted as a slug anywhere, and that the ingestion CLI's stdout summary actually surfaces story_id (Codex's sole low-friction path to the id without an extra GET call).",
+      "Confirm the export endpoint's success response is bespoke JSON (not a Dataset) but its error responses are still ApiError.",
+      "Confirm the nginx.conf nginx block and compose.yml port match the design (8026, 127.0.0.1-bound) and that STORYREADER_CONTENT_DIR is not hardcoded anywhere in backend code (only ever used as a docker-compose host-side variable)."
+    ]
+  },
+  "deferred_decisions": [
+    "Whether a future sprint should add a way to view an old version's annotations alongside the version's own diff against the current latest version (explicitly out of scope now per the draft's non-goals)",
+    "Whether context_before/context_after's 200-character/no-word-boundary-snap rule should later be refined to snap to word boundaries for readability — accepted as-is for this sprint for determinism and simplicity",
+    "Whether the ingestion CLI should eventually support a batch/directory mode instead of one file per invocation — out of scope; Codex currently invokes it once per publish"
+  ],
+  "risks": [
+    {
+      "risk": "The Scope section of the draft requires the story list to show 'marked-passage count for the version currently in view', but the draft's own API section originally listed GET /stories' row shape without that field.",
+      "impact": "Resolved during this design pass by adding marked_passage_count to the GET /stories row shape (internal_flow step 3) — documented here per R-CON-BP-09 so the correction is traceable rather than silent."
+    },
+    {
+      "risk": "The nginx.conf proxy block, the main.tsx side-effect import for src/shellConfig.ts, and the STORYREADER_CONTENT_DIR host-side env var are all platform/ops-adjacent edits the application_implementer/ui_implementer must make outside this component's own backend/ and src/ code — easy to forget since none is part of the Python/TS diff for storyreader alone.",
+      "impact": "Without the nginx block, the browser UI cannot reach the API even though the container itself is healthy. Without the main.tsx import, AppRegistry.register() for storyreader never executes, so the app is never listed by AppRegistry.getAll()/getByPath() and is unreachable through the shell despite a healthy backend and a correctly built frontend bundle. Without the env var set in .env, the compose volume mount source is undefined — all three are flagged explicitly in deferrals.application_implementer/ui_implementer."
+    },
+    {
+      "risk": "Two annotations covering overlapping spans within the same paragraph are explicitly allowed (draft non-goal: no overlap reconciliation) — the unique constraint on (story_id, version, paragraph_index, char_start, char_end) only prevents an exact-duplicate span, not an overlapping one.",
+      "impact": "The Reader's highlight rendering must tolerate overlapping highlighted ranges within one paragraph without crashing or silently dropping one — a UI rendering concern, not a data-integrity one."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should StoryReader be renamed (e.g. to 'Marginalia') before or independently of this sprint's implementation, given the human must execute the folder move manually?",
+      "owner": "product"
+    },
+    {
+      "question": "What is the final host-side path for STORYREADER_CONTENT_DIR, and should ingestion be triggered by anything other than Codex's manual docker exec (e.g. a filesystem watcher) in a later sprint?",
+      "owner": "product"
+    }
+  ]
+}

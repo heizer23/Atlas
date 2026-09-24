@@ -28,6 +28,7 @@ COPY 03_Application/PersonalDevelopment/frontend/ 03_Application/PersonalDevelop
 COPY 03_Application/Calendar/src/              03_Application/Calendar/src/
 COPY 03_Application/EssayCards/src/            03_Application/EssayCards/src/
 COPY 03_Application/ClaudeConsole/src/         03_Application/ClaudeConsole/src/
+COPY 03_Application/StoryReader/src/           03_Application/StoryReader/src/
 
 WORKDIR /repo/02_Platform/Atlas_Shell
 RUN npm run build

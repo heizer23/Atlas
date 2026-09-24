@@ -273,3 +273,20 @@ services:
       ATLAS_PG_HOST:     atlas-postgres
     networks:
       - atlas-net
+
+  storyreader-test:
+    build:
+      context: ../..
+      dockerfile: 03_Application/StoryReader/Dockerfile
+    container_name: atlas-storyreader-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9026:8000"
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    networks:
+      - atlas-net

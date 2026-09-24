@@ -1,0 +1,39 @@
+services:
+  storyreader:
+    build:
+      context: ../..
+      dockerfile: 03_Application/StoryReader/Dockerfile
+    container_name: atlas-storyreader
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8026:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    volumes:
+      - ${STORYREADER_CONTENT_DIR}:/app/content:ro
+      - ${DATA_ROOT}/storyreader/logs:/app/logs
+    networks:
+      - atlas-net
+
+  storyreader-test:
+    container_name: atlas-storyreader-test
+    build:
+      context: ../..
+      dockerfile: 03_Application/StoryReader/Dockerfile
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    command: ["sleep", "infinity"]
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

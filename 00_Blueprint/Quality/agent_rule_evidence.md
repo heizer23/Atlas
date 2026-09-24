@@ -763,3 +763,71 @@ severity: major
 recurrence_hint: "First observed — general pattern: when a test spec directs adding new fixture rows for scoped-query scenarios, any pre-existing UNSCOPED exact-count/exact-sum assertion elsewhere in the suite is a hidden coupling point that should be checked, since an unscoped aggregate has no way to exclude new fixture data by construction."
 linked_immediate_artifact: 03_Application/EssayCards/Sprint10_DualSchedulerAB/99_sprint_log.md
 ---
+
+---
+entry_id: EVD-2026-09-24-001
+date: 2026-09-24
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: StoryReader
+sprint: Sprint01_Core
+pattern_name: shell_registration_wiring_edit_omitted_from_design
+short_description: Design scaffolds a new application's shellConfig.ts/AppRegistry.register() call correctly but never instructs the implementer to add the required side-effect import line to Atlas Shell's main.tsx, without which the app is never registered at all.
+evidence: "10_scaffolding.json has an explicit nginx_note flagging the out-of-component nginx.conf edit, but no equivalent note for main.tsx; main.tsx:13-29 header comment states 'Add a side-effect import below' as step 2 of 'HOW TO ADD AN APPLICATION'; main.tsx:40-49 shows every currently-registered app requires this line; neither 10_architecture.json §deferrals.application_implementer nor §deferrals.ui_implementer mentions it."
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "Related to EVD-2026-04-09-010 (exception records citing a stale main.tsx mechanism name) but a distinct pattern: here the actual current mechanism is correctly understood elsewhere in the repo, yet a new-application design still omits instructing the implementer to perform the required edit, despite correctly flagging the structurally identical nginx.conf edit in the same document."
+linked_immediate_artifact: 03_Application/StoryReader/Sprint01_Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-09-24-002
+date: 2026-09-24
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: StoryReader
+sprint: Sprint01_Core
+pattern_name: dataset_row_missing_required_id_field
+short_description: A single-row Dataset-returning endpoint's declared row_shape omits the id field required by the platform Row type, while every other Dataset endpoint in the same design correctly includes it.
+evidence: "10_architecture.json §interfaces.exposed_surfaces GET /api/storyreader/stories/{story_id}/versions/{version} row_shape: '{ story_id, version, title, paragraphs: [...], created_at }' — no id field; UI_Data_Contract.md §2: 'Every row must have an id field (string) | WarningPlaceholder if missing'; contrast with the same document's GET /stories, GET /stories/{story_id}, and GET .../annotations row_shapes, which all include id."
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed — general pattern: a single-row Dataset endpoint built around a natural composite key (story_id+version here) is more likely to drop the generic id field than a list endpoint, where id's necessity for row identity is more obviously visible."
+linked_immediate_artifact: 03_Application/StoryReader/Sprint01_Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-09-24-003
+date: 2026-09-24
+source_agent: application_implementer
+run_type: implementer_note
+component: StoryReader
+sprint: Sprint01_Core
+pattern_name: test_spec_fixture_narrative_implies_incompatible_starting_states
+short_description: 10_test_spec.md refers to "the fixture story 'lighthouse'" across scenarios that need mutually incompatible starting states — some require it to already have two versions and multiple annotations, others require a single-version story that ingestion then mutates — so one shared fixture row cannot literally satisfy all of them at once.
+evidence: "10_test_spec.md 'Story list — marked-passage count' requires lighthouse to already have versions 1+2 with 2 annotations on v2 / 1 on v1; 'Ingestion — unchanged content is a no-op' requires 'the fixture story lighthouse' to have exactly one version whose body byte-matches a content file, unchanged by two ingestion runs; 'Publishing a new version never touches existing annotations' requires ingestion to create version 2 fresh (implying only version 1 exists beforehand) — these cannot all be true of one persistent fixture row loaded before every test."
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: major
+recurrence_hint: "First observed — resolved locally by splitting into two fixture stories (tests/fixtures.sql): 'lighthouse' (slug 'lighthouse', 2 versions, pre-seeded annotations) serves every read-endpoint scenario; a second single-version story (slug 'tidepool', body byte-matching tests/fixtures_md/tidepool.md) serves the ingestion round-trip scenarios that mutate state via upsert_story(). Ingestion tests needing a different body/title for the same slug write a fresh temp <slug>.md via pytest's tmp_path fixture rather than a second static file with a mismatched filename, since backend/ingest.py's filename-must-equal-slug check would otherwise reject them. No architecture change was needed — this is a test-authoring resolution, recorded so a future test_spec.md avoids narrating one fixture name across scenarios with contradictory starting states."
+linked_immediate_artifact: 03_Application/StoryReader/Sprint01_Core/10_test_spec.md
+---
+
+---
+entry_id: EVD-2026-09-24-004
+date: 2026-09-24
+source_agent: interactive_session
+run_type: execution_issue
+component: StoryReader
+sprint: Sprint03_ScrollAndResume
+pattern_name: destructive_ab_experiment_against_live_target_during_user_testing
+short_description: To isolate which code change fixed a bug, the agent built a deliberately-broken revert and docker cp'd it onto the LIVE atlas-shell container while the human was actively testing that same app — so a user-reported "still broken" could have been measuring the agent's own intentionally-broken build rather than the real fix.
+evidence: "Session sequence: (1) fixed build deployed to atlas-shell; (2) slow-network Playwright test passes (scrollTop 2696); (3) agent reverted only the `loading` dependency, rebuilt, and ran `docker cp dist/. atlas-shell:/usr/share/nginx/html/` with the log line 'deployed-reverted-version-for-test'; (4) test fails (scrollTop 0) — A/B conclusive; (5) human's next message: 'still not'. The human was never told the live app had been intentionally broken, and step 5 may have been tested against step 3's build."
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed. The A/B itself was sound methodology and produced the decisive evidence (it is what proved the loading-dependency root cause over an earlier incorrect fonts.ready theory) — the failure is purely the choice of target. atlas-shell is the single shared serving container for EVERY Atlas app's frontend, so breaking it is never local to the app under test. Safer options: run the comparison against a throwaway copy of the container/directory, serve the reverted bundle under a distinct path, or (minimum) warn the human not to test for the duration and restore immediately after. Generalises to any deliberate break-it-to-confirm experiment on shared infrastructure a human is concurrently using."
+linked_immediate_artifact: 03_Application/StoryReader/Sprint03_ScrollAndResume/99_sprint_log.md
+---

@@ -1,0 +1,307 @@
+{
+  "component_name": "storyreader",
+  "target_root": "03_Application/StoryReader",
+  "directories": [
+    "03_Application/StoryReader",
+    "03_Application/StoryReader/backend",
+    "03_Application/StoryReader/backend/routers",
+    "03_Application/StoryReader/src",
+    "03_Application/StoryReader/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/StoryReader/pyproject.toml",
+      "stub_kind": "config",
+      "role": "Python project manifest. Dependencies: fastapi, uvicorn, psycopg2-binary, pydantic, pyyaml. Dev dependencies: pytest, httpx. Mirror StorageTracker's pyproject.toml structure.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/Dockerfile",
+      "stub_kind": "config",
+      "role": "Container image. Build context is repo root. Copies 02_Platform/packages to /platform_packages, sets PYTHONPATH. Copies backend/, schema.sql, tests/. CMD: uvicorn backend.main:app --host 0.0.0.0 --port 8000. Identical structure to StorageTracker/Dockerfile.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/compose.yml",
+      "stub_kind": "config",
+      "role": "Docker Compose service definition. container_name atlas-storyreader. Port 127.0.0.1:8026:8000 (least exposure — no other Atlas host port uses 8026 as of this design; 8022-8025 are taken by StorageTracker/Calendar/EssayCards/ClaudeConsole). Environment: ATLAS_PG_* vars, ATLAS_PG_HOST=atlas-postgres. Volumes: ${STORYREADER_CONTENT_DIR}:/app/content:ro, ${DATA_ROOT}/storyreader/logs:/app/logs. Joins atlas-net.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management. Identical pattern to StorageTracker/EssayCards: _build_url() from ATLAS_PG_* or DATABASE_URL, SimpleConnectionPool(minconn=1, maxconn=5, RealDictCursor), get_db() context manager, init_schema() reads schema.sql relative to module path.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "pattern": "factory",
+          "methods": [
+            {"name": "init_pool", "visibility": "public", "args": [], "returns": "None", "purpose": "Construct the module-level psycopg2 SimpleConnectionPool."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "pattern": "factory",
+          "methods": [
+            {"name": "init_schema", "visibility": "public", "args": [], "returns": "None", "purpose": "Execute schema.sql idempotently against the pool on startup."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "pattern": "repository",
+          "methods": [
+            {"name": "get_db", "visibility": "public", "args": [], "returns": "contextmanager yielding a psycopg2 connection", "purpose": "Borrow a pooled connection, roll back on exception, always return it to the pool."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/backend/paragraphs.py",
+      "stub_kind": "python_module",
+      "role": "The single canonical paragraph-split/render function, shared verbatim by ingestion and the version-content read endpoint. Pure function, no I/O, no DB access.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "split_paragraphs",
+          "pattern": "mapper",
+          "methods": [
+            {
+              "name": "split_paragraphs",
+              "visibility": "public",
+              "args": ["body_markdown: str"],
+              "returns": "list[str]",
+              "purpose": "Render body_markdown into an ordered list of plain-text paragraph strings per the exact algorithm in 10_architecture.json contracts.invariants (blank-line block splitting; heading/blockquote/list/fence-marker stripping; inline emphasis/link stripping; one paragraph per block, lines joined with a single space)."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/backend/ingest.py",
+      "stub_kind": "python_module",
+      "role": "Ingestion core (importable) plus `python -m backend.ingest <path>` CLI entrypoint. The only way story content enters the app.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "upsert_story",
+          "pattern": "service",
+          "methods": [
+            {
+              "name": "upsert_story",
+              "visibility": "public",
+              "args": ["conn", "file_path: str"],
+              "returns": "dict — {\"action\": \"created\"|\"unchanged\"|\"new_version\", \"slug\": str, \"story_id\": str, \"version\": int}",
+              "purpose": "Read the file at file_path (relative to /app), split front matter/body, validate front-matter slug == filename-derived slug and required keys present, compute content_sha256, upsert storyreader.stories/story_versions per 10_architecture.json internal_flow step 2, all inside one transaction. Raises IngestionError on any validation failure — never partially writes."
+            }
+          ]
+        },
+        {
+          "kind": "class",
+          "name": "IngestionError",
+          "pattern": "validator",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "main",
+          "pattern": "cli_entrypoint",
+          "methods": [
+            {
+              "name": "main",
+              "visibility": "public",
+              "args": ["argv: list[str]"],
+              "returns": "int — process exit code",
+              "purpose": "Parse the CLI argument, open a DB connection, call upsert_story, print the one-line JSON summary to stdout on success or the error message to stderr on IngestionError, return 0 or 1 accordingly. Invoked via `if __name__ == '__main__': sys.exit(main(sys.argv))`."
+            }
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_parse_front_matter",
+          "pattern": "mapper",
+          "methods": [
+            {"name": "_parse_front_matter", "visibility": "private", "args": ["raw_text: str"], "returns": "tuple[dict, str] — (front_matter_fields, body_markdown)", "purpose": "Split the leading --- YAML block from the markdown body using PyYAML; raise IngestionError on unparsable YAML."}
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/StoryReader/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/backend/routers/stories.py",
+      "stub_kind": "python_module",
+      "role": "All story, version, and annotation endpoints. Single router file, mirroring StorageTracker's backend/routers/items.py single-file convention.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "AnnotationCreate",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "list_stories",
+          "pattern": "router",
+          "methods": [
+            {"name": "list_stories", "visibility": "public", "args": [], "returns": "Dataset", "purpose": "GET /stories — internal_flow step 3."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_story",
+          "pattern": "router",
+          "methods": [
+            {"name": "get_story", "visibility": "public", "args": ["story_id: str"], "returns": "Dataset | ApiError", "purpose": "GET /stories/{story_id} — internal_flow step 4."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_version_content",
+          "pattern": "router",
+          "methods": [
+            {"name": "get_version_content", "visibility": "public", "args": ["story_id: str", "version: str"], "returns": "Dataset | ApiError", "purpose": "GET /stories/{story_id}/versions/{version} — internal_flow step 5. version path segment is 'latest' or an integer string. Response row includes the resolved version's own story_versions.id as the row's required id field (R-CON-BP-04)."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "list_annotations",
+          "pattern": "router",
+          "methods": [
+            {"name": "list_annotations", "visibility": "public", "args": ["story_id: str", "version: int"], "returns": "Dataset | ApiError", "purpose": "GET /stories/{story_id}/versions/{version}/annotations — internal_flow step 6."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "create_or_update_annotation",
+          "pattern": "router",
+          "methods": [
+            {"name": "create_or_update_annotation", "visibility": "public", "args": ["body: AnnotationCreate"], "returns": "typed annotation record | ApiError", "purpose": "POST /annotations — internal_flow step 7. Returns 201 on insert, 200 on in-place reaction update."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "delete_annotation",
+          "pattern": "router",
+          "methods": [
+            {"name": "delete_annotation", "visibility": "public", "args": ["annotation_id: str"], "returns": "204 | ApiError", "purpose": "DELETE /annotations/{annotation_id} — internal_flow step 8."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "export_annotations",
+          "pattern": "router",
+          "methods": [
+            {"name": "export_annotations", "visibility": "public", "args": ["story_id: str", "version: int"], "returns": "bespoke JSON | ApiError", "purpose": "GET .../annotations/export — internal_flow step 9. R-CON-BP-04 exempt on success."}
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_resolve_version",
+          "pattern": "validator",
+          "methods": [
+            {"name": "_resolve_version", "visibility": "private", "args": ["conn", "story_id: str", "version_segment: str", "allow_latest: bool"], "returns": "int — the resolved version number", "purpose": "Shared by get_version_content (allow_latest=True) and list_annotations/export_annotations (allow_latest=False). Raises the appropriate ApiError (VALIDATION_ERROR or NOT_FOUND) per contracts.failure_modes."}
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/StoryReader/schema.sql",
+      "stub_kind": "sql",
+      "role": "Canonical schema DDL — copy of Sprint01_Core/10_schema.sql promoted to component root. Idempotent (create table/schema if not exists). Executed at startup by backend/database.py::init_schema().",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI app entry point. Installs CORS (allow_origin_regex localhost), exception handlers, request timing. Includes stories router at prefix /api/storyreader. On startup: init_pool(), init_schema(). Identical structure to StorageTracker's backend/main.py, with allow_methods=[GET, POST, DELETE] (no PATCH/PUT in this API).",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "factory",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/src/ShellEntry.tsx",
+      "stub_kind": "react_component",
+      "role": "React entry point registered with Atlas Shell. Routing and all UI views.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "StoryListView",
+          "pattern": "view",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ReaderView",
+          "pattern": "view",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "FeedbackListView",
+          "pattern": "view",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ReactionPopover",
+          "pattern": "component",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/src/shellConfig.ts",
+      "stub_kind": "config",
+      "role": "Shell registration config. appId 'storyreader', basePath '/storyreader'. mobilePrimaryNav is the primary target (one-handed phone reading); desktopNav mirrors it for consistency, per StorageTracker's shellConfig.ts pattern.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/StoryReader/CLAUDE.md",
+      "stub_kind": "docs",
+      "role": "App-local guidance for Claude Code. Restates the Codex Integration section from 00_draft.md (ingestion command, export curl command, story_id/slug resolution rule) as the authoritative reference for both the human and Codex, EssayCards-style. States the port (8026) and schema (storyreader).",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ],
+  "nginx_note": "Not a file in this component — the implementer must additionally add a `location /api/storyreader { set $upstream_storyreader atlas-storyreader:8000; ... }` block to 02_Platform/Atlas_Shell/nginx.conf, matching the existing per-app block shape (see the /api/essaycards block for the exact pattern). Listed here rather than as a scaffolded file because it lives outside 03_Application/StoryReader.",
+  "main_tsx_note": "Not a file in this component — the implementer must additionally add a side-effect import for src/shellConfig.ts to 02_Platform/Atlas_Shell/src/shell/main.tsx's REGISTER APPLICATION SHELLS block: `import '../../../../03_Application/StoryReader/src/shellConfig';`, matching the existing per-app import shape (see e.g. StorageTracker's import in main.tsx for the exact mobilePrimaryNav-app pattern). Without this import, AppRegistry.register() for storyreader never executes and the app is unreachable through the shell despite a healthy backend and a correctly built frontend bundle. Listed here rather than as a scaffolded file because it lives outside 03_Application/StoryReader.",
+  "env_vars": {
+    "required": ["ATLAS_PG_HOST", "ATLAS_PG_PORT", "ATLAS_PG_DB", "ATLAS_PG_USER", "ATLAS_PG_PASSWORD"],
+    "compose_only_host_side": ["STORYREADER_CONTENT_DIR — used only in compose.yml's volume mapping; never read by Python code, which always reads the fixed container path /app/content"],
+    "optional": ["DATABASE_URL (overrides ATLAS_PG_* if set)"]
+  },
+  "route_registration_note": "FastAPI path-parameter routes are unambiguous here (no /views/ style static-vs-dynamic collision like StorageTracker's items router) since every dynamic segment is nested under a distinct static prefix (/versions/, /annotations/). No special registration ordering is required."
+}

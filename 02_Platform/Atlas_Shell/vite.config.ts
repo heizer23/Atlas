@@ -54,6 +54,7 @@ export default defineConfig({
       '/api/essaycards':     { target: 'http://localhost:8024', changeOrigin: true },
       '/api/claudeconsole/ws': { target: 'http://localhost:8025', ws: true, changeOrigin: true },
       '/api/claudeconsole':    { target: 'http://localhost:8025', changeOrigin: true },
+      '/api/storyreader':    { target: 'http://localhost:8026', changeOrigin: true },
     },
   },
   test: {

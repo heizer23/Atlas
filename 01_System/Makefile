@@ -412,6 +412,37 @@ essaycards-schema:
 # endregion
 
 
+# region --- Application: StoryReader
+STORYREADER_DIR=../03_Application/StoryReader
+
+STORYREADER_COMPOSE=docker compose \
+	-f $(STORYREADER_DIR)/compose.yml \
+	$(ENV_FILES)
+
+storyreader-build:
+	$(STORYREADER_COMPOSE) build
+
+storyreader-up:
+	$(STORYREADER_COMPOSE) up -d
+
+storyreader-down:
+	$(STORYREADER_COMPOSE) down
+
+storyreader-logs:
+	$(STORYREADER_COMPOSE) logs -f
+
+storyreader-reboot:
+	$(STORYREADER_COMPOSE) down
+	$(STORYREADER_COMPOSE) up -d
+
+storyreader-schema:
+	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
+	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(STORYREADER_DIR)/schema.sql
+
+# endregion
+
+
 # region --- Platform: Notifications
 NOTIF_DIR=../02_Platform/Notifications
 
@@ -724,6 +755,7 @@ net-connect:
 	@docker network connect atlas-net atlas-calendar          2>/dev/null || true
 	@docker network connect atlas-net atlas-essaycards        2>/dev/null || true
 	@docker network connect atlas-net atlas-claudeconsole     2>/dev/null || true
+	@docker network connect atlas-net atlas-storyreader       2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -756,6 +788,8 @@ up:
 	$(MAKE) cal-app-build    cal-app-up
 	$(MAKE) essaycards-schema
 	$(MAKE) essaycards-build essaycards-up
+	$(MAKE) storyreader-schema
+	$(MAKE) storyreader-build storyreader-up
 	$(MAKE) console-schema
 	$(MAKE) console-build    console-up
 	$(MAKE) cloudflared-up
