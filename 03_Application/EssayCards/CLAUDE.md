@@ -96,22 +96,19 @@ they must be built.
   established**. This is the *maintenance* mode.
 
 ### Oral exams
-- **exam** — the current oral-exam standing of an essay, derived (not stored) from
-  `section_examinations` (append-only, one row per section per occasion). Method: for
-  each section take its most recent row (latest `examined_at`) — that row is the current
-  assessment of that section. The essay-level **score** / **exam date** exist only when
-  **every** section has at least one such row; if any section has never been examined,
-  both are null (an essay is not "currently examined" until all of it has been).
+- **exam** — a historical oral-examination result for one section, stored as a
+  `section_examinations` row (append-only, one row per section per occasion). "Current
+  understanding" of a section is always the latest such row (highest `examined_at`).
 - **section score** — one `section_examinations` row's raw grade, `0–6`.
-- **score** — the essay's overall exam result, present only when every section has been
-  examined: `round(avg(latest section_score across all sections) / 6 * 100)`. Rendered
-  as a percentage.
-- **exam date** — the **oldest** `examined_at` among those per-section most-recent rows
-  (the least-recently-tested section sets it); present under the same all-sections
-  condition as **score**. Re-examining one stale section moves the date forward to
-  whichever section is stalest next.
-- Sections only ever grow (re-ingest never deletes them), so a section added in a later
-  ingest drops the essay back to no **score** / **exam date** until it too is examined.
+- **exam_type** (Sprint12) — `guided` | `unguided`, required on every
+  `section_examinations` row, never silently defaulted by the application going
+  forward. `guided` = calibration-aware (the examiner is shown the section's prior
+  `guided`-type history to tune starting difficulty). `unguided` = genuinely cold —
+  no prior history/calibration context is ever passed, regardless of what history
+  exists. See `## Learning progress`.
+- Sprint12 removes the single blended per-essay **oral score** / **exam date**
+  percentage that previously lived on the essay overview (`oral_score`/`oral_date`) —
+  superseded by the guided/unguided milestones below.
 
 ### Overview indicators
 - **progress** — for an essay or topic: **established** cards / total cards in scope —
@@ -119,6 +116,9 @@ they must be built.
   score.
 - **open count** — for an essay or topic: how many cards in scope are **open** right
   now — what a focus session would surface. The `12 open` line.
+- **learning_level** (Sprint12) — an essay's 0–4 count of completed learning
+  milestones, replacing the removed writing-maturity concept. See `## Learning
+  progress`.
 
 ## Sprint scope
 - Sprint 1: One-shot markdown ingestion CLI, essay/section/flashcard data model, due-queue
@@ -136,8 +136,15 @@ they must be built.
   nugget-aware flashcard exploration context, examination `nugget_versions` echo-through, and
   in-app nugget rendering/navigation (see `## Glossary` "Nuggets" and `## Nuggets` below).
 - Sprint 10: FSRS as a second, persistently 50/50 A/B-assigned scheduling algorithm alongside
-  Classic, a scheduler badge on the review card, and a first-version experiment dashboard (see
-  `## Dual scheduler A/B (Sprint10)` below).
+  Classic, a scheduler badge on the review card, and a first-version experiment dashboard.
+  Retired in full by Sprint 12 (see below) — kept here only as a historical note.
+- Sprint 11: `GET /review-stats/summary` — day/week/month observed recall dashboard.
+- Sprint 12: FSRS becomes the SOLE scheduler (Classic + the Sprint10 A/B experiment and its
+  dashboard removed entirely), a derived 0-4 essay `learning_level` with a new guided/unguided
+  `exam_type` split on oral exams, consolidated essay/section action menus (`ActionMenu`) with a
+  persisted category collapse control, and a reworked stats page (`GET /review-stats/activity`,
+  `GET /review-stats/intervals`) plus regrouped main nav (see `## FSRS scheduling (Sprint12)` and
+  `## Learning progress` below).
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys
@@ -318,7 +325,8 @@ of record. Single writer: `POST /flashcards/{id}/review` sets it in the same
 `UPDATE` as `next_due_at`, to `next_due_at - now` (`now` also being
 `last_reviewed_at`), so the cache always equals the difference. `ingest.py`
 seeds `'0'`. Any future code path that reschedules a card without going through
-`compute_next_due_at` must recompute it. Card classification:
+`backend.scheduling.FSRSScheduler` (the sole scheduler since Sprint12 — see
+`## FSRS scheduling (Sprint12)`) must recompute it. Card classification:
 `new` = `last_reviewed_at IS NULL` (interval `'0'`); `learning` =
 `review_interval < interval '24 hours'` and not new; `established` =
 `review_interval >= interval '24 hours'`.
@@ -333,9 +341,10 @@ end-of-section jump is already scoped, so it is a focus session with no code
 change. `GET /flashcards/stats` is unchanged.
 
 ### `GET /essays` roadmap indicators
-Every row carries, beyond `id/title/slug/category/sort_index/status`, five
-derived fields (all against Postgres `now()` at query time; `list_essays`
-docstring is authoritative):
+Every row carries, beyond `id/title/slug/category/sort_index/status`, three
+pre-existing fields plus the nine Sprint12 learning-progress fields (all
+against Postgres `now()` at query time; `list_essays` docstring is
+authoritative):
 - `progress_total` (int) — every flashcard in the essay (not gated on a
   review-state row existing).
 - `progress_established` (int) — those with `review_interval >= interval '24 hours'`
@@ -343,15 +352,16 @@ docstring is authoritative):
 - `open_count` (int) — those with `next_due_at <= now()` (the plain `open`
   definition; **not** gated on established — exactly what a focus session would
   surface).
-- `oral_score` (int | null) — `round(avg(latest section_score) / 6 * 100)` over
-  the most recent `section_examinations` row per section. `null` unless **every**
-  section has ≥ 1 examination.
-- `oral_date` (ISO str | null) — the **oldest** `examined_at` among those
-  most-recent-per-section rows; same all-sections gate as `oral_score`.
+- The nine `## Learning progress` fields (`cards_seen_count`,
+  `cards_future_safe_count`, the four `milestone_*` booleans,
+  `guided_passed_at`/`unguided_passed_at`, `learning_level`) — replace the
+  removed `oral_score`/`oral_date` pair.
 
 Topic-level progress / open count are **not** returned — the frontend sums the
-per-essay counts of a topic's rows. `GET /essays/{id}` (detail) carries `status`
-only, not the derived indicators.
+per-essay counts of a topic's rows. `GET /essays/{id}` (detail) carries the
+same nine learning-progress fields as the list endpoint (Sprint12 — previously
+carried none of the derived indicators), computed by the identical shared SQL
+(`backend/routers/essays.py::_learning_progress_subquery_sql`).
 
 ## Queue stats
 `GET /api/essaycards/flashcards/stats` — review-queue forecast. Returns a Dataset of
@@ -714,86 +724,167 @@ emerges from the conversation).
 - Backend: `backend/exploration.py` (build/validate/plan/execute) +
   `backend/routers/exploration.py` (registered after `flashcards.router`).
 
-## Dual scheduler A/B (Sprint10)
-A persistent, 50/50 A/B experiment comparing the original Classic scheduler
-against FSRS (`fsrs` PyPI package, FSRS-6), scoped narrowly: the existing
-due-queue selection/ordering mechanism (`## Due-queue ordering`, `## Queue
-stats`, Focus/Review eligibility, the 24-hour learning/established threshold)
-is completely untouched. Only `next_due_at` / `review_interval` /
-`last_reviewed_at` ever differ between the two schedulers — both write
-through the exact same three `flashcard_review_state` columns via the exact
-same single `UPDATE` statement shape as before this sprint.
+## FSRS scheduling (Sprint12)
+FSRS (`fsrs` PyPI package, FSRS-6) is the SOLE scheduler. Sprint10's
+dual-scheduler A/B experiment (Classic vs FSRS, persistent 50/50 assignment,
+the scheduler badge, the experiment dashboard) is retired in full: its
+schema columns dropped, its router/UI deleted. The due-queue selection/
+ordering mechanism (`## Due-queue ordering`, `## Queue stats`, Focus/Review
+eligibility, the 24-hour learning/established threshold) remains completely
+untouched by this — only the mechanism that computes `next_due_at` changed.
 
-**`backend/scheduling.py`.** `compute_next_due_at` and `VALID_GRADES` are
-byte-for-byte unchanged. New: `ClassicScheduler` (a thin pass-through to
-`compute_next_due_at`) and `FSRSScheduler` (loads or creates an `fsrs.Card`,
-drives a module-level `fsrs.Scheduler(desired_retention=0.9)`, library-default
-parameters/learning_steps/relearning_steps — no personalized optimization
-this sprint), both returning the same `SchedulerResult(next_due_at,
-review_interval, extra_state)` shape. FSRS's own memory state (stability,
-difficulty, its internal Learning/Review/Relearning state, step) is a
-SEPARATE, additional persisted concept (`essaycards.fsrs_card_state`) — never
-confused with or substituted for `review_interval`. Rating mapping is a
-direct 1:1 name match (`again`/`hard`/`good`/`easy` ->
-`fsrs.Rating.Again`/`Hard`/`Good`/`Easy`); every datetime handed to the
-library is normalized to exactly `.astimezone(timezone.utc)` first.
+**`backend/scheduling.py`.** `VALID_GRADES` is unchanged. `ClassicScheduler`,
+`compute_next_due_at`, and `decide_scheduler_assignment` are REMOVED (verified
+safe to remove only after the migration and FSRS review dispatch were
+confirmed correct by the test suite). `FSRSScheduler` is unchanged from
+Sprint10: loads or creates an `fsrs.Card`, drives a module-level
+`fsrs.Scheduler(desired_retention=DESIRED_RETENTION)`, library-default
+parameters/learning_steps/relearning_steps. `DESIRED_RETENTION` (new) — a
+module constant, `float(os.environ.get('ESSAYCARDS_FSRS_DESIRED_RETENTION',
+'0.9'))`, read once at import time; no UI exposure this sprint (env-var-only
+server setting). FSRS's own memory state (stability, difficulty, its internal
+Learning/Review/Relearning state, step) remains a SEPARATE, additional
+persisted concept (`essaycards.fsrs_card_state`) — never confused with or
+substituted for `review_interval`. Rating mapping unchanged: direct 1:1 name
+match (`again`/`hard`/`good`/`easy` -> `fsrs.Rating.Again`/`Hard`/`Good`/`Easy`);
+every datetime handed to the library is normalized to exactly
+`.astimezone(timezone.utc)` first.
 
-**Assignment.** `decide_scheduler_assignment(flashcard_id,
-migrated_never_reviewed=False)` decides once, permanently, at the existing
-`if was_inserted:` gate already present at all three card-creation call sites
-(`backend/ingest.py`, `backend/routers/flashcards.py::_upsert_question`,
-`backend/exploration.py::execute_plan`'s `create_card` branch) — never on
-update/re-ingest/regeneration, and no endpoint request body anywhere accepts
-a `scheduler` field. A stable hash of the flashcard id splits ~50/50 between
-`classic`/`fsrs`, unless `ESSAYCARDS_FSRS_EXPERIMENT_ENABLED` (read fresh
-from `os.environ` every call, default true) is false, which forces
-`classic` unconditionally (the kill switch — stops new assignment only, no
-effect on already-assigned cards). `flashcard_review_state.scheduler` /
-`scheduler_assigned_at` / `scheduler_assignment_reason` /
-`experiment_version` are additive columns; `scheduler_assignment_reason` is a
-closed 4-value vocabulary: `new_card_random`, `assignment_disabled_classic`
-(both from the creation-time gate), `migrated_never_reviewed_random`,
-`legacy_retained_classic` (both from the one-time migration backfill below).
+**Review transaction.** `POST /flashcards/{id}/review` now ALWAYS dispatches
+to `FSRSScheduler` — no scheduler column to read, no branch. Inside the same
+transaction as the `flashcard_review_state` `UPDATE`, it always upserts
+`essaycards.fsrs_card_state` and always inserts one `essaycards.review_events`
+row (append-only; the `scheduler` column on this table is also dropped). New
+card creation (`backend/ingest.py`, `backend/routers/flashcards.py::
+_upsert_question`, `backend/exploration.py::execute_plan`'s `create_card`
+branch) seeds a bare `flashcard_review_state` row with no scheduler metadata
+at all.
 
-**Migration.** A one-time, sentinel-guarded backfill folded into `schema.sql`
-(idempotent — reruns on every startup are a no-op once a row has a non-null
-`scheduler_assigned_at`): every pre-Sprint10 row with real review history
-(`last_reviewed_at is not null`) is forced to `classic` /
-`legacy_retained_classic`, unconditionally — py-fsrs has no way to reliably
-initialize FSRS state without a full per-review rating history, which this
-app has never persisted. Every pre-Sprint10 never-reviewed row is assigned
-via the identical balanced mechanism as a brand-new card (Postgres-native
-`hashtext()`, not the Python `sha256`-based helper — a deliberate, safe
-divergence between two disjoint cohorts that never need cross-language hash
-parity). Neither migration `UPDATE`'s `SET` list touches `next_due_at`,
-`review_interval`, or `last_reviewed_at` — a pre-existing card's schedule is
-never altered.
+**Legacy FSRS-state migration (documented approximation — R-OPS-BP-01).**
+`backend/migrate_fsrs_state.py::migrate_legacy_fsrs_state`, invoked once at
+every startup immediately after `init_schema()`: for every
+`flashcard_review_state` row with `last_reviewed_at IS NOT NULL` and no
+existing `fsrs_card_state` row, synthesizes initial FSRS state via
+`backend.scheduling.estimate_initial_fsrs_state(review_interval,
+last_reviewed_at, desired_retention)` — a pure, independently unit-testable
+function. This is an APPROXIMATION, not a reconstruction of real review
+history: no complete per-review rating history exists anywhere in this schema
+to replay. Stability is inverted from FSRS-6's own
+interval-from-stability-and-retention formula, reading `FACTOR`/`DECAY`
+directly off the live `fsrs.Scheduler` instance (never hardcoded literals —
+they are themselves trainable-parameter-derived and would silently drift from
+whatever parameter vector the scheduler actually uses). Difficulty is
+obtained by running one `review_card()` call on a fresh `fsrs.Card()` with a
+neutral `Rating.Good`, timestamped at the card's own `last_reviewed_at` — not
+hand-derived, so it stays correct across a library version bump. Each row is
+backfilled in its own small transaction (one bad row logs and is skipped, not
+a startup failure); a skipped row falls back to a fresh `fsrs.Card()` on its
+next real review, same as a never-reviewed card. Never writes
+`next_due_at`/`review_interval`/`last_reviewed_at` — those are read-only
+inputs to the synthesis, never its targets.
 
-**Review transaction.** `POST /flashcards/{id}/review` reads the card's
-persisted `scheduler`, dispatches to `ClassicScheduler` or `FSRSScheduler`,
-then — inside the same transaction as the existing `flashcard_review_state`
-`UPDATE` — upserts `essaycards.fsrs_card_state` (fsrs cards only) and always
-inserts one `essaycards.review_events` row (both schedulers, append-only). A
-review can never persist its new due date while failing to persist its
-scheduler state or its review-event record.
+**Schema migration.** `essaycards.pre_fsrs_migration_backup_sprint12` — a new,
+retained-indefinitely audit table (no pruning policy yet), created and
+populated from the Sprint10 scheduler-assignment columns BEFORE they are
+dropped, guarded by both the backup table's own absence and the source
+`scheduler` column still existing (so it is correctly a no-op on a fresh
+database that never had those columns, not just on a rerun). `schema.sql`
+then drops `flashcard_review_state.scheduler` /
+`scheduler_assigned_at` / `scheduler_assignment_reason` / `experiment_version`
+and `review_events.scheduler`. The old Sprint10 `ADD COLUMN`/`CREATE INDEX`/
+backfill-`UPDATE` statements for these columns are NOT reproduced in
+`schema.sql` — keeping an add-then-drop pair for a permanently retired column
+in the same idempotently-rerun file would churn forever (add — drop — add —
+drop — ...) rather than converging; see the file's own "Sprint10_DualSchedulerAB
+(retired by Sprint12)" comment block.
 
-**Badge.** The review card shows a small pill in its top corner reading
-exactly `Classic` or `FSRS` (`SchedulerBadge` in `src/ShellEntry.tsx`) —
-plain algorithm names only, no FSRS-native vocabulary (stability,
-difficulty, FSRS state names) anywhere in the UI.
+## Learning progress (Sprint12)
+Replaces the removed writing-maturity concept with a derived **0–4
+`learning_level`** per essay — the count of four independently-gated
+milestones, computed fresh at query time (never cached/stored), with no
+fixed completion order required. "Active card" = every flashcard currently
+belonging to the essay (no archival/retirement concept exists).
 
-**Experiment dashboard.** `GET /api/essaycards/experiment/summary`
-(`backend/routers/experiment.py`) — always exactly two rows, `classic` then
-`fsrs`. `ordinary_due_reviews` / `recall_rate` / `failures` are filtered on
-`review_events.prior_review_interval >= interval '24 hours'` — mirroring the
-app's existing learning/established threshold — NOT on `review_events.was_due`,
-which is true for virtually every reachable review (the due-queue's own base
-eligibility, `next_due_at <= now()`, already requires it for every session
-type) and therefore cannot by itself separate ordinary due-review evidence
-from immediate-relearning/rapid-retry reviews. `recall_rate` is `null` (not
-`0`) when a scheduler has zero ordinary-due reviews — "no data yet" and "0%
-recall" are different facts. Reachable at `/essaycards/experiment`
-(`ExperimentDashboardView`).
+1. **All active cards seen** (`milestone_all_cards_seen`) —
+   `progress_total > 0` AND every card has `last_reviewed_at IS NOT NULL`.
+2. **All active cards reviewed, next due 24h+ out**
+   (`milestone_all_cards_future_safe`) — `progress_total > 0` AND every
+   card's `last_reviewed_at IS NOT NULL` AND `next_due_at > now() + interval
+   '24 hours'`.
+3. **Guided oral exam passed** (`milestone_guided_passed`) — the essay has
+   ≥ 1 section, every section has ≥ 1 `exam_type='guided'` examination, AND
+   every section's LATEST guided examination scores `>= 3`
+   (`PASS_SCORE_THRESHOLD`) — a per-section minimum gate, not an average.
+4. **Unguided oral exam passed** (`milestone_unguided_passed`) — identical to
+   (3) with `exam_type='unguided'`.
+
+Milestones 1/2 are explicitly false (never vacuously true) for a zero-card
+essay — satisfying "essays without active cards must not automatically
+satisfy the card milestones." Milestones 3/4 have no card dependency and can
+be true even for a zero-card essay. `guided_passed_at`/`unguided_passed_at`
+mirror the old `oral_date`'s "oldest wins" semantics, applied per `exam_type`:
+the OLDEST `examined_at` among each section's latest examination of that
+type, present only when the corresponding milestone is true.
+
+All nine fields (`cards_seen_count`, `cards_future_safe_count`, the four
+`milestone_*` booleans, `guided_passed_at`, `unguided_passed_at`,
+`learning_level`) are computed by one shared SQL fragment,
+`backend/routers/essays.py::_learning_progress_subquery_sql`, reused
+identically by both `GET /essays` (list) and `GET /essays/{id}` (detail) —
+the milestone logic exists in exactly one place.
+
+**exam_type.** `section_examinations.exam_type` (`guided` | `unguided`) is
+required on every row going forward — `POST /examinations/import` rejects a
+missing/invalid value with no default (same discipline as `flashcards.level`).
+Pre-Sprint12 rows are backfilled to `guided` via the column `DEFAULT` (every
+pre-sprint exam used the one pre-existing calibration-aware flow).
+`GET /essays/{id}/examination-package` gains a required `exam_type` query
+param (manually validated, same raw-param-not-FastAPI-422 discipline as every
+other endpoint in this app). `exam_type='unguided'` means the package's
+`last_examination` is ALWAYS `null` per section — "no calibration context
+passed", not merely "no unguided history exists yet."
+
+**UI.** `LearningLevelBadge` (`src/ShellEntry.tsx`) renders the compact `N/4`
+level on both the essay overview row and the `ReaderView` header, with a
+tooltip/`aria-label` naming all four milestones and their current true/false
+state. The old oral-score/date text line and the per-essay Study/Oral-exam
+buttons on the overview row are removed — Study and both oral-exam variants
+now live in `ReaderView`'s header `ActionMenu` (see `## Button and nav
+consolidation (Sprint12)`).
+
+## Button and nav consolidation (Sprint12)
+Essay/section button rows are replaced by a reusable `ActionMenu` component
+(`src/ShellEntry.tsx`) — a primary button plus an accessible dropdown
+(`role=menu`/`menuitem`, Escape + click-outside to close, keyboard-operable).
+Used at two sites:
+- **Essay header** (`ReaderView`) — primary = Study (focus session on the
+  whole essay, when it has cards) or Question overview (fallback, when it has
+  none); secondary dropdown = Question overview (when not primary), Guided
+  oral exam, Unguided oral exam (both gated on `status === 'complete'`),
+  Export essay / Import, + New nugget (gated on `sections.length > 0`). The
+  `← All essays` back button stays standalone, never folded into the menu.
+- **Section end** (`ReaderView`) — primary = Review this section; secondary
+  dropdown = Export section / Import, Insert section after / Import.
+  `SectionExaminationHistory` is unaffected, sitting below the menu as before.
+
+Every pre-existing action is preserved somewhere post-consolidation — none
+silently dropped (see `Sprint12_FSRSAndUXOverhaul/10_architecture.json
+§button_nav_inventory` for the complete pre -> post mapping).
+
+**Category collapse** (`EssayListView`). Each category heading gets a
+collapse/expand toggle (▸/▾ chevron, same glyph convention as
+`SectionExaminationHistory`), persisted via `localStorage` key
+`essaycards:categoryCollapsed:<category>` (`UNCATEGORIZED` for the
+null-category group), defaulting expanded when no stored value exists. The
+heading row (title, established/total, open count, the per-category Study
+button) always stays visible; only the essay rows beneath it collapse/hide.
+
+**Nav regrouping** (`src/shellConfig.ts`). `mobilePrimaryNav` trimmed to
+Essays / Due for review / Stats (the everyday-learning + stats items).
+Add / Update Essay moves to the new `secondaryMenu` (the Shell's existing
+mobile "More" overlay). `desktopNav` keeps all four items (no group concept
+in the Shell's current `AppConfig`/`NavItem` contract — R-CON-BP-06; desktop
+"grouping" is order-only). The Experiment nav entry is removed entirely.
 
 ## Port
 EssayCards backend runs on host port 8024 (container port 8000).
@@ -801,12 +892,15 @@ EssayCards backend runs on host port 8024 (container port 8000).
 ## Schema
 essaycards schema in the shared Atlas Postgres instance.
 Tables: essaycards.essays, essaycards.essay_sections, essaycards.flashcards,
-essaycards.flashcard_review_state, essaycards.section_examinations (append-only),
-essaycards.flashcard_discussions, essaycards.flashcard_revisions (Sprint06 —
-flashcard exploration; the app never updates/deletes rows in either),
-essaycards.fsrs_card_state, essaycards.review_events (Sprint10 — dual
-scheduler A/B; review_events is append-only, the app never updates/deletes a
-row there either — see `## Dual scheduler A/B (Sprint10)`).
+essaycards.flashcard_review_state, essaycards.section_examinations (append-only,
+gains `exam_type` in Sprint12), essaycards.flashcard_discussions,
+essaycards.flashcard_revisions (Sprint06 — flashcard exploration; the app
+never updates/deletes rows in either), essaycards.fsrs_card_state,
+essaycards.review_events (append-only; its Sprint10-only `scheduler` column
+was dropped in Sprint12), essaycards.pre_fsrs_migration_backup_sprint12
+(Sprint12 — one-time audit snapshot of the retired Sprint10 scheduler-
+assignment data, retained indefinitely, never read by live code — see
+`## FSRS scheduling (Sprint12)`).
 Schema initialized idempotently at startup from schema.sql.
 
 `00_architecture/schema.sql` is a design copy that `make essaycards-schema` feeds

@@ -6,10 +6,17 @@ Two directions, mirroring the export/import shape already established by
 backend/ingest.py + backend/routers/essays.py::ingest_essay for the markdown/
 JSON essay round trip:
 
-  build_export_package(cur, essay_id)
+  build_export_package(cur, essay_id, exam_type)
       Reads an essay's current sections, flashcards, and (derived, read-only)
       latest examination per section into a single self-contained dict — no
       DB writes. Used by GET /essays/{essay_id}/examination-package.
+      Sprint12_FSRSAndUXOverhaul: exam_type ('guided' | 'unguided') is now a
+      required parameter. For exam_type='guided', last_examination reflects
+      only the latest exam_type='guided' row per section. For
+      exam_type='unguided', last_examination is ALWAYS null — "unguided"
+      means no calibration context is passed to the LLM, not merely "no
+      unguided history exists yet". The package gains a top-level exam_type
+      echo.
 
   validate_import_body(body) -> (results, error_response)
       Full structural + semantic validation of an import payload, before any
@@ -40,13 +47,21 @@ from platform_errorhandling import api_error
 
 _SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+# Closed, required, never-defaulted vocabulary (Sprint12_FSRSAndUXOverhaul) —
+# same discipline as POST /flashcards/upsert's required card.level (R-CON-AL-04):
+# a silently-defaulted exam_type could misclassify an unguided exam as guided
+# or vice versa, silently corrupting the guided/unguided learning-progress
+# milestones.
+VALID_EXAM_TYPES = ("guided", "unguided")
+
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
-def build_export_package(cur: Any, essay_id: str) -> dict[str, Any] | None:
+def build_export_package(cur: Any, essay_id: str, exam_type: str) -> dict[str, Any] | None:
     """
     Returns the export package dict, or None if essay_id does not exist.
-    Read-only — issues no writes.
+    Read-only — issues no writes. `exam_type` must be 'guided' or 'unguided'
+    (validated by the router before this is called).
     """
     cur.execute(
         "select id, title, slug from essaycards.essays where id = %s",
@@ -79,23 +94,29 @@ def build_export_package(cur: Any, essay_id: str) -> dict[str, Any] | None:
             "a": card["answer"],
         })
 
-    cur.execute(
-        """
-        select distinct on (section_id) section_id, examined_at, score, feedback
-        from essaycards.section_examinations
-        where essay_id = %s
-        order by section_id, examined_at desc
-        """,
-        (essay_id,),
-    )
-    last_exam_by_section: dict[str, dict[str, Any]] = {
-        str(row["section_id"]): {
-            "examined_at": row["examined_at"].isoformat(),
-            "score": row["score"],
-            "feedback": row["feedback"],
+    # exam_type='unguided' is a deliberate skip, not a query that happens to
+    # return no rows — "unguided" means NO calibration context is ever passed,
+    # regardless of whatever unguided history may already exist.
+    if exam_type == "guided":
+        cur.execute(
+            """
+            select distinct on (section_id) section_id, examined_at, score, feedback
+            from essaycards.section_examinations
+            where essay_id = %s and exam_type = 'guided'
+            order by section_id, examined_at desc
+            """,
+            (essay_id,),
+        )
+        last_exam_by_section: dict[str, dict[str, Any]] = {
+            str(row["section_id"]): {
+                "examined_at": row["examined_at"].isoformat(),
+                "score": row["score"],
+                "feedback": row["feedback"],
+            }
+            for row in cur.fetchall()
         }
-        for row in cur.fetchall()
-    }
+    else:
+        last_exam_by_section = {}
 
     # Sprint09_Nuggets: per-section nugget_versions ({nugget_key: current
     # nuggets.updated_at ISO8601}) for that section's currently-referenced
@@ -134,6 +155,7 @@ def build_export_package(cur: Any, essay_id: str) -> dict[str, Any] | None:
         "essay_id": str(essay_row["id"]),
         "essay_slug": essay_row["slug"],
         "essay_title": essay_row["title"],
+        "exam_type": exam_type,
         "sections": sections,
     }
 
@@ -227,6 +249,13 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
                 "VALIDATION_ERROR", f"results[{idx}].score is required and must be an integer between 0 and 6"
             )
 
+        exam_type = entry.get("exam_type")
+        if exam_type not in VALID_EXAM_TYPES:
+            return None, api_error(
+                "VALIDATION_ERROR",
+                f"results[{idx}].exam_type is required and must be one of: {', '.join(VALID_EXAM_TYPES)}",
+            )
+
         feedback = entry.get("feedback")
         if feedback is not None and not isinstance(feedback, str):
             return None, api_error("VALIDATION_ERROR", f"results[{idx}].feedback must be a string or null")
@@ -257,6 +286,7 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
             "answer_transcript": answer_transcript,
             "score": score,
             "feedback": feedback,
+            "exam_type": exam_type,
             "nugget_versions": nugget_versions,
         })
 
@@ -307,13 +337,14 @@ def import_results(cur: Any, results: list[dict[str, Any]]) -> tuple[list[dict[s
             """
             insert into essaycards.section_examinations
                 (essay_id, section_id, section_version_at, examined_at, question, answer_transcript,
-                 score, feedback, nugget_versions_at)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 score, feedback, exam_type, nugget_versions_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             returning id, essay_id, section_id, examined_at, score
             """,
             (
                 r["essay_id"], r["section_id"], r["section_version"], r["examined_at"],
                 r["question"], r["answer_transcript"], r["score"], r["feedback"],
+                r["exam_type"],
                 Json(nugget_versions) if nugget_versions is not None else None,
             ),
         )

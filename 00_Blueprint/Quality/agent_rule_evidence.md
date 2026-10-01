@@ -848,3 +848,54 @@ severity: major
 recurrence_hint: "First observed. Resolved by attaching every new Sprint11 review_events row to the two PRE-EXISTING established cards (fc000025 classic / fc000023 fsrs) that already carry a flashcard_review_state row, and keeping every new row's prior_review_interval < 24h so it can never enter /experiment/summary's ordinary_due_reviews filter — zero new flashcards/frs rows introduced, so neither hardcoded assertion moved. Generalises to any future sprint adding review_events (or flashcard_review_state) fixture rows: check every OTHER unscoped-aggregation endpoint's existing tests for hardcoded exact totals over that same table before picking fixture ids, not just the new endpoint's own scenarios. A design/test-spec candidate_response would be a standing note in CLAUDE.md's '## Pattern references' or a fixtures.sql header enumerating which endpoints aggregate review_events/flashcard_review_state globally, so this is checked by construction rather than discovered by a failing run."
 linked_immediate_artifact: 03_Application/EssayCards/Sprint11_ReviewStats/99_sprint_log.md
 ---
+
+---
+entry_id: EVD-2026-10-01-001
+date: 2026-10-01
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint12_FSRSAndUXOverhaul
+pattern_name: self_contradictory_function_signature_across_artifacts
+short_description: A pure helper function's declared signature is stated inconsistently four times across 10_architecture.json and 10_scaffolding.json — three occurrences omit an input (last_reviewed_at) that the invariant text's own output field requires.
+evidence: "10_architecture.json §contracts.invariants and §deferrals.application_implementer both write estimate_initial_fsrs_state(review_interval, desired_retention), as does 10_scaffolding.json's migrate_fsrs_state.py role text — yet the same invariant's field (e) 'last_review_at — the card's existing last_reviewed_at, used as-is' requires that input. Only 10_scaffolding.json's backend/scheduling.py public_objects entry declares the correct 3-arg form (review_interval, last_reviewed_at, desired_retention)."
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint12_FSRSAndUXOverhaul/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-01-002
+date: 2026-10-01
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint12_FSRSAndUXOverhaul
+pattern_name: load_bearing_content_left_in_ephemeral_scratchpad
+short_description: 10_architecture.json's deferred reviewer instruction depends on a "Phase A investigation" button/nav inventory that was deliberately written only to a session-scoped /tmp scratchpad, not the sprint folder, making the instruction unexecutable by any agent outside that one session.
+evidence: "10_architecture.json §deferrals.reviewer: 'Confirm every button/action in the Phase A investigation A4 inventory is reachable somewhere post-consolidation'; 99_sprint_log.md: 'Phase A investigation findings live in the session scratchpad (/tmp/.../scratchpad/sprint12_phaseA_investigation.md), not as a sprint-folder artifact' — same pattern used uncritically in Sprint10_DualSchedulerAB (not flagged there)."
+likely_root_cause: rule_gap
+candidate_response: rule
+severity: major
+recurrence_hint: "Also present in Sprint10_DualSchedulerAB's design process (same scratchpad-only Phase A investigation convention), not previously flagged — now recurring across two sprints."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint12_FSRSAndUXOverhaul/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-01-003
+date: 2026-10-01
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint12_FSRSAndUXOverhaul
+pattern_name: component_reuse_claimed_without_checking_prop_contract
+short_description: Design claims reuse of an existing component (ReviewStatsPanel's FORECAST_COLUMNS rendering) at a new call site whose available data does not satisfy that component's actual required props, with no refactor scoped to reconcile the two.
+evidence: "10_architecture.json §internal_flow step 13 claims ReviewStatsView 'reuses ReviewStatsPanel's existing FORECAST_COLUMNS rendering' but ReviewStatsPanel (src/ShellEntry.tsx:2285-2328) requires session-only props (reviewed, backlog, newRemaining, sessionForecast, topic/essayId/sectionId) that have no equivalent on the scoped-free stats page; 10_scaffolding.json's ShellEntry.tsx private_objects diff does not list ReviewStatsPanel or FORECAST_COLUMNS as changed."
+likely_root_cause: agent_gap
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint12_FSRSAndUXOverhaul/11_design_review.md
+---

@@ -32,7 +32,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.database import get_db
-from backend.examinations import build_export_package, import_results, validate_import_body
+from backend.examinations import VALID_EXAM_TYPES, build_export_package, import_results, validate_import_body
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
 
@@ -41,6 +41,7 @@ router = APIRouter(tags=["examinations"])
 EXAMINATION_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="examined_at",       label="Examined",  type="date",   sortable=True,  filterable=False),
     ColumnSchema(key="score",             label="Score",     type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="exam_type",         label="Type",      type="string", sortable=True,  filterable=True),
     ColumnSchema(key="question",          label="Question",  type="string", sortable=False, filterable=False, detail_visible=True),
     ColumnSchema(key="answer_transcript", label="Answer",    type="string", sortable=False, filterable=False, detail_visible=True),
     ColumnSchema(key="feedback",          label="Feedback",  type="string", sortable=False, filterable=False, detail_visible=True),
@@ -52,16 +53,29 @@ def _dataset_response(dataset: Dataset) -> JSONResponse:
 
 
 @router.get("/essays/{essay_id}/examination-package", response_model=None)
-def get_examination_package(essay_id: str) -> JSONResponse:
+def get_examination_package(essay_id: str, exam_type: str | None = None) -> JSONResponse:
     """
     Self-contained JSON package for conducting an oral examination outside
     the app (see module docstring re: Dataset exemption). 404 ApiError if
     essay_id does not exist. An essay with zero sections still returns a
     package with sections: [].
+
+    exam_type ('guided' | 'unguided') is REQUIRED but implemented as an
+    optional (defaulted-None) FastAPI parameter, manually validated to
+    ApiError VALIDATION_ERROR when missing or invalid — never a bare required
+    FastAPI query param, which would produce FastAPI's own 422 shape instead
+    (same discipline already applied to every raw-Request-body endpoint in
+    this app).
     """
+    if exam_type not in VALID_EXAM_TYPES:
+        return api_error(
+            "VALIDATION_ERROR",
+            f"exam_type query parameter is required and must be one of: {', '.join(VALID_EXAM_TYPES)}",
+        )
+
     with get_db() as conn:
         with conn.cursor() as cur:
-            package = build_export_package(cur, essay_id)
+            package = build_export_package(cur, essay_id, exam_type)
 
     if package is None:
         return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
@@ -119,7 +133,7 @@ def list_section_examinations(section_id: str) -> JSONResponse:
 
             cur.execute(
                 """
-                select id, examined_at, score, question, answer_transcript, feedback, section_version_at
+                select id, examined_at, score, exam_type, question, answer_transcript, feedback, section_version_at
                 from essaycards.section_examinations
                 where section_id = %s
                 order by examined_at desc

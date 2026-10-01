@@ -319,41 +319,37 @@ def test_reingest_dropping_nugget_reference_removes_only_the_association(db_conn
         assert cur.fetchone() is not None
 
 
-# ── Sprint10_DualSchedulerAB — scheduler assignment at the ingest creation gate ──
+# ── Sprint12_FSRSAndUXOverhaul — no scheduler metadata at the ingest creation gate ──
 
-def test_ingest_new_card_receives_scheduler_assignment(db_conn):
-    """Scenario: New card creation assigns a scheduler permanently — via
+def test_ingest_new_card_has_no_scheduler_metadata(db_conn):
+    """Scenario: FSRS is the only scheduler for a new card — via
     essay/section markdown ingest, each newly-created card's
-    flashcard_review_state row is seeded with scheduler, scheduler_assigned_at,
-    scheduler_assignment_reason='new_card_random', experiment_version='sprint10_v1'."""
+    flashcard_review_state row carries no scheduler-related column at all
+    (they no longer exist on the table)."""
     ingest(_path("well_formed.md"), db_conn)
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select rs.scheduler, rs.scheduler_assigned_at, rs.scheduler_assignment_reason, "
-            "rs.experiment_version "
+            "select rs.* "
             "from essaycards.flashcard_review_state rs "
             "join essaycards.flashcards f on f.id = rs.flashcard_id "
             "where f.card_key = 'fc-test-1'"
         )
         row = cur.fetchone()
 
-    assert row["scheduler"] in ("classic", "fsrs")
-    assert row["scheduler_assigned_at"] is not None
-    assert row["scheduler_assignment_reason"] == "new_card_random"
-    assert row["experiment_version"] == "sprint10_v1"
+    for col in ("scheduler", "scheduler_assigned_at", "scheduler_assignment_reason", "experiment_version"):
+        assert col not in row
 
 
-def test_reingest_never_changes_existing_card_scheduler_assignment(db_conn):
-    """Scenario: Editing an existing card never reassigns its scheduler —
-    re-ingesting the same essay/section (even with changed text) never
-    changes an already-assigned card's scheduler/scheduler_assigned_at/
-    scheduler_assignment_reason."""
+def test_reingest_preserves_flashcard_review_state_identity(db_conn):
+    """Scenario: re-ingesting the same essay/section (even with changed text)
+    never resets or recreates an already-existing card's review-state row —
+    its scheduling fields are left exactly as they were."""
     ingest(_path("well_formed.md"), db_conn)
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select rs.scheduler, rs.scheduler_assigned_at, rs.scheduler_assignment_reason "
+            "select rs.last_reviewed_at, rs.next_due_at, rs.review_interval "
             "from essaycards.flashcard_review_state rs "
             "join essaycards.flashcards f on f.id = rs.flashcard_id "
             "where f.card_key = 'fc-test-1'"
@@ -364,7 +360,7 @@ def test_reingest_never_changes_existing_card_scheduler_assignment(db_conn):
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select rs.scheduler, rs.scheduler_assigned_at, rs.scheduler_assignment_reason "
+            "select rs.last_reviewed_at, rs.next_due_at, rs.review_interval "
             "from essaycards.flashcard_review_state rs "
             "join essaycards.flashcards f on f.id = rs.flashcard_id "
             "where f.card_key = 'fc-test-1'"

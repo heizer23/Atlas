@@ -386,80 +386,23 @@ alter table essaycards.essays
 alter table essaycards.section_examinations
     add column if not exists nugget_versions_at jsonb;
 
--- ── Sprint10_DualSchedulerAB ─────────────────────────────────────────────────
+-- ── Sprint10_DualSchedulerAB (retired by Sprint12_FSRSAndUXOverhaul) ────────
 --
--- Folded verbatim from Sprint10_DualSchedulerAB/10_schema.sql, with one
--- documentation fix carried in from 13_design_review.md's approved-as-is
--- optional cleanup: the review_events index below (and its comment) now
--- matches the corrected prior_review_interval-based dashboard filter instead
--- of the disproven was_due-based one.
+-- Sprint10 introduced flashcard_review_state.scheduler/scheduler_assigned_at/
+-- scheduler_assignment_reason/experiment_version and review_events.scheduler
+-- as a permanent 50/50 Classic-vs-FSRS A/B experiment. Sprint12 makes FSRS
+-- the sole scheduler and drops all five columns for good (see the
+-- "Sprint12_FSRSAndUXOverhaul" block below, which backs them up to
+-- essaycards.pre_fsrs_migration_backup_sprint12 first).
 --
--- essaycards.flashcard_review_state — scheduler assignment columns.
--- Assignment is permanent, decided exactly once per card
--- (backend/scheduling.py::decide_scheduler_assignment), at the existing
--- `if was_inserted:` gate already present at all three flashcard-creation
--- call sites (backend/ingest.py, backend/routers/flashcards.py,
--- backend/exploration.py), or by the one-time migration backfill below for
--- cards that already existed before this sprint. No endpoint accepts a
--- scheduler field in any request body — this is exclusively a server-side
--- side effect.
-alter table essaycards.flashcard_review_state
-    add column if not exists scheduler text not null default 'classic';
-
-do $$ begin
-    if not exists (select 1 from pg_constraint where conname = 'ck_review_state_scheduler') then
-        alter table essaycards.flashcard_review_state
-            add constraint ck_review_state_scheduler check (scheduler in ('classic', 'fsrs'));
-    end if;
-end $$;
-
--- Null only transiently, for a pre-sprint row between the ADD COLUMN above and
--- the guarded backfill below running later in this same transaction. Every
--- row that has ever been read by the application has a non-null value here.
-alter table essaycards.flashcard_review_state
-    add column if not exists scheduler_assigned_at timestamptz;
-
--- Closed, fixed vocabulary (R-CON-AL-01/03) — exactly these four values:
---   new_card_random               — a genuinely new card, kill switch enabled
---   migrated_never_reviewed_random — a pre-existing but never-reviewed card,
---                                    assigned at the one-time migration below
---                                    via the same balanced mechanism as a new card
---   legacy_retained_classic        — a pre-existing card with real review
---                                    history; py-fsrs has no way to reliably
---                                    initialize FSRS state without a full
---                                    per-review rating history, which this app
---                                    has never persisted, so every such card
---                                    stays on Classic (mission §4 fallback)
---   assignment_disabled_classic    — the kill switch was disabled at creation time
-alter table essaycards.flashcard_review_state
-    add column if not exists scheduler_assignment_reason text;
-
-do $$ begin
-    if not exists (select 1 from pg_constraint where conname = 'ck_review_state_assignment_reason') then
-        alter table essaycards.flashcard_review_state
-            add constraint ck_review_state_assignment_reason check (
-                scheduler_assignment_reason is null or scheduler_assignment_reason in (
-                    'new_card_random', 'migrated_never_reviewed_random',
-                    'legacy_retained_classic', 'assignment_disabled_classic'
-                )
-            );
-    end if;
-end $$;
-
--- Coarse cohort/version tag identifying when and under which experiment
--- iteration a card was assigned (mission §4). A single literal this sprint;
--- a later sprint that changes assignment mechanics would introduce a new
--- value, never rewrite this one for already-assigned cards.
--- Canonical definition: backend.scheduling.EXPERIMENT_VERSION ('sprint10_v1')
--- — this DEFAULT and both migration UPDATEs below must stay in sync with it;
--- a future version bump should update all three occurrences together.
-alter table essaycards.flashcard_review_state
-    add column if not exists experiment_version text not null default 'sprint10_v1';
-
--- Supports the experiment dashboard's GROUP BY scheduler aggregates and any
--- future per-scheduler filtering of the due queue.
-create index if not exists ix_review_state_scheduler
-    on essaycards.flashcard_review_state(scheduler);
+-- The ADD COLUMN / CREATE INDEX / backfill-UPDATE statements that used to
+-- live here are intentionally NOT reproduced: re-adding a column in the same
+-- file that later drops it would make every second execution of this file
+-- (this file reruns on every application startup) re-create, re-populate,
+-- and re-drop the column forever — churn with no purpose once the columns
+-- are permanently retired. essaycards.fsrs_card_state (below) and the
+-- `review_events` table (further below, now without its own `scheduler`
+-- column) are UNCHANGED by this retirement.
 
 -- ── essaycards.fsrs_card_state ───────────────────────────────────────────────
 --
@@ -499,9 +442,11 @@ create table if not exists essaycards.fsrs_card_state (
 -- ── essaycards.review_events ─────────────────────────────────────────────────
 --
 -- Append-only, new durable state (R-CON-BP-03): owned entirely by
--- POST /flashcards/{id}/review, one row inserted per review, for BOTH
--- schedulers (not fsrs-only) — this is what backs the experiment dashboard,
--- since flashcard_review_state only ever holds the latest snapshot and
+-- POST /flashcards/{id}/review, one row inserted per review — this is what
+-- backs GET /review-stats/summary|activity (the Sprint10 experiment
+-- dashboard that originally motivated this table, and its own `scheduler`
+-- column, were both retired by Sprint12_FSRSAndUXOverhaul), since
+-- flashcard_review_state only ever holds the latest snapshot and
 -- EssayCards has no other per-review history table. Never backfilled: no
 -- historical per-review data exists anywhere in the schema to backfill from
 -- (confirmed absent by investigation), so this table only ever reflects
@@ -525,72 +470,106 @@ create table if not exists essaycards.fsrs_card_state (
 create table if not exists essaycards.review_events (
     id                        uuid        primary key default gen_random_uuid(),
     flashcard_id              uuid        not null references essaycards.flashcards(id) on delete cascade,
-    scheduler                 text        not null,
     grade                     text        not null,
     reviewed_at               timestamptz not null,
     was_due                   boolean     not null,
     prior_review_interval     interval    not null,  -- review_interval value immediately before this review
     resulting_review_interval interval    not null,  -- review_interval value this review produced
-    constraint ck_review_events_scheduler check (scheduler in ('classic', 'fsrs')),
     constraint ck_review_events_grade check (grade in ('again', 'hard', 'good', 'easy'))
 );
 
 create index if not exists ix_review_events_flashcard
     on essaycards.review_events(flashcard_id, reviewed_at desc);
 
--- Supports the experiment dashboard's GROUP BY scheduler ... FILTER (WHERE
--- prior_review_interval >= interval '24 hours') aggregates — the actual
--- corrected ordinary-due-review filter (NOT was_due; see the table comment
--- above and 13_design_review.md's approved optional cleanup).
-create index if not exists ix_review_events_scheduler_prior_interval
-    on essaycards.review_events(scheduler, prior_review_interval);
-
--- ── One-time migration backfill for cards that existed before this sprint ───
+-- ── Sprint12_FSRSAndUXOverhaul — FSRS becomes the sole scheduler ───────────
 --
--- Both UPDATEs are guarded on scheduler_assigned_at IS NULL, so a rerun of
--- this file (schema.sql runs idempotently on every startup) touches zero rows
--- the second time — the same sentinel-guarded-backfill idiom already used for
--- flashcard_review_state.review_interval's own historical backfill above in
--- schema.sql. Neither UPDATE's SET list includes next_due_at, review_interval,
--- or last_reviewed_at — a pre-existing card's schedule is never altered by
--- this migration (mission §5 "preserve existing next due dates during
--- migration").
---
--- 1. Cards already reviewed under Classic pre-sprint (real review history
---    exists) -> forced to classic, permanently. py-fsrs's only history-based
---    initialization path (Scheduler.reschedule_card) requires a complete
---    ordered per-review rating history, which this schema has never
---    persisted (only the latest-state snapshot survives) — so reliable FSRS
---    initialization is impossible for any such card, and the mission's
---    documented fallback ("retain it in Classic") applies uniformly, not to
---    a subset.
--- 'sprint10_v1' here mirrors backend.scheduling.EXPERIMENT_VERSION (canonical source).
-update essaycards.flashcard_review_state
-   set scheduler = 'classic',
-       scheduler_assigned_at = now(),
-       scheduler_assignment_reason = 'legacy_retained_classic',
-       experiment_version = 'sprint10_v1'
- where scheduler_assigned_at is null
-   and last_reviewed_at is not null;
+-- Folded from Sprint12_FSRSAndUXOverhaul/10_schema.sql. Order within this
+-- same transaction matters: back up the Sprint10 scheduler-assignment data
+-- BEFORE dropping the columns that carry it (R-CON-BP-03 — this is new,
+-- retained-indefinitely durable state, an audit snapshot only, never read by
+-- live code), then drop those columns, then add the new exam_type column.
+-- The legacy FSRS-state NUMERIC synthesis itself is deliberately NOT done
+-- here in SQL — see backend/migrate_fsrs_state.py +
+-- backend/scheduling.py::estimate_initial_fsrs_state, run once at every
+-- startup immediately after this file, so it can reuse the exact same fsrs
+-- library code/constants the live scheduler uses with zero risk of a
+-- hand-duplicated SQL formula drifting from it.
 
--- 2. Cards that existed before this sprint but were never reviewed -> eligible
---    for the identical balanced random assignment as a brand-new card, because
---    a fresh fsrs.Card() IS the correct FSRS initialization for a
---    never-reviewed card (zero replay needed — it is exactly the state a
---    genuinely new FSRS-cohort card would start from). Uses Postgres-native
---    hashtext() rather than the Python sha256-based helper used for
---    in-application new-card assignment — a deliberate, safe divergence: this
---    cohort (existing never-reviewed rows, assigned once at migration time)
---    and the application's new-card cohort (assigned at INSERT time, from
---    this sprint forward) are disjoint and never need cross-language hash
---    parity with each other.
--- 'sprint10_v1' here mirrors backend.scheduling.EXPERIMENT_VERSION (canonical source).
-update essaycards.flashcard_review_state
-   set scheduler = case when hashtext(flashcard_id::text) % 2 = 0 then 'classic' else 'fsrs' end,
-       scheduler_assigned_at = now(),
-       scheduler_assignment_reason = 'migrated_never_reviewed_random',
-       experiment_version = 'sprint10_v1'
- where scheduler_assigned_at is null
-   and last_reviewed_at is null;
+-- Guarded by BOTH (a) the backup table's own absence and (b) the source
+-- `scheduler` column still existing on flashcard_review_state. (a) alone is
+-- not a sufficient guard: on an application instance that is upgrading from
+-- a pre-Sprint12 deploy, the Sprint10 columns exist on the first run of this
+-- file and must be captured before being dropped below; on a brand-new
+-- database (or any rerun after the first successful pass, here or on a
+-- prior deploy), those columns never exist in the first place (no Sprint10
+-- ADD COLUMN statements remain in this file — see the retirement note
+-- above), so the SELECT below would itself fail with UndefinedColumn if
+-- attempted. Checking column existence makes this correctly idempotent in
+-- both directions regardless of how many times this file reruns.
+do $$ begin
+    if not exists (
+        select 1 from information_schema.tables
+        where table_schema = 'essaycards' and table_name = 'pre_fsrs_migration_backup_sprint12'
+    ) and exists (
+        select 1 from information_schema.columns
+        where table_schema = 'essaycards' and table_name = 'flashcard_review_state' and column_name = 'scheduler'
+    ) then
+        create table essaycards.pre_fsrs_migration_backup_sprint12 as
+        select
+            flashcard_id,
+            scheduler,
+            scheduler_assigned_at,
+            scheduler_assignment_reason,
+            experiment_version,
+            last_reviewed_at,
+            next_due_at,
+            review_interval,
+            now() as backed_up_at
+        from essaycards.flashcard_review_state;
+    end if;
+end $$;
+
+-- Every card is FSRS-only from this sprint forward — scheduler assignment is
+-- no longer a live decision anywhere in the app (00_draft.md §1 "Remove
+-- experimental assignment, scheduler badges, and comparison statistics").
+-- `if exists` on each column/constraint/index makes every one of these
+-- statements a no-op on an instance where the Sprint10 columns were never
+-- (re)created in the first place (see the retirement note above) — safe on
+-- both an upgrading database (columns present, backed up just above) and a
+-- database that never had them.
+alter table essaycards.flashcard_review_state drop column if exists scheduler;
+alter table essaycards.flashcard_review_state drop column if exists scheduler_assigned_at;
+alter table essaycards.flashcard_review_state drop column if exists scheduler_assignment_reason;
+alter table essaycards.flashcard_review_state drop column if exists experiment_version;
+
+-- review_events itself survives unchanged otherwise — it remains the
+-- general-purpose append-only review-history log GET /review-stats/* reads
+-- from.
+alter table essaycards.review_events drop column if exists scheduler;
+
+-- Distinguishes a calibration-aware "guided" oral exam (the only mode that
+-- existed before this sprint) from a new, genuinely cold "unguided" mode that
+-- passes no prior history/calibration context to the examiner. Required,
+-- never silently defaulted by the application going forward
+-- (validate_import_body rejects a missing exam_type) — the column DEFAULT
+-- below exists only to backfill every pre-Sprint12 row, which was always
+-- examined under the one pre-existing calibration-aware flow and is
+-- therefore correctly classified 'guided' in retrospect.
+alter table essaycards.section_examinations
+    add column if not exists exam_type text not null default 'guided';
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_section_examinations_exam_type') then
+        alter table essaycards.section_examinations
+            add constraint ck_section_examinations_exam_type check (exam_type in ('guided', 'unguided'));
+    end if;
+end $$;
+
+-- Supports the per-(section, exam_type) "latest examination" lookup that
+-- backend/routers/essays.py's learning-progress query and
+-- backend/examinations.py::build_export_package both need (DISTINCT ON
+-- (section_id) ... WHERE exam_type = ... ORDER BY examined_at DESC).
+create index if not exists ix_section_examinations_section_type_examined
+    on essaycards.section_examinations(section_id, exam_type, examined_at desc);
 
 commit;

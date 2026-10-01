@@ -132,9 +132,10 @@ def test_review_stats_recall_rate_computed_from_reviews_and_failures(client, db_
 
 
 def test_review_stats_aggregation_is_scheduler_agnostic(client, db_conn):
-    """Scenario: Aggregation combines classic and fsrs reviews with no
-    per-scheduler breakdown in the response — the week window's fixture data
-    spans both schedulers (fc000025=classic, fc000023=fsrs)."""
+    """Scenario: Aggregation has no per-scheduler breakdown in the response
+    (the concept no longer exists — review_events.scheduler was dropped this
+    sprint) — the week window's fixture data spans two distinct cards
+    (fc000025, fc000023)."""
     r = client.get(URL)
     assert r.status_code == 200
     body = r.json()
@@ -148,7 +149,7 @@ def test_review_stats_aggregation_is_scheduler_agnostic(client, db_conn):
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select count(distinct scheduler) as n from essaycards.review_events "
+            "select count(distinct flashcard_id) as n from essaycards.review_events "
             "where reviewed_at >= now() - interval '7 days'"
         )
         assert cur.fetchone()["n"] == 2
@@ -176,3 +177,76 @@ def test_review_stats_includes_rapid_retry_reviews(client, db_conn):
 
     assert rows["day"]["reviews"] == 4
     assert rows["day"]["again_count"] == 2  # the two fsrs rapid-retry 'again' rows
+
+
+# ── GET /review-stats/activity (Sprint12_FSRSAndUXOverhaul) ─────────────────
+
+ACTIVITY_URL = "/api/essaycards/review-stats/activity"
+
+
+def test_activity_returns_thirty_zero_filled_utc_days(client):
+    """Scenario: GET /review-stats/activity always returns exactly 30 rows,
+    oldest UTC calendar day first, with 0 reviews on every day with no
+    recorded review."""
+    r = client.get(ACTIVITY_URL)
+    assert r.status_code == 200
+    body = r.json()
+    rows = body["rows"]
+    assert len(rows) == 30
+    assert body["meta"]["total"] == 30
+
+    dates = [row["date"] for row in rows]
+    assert dates == sorted(dates)  # oldest first
+    assert all(row["reviews"] >= 0 for row in rows)
+    # Every fixture review is recent (within the last 40 days at most, per
+    # tests/fixtures.sql); at least one day in the trailing 30-day window has
+    # zero reviews (the window is mostly empty).
+    assert any(row["reviews"] == 0 for row in rows)
+
+
+def test_activity_counts_reviews_on_the_correct_utc_day(client, db_conn):
+    """Scenario: a review recorded near a UTC day boundary is counted on the
+    correct side of it."""
+    with db_conn.cursor() as cur:
+        cur.execute("delete from essaycards.review_events")
+        cur.execute(
+            """
+            insert into essaycards.review_events
+                (flashcard_id, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval)
+            values
+                ('fc000025-0000-0000-0000-000000000025', 'good',
+                 date_trunc('day', now() at time zone 'utc') + interval '1 minute',
+                 true, interval '1 day', interval '2 days')
+            """
+        )
+
+    r = client.get(ACTIVITY_URL)
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    assert rows[-1]["reviews"] == 1  # today (UTC) is the last row — oldest-first order
+    assert sum(row["reviews"] for row in rows) == 1
+
+
+# ── GET /review-stats/intervals (Sprint12_FSRSAndUXOverhaul) ────────────────
+
+INTERVALS_URL = "/api/essaycards/review-stats/intervals"
+
+
+def test_intervals_returns_six_zero_filled_buckets_summing_to_total_scheduled(client, db_conn):
+    """Scenario: GET /review-stats/intervals always returns exactly six rows
+    whose counts sum to the total number of flashcard_review_state rows."""
+    r = client.get(INTERVALS_URL)
+    assert r.status_code == 200
+    body = r.json()
+    rows = body["rows"]
+    assert len(rows) == 6
+    assert [row["bucket"] for row in rows] == [
+        "new", "within_1_day", "within_7_days", "within_30_days", "within_90_days", "beyond_90_days",
+    ]
+
+    with db_conn.cursor() as cur:
+        cur.execute("select count(*) as n from essaycards.flashcard_review_state")
+        total = cur.fetchone()["n"]
+
+    assert sum(row["count"] for row in rows) == total
+    assert total > 0

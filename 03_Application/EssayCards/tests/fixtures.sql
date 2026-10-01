@@ -232,59 +232,29 @@ INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, n
   ('fc000021-0000-0000-0000-000000000021', null, now() - interval '10 minutes'),
   ('fc000022-0000-0000-0000-000000000022', null, now() - interval '10 minutes');
 
--- ── Sprint10_DualSchedulerAB — pin every PRE-EXISTING (pre-Sprint10) fixture
---    row to scheduler='classic' ─────────────────────────────────────────────
+-- ── Sprint12_FSRSAndUXOverhaul — FSRS is the sole scheduler ─────────────────
 --
--- schema.sql's migration backfill is guarded on scheduler_assigned_at IS
--- NULL and is meant to run once, ever, in production. In this test suite,
--- tests/conftest.py's `client` fixture enters a fresh `TestClient(app)`
--- context PER TEST, which re-fires backend.main's FastAPI startup handler —
--- and therefore re-runs schema.sql, migration backfill included — on every
--- single test, against whatever fixtures.sql just (re)inserted. Every row
--- above never sets scheduler_assigned_at, so left alone each would be
--- reprocessed by the migration on every test: already-reviewed rows would
--- deterministically land on 'classic' (legacy_retained_classic is
--- unconditional, no hash involved — harmless), but never-reviewed rows
--- (e.g. FC_ORIGINS_1/fc000001) would be swept into the 50/50
--- hashtext(flashcard_id::text) split and could land on 'fsrs' — which is
--- exactly what the many PRE-SPRINT10 regression tests throughout
--- test_flashcards.py / test_scheduling.py assume will NOT happen for these
--- specific hardcoded ids (they assert exact Classic-formula results).
+-- schema.sql drops flashcard_review_state's scheduler/scheduler_assigned_at/
+-- scheduler_assignment_reason/experiment_version columns and
+-- review_events.scheduler entirely (the Sprint10 A/B experiment is retired).
+-- Every flashcard_review_state/review_events row below is written WITHOUT
+-- those columns. Card ids/keys below still read "classic"/"fsrs" in a few
+-- places for historical traceability only (fix-classic-established,
+-- fix-mix-recent-classic, etc.) — these are now just labels; every card is
+-- reviewed through the single FSRS scheduler regardless of what its key says.
 --
--- This UPDATE pins every row inserted above (essays A-G, images, nuggets —
--- everything pre-Sprint10) to scheduler='classic' with a non-null
--- scheduler_assigned_at, so schema.sql's migration WHERE clause never
--- matches them again regardless of how many times it reruns. This mirrors
--- exactly what the legacy_retained_classic path already guarantees
--- unconditionally for already-reviewed rows in production; for
--- never-reviewed rows it deliberately overrides the hash (rather than
--- leaving the outcome to hashtext()'s output for a given uuid) so these
--- pre-Sprint10 fixture-based tests are deterministic. New Sprint10-specific
--- fixture rows (below) explicitly set their own scheduler/scheduler_assigned_at
--- at INSERT time and are therefore never touched by this UPDATE (they don't
--- exist yet) or by any later migration rerun (they're already "migrated").
-UPDATE essaycards.flashcard_review_state
-SET scheduler = 'classic',
-    scheduler_assigned_at = now(),
-    scheduler_assignment_reason = case when last_reviewed_at is not null
-                                        then 'legacy_retained_classic'
-                                        else 'migrated_never_reviewed_random' end,
-    experiment_version = 'sprint10_v1'
-WHERE scheduler_assigned_at IS NULL;
-
--- ── Sprint10_DualSchedulerAB — dual-scheduler fixtures ───────────────────────
---
--- Essay H: dedicated fixture set for scheduler dispatch / FSRS state / the
--- experiment dashboard. Every card here is placed carefully with respect to
--- GET /flashcards/due's UNSCOPED (system-wide REVIEW) query, which has no
--- essay filter: an unscoped-visible card must be both due (next_due_at <=
--- now()) AND established (review_interval >= 24h). The pre-existing
--- test_due_no_params_returns_review_queue asserts an EXACT ids list for that
--- unscoped query, so no card added here may satisfy both conditions at once
--- — established cards (fix-fsrs-established, fix-classic-established) are
--- kept NOT due (next_due_at in the future; POST /review does not require
--- due-ness), and every card that IS due here is kept sub-24h (learning), so
--- none can ever leak into that exact-match assertion.
+-- Essay H: dedicated fixture set for FSRS state / due-queue-ordering-is-
+-- scheduler-agnostic coverage. Every card here is placed carefully with
+-- respect to GET /flashcards/due's UNSCOPED (system-wide REVIEW) query,
+-- which has no essay filter: an unscoped-visible card must be both due
+-- (next_due_at <= now()) AND established (review_interval >= 24h). The
+-- pre-existing test_due_no_params_returns_review_queue asserts an EXACT ids
+-- list for that unscoped query, so no card added here may satisfy both
+-- conditions at once — established cards (fix-fsrs-established,
+-- fix-classic-established) are kept NOT due (next_due_at in the future;
+-- POST /review does not require due-ness), and every card that IS due here
+-- is kept sub-24h (learning), so none can ever leak into that exact-match
+-- assertion.
 INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
   ('ea000008-0000-0000-0000-000000000008', 'Essay H (Sprint10 scheduler fixtures)', 'essay-h-scheduler', now() - interval '10 days', now() - interval '10 days');
 
@@ -298,20 +268,19 @@ INSERT INTO essaycards.flashcards (id, essay_id, section_id, card_key, question,
   ('fc000026-0000-0000-0000-000000000026', 'ea000008-0000-0000-0000-000000000008', 'ec000009-0000-0000-0000-000000000009', 'fix-mix-recent-classic', 'H q4 (recent, classic)',       'H a4'),
   ('fc000027-0000-0000-0000-000000000027', 'ea000008-0000-0000-0000-000000000008', 'ec000009-0000-0000-0000-000000000009', 'fix-mix-recent-fsrs',    'H q5 (recent, fsrs)',          'H a5'),
   ('fc000028-0000-0000-0000-000000000028', 'ea000008-0000-0000-0000-000000000008', 'ec000009-0000-0000-0000-000000000009', 'fix-mix-backlog-classic','H q6 (backlog, classic)',      'H a6'),
-  ('fc000029-0000-0000-0000-000000000029', 'ea000008-0000-0000-0000-000000000008', 'ec000009-0000-0000-0000-000000000009', 'fix-mix-backlog-fsrs',   'H q7 (backlog, fsrs)',         'H a7');
+  ('fc000029-0000-0000-0000-000000000029', 'ea000008-0000-0000-0000-000000000008', 'ec000009-0000-0000-0000-000000000009', 'fix-mix-backlog-fsrs',   'H q7 (backlog, fsrs)',         'H a7'),
+  ('fc000030-0000-0000-0000-000000000030', 'ea000008-0000-0000-0000-000000000008', 'ec000009-0000-0000-0000-000000000009', 'fix-legacy-no-fsrs-state', 'H q8 (reviewed, no fsrs_card_state row)', 'H a8');
 
--- fix-fsrs-established: already reviewed under FSRS, established
--- (review_interval ~10d1h >= 24h), NOT currently due (kept out of every
--- /due query — see note above). Has a pre-existing fsrs_card_state row in
--- the library's Review state, simulating state surviving an application
--- restart (state is read fresh from the DB on every request, never cached
--- in-process) — exercises reload/relearning.
+-- fix-fsrs-established: already reviewed, established (review_interval
+-- ~10d1h >= 24h), NOT currently due (kept out of every /due query — see
+-- note above). Has a pre-existing fsrs_card_state row in the library's
+-- Review state, simulating state surviving an application restart (state is
+-- read fresh from the DB on every request, never cached in-process) —
+-- exercises reload/relearning.
 INSERT INTO essaycards.flashcard_review_state
-    (flashcard_id, last_reviewed_at, next_due_at, review_interval,
-     scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version) VALUES
+    (flashcard_id, last_reviewed_at, next_due_at, review_interval) VALUES
   ('fc000023-0000-0000-0000-000000000023',
-   now() - interval '10 days', now() + interval '1 hour', interval '10 days 1 hour',
-   'fsrs', now() - interval '10 days', 'new_card_random', 'sprint10_v1');
+   now() - interval '10 days', now() + interval '1 hour', interval '10 days 1 hour');
 
 INSERT INTO essaycards.fsrs_card_state
     (flashcard_id, stability, difficulty, fsrs_state, step, last_review_at, raw_state) VALUES
@@ -326,34 +295,28 @@ INSERT INTO essaycards.fsrs_card_state
      'last_review', now() - interval '10 days'
    ));
 
--- fix-fsrs-fresh: fsrs-cohort, never reviewed, NO fsrs_card_state row yet —
--- exercises FSRSScheduler.review's fresh fsrs.Card() path on first-ever
--- review. Not currently due (see note above; POST /review doesn't require
--- due-ness).
-INSERT INTO essaycards.flashcard_review_state
-    (flashcard_id, last_reviewed_at, next_due_at,
-     scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version) VALUES
-  ('fc000024-0000-0000-0000-000000000024',
-   null, now() + interval '1 hour',
-   'fsrs', now(), 'new_card_random', 'sprint10_v1');
+-- fix-fsrs-fresh: never reviewed, NO fsrs_card_state row yet — exercises
+-- FSRSScheduler.review's fresh fsrs.Card() path on first-ever review. Not
+-- currently due (see note above; POST /review doesn't require due-ness).
+INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at) VALUES
+  ('fc000024-0000-0000-0000-000000000024', null, now() + interval '1 hour');
 
--- fix-classic-established: classic-cohort, already established
--- (review_interval ~40d1h >= 24h), NOT currently due — the dedicated target
--- for "mature card reviewed again applies doubling at multi-day scale via
--- the endpoint" (POST /review doesn't require due-ness).
+-- fix-classic-established: already established (review_interval ~40d1h >=
+-- 24h), NOT currently due — a dedicated mature card target for generic
+-- "review an established card via the endpoint" coverage (POST /review
+-- doesn't require due-ness).
 INSERT INTO essaycards.flashcard_review_state
-    (flashcard_id, last_reviewed_at, next_due_at, review_interval,
-     scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version) VALUES
+    (flashcard_id, last_reviewed_at, next_due_at, review_interval) VALUES
   ('fc000025-0000-0000-0000-000000000025',
-   now() - interval '40 days', now() + interval '1 hour', interval '40 days 1 hour',
-   'classic', now(), 'new_card_random', 'sprint10_v1');
+   now() - interval '40 days', now() + interval '1 hour', interval '40 days 1 hour');
 
 -- fix-mix-recent-classic / fix-mix-recent-fsrs / fix-mix-backlog-classic /
--- fix-mix-backlog-fsrs: a deliberate mix of classic- and fsrs-scheduler
--- cards, interleaved across BOTH due-queue ordering categories, all kept
--- sub-24h (learning) so none can ever appear in the unscoped/system-wide
--- REVIEW query (which requires review_interval >= 24h) — every assertion
--- against this set uses a FOCUS query scoped to essay_id=essay-h-scheduler.
+-- fix-mix-backlog-fsrs: four cards interleaved across BOTH due-queue
+-- ordering categories, all kept sub-24h (learning) so none can ever appear
+-- in the unscoped/system-wide REVIEW query (which requires review_interval
+-- >= 24h) — every assertion against this set uses a FOCUS query scoped to
+-- essay_id=essay-h-scheduler. (Names predate Sprint12's single-scheduler
+-- model — see module note above; they are ordinary cards now.)
 --   RECENT  (last_reviewed_at within 24h), sorted next_due_at DESC:
 --     fix-mix-recent-classic (due 5m ago)  before
 --     fix-mix-recent-fsrs    (due 20m ago)
@@ -361,42 +324,110 @@ INSERT INTO essaycards.flashcard_review_state
 --     fix-mix-backlog-classic (12h interval) before
 --     fix-mix-backlog-fsrs    (6h interval)
 INSERT INTO essaycards.flashcard_review_state
-    (flashcard_id, last_reviewed_at, next_due_at, review_interval,
-     scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version) VALUES
+    (flashcard_id, last_reviewed_at, next_due_at, review_interval) VALUES
   ('fc000026-0000-0000-0000-000000000026',
-   now() - interval '2 hours', now() - interval '5 minutes', interval '115 minutes',
-   'classic', now(), 'new_card_random', 'sprint10_v1'),
+   now() - interval '2 hours', now() - interval '5 minutes', interval '115 minutes'),
   ('fc000027-0000-0000-0000-000000000027',
-   now() - interval '3 hours', now() - interval '20 minutes', interval '160 minutes',
-   'fsrs', now(), 'new_card_random', 'sprint10_v1'),
+   now() - interval '3 hours', now() - interval '20 minutes', interval '160 minutes'),
   ('fc000028-0000-0000-0000-000000000028',
-   now() - interval '2 days', now() - interval '1 day 12 hours', interval '12 hours',
-   'classic', now(), 'new_card_random', 'sprint10_v1'),
+   now() - interval '2 days', now() - interval '1 day 12 hours', interval '12 hours'),
   ('fc000029-0000-0000-0000-000000000029',
-   now() - interval '3 days', now() - interval '2 days 18 hours', interval '6 hours',
-   'fsrs', now(), 'new_card_random', 'sprint10_v1');
+   now() - interval '3 days', now() - interval '2 days 18 hours', interval '6 hours');
 
--- ── review_events (Sprint10_DualSchedulerAB) ─────────────────────────────────
+-- fix-legacy-no-fsrs-state (Sprint12_FSRSAndUXOverhaul): reviewed (real
+-- history) but deliberately given NO fsrs_card_state row — the direct
+-- target of backend/migrate_fsrs_state.py's legacy backfill. Every test run
+-- re-fires backend.main's startup handler (see tests/conftest.py's `client`
+-- fixture), so by the time any test queries this card the migration has
+-- already run once against it and it should already carry a synthesized
+-- fsrs_card_state row. Kept established and NOT due so it can never affect
+-- any /due assertion.
+INSERT INTO essaycards.flashcard_review_state
+    (flashcard_id, last_reviewed_at, next_due_at, review_interval) VALUES
+  ('fc000030-0000-0000-0000-000000000030',
+   now() - interval '5 days', now() + interval '2 hours', interval '5 days 2 hours');
+
+-- ── Learning progress (Sprint12_FSRSAndUXOverhaul) ──────────────────────────
 --
--- Spans both schedulers and both prior_review_interval regimes, for the
--- experiment dashboard scenarios:
+-- Essay I: sections but zero flashcards, with BOTH sections having a passing
+-- guided examination — proves milestones 1/2 (card-based) stay false for a
+-- zero-card essay (00_draft.md "essays without active cards must not
+-- automatically satisfy the card milestones") while milestone 3 (exam-based,
+-- no card dependency) can still be true, giving learning_level 1, not 0 and
+-- not vacuously 4.
+INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
+  ('ea000009-0000-0000-0000-000000000009', 'Essay I (zero cards, guided-passed)', 'essay-i-zero-cards', now() - interval '6 days', now() - interval '6 days');
+
+INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, anchor_slug, body_markdown) VALUES
+  ('ec000010-0000-0000-0000-000000000010', 'ea000009-0000-0000-0000-000000000009', 0, 'I Section 1', 'i-section-1', 'Essay I section 1 content.'),
+  ('ec000011-0000-0000-0000-000000000011', 'ea000009-0000-0000-0000-000000000009', 1, 'I Section 2', 'i-section-2', 'Essay I section 2 content.');
+
+INSERT INTO essaycards.section_examinations
+  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, exam_type) VALUES
+  ('5e000003-0000-0000-0000-000000000003', 'ea000009-0000-0000-0000-000000000009', 'ec000010-0000-0000-0000-000000000010',
+    (select updated_at from essaycards.essay_sections where id = 'ec000010-0000-0000-0000-000000000010'),
+    now() - interval '5 days', 'Explain I.1', 'Good account.', 5, 'guided'),
+  ('5e000004-0000-0000-0000-000000000004', 'ea000009-0000-0000-0000-000000000009', 'ec000011-0000-0000-0000-000000000011',
+    (select updated_at from essaycards.essay_sections where id = 'ec000011-0000-0000-0000-000000000011'),
+    now() - interval '4 days', 'Explain I.2', 'Good account.', 4, 'guided');
+
+-- Essay J: two sections, each with a GUIDED and an UNGUIDED examination on
+-- record — one section's guided exam scores below the pass threshold while
+-- every other guided/unguided exam passes. Exercises:
+--   - guided-passed requires EVERY section to individually meet the
+--     threshold (one section below 3 keeps milestone_guided_passed false
+--     even though the other section passes)
+--   - guided/unguided independence (every section's unguided exam passes,
+--     so milestone_unguided_passed is true while milestone_guided_passed is
+--     false)
+INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
+  ('ea00000a-0000-0000-0000-00000000000a', 'Essay J (mixed guided pass/fail, unguided passed)', 'essay-j-mixed-exam-types', now() - interval '6 days', now() - interval '6 days');
+
+INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, anchor_slug, body_markdown) VALUES
+  ('ec00000a-0000-0000-0000-00000000000a', 'ea00000a-0000-0000-0000-00000000000a', 0, 'J Section 1', 'j-section-1', 'Essay J section 1 content.'),
+  ('ec00000b-0000-0000-0000-00000000000b', 'ea00000a-0000-0000-0000-00000000000a', 1, 'J Section 2', 'j-section-2', 'Essay J section 2 content.');
+
+INSERT INTO essaycards.section_examinations
+  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, exam_type) VALUES
+  -- section 1: guided passes (score 4), unguided passes (score 3)
+  ('5e000005-0000-0000-0000-000000000005', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000a-0000-0000-0000-00000000000a',
+    (select updated_at from essaycards.essay_sections where id = 'ec00000a-0000-0000-0000-00000000000a'),
+    now() - interval '5 days', 'Explain J.1 guided', 'Good account.', 4, 'guided'),
+  ('5e000006-0000-0000-0000-000000000006', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000a-0000-0000-0000-00000000000a',
+    (select updated_at from essaycards.essay_sections where id = 'ec00000a-0000-0000-0000-00000000000a'),
+    now() - interval '3 days', 'Explain J.1 unguided', 'Good account.', 3, 'unguided'),
+  -- section 2: guided FAILS (score 2, below threshold), unguided passes (score 5)
+  ('5e000007-0000-0000-0000-000000000007', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000b-0000-0000-0000-00000000000b',
+    (select updated_at from essaycards.essay_sections where id = 'ec00000b-0000-0000-0000-00000000000b'),
+    now() - interval '5 days', 'Explain J.2 guided', 'Weak account.', 2, 'guided'),
+  ('5e000008-0000-0000-0000-000000000008', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000b-0000-0000-0000-00000000000b',
+    (select updated_at from essaycards.essay_sections where id = 'ec00000b-0000-0000-0000-00000000000b'),
+    now() - interval '2 days', 'Explain J.2 unguided', 'Good account.', 5, 'unguided');
+
+-- Essay-K-level-4 and Essay-L-level-1 scenarios (every card seen/future-safe;
+-- one card seen but not future-safe) are deliberately NOT static SQL fixture
+-- rows here — any new flashcard_review_state row perturbs
+-- test_stats_system_wide_partitions_all_bands' exact system-wide horizon-band
+-- counts in tests/test_flashcards.py (same reasoning the Sprint11_ReviewStats
+-- note below already documents for review_events). Built instead inside the
+-- relevant test bodies in tests/test_essays.py via the existing
+-- `_mk_essay` + POST .../review API-call pattern, same convention that file
+-- already uses for `test_overview_progress_and_open_counts` etc.
+
+-- ── review_events ─────────────────────────────────────────────────────────
+--
+-- Spans both prior_review_interval regimes:
 --   fix-classic-established (fc000025): 2 "ordinary due" events (>=24h prior
---     — one success, one failure) + 1 rapid-retry event (<24h prior, must be
---     EXCLUDED from ordinary_due_reviews/recall_rate/failures even though
---     was_due is true).
+--     — one success, one failure) + 1 rapid-retry event (<24h prior).
 --   fix-fsrs-established (fc000023): 1 "ordinary due" success event (>=24h
---     prior) + 1 rapid-retry event (<24h prior, excluded).
--- Expected dashboard math (verified independently in test_experiment.py via
--- a direct DB count, not hardcoded here):
---   classic: completed=3, ordinary_due=2, failures=1, recall_rate=0.5
---   fsrs:    completed=2, ordinary_due=1, failures=0, recall_rate=1.0
+--     prior) + 1 rapid-retry event (<24h prior).
 INSERT INTO essaycards.review_events
-    (flashcard_id, scheduler, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval) VALUES
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '4 days', true, interval '2 days', interval '4 days'),
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'again', now() - interval '3 days', true, interval '3 days', interval '5 seconds'),
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '30 minutes', true, interval '10 minutes', interval '20 minutes'),
-  ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'good',  now() - interval '5 days', true, interval '5 days', interval '10 days'),
-  ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'again', now() - interval '20 minutes', true, interval '30 seconds', interval '60 seconds');
+    (flashcard_id, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval) VALUES
+  ('fc000025-0000-0000-0000-000000000025', 'good',  now() - interval '4 days', true, interval '2 days', interval '4 days'),
+  ('fc000025-0000-0000-0000-000000000025', 'again', now() - interval '3 days', true, interval '3 days', interval '5 seconds'),
+  ('fc000025-0000-0000-0000-000000000025', 'good',  now() - interval '30 minutes', true, interval '10 minutes', interval '20 minutes'),
+  ('fc000023-0000-0000-0000-000000000023', 'good',  now() - interval '5 days', true, interval '5 days', interval '10 days'),
+  ('fc000023-0000-0000-0000-000000000023', 'again', now() - interval '20 minutes', true, interval '30 seconds', interval '60 seconds');
 
 -- ── Sprint11_ReviewStats — review-performance stats page fixtures ───────────
 --
@@ -434,14 +465,14 @@ INSERT INTO essaycards.review_events
 --             day; exercises the grade breakdown / failures / recall_rate
 --             math together with the now()-2h/-3d rows above
 --
--- Schedulers are deliberately mixed within the same window (the now()-2h
--- classic row and the now()-1h fsrs row both land in the day window) to
--- exercise the scheduler-agnostic aggregation invariant.
+-- Two different cards are deliberately mixed within the same window (the
+-- now()-2h row on fc000025 and the now()-1h row on fc000023 both land in the
+-- day window) to exercise multi-card aggregation.
 INSERT INTO essaycards.review_events
-    (flashcard_id, scheduler, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval) VALUES
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '2 hours',  true, interval '10 minutes', interval '6 hours'),
-  ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'hard',  now() - interval '3 days',   true, interval '5 minutes',  interval '9 hours'),
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'easy',  now() - interval '20 days',  true, interval '1 minute',   interval '25 hours'),
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '40 days',  true, interval '2 minutes',  interval '20 hours'),
-  ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'again', now() - interval '1 hour',   true, interval '30 seconds', interval '60 seconds'),
-  ('fc000025-0000-0000-0000-000000000025', 'classic', 'again', now() - interval '2 days',   true, interval '15 minutes', interval '5 seconds');
+    (flashcard_id, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval) VALUES
+  ('fc000025-0000-0000-0000-000000000025', 'good',  now() - interval '2 hours',  true, interval '10 minutes', interval '6 hours'),
+  ('fc000023-0000-0000-0000-000000000023', 'hard',  now() - interval '3 days',   true, interval '5 minutes',  interval '9 hours'),
+  ('fc000025-0000-0000-0000-000000000025', 'easy',  now() - interval '20 days',  true, interval '1 minute',   interval '25 hours'),
+  ('fc000025-0000-0000-0000-000000000025', 'good',  now() - interval '40 days',  true, interval '2 minutes',  interval '20 hours'),
+  ('fc000023-0000-0000-0000-000000000023', 'again', now() - interval '1 hour',   true, interval '30 seconds', interval '60 seconds'),
+  ('fc000025-0000-0000-0000-000000000025', 'again', now() - interval '2 days',   true, interval '15 minutes', interval '5 seconds');

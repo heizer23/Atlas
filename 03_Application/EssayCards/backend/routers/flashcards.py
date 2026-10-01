@@ -39,13 +39,7 @@ from fastapi.responses import JSONResponse
 from psycopg2.extras import Json
 
 from backend.database import get_db
-from backend.scheduling import (
-    VALID_GRADES,
-    ClassicScheduler,
-    EXPERIMENT_VERSION,
-    FSRSScheduler,
-    decide_scheduler_assignment,
-)
+from backend.scheduling import VALID_GRADES, FSRSScheduler
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
 
@@ -97,11 +91,6 @@ DUE_SCHEMA: list[ColumnSchema] = [
     # Feeds the review screen's source-navigation branch: set -> "Flashcard ->
     # Nugget" overlay; null -> unchanged legacy "Jump to passage" navigation.
     ColumnSchema(key="nugget_id", label="Nugget", type="string", sortable=False, filterable=True),
-    # [NEW Sprint10_DualSchedulerAB] The card's persisted scheduler assignment
-    # ('classic' | 'fsrs') — permanent, decided once at creation. Feeds the
-    # review screen's SchedulerBadge. Never a sort/filter key: selection and
-    # ordering remain scheduler-agnostic by construction.
-    ColumnSchema(key="scheduler", label="Scheduler", type="string", sortable=False, filterable=False),
 ]
 
 STATS_SCHEMA: list[ColumnSchema] = [
@@ -255,7 +244,7 @@ def list_due_flashcards(
             cur.execute(
                 f"""
                 select f.id as flashcard_id, f.question, f.answer, f.essay_id, f.section_id,
-                       f.nugget_id, s.anchor_slug, frs.next_due_at, frs.scheduler,
+                       f.nugget_id, s.anchor_slug, frs.next_due_at,
                        (frs.last_reviewed_at is null) as is_new,
                        coalesce(frs.last_reviewed_at >= now() - interval '24 hours', false)
                            as is_recent,
@@ -594,15 +583,12 @@ def _upsert_question(
     row = cur.fetchone()
 
     if row["was_inserted"]:
-        scheduler, reason = decide_scheduler_assignment(str(row["id"]))
         cur.execute(
             """
-            insert into essaycards.flashcard_review_state
-                (flashcard_id, last_reviewed_at, next_due_at,
-                 scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version)
-            values (%s, null, %s, %s, now(), %s, %s)
+            insert into essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at)
+            values (%s, null, %s)
             """,
-            (row["id"], row["created_at"], scheduler, reason, EXPERIMENT_VERSION),
+            (row["id"], row["created_at"]),
         )
 
     return {
@@ -737,10 +723,10 @@ async def _parse_review_grade(request: Request) -> tuple[str | None, JSONRespons
 
 
 def _load_fsrs_existing_state(cur: Any, flashcard_id: str) -> dict[str, Any] | None:
-    """Read this card's persisted FSRS memory state, if any. Used only when
-    the card's persisted scheduler is 'fsrs'. Returns None for a brand-new
-    FSRS-cohort card being reviewed for the first time — FSRSScheduler.review
-    starts such a card from a fresh fsrs.Card()."""
+    """Read this card's persisted FSRS memory state, if any. Returns None for
+    a card being reviewed for the first time (never reviewed before, or
+    reviewed pre-Sprint12 and not yet reached by the legacy backfill) —
+    FSRSScheduler.review starts such a card from a fresh fsrs.Card()."""
     cur.execute(
         "select raw_state from essaycards.fsrs_card_state where flashcard_id = %s",
         (flashcard_id,),
@@ -786,25 +772,23 @@ def _upsert_fsrs_card_state(cur: Any, flashcard_id: str, extra_state: dict[str, 
 def _insert_review_event(
     cur: Any,
     flashcard_id: str,
-    scheduler: str,
     grade: str,
     now: Any,
     was_due: bool,
     prior_review_interval: Any,
     resulting_review_interval: Any,
 ) -> None:
-    """Append-only: one row per review, for BOTH schedulers. Called
-    unconditionally for every review — this is what backs the experiment
-    dashboard, since flashcard_review_state only ever holds the latest
-    snapshot."""
+    """Append-only: one row per review. Called unconditionally for every
+    review — backs GET /review-stats/summary|activity, since
+    flashcard_review_state only ever holds the latest snapshot."""
     cur.execute(
         """
         insert into essaycards.review_events
-            (flashcard_id, scheduler, grade, reviewed_at, was_due,
+            (flashcard_id, grade, reviewed_at, was_due,
              prior_review_interval, resulting_review_interval)
-        values (%s, %s, %s, %s, %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s)
         """,
-        (flashcard_id, scheduler, grade, now, was_due, prior_review_interval, resulting_review_interval),
+        (flashcard_id, grade, now, was_due, prior_review_interval, resulting_review_interval),
     )
 
 
@@ -815,18 +799,18 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
 
     R-CON-AL-06 time authority: a single `select now()` read at the start of
     the transaction is reused as both last_reviewed_at and the base for
-    computing next_due_at (for either scheduler).
+    computing next_due_at.
 
-    Dispatches to ClassicScheduler or FSRSScheduler per the card's persisted
-    `scheduler` (backend/scheduling.py) — the request/response shape is
-    unchanged from pre-sprint. This is still the single writer of
+    Sprint12_FSRSAndUXOverhaul: FSRS is the sole scheduler — always dispatches
+    to FSRSScheduler, unconditionally. The request/response shape is unchanged
+    from pre-sprint. This is still the single writer of
     flashcard_review_state.review_interval — the write-time cache of
     (next_due_at - last_reviewed_at) — set here in the same UPDATE as
-    next_due_at, from the dispatched scheduler's SchedulerResult. Inside the
-    SAME transaction/commit as that UPDATE, this also upserts
-    fsrs_card_state (fsrs cards only) and always inserts one review_events
-    row — a review can never persist its new due date while failing to
-    persist its scheduler state or its review-event record.
+    next_due_at, from FSRSScheduler's SchedulerResult. Inside the SAME
+    transaction/commit as that UPDATE, this also upserts fsrs_card_state and
+    always inserts one review_events row — a review can never persist its new
+    due date while failing to persist its FSRS state or its review-event
+    record.
     """
     grade, error = await _parse_review_grade(request)
     if error is not None:
@@ -838,7 +822,7 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
             now = cur.fetchone()["now"]
 
             cur.execute(
-                "select last_reviewed_at, next_due_at, review_interval, scheduler "
+                "select last_reviewed_at, next_due_at, review_interval "
                 "from essaycards.flashcard_review_state where flashcard_id = %s",
                 (flashcard_id,),
             )
@@ -846,13 +830,9 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
             if not state_row:
                 return api_error("NOT_FOUND", f"Flashcard {flashcard_id} not found", status=404)
 
-            scheduler = state_row["scheduler"]
-            existing_state = (
-                _load_fsrs_existing_state(cur, flashcard_id) if scheduler == "fsrs" else None
-            )
+            existing_state = _load_fsrs_existing_state(cur, flashcard_id)
 
-            impl = FSRSScheduler() if scheduler == "fsrs" else ClassicScheduler()
-            result = impl.review(grade, state_row["last_reviewed_at"], now, existing_state)
+            result = FSRSScheduler().review(grade, state_row["last_reviewed_at"], now, existing_state)
 
             was_due = state_row["next_due_at"] <= now
             prior_review_interval = state_row["review_interval"]
@@ -866,11 +846,10 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
                 (now, result.next_due_at, result.review_interval, now, flashcard_id),
             )
 
-            if scheduler == "fsrs":
-                _upsert_fsrs_card_state(cur, flashcard_id, result.extra_state)
+            _upsert_fsrs_card_state(cur, flashcard_id, result.extra_state)
 
             _insert_review_event(
-                cur, flashcard_id, scheduler, grade, now, was_due,
+                cur, flashcard_id, grade, now, was_due,
                 prior_review_interval, result.review_interval,
             )
         conn.commit()

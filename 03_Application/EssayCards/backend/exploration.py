@@ -41,7 +41,6 @@ import secrets
 import uuid
 from typing import Any
 
-from backend.scheduling import EXPERIMENT_VERSION, decide_scheduler_assignment
 from platform_errorhandling import api_error
 
 # update_card.changes may only carry these keys — never let an arbitrary column
@@ -534,15 +533,12 @@ def execute_plan(cur: Any, plan: dict[str, Any]) -> dict[str, Any]:
             (c["essay_id"], c["section_id"], c["card_key"], c["question"], c["answer"]),
         )
         crow = cur.fetchone()
-        scheduler, reason = decide_scheduler_assignment(str(crow["id"]))
         cur.execute(
             """
-            insert into essaycards.flashcard_review_state
-                (flashcard_id, last_reviewed_at, next_due_at,
-                 scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version)
-            values (%s, null, %s, %s, now(), %s, %s)
+            insert into essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at)
+            values (%s, null, %s)
             """,
-            (crow["id"], crow["created_at"], scheduler, reason, EXPERIMENT_VERSION),
+            (crow["id"], crow["created_at"]),
         )
         created_cards.append({
             "id": str(crow["id"]),

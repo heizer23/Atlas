@@ -1,15 +1,12 @@
 """
 EssayCards — unit tests for backend.scheduling.
 
-Pure function tests: no HTTP, no DB. Per Sprint01_Core/10_architecture.json
-deferrals.test_writer, covers: again flat 5s; hard/good/easy first-time
-(null last_reviewed_at) floor-only; hard/good/easy repeat review where
-2*elapsed exceeds floor; hard/good/easy repeat review where floor exceeds
-2*elapsed.
+Pure function tests: no HTTP, no DB.
 
-Sprint10_DualSchedulerAB adds: a boundary/tie-break case for
-compute_next_due_at (still unchanged itself), plus unit coverage for
-ClassicScheduler, FSRSScheduler, and decide_scheduler_assignment.
+Sprint12_FSRSAndUXOverhaul removes every Classic/compute_next_due_at/
+decide_scheduler_assignment scenario (that code no longer exists — FSRS is
+the sole scheduler) and adds unit coverage for the new
+estimate_initial_fsrs_state legacy-migration-approximation function.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -17,90 +14,9 @@ from datetime import datetime, timedelta, timezone
 import fsrs
 import pytest
 
-from backend.scheduling import (
-    ClassicScheduler,
-    FSRSScheduler,
-    compute_next_due_at,
-    decide_scheduler_assignment,
-)
+from backend.scheduling import FSRSScheduler, estimate_initial_fsrs_state
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-
-FLOORS = {
-    "hard": timedelta(minutes=1),
-    "good": timedelta(minutes=20),
-    "easy": timedelta(days=1),
-}
-
-
-def test_again_is_flat_five_seconds_regardless_of_last_reviewed_at():
-    assert compute_next_due_at("again", None, NOW) == NOW + timedelta(seconds=5)
-    assert compute_next_due_at("again", NOW - timedelta(days=3), NOW) == NOW + timedelta(seconds=5)
-
-
-@pytest.mark.parametrize("grade", ["hard", "good", "easy"])
-def test_first_time_review_uses_floor_only(grade):
-    result = compute_next_due_at(grade, None, NOW)
-    assert result == NOW + FLOORS[grade]
-
-
-@pytest.mark.parametrize("grade", ["hard", "good", "easy"])
-def test_repeat_review_doubles_elapsed_when_it_exceeds_floor(grade):
-    # 5 days elapsed comfortably exceeds all three floors (1min / 20min / 1day) once doubled.
-    last_reviewed_at = NOW - timedelta(days=5)
-    elapsed = NOW - last_reviewed_at
-    result = compute_next_due_at(grade, last_reviewed_at, NOW)
-    assert result == NOW + 2 * elapsed
-    assert 2 * elapsed > FLOORS[grade]
-
-
-@pytest.mark.parametrize("grade", ["hard", "good", "easy"])
-def test_repeat_review_uses_floor_when_it_exceeds_doubled_elapsed(grade):
-    last_reviewed_at = NOW - timedelta(seconds=1)
-    result = compute_next_due_at(grade, last_reviewed_at, NOW)
-    assert result == NOW + FLOORS[grade]
-    assert FLOORS[grade] > 2 * (NOW - last_reviewed_at)
-
-
-def test_invalid_grade_raises_value_error():
-    with pytest.raises(ValueError):
-        compute_next_due_at("maybe", None, NOW)
-
-
-@pytest.mark.parametrize("grade", ["hard", "good", "easy"])
-def test_floor_crossing_boundary_pins_max_tiebreak(grade):
-    """Scenario: Boundary case at the exact floor crossing pins max()'s
-    tie-break. elapsed chosen so 2*elapsed == the grade's floor exactly —
-    max(floor, 2*elapsed) is deterministic (both operands equal), and the
-    result must equal NOW + floor either way."""
-    elapsed = FLOORS[grade] / 2
-    last_reviewed_at = NOW - elapsed
-    assert 2 * elapsed == FLOORS[grade]  # sanity check on the constructed boundary
-    result = compute_next_due_at(grade, last_reviewed_at, NOW)
-    assert result == NOW + FLOORS[grade]
-
-
-# ── Sprint10_DualSchedulerAB — ClassicScheduler / FSRSScheduler / assignment ─
-
-
-@pytest.mark.parametrize("grade", ["again", "hard", "good", "easy"])
-def test_classic_scheduler_review_matches_compute_next_due_at(grade):
-    """Scenario: ClassicScheduler.review produces identical results to
-    calling compute_next_due_at directly, with extra_state always None."""
-    last_reviewed_at = NOW - timedelta(days=2)
-    expected_next_due_at = compute_next_due_at(grade, last_reviewed_at, NOW)
-
-    result = ClassicScheduler().review(grade, last_reviewed_at, NOW)
-    assert result.next_due_at == expected_next_due_at
-    assert result.review_interval == expected_next_due_at - NOW
-    assert result.extra_state is None
-
-    # existing_state is accepted but ignored — Classic persists no state.
-    result_with_state = ClassicScheduler().review(
-        grade, last_reviewed_at, NOW, {"raw_state": {"anything": "ignored"}}
-    )
-    assert result_with_state.next_due_at == expected_next_due_at
-    assert result_with_state.extra_state is None
 
 
 def test_fsrs_scheduler_review_maps_ratings_correctly():
@@ -185,40 +101,63 @@ def test_fsrs_relearning_transitions_state_and_uses_relearning_step():
     assert relearn.review_interval < timedelta(hours=1)
 
 
-def test_decide_scheduler_assignment_disabled_by_kill_switch(monkeypatch):
-    """Scenario: Kill switch disables new assignment, defaulting new cards
-    to classic. Forces classic with the disabled reason."""
-    monkeypatch.setenv("ESSAYCARDS_FSRS_EXPERIMENT_ENABLED", "false")
-    scheduler, reason = decide_scheduler_assignment("some-flashcard-id")
-    assert (scheduler, reason) == ("classic", "assignment_disabled_classic")
+# ── Sprint12_FSRSAndUXOverhaul — estimate_initial_fsrs_state ────────────────
+
+def test_estimate_initial_fsrs_state_established_card_yields_review_state():
+    """Scenario: a card with review_interval >= 24h yields fsrs_state=2
+    (Review), step=null."""
+    state = estimate_initial_fsrs_state(timedelta(days=10), NOW - timedelta(days=10))
+    assert state["fsrs_state"] == 2
+    assert state["step"] is None
+    assert state["last_review_at"] == NOW - timedelta(days=10)
 
 
-def test_decide_scheduler_assignment_deterministic_for_same_id(monkeypatch):
-    """Scenario: Assignment is deterministic — calling
-    decide_scheduler_assignment twice for the same id returns the same
-    scheduler."""
-    monkeypatch.setenv("ESSAYCARDS_FSRS_EXPERIMENT_ENABLED", "true")
-    first = decide_scheduler_assignment("00000000-0000-0000-0000-000000000042")
-    second = decide_scheduler_assignment("00000000-0000-0000-0000-000000000042")
-    assert first == second
+def test_estimate_initial_fsrs_state_learning_card_yields_learning_state():
+    """Scenario: a card with review_interval < 24h yields fsrs_state=1
+    (Learning), step=0."""
+    state = estimate_initial_fsrs_state(timedelta(hours=2), NOW - timedelta(hours=2))
+    assert state["fsrs_state"] == 1
+    assert state["step"] == 0
 
 
-def test_decide_scheduler_assignment_approximately_balanced(monkeypatch):
-    """Scenario: Assignment across many distinct ids is approximately
-    balanced (not exact, but not lopsided)."""
-    monkeypatch.setenv("ESSAYCARDS_FSRS_EXPERIMENT_ENABLED", "true")
-    counts = {"classic": 0, "fsrs": 0}
-    for i in range(500):
-        scheduler, reason = decide_scheduler_assignment(f"fixture-id-{i}")
-        assert reason == "new_card_random"
-        counts[scheduler] += 1
-    # Not a stratified sampler (mission-accepted risk) — a generous band is
-    # enough to catch a badly broken hash (e.g. always-classic).
-    assert 150 <= counts["classic"] <= 350
-    assert 150 <= counts["fsrs"] <= 350
+def test_estimate_initial_fsrs_state_stability_increases_with_longer_interval():
+    """Scenario: a longer review_interval yields a larger synthesized
+    stability, monotonically."""
+    short = estimate_initial_fsrs_state(timedelta(days=1), NOW - timedelta(days=1))
+    medium = estimate_initial_fsrs_state(timedelta(days=10), NOW - timedelta(days=10))
+    long = estimate_initial_fsrs_state(timedelta(days=90), NOW - timedelta(days=90))
+    assert short["stability"] < medium["stability"] < long["stability"]
 
 
-def test_decide_scheduler_assignment_migrated_never_reviewed_reason(monkeypatch):
-    monkeypatch.setenv("ESSAYCARDS_FSRS_EXPERIMENT_ENABLED", "true")
-    _, reason = decide_scheduler_assignment("some-id", migrated_never_reviewed=True)
-    assert reason == "migrated_never_reviewed_random"
+def test_estimate_initial_fsrs_state_stability_is_positive_for_very_short_interval():
+    """A very short (near-zero) review_interval must never invert to a
+    non-positive stability — the implementation floors it at the library's
+    own STABILITY_MIN."""
+    state = estimate_initial_fsrs_state(timedelta(seconds=5), NOW - timedelta(seconds=5))
+    assert state["stability"] > 0
+
+
+def test_estimate_initial_fsrs_state_raw_state_round_trips_through_card_from_dict():
+    """Scenario: the synthesized raw_state can be loaded by fsrs.Card.from_dict
+    without error and used for a subsequent real review."""
+    state = estimate_initial_fsrs_state(timedelta(days=5), NOW - timedelta(days=5))
+    card = fsrs.Card.from_dict(state["raw_state"])
+    assert card.stability == pytest.approx(state["stability"])
+    assert card.difficulty == pytest.approx(state["difficulty"])
+    assert int(card.state) == state["fsrs_state"]
+
+    # Usable for a subsequent real review — no error, continuation not a reset.
+    result = FSRSScheduler().review("good", state["last_review_at"], NOW, {"raw_state": state["raw_state"]})
+    assert result.next_due_at > NOW
+
+
+def test_estimate_initial_fsrs_state_never_touches_due_date_inputs():
+    """The function is pure and read-only with respect to its inputs — it
+    never mutates/returns next_due_at/review_interval/last_reviewed_at as
+    targets, only uses them as inputs (DUE DATES PRESERVED)."""
+    review_interval = timedelta(days=3)
+    last_reviewed_at = NOW - timedelta(days=3)
+    state = estimate_initial_fsrs_state(review_interval, last_reviewed_at)
+    assert review_interval == timedelta(days=3)  # untouched
+    assert last_reviewed_at == NOW - timedelta(days=3)  # untouched
+    assert state["last_review_at"] == last_reviewed_at

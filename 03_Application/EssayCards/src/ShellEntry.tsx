@@ -7,22 +7,22 @@
  *   /essaycards/review         → ReviewSessionView (no query = review/maintenance;
  *                                 query topic? | essay_id? [+ section_id?] = focus session)
  *   /essaycards/ingest         → IngestView (Sprint02: paste-JSON add/update essay)
- *   /essaycards/experiment     → ExperimentDashboardView (Sprint10_DualSchedulerAB:
- *                                 Classic vs FSRS scheduler comparison, real recorded
- *                                 data only — see GET /experiment/summary)
- *   /essaycards/stats          → ReviewStatsView (Sprint11_ReviewStats: how the
- *                                 reviewer did over the trailing day/week/month,
- *                                 scheduler-agnostic — see GET /review-stats/summary)
+ *   /essaycards/stats          → ReviewStatsView (study activity, scheduled-reviews
+ *                                 forecast, observed recall, scheduled intervals,
+ *                                 essay learning progress — see CLAUDE.md "FSRS
+ *                                 scheduling" and "Learning progress";
+ *                                 Sprint10_DualSchedulerAB's /essaycards/experiment
+ *                                 route and its dashboard are retired)
  *
  * Review session note: the due queue is re-fetched from GET /flashcards/due
  * after every grade (and via a manual "Check again" on the completion screen).
- * The just-graded card is scheduled past now() so it drops out on its own; a
- * card graded `again` (+5s) or a floored `hard` (+1 min) reappears on a later
- * refetch once it comes due, in the server's RECENT-first order. No
- * client-side queue, no timer, no live-poll. The session ends when a refetch
- * returns nothing due — the completion screen's "Check again" re-runs the
- * fetch for the one case that leaves behind (the very last card graded `again`
- * or floored `hard`, with nothing else to grade while its interval elapses).
+ * The just-graded card is scheduled past now() by FSRS so it drops out on its
+ * own; a card graded `again` reappears on a later refetch once it comes due,
+ * in the server's RECENT-first order. No client-side queue, no timer, no
+ * live-poll. The session ends when a refetch returns nothing due — the
+ * completion screen's "Check again" re-runs the fetch for the one case that
+ * leaves behind (the very last card graded `again`, with nothing else to
+ * grade while its interval elapses).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -32,7 +32,9 @@ import { visit } from 'unist-util-visit';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
-import type { ApiError } from '@platform-ui/api/types';
+import BarChart from '@platform-ui/components/BarChart';
+import LineChart from '@platform-ui/components/LineChart';
+import type { ApiError, Dataset as PlatformDataset } from '@platform-ui/api/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,8 +48,17 @@ interface EssayRow {
   progress_total: number;
   progress_established: number;
   open_count: number;
-  oral_score: number | null;
-  oral_date: string | null;
+  // Sprint12_FSRSAndUXOverhaul — learning-progress fields (see CLAUDE.md
+  // "Learning progress"). Replace the removed oral_score/oral_date.
+  cards_seen_count: number;
+  cards_future_safe_count: number;
+  milestone_all_cards_seen: boolean;
+  milestone_all_cards_future_safe: boolean;
+  milestone_guided_passed: boolean;
+  milestone_unguided_passed: boolean;
+  guided_passed_at: string | null;
+  unguided_passed_at: string | null;
+  learning_level: number;
 }
 
 // {nugget_key, title} — the light pair shape every nugget-reference field
@@ -86,26 +97,19 @@ interface DueCardRow {
   is_recent: boolean;
   scheduled_interval_seconds: number;
   nugget_id: string | null;
-  // Sprint10_DualSchedulerAB — the card's permanent scheduler assignment.
-  // Never a sort/filter key; feeds SchedulerBadge only.
-  scheduler: 'classic' | 'fsrs';
 }
 
-// Sprint10_DualSchedulerAB — GET /experiment/summary row shape, mirroring
-// backend/routers/experiment.py::EXPERIMENT_SUMMARY_SCHEMA.
-interface ExperimentSummaryRow {
-  scheduler: 'classic' | 'fsrs';
-  assigned_cards: number;
-  new_cards_assigned: number;
-  migrated_cards_assigned: number;
-  cards_new: number;
-  cards_learning: number;
-  cards_established: number;
-  reviewed_cards: number;
-  completed_reviews: number;
-  ordinary_due_reviews: number;
-  recall_rate: number | null;
-  failures: number;
+// Sprint12_FSRSAndUXOverhaul — GET /review-stats/activity and
+// GET /review-stats/intervals row shapes.
+interface ActivityRow {
+  date: string;
+  reviews: number;
+}
+
+interface IntervalBucketRow {
+  bucket: string;
+  label: string;
+  count: number;
 }
 
 interface ReviewStatsSummaryRow {
@@ -152,6 +156,9 @@ interface ExaminationPackage {
   essay_id: string;
   essay_slug: string;
   essay_title: string;
+  // Sprint12_FSRSAndUXOverhaul — echoes the exam_type the package was
+  // requested with.
+  exam_type: 'guided' | 'unguided';
   sections: ExaminationPackageSection[];
 }
 
@@ -159,6 +166,8 @@ interface SectionExaminationRow {
   id: string;
   examined_at: string;
   score: number;
+  // Sprint12_FSRSAndUXOverhaul
+  exam_type: 'guided' | 'unguided';
   question: string;
   answer_transcript: string;
   feedback: string | null;
@@ -425,6 +434,126 @@ const primaryBtnStyle: React.CSSProperties = {
   borderColor: 'transparent',
 };
 
+// ── Action menu (Sprint12_FSRSAndUXOverhaul) ────────────────────────────────
+//
+// Generic primary-button + accessible dropdown, replacing a row of buttons
+// at the essay header and at each section's end (10_architecture.json
+// internal_flow steps 9-10; see button_nav_inventory for the full pre/post
+// mapping). role=menu/menuitem, Escape + click-outside to close, operable by
+// keyboard and touch. Reuses existing btnStyle/primaryBtnStyle tokens only —
+// no new design tokens.
+
+interface ActionMenuItem {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+const actionMenuWrapStyle: React.CSSProperties = {
+  position: 'relative',
+  display: 'inline-flex',
+  gap: 8,
+};
+
+const actionMenuDropdownStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  marginTop: 4,
+  background: 'var(--md-sys-color-surface)',
+  border: '1px solid var(--md-sys-color-outline-variant)',
+  borderRadius: 8,
+  boxShadow: 'var(--elevation-1)',
+  padding: 4,
+  minWidth: 180,
+  zIndex: 50,
+  display: 'flex',
+  flexDirection: 'column',
+};
+
+const actionMenuItemStyle: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  textAlign: 'left',
+  padding: '8px 10px',
+  border: 'none',
+  background: 'transparent',
+  cursor: 'pointer',
+  fontSize: 13,
+  borderRadius: 6,
+  color: 'var(--md-sys-color-on-surface)',
+};
+
+function ActionMenu({
+  primary,
+  items,
+}: {
+  primary: { label: string; onClick: () => void; disabled?: boolean };
+  items: ActionMenuItem[];
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} style={actionMenuWrapStyle}>
+      <button
+        style={primaryBtnStyle}
+        disabled={primary.disabled}
+        onClick={primary.onClick}
+      >
+        {primary.label}
+      </button>
+      {items.length > 0 && (
+        <>
+          <button
+            style={btnStyle}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            aria-label="More actions"
+            onClick={() => setOpen(o => !o)}
+          >
+            More ▾
+          </button>
+          {open && (
+            <div role="menu" style={actionMenuDropdownStyle}>
+              {items.map((item, i) => (
+                <button
+                  key={i}
+                  role="menuitem"
+                  style={actionMenuItemStyle}
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setOpen(false);
+                    item.onClick();
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Review screen (Sprint05b redesign) — Material 3 surfaces / tokens ────────
 
 const reviewCardStyle: React.CSSProperties = {
@@ -437,29 +566,6 @@ const reviewCardStyle: React.CSSProperties = {
   boxShadow: 'var(--elevation-1)',
   position: 'relative',
 };
-
-// Sprint10_DualSchedulerAB — small pill in the question card's top corner,
-// visible both before and after reveal. Existing Material 3 tokens only
-// (surface-variant, same as ReviewStatsPanel); no new visual tokens. Shows
-// exactly the persisted algorithm name — 'Classic' or 'FSRS' — never
-// FSRS-native vocabulary.
-const schedulerBadgeStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 12,
-  right: 12,
-  fontSize: 11,
-  fontWeight: 600,
-  letterSpacing: 0.4,
-  textTransform: 'uppercase',
-  padding: '3px 8px',
-  borderRadius: 999,
-  background: 'var(--md-sys-color-surface-variant)',
-  color: 'var(--md-sys-color-on-surface-variant)',
-};
-
-function SchedulerBadge({ scheduler }: { scheduler: 'classic' | 'fsrs' }) {
-  return <span style={schedulerBadgeStyle}>{scheduler === 'fsrs' ? 'FSRS' : 'Classic'}</span>;
-}
 
 // Full-width primary action after reading the question (goal 1).
 const flipBtnStyle: React.CSSProperties = {
@@ -576,16 +682,22 @@ async function readClipboard(): Promise<{ text: string } | { error: string }> {
   }
 }
 
-// ── Oral examination prompt ──────────────────────────────────────────────────
+// ── Oral examination prompts ─────────────────────────────────────────────────
 //
 // Copied to the clipboard together with the fetched examination package (see
-// ReaderView's handleExportForExamination). Self-contained: a ChatGPT
-// conversation with zero prior knowledge of this app can conduct the exam and
-// produce a reply that POST /examinations/import accepts unmodified. Every
-// output field named below must stay in sync with backend/examinations.py's
-// validate_import_body().
+// ReaderView's handleExportExam). Self-contained: a ChatGPT conversation with
+// zero prior knowledge of this app can conduct the exam and produce a reply
+// that POST /examinations/import accepts unmodified. Every output field named
+// below must stay in sync with backend/examinations.py's validate_import_body().
+//
+// Sprint12_FSRSAndUXOverhaul splits the single prompt into two variants:
+// EXAM_PROMPT_INTRO_GUIDED (unchanged calibration-aware behavior, renamed)
+// and EXAM_PROMPT_INTRO_UNGUIDED (explicitly cold-start, no calibration
+// context — matches the backend always returning last_examination: null for
+// exam_type=unguided). Both bake their own "exam_type" into the described
+// reply shape.
 
-const EXAM_PROMPT_INTRO = `You are conducting an oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and its sections.
+const EXAM_PROMPT_INTRO_GUIDED = `You are conducting an oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and its sections.
 
 GOAL: test whether I actually understand the ideas in each section — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
 
@@ -615,6 +727,7 @@ WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact sh
       "question": "a summary of what you asked/covered for this section (can be multiple questions, written as one text block)",
       "answer_transcript": "a summary or verbatim transcript of my answer(s) for this section",
       "score": 0,
+      "exam_type": "guided",
       "feedback": "one or two sentences of feedback, e.g. \\"Good enough for now — revisit in ~6 months.\\" (optional, use null to omit)"
     }
   ]
@@ -626,8 +739,52 @@ Here is the examination package:
 
 `;
 
-function buildExamClipboardText(pkg: ExaminationPackage): string {
-  return EXAM_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+const EXAM_PROMPT_INTRO_UNGUIDED = `You are conducting an UNGUIDED oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and its sections.
+
+GOAL: test whether I actually understand the ideas in each section — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
+
+IMPORTANT — this is a COLD-START examination: do NOT use any prior-history or calibration context, even if you happen to know it from earlier in this conversation. Start every section from the fundamentals, exactly as you would for a learner with no recorded history, regardless of how well I may have done before.
+
+PROCESS:
+- Examine each section in "sections" one at a time (skip a section only if I ask you to).
+- Ask follow-up questions until you can confidently assess my understanding, then move on — this is a conversation, not a fixed quiz.
+- I will answer by typing or by pasting a transcript of a spoken answer.
+
+SCORING (0-6, per section, for my demonstrated understanding — not the essay's quality):
+  0-2: insufficient / fragmentary — needs active study
+  3:   functional understanding — good enough for now, ready to move on
+  4:   strong understanding
+  5:   deep/integrated understanding
+  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently
+A score of 3 is a legitimate, successful stopping point — do not withhold it hoping I reach a higher score later.
+
+WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+
+{
+  "results": [
+    {
+      "essay_slug": "copy verbatim from the package's essay_slug",
+      "section_anchor_slug": "copy verbatim from this section's anchor_slug",
+      "section_version": "copy verbatim from this section's section_version",
+      "examined_at": "today's date/time in ISO-8601, e.g. 2026-08-28T14:30:00Z",
+      "question": "a summary of what you asked/covered for this section (can be multiple questions, written as one text block)",
+      "answer_transcript": "a summary or verbatim transcript of my answer(s) for this section",
+      "score": 0,
+      "exam_type": "unguided",
+      "feedback": "one or two sentences of feedback, e.g. \\"Good enough for now — revisit in ~6 months.\\" (optional, use null to omit)"
+    }
+  ]
+}
+
+Include one object per section actually examined. Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
+
+Here is the examination package:
+
+`;
+
+function buildExamClipboardText(pkg: ExaminationPackage, examType: 'guided' | 'unguided'): string {
+  const intro = examType === 'guided' ? EXAM_PROMPT_INTRO_GUIDED : EXAM_PROMPT_INTRO_UNGUIDED;
+  return intro + JSON.stringify(pkg, null, 2);
 }
 
 // ── Flashcard exploration prompt (Sprint06) ─────────────────────────────────
@@ -1218,7 +1375,7 @@ function groupEssaysByCategory(essays: EssayRow[]): [string, EssayRow[]][] {
   );
 }
 
-function formatOralDate(iso: string): string {
+function formatExamDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
@@ -1229,6 +1386,89 @@ const studyBtnStyle: React.CSSProperties = {
   flexShrink: 0,
   whiteSpace: 'nowrap',
 };
+
+// ── Category collapse/expand (Sprint12_FSRSAndUXOverhaul) ──────────────────
+//
+// Persisted per category name via localStorage, key
+// essaycards:categoryCollapsed:<category> ('true'/'false'; UNCATEGORIZED for
+// the null-category group). Default expanded (false) when no stored value
+// exists. localStorage can throw (private browsing, disabled storage) — both
+// helpers degrade gracefully to the default rather than erroring.
+
+function categoryCollapseKey(category: string): string {
+  return `essaycards:categoryCollapsed:${category}`;
+}
+
+function loadCategoryCollapsed(category: string): boolean {
+  try {
+    return localStorage.getItem(categoryCollapseKey(category)) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function saveCategoryCollapsed(category: string, collapsed: boolean): void {
+  try {
+    localStorage.setItem(categoryCollapseKey(category), collapsed ? 'true' : 'false');
+  } catch {
+    /* localStorage unavailable — collapse state just won't persist across visits */
+  }
+}
+
+// ── Learning-level badge (Sprint12_FSRSAndUXOverhaul) ───────────────────────
+//
+// Compact 0-4 level with a tooltip/accessible explanation of the four
+// milestones and their current true/false state. Keyboard/touch-reachable
+// via a native <button> with title (hover/focus tooltip) and aria-label
+// (always-available accessible explanation, not hover-only).
+
+const MILESTONE_LABELS: { key: keyof EssayRow; label: string }[] = [
+  { key: 'milestone_all_cards_seen', label: 'All active cards seen' },
+  { key: 'milestone_all_cards_future_safe', label: 'All active cards reviewed, next due in 24h+' },
+  { key: 'milestone_guided_passed', label: 'Guided oral exam passed' },
+  { key: 'milestone_unguided_passed', label: 'Unguided oral exam passed' },
+];
+
+function learningLevelExplanation(e: EssayRow): string {
+  const lines = MILESTONE_LABELS.map(
+    m => `${e[m.key] ? '✓' : '✗'} ${m.label}`,
+  );
+  const extra: string[] = [];
+  if (e.guided_passed_at) extra.push(`Guided passed: ${formatExamDate(e.guided_passed_at)}`);
+  if (e.unguided_passed_at) extra.push(`Unguided passed: ${formatExamDate(e.unguided_passed_at)}`);
+  return [`Learning level ${e.learning_level} / 4`, ...lines, ...extra].join('\n');
+}
+
+const learningLevelBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 36,
+  height: 22,
+  padding: '0 8px',
+  borderRadius: 999,
+  border: '1px solid var(--md-sys-color-outline-variant)',
+  background: 'var(--md-sys-color-surface-variant)',
+  color: 'var(--md-sys-color-on-surface-variant)',
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: 'default',
+};
+
+function LearningLevelBadge({ essay }: { essay: EssayRow }) {
+  const explanation = learningLevelExplanation(essay);
+  return (
+    <button
+      type="button"
+      style={learningLevelBadgeStyle}
+      title={explanation}
+      aria-label={explanation}
+      onClick={e => e.stopPropagation()}
+    >
+      {essay.learning_level}/4
+    </button>
+  );
+}
 
 function StatusPill({ status }: { status: 'planned' | 'complete' }) {
   const planned = status === 'planned';
@@ -1250,13 +1490,34 @@ function StatusPill({ status }: { status: 'planned' | 'complete' }) {
   );
 }
 
+function CategoryCollapseToggle({ category, collapsed, onToggle }: {
+  category: string;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      style={{ ...btnStyle, padding: '2px 8px', fontSize: 12 }}
+      aria-expanded={!collapsed}
+      aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${category}`}
+      onClick={onToggle}
+    >
+      {collapsed ? '▸' : '▾'}
+    </button>
+  );
+}
+
 function EssayListView() {
   const navigate = useNavigate();
   const [essays, setEssays] = useState<EssayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
-  const [examMsg, setExamMsg] = useState<string | null>(null);
-  const [examBusyId, setExamBusyId] = useState<string | null>(null);
+  // Category collapse state, keyed by category name (UNCATEGORIZED for the
+  // null-category group) — read from localStorage on first render per
+  // category, default expanded. A plain object (not a Set) so toggling one
+  // category re-renders predictably via setState.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     (async () => {
@@ -1271,24 +1532,13 @@ function EssayListView() {
     })();
   }, []);
 
-  // Oral-exam export: copies the essay's examination package + rubric prompt to
-  // the clipboard. Lives here (not on the reader page) so it sits under the
-  // essay's Study button on the overview.
-  const handleExportExam = async (essayId: string) => {
-    setExamBusyId(essayId);
-    setExamMsg(null);
-    const res = await apiFetch<ExaminationPackage>(`/essaycards/essays/${essayId}/examination-package`);
-    setExamBusyId(null);
-    if (isApiError(res)) {
-      setExamMsg(`Export failed: ${res.error.message}`);
-      return;
-    }
-    const err = await writeClipboard(buildExamClipboardText(res));
-    setExamMsg(
-      err ??
-        'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply ' +
-          'into "Import exam results" above.',
-    );
+  const isCollapsed = (category: string) =>
+    category in collapsed ? collapsed[category] : loadCategoryCollapsed(category);
+
+  const toggleCategory = (category: string) => {
+    const next = !isCollapsed(category);
+    saveCategoryCollapsed(category, next);
+    setCollapsed(prev => ({ ...prev, [category]: next }));
   };
 
   return (
@@ -1313,7 +1563,6 @@ function EssayListView() {
 
       {loading && <Skeleton />}
       {error && <ErrorCard error={error} />}
-      {examMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{examMsg}</div>}
       {!loading && !error && essays.length === 0 && (
         <div style={{ color: '#888', fontSize: 14 }}>
           No essays yet. Ingest one with the backend CLI:
@@ -1329,10 +1578,16 @@ function EssayListView() {
           const est = rows.reduce((n, e) => n + e.progress_established, 0);
           const tot = rows.reduce((n, e) => n + e.progress_total, 0);
           const open = rows.reduce((n, e) => n + e.open_count, 0);
+          const categoryCollapsed = showHeadings && isCollapsed(category);
           return (
             <div key={category} style={{ marginBottom: 24 }}>
               {showHeadings && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 8px', padding: '0 12px' }}>
+                  <CategoryCollapseToggle
+                    category={category}
+                    collapsed={categoryCollapsed}
+                    onToggle={() => toggleCategory(category)}
+                  />
                   <div
                     style={{
                       fontSize: 12,
@@ -1359,7 +1614,7 @@ function EssayListView() {
                   )}
                 </div>
               )}
-              {rows.map(e => (
+              {!categoryCollapsed && rows.map(e => (
                 <div
                   key={e.id}
                   onClick={() => navigate(`/essaycards/essays/${e.id}`)}
@@ -1387,37 +1642,8 @@ function EssayListView() {
                         ? 'No flashcards yet'
                         : `Progress: ${e.progress_established} / ${e.progress_total} · Open: ${e.open_count}`}
                     </div>
-                    <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
-                      {e.oral_score == null
-                        ? 'No oral exam yet'
-                        : `Oral: ${e.oral_score}% · ${formatOralDate(e.oral_date!)}`}
-                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0, alignItems: 'stretch' }}>
-                    {e.progress_total > 0 && (
-                      <button
-                        style={studyBtnStyle}
-                        onClick={ev => {
-                          ev.stopPropagation();
-                          navigate(`/essaycards/review?essay_id=${e.id}`);
-                        }}
-                      >
-                        Study
-                      </button>
-                    )}
-                    {e.status === 'complete' && (
-                      <button
-                        style={studyBtnStyle}
-                        disabled={examBusyId === e.id}
-                        onClick={ev => {
-                          ev.stopPropagation();
-                          handleExportExam(e.id);
-                        }}
-                      >
-                        {examBusyId === e.id ? 'Preparing…' : 'Oral exam'}
-                      </button>
-                    )}
-                  </div>
+                  <LearningLevelBadge essay={e} />
                 </div>
               ))}
             </div>
@@ -1465,6 +1691,32 @@ function ReaderView() {
   // buttons, one level up (no sectionId to key on; only one essay on this
   // page).
   const [essayExportMsg, setEssayExportMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Oral-exam export (moved here from EssayListView, internal_flow step 11):
+  // copies the essay's examination package + the exam_type-appropriate
+  // rubric prompt to the clipboard.
+  const [examMsg, setExamMsg] = useState<string | null>(null);
+  const [examBusyType, setExamBusyType] = useState<'guided' | 'unguided' | null>(null);
+
+  const handleExportExam = async (examType: 'guided' | 'unguided') => {
+    if (!essay) return;
+    setExamBusyType(examType);
+    setExamMsg(null);
+    const res = await apiFetch<ExaminationPackage>(
+      `/essaycards/essays/${essay.id}/examination-package?exam_type=${examType}`,
+    );
+    setExamBusyType(null);
+    if (isApiError(res)) {
+      setExamMsg(`Export failed: ${res.error.message}`);
+      return;
+    }
+    const err = await writeClipboard(buildExamClipboardText(res, examType));
+    setExamMsg(
+      err ??
+        'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply ' +
+          'into "Import exam results" on the essay list page.',
+    );
+  };
 
   const handleExportEssay = async () => {
     if (!essay) return;
@@ -1567,36 +1819,58 @@ function ReaderView() {
   if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
   if (!essay) return <div style={pageStyle}>Essay not found.</div>;
 
+  const hasCards = essay.progress_total > 0;
+  const questionOverviewItem: ActionMenuItem = {
+    label: 'Question overview',
+    onClick: () => navigate(`/essaycards/essays/${essay.id}/questions`),
+  };
+  const secondaryItems: ActionMenuItem[] = [
+    ...(hasCards ? [questionOverviewItem] : []),
+    {
+      label: examBusyType === 'guided' ? 'Preparing…' : 'Guided oral exam',
+      onClick: () => handleExportExam('guided'),
+      disabled: essay.status !== 'complete' || examBusyType !== null,
+    },
+    {
+      label: examBusyType === 'unguided' ? 'Preparing…' : 'Unguided oral exam',
+      onClick: () => handleExportExam('unguided'),
+      disabled: essay.status !== 'complete' || examBusyType !== null,
+    },
+    {
+      label: essayExportMsg?.ok ? 'Import essay →' : 'Export essay',
+      onClick: () => (essayExportMsg?.ok ? navigate('/essaycards/ingest') : handleExportEssay()),
+    },
+    ...(essay.sections.length > 0
+      ? [{
+          label: '+ New nugget',
+          onClick: () => navigate(
+            `/essaycards/nuggets/authoring?essay_id=${essay.id}&section_id=${essay.sections[0].id}`,
+          ),
+        }]
+      : []),
+  ];
+
   return (
     <div style={pageStyle}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <button style={btnStyle} onClick={() => navigate('/essaycards')}>
           ← All essays
         </button>
-        <button style={btnStyle} onClick={() => navigate(`/essaycards/essays/${essay.id}/questions`)}>
-          Question overview
-        </button>
-        <button
-          style={btnStyle}
-          onClick={() =>
-            essayExportMsg?.ok ? navigate('/essaycards/ingest') : handleExportEssay()
+        <ActionMenu
+          primary={
+            hasCards
+              ? { label: 'Study', onClick: () => navigate(`/essaycards/review?essay_id=${essay.id}`) }
+              : questionOverviewItem
           }
-        >
-          {essayExportMsg?.ok ? 'Import →' : 'Export essay'}
-        </button>
-        {essay.sections.length > 0 && (
-          <button
-            style={btnStyle}
-            onClick={() => navigate(
-              `/essaycards/nuggets/authoring?essay_id=${essay.id}&section_id=${essay.sections[0].id}`,
-            )}
-          >
-            + New nugget
-          </button>
-        )}
+          items={secondaryItems}
+        />
+        <LearningLevelBadge essay={essay} />
       </div>
       {essayExportMsg && (
         <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{essayExportMsg.text}</div>
+      )}
+      {examMsg && (
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{examMsg}</div>
       )}
       <h1 style={{ marginBottom: 12 }}>{essay.title}</h1>
 
@@ -1639,34 +1913,28 @@ function ReaderView() {
               {section.body_markdown}
             </ReactMarkdown>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              style={btnStyle}
-              onClick={() => navigate(`/essaycards/review?essay_id=${essay.id}&section_id=${section.id}`)}
-            >
-              Review this section
-            </button>
-            <button
-              style={btnStyle}
-              onClick={() =>
-                sectionActionReady(section.id, 'export')
-                  ? navigate('/essaycards/ingest')
-                  : handleExportSection(section.id)
-              }
-            >
-              {sectionActionReady(section.id, 'export') ? 'Import →' : 'Export section'}
-            </button>
-            <button
-              style={btnStyle}
-              onClick={() =>
-                sectionActionReady(section.id, 'insert')
-                  ? navigate('/essaycards/ingest')
-                  : handleInsertSection(section.id)
-              }
-            >
-              {sectionActionReady(section.id, 'insert') ? 'Import →' : 'Insert section after'}
-            </button>
-          </div>
+          <ActionMenu
+            primary={{
+              label: 'Review this section',
+              onClick: () => navigate(`/essaycards/review?essay_id=${essay.id}&section_id=${section.id}`),
+            }}
+            items={[
+              {
+                label: sectionActionReady(section.id, 'export') ? 'Import section →' : 'Export section',
+                onClick: () =>
+                  sectionActionReady(section.id, 'export')
+                    ? navigate('/essaycards/ingest')
+                    : handleExportSection(section.id),
+              },
+              {
+                label: sectionActionReady(section.id, 'insert') ? 'Import insertion →' : 'Insert section after',
+                onClick: () =>
+                  sectionActionReady(section.id, 'insert')
+                    ? navigate('/essaycards/ingest')
+                    : handleInsertSection(section.id),
+              },
+            ]}
+          />
           {sectionActionMsg && sectionActionMsg.sectionId === section.id && (
             <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{sectionActionMsg.text}</div>
           )}
@@ -2218,6 +2486,8 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
             >
               <div style={{ fontWeight: 600 }}>
                 {new Date(r.examined_at).toLocaleDateString()} — score {r.score}/6
+                {' · '}
+                <span style={{ textTransform: 'capitalize', fontWeight: 400, color: '#888' }}>{r.exam_type}</span>
               </div>
               {r.feedback && <div style={{ color: '#555', marginTop: 4 }}>{r.feedback}</div>}
             </div>
@@ -2279,6 +2549,41 @@ function ForecastRow({ label, values }: { label: string; values: (number | null)
         </span>
       ))}
     </>
+  );
+}
+
+// ── Forecast grid (Sprint12_FSRSAndUXOverhaul) ──────────────────────────────
+//
+// Extracted from ReviewStatsPanel's inline "Upcoming" markup so the same
+// grid (header row + one ForecastRow per `rows` entry) can be reused by the
+// stats page's "Scheduled reviews (forecast)" zone. Deliberately decoupled
+// from any session state — only `rows` (label + values, one entry per
+// FORECAST_COLUMNS column) is accepted.
+function ForecastGrid({ rows }: { rows: { label: string; values: (number | null)[] }[] }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `minmax(44px, auto) repeat(${FORECAST_COLUMNS.length}, minmax(34px, 1fr))`,
+          rowGap: 4,
+          columnGap: 8,
+          alignItems: 'baseline',
+          minWidth: 300,
+        }}
+      >
+        <span />
+        {FORECAST_COLUMNS.map(c => (
+          <span
+            key={c.key}
+            style={{ fontSize: 11, textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}
+          >
+            {c.label}
+          </span>
+        ))}
+        {rows.map(row => <ForecastRow key={row.label} label={row.label} values={row.values} />)}
+      </div>
+    </div>
   );
 }
 
@@ -2354,29 +2659,8 @@ function ReviewStatsPanel({
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <span style={gutterLabelStyle}>Upcoming</span>
-        <div style={{ flex: 1, overflowX: 'auto' }}>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `minmax(44px, auto) repeat(${FORECAST_COLUMNS.length}, minmax(34px, 1fr))`,
-              rowGap: 4,
-              columnGap: 8,
-              alignItems: 'baseline',
-              minWidth: 300,
-            }}
-          >
-            <span />
-            {FORECAST_COLUMNS.map(c => (
-              <span
-                key={c.key}
-                style={{ fontSize: 11, textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}
-              >
-                {c.label}
-              </span>
-            ))}
-            <ForecastRow label="All" values={allRow} />
-            <ForecastRow label="Session" values={sessionRow} />
-          </div>
+        <div style={{ flex: 1 }}>
+          <ForecastGrid rows={[{ label: 'All', values: allRow }, { label: 'Session', values: sessionRow }]} />
         </div>
       </div>
     </div>
@@ -2607,7 +2891,6 @@ function ReviewSessionView() {
             : reviewCardStyle
         }
       >
-        <SchedulerBadge scheduler={current.scheduler} />
         <div className="type-title" style={{ lineHeight: 1.5 }}>
           <ReactMarkdown>{current.question}</ReactMarkdown>
         </div>
@@ -3982,104 +4265,14 @@ function GenerateFlashcardsImportView() {
   );
 }
 
-// ── Experiment dashboard (Sprint10_DualSchedulerAB) ──────────────────────────
-//
-// First version: a compact two-row comparison table over GET /experiment/summary
-// — real recorded per-scheduler data only, never theoretical predictions (mission
-// §7). No new fetch pattern: same apiFetch<Dataset<T>>/isApiError/ErrorCard/
-// Skeleton convention already used throughout this file (e.g. ImagesView above).
-// Plain algorithm names only ('Classic' / 'FSRS') — no FSRS-native vocabulary.
-
-const EXPERIMENT_METRIC_ROWS: { key: keyof ExperimentSummaryRow; label: string }[] = [
-  { key: 'assigned_cards', label: 'Assigned cards' },
-  { key: 'new_cards_assigned', label: 'New cards assigned' },
-  { key: 'migrated_cards_assigned', label: 'Migrated cards assigned' },
-  { key: 'cards_new', label: 'New' },
-  { key: 'cards_learning', label: 'Learning' },
-  { key: 'cards_established', label: 'Established' },
-  { key: 'reviewed_cards', label: 'Reviewed cards' },
-  { key: 'completed_reviews', label: 'Completed reviews' },
-  { key: 'ordinary_due_reviews', label: 'Ordinary due reviews (sample size)' },
-  { key: 'recall_rate', label: 'Recall rate' },
-  { key: 'failures', label: 'Failures' },
-];
-
-function formatExperimentValue(key: keyof ExperimentSummaryRow, value: number | null): string {
-  if (key === 'recall_rate') {
-    return value == null ? '—' : `${Math.round(value * 100)}%`;
-  }
-  return String(value);
-}
-
-function ExperimentDashboardView() {
-  const navigate = useNavigate();
-  const [rows, setRows] = useState<ExperimentSummaryRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const res = await apiFetch<Dataset<ExperimentSummaryRow>>('/essaycards/experiment/summary');
-      setLoading(false);
-      if (isApiError(res)) {
-        setError(res);
-        return;
-      }
-      setError(null);
-      setRows(res.rows);
-    })();
-  }, []);
-
-  const classic = rows.find(r => r.scheduler === 'classic');
-  const fsrs = rows.find(r => r.scheduler === 'fsrs');
-
-  return (
-    <div style={pageStyle}>
-      <button style={jumpBtnStyle} onClick={() => navigate('/essaycards')}>← Back to all essays</button>
-      <h2 style={{ marginTop: 16 }}>Scheduler experiment</h2>
-      <p style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>
-        Real recorded data only. "Ordinary due reviews" is the sample size behind
-        recall rate — immediate relearning and rapid retries are excluded.
-      </p>
-
-      {loading && <Skeleton />}
-      {error && <ErrorCard error={error} />}
-
-      {!loading && !error && classic && fsrs && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 16 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--md-sys-color-outline-variant)' }}>
-              <th style={{ textAlign: 'left', padding: '8px 4px', fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>Metric</th>
-              <th style={{ textAlign: 'right', padding: '8px 4px', fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>Classic</th>
-              <th style={{ textAlign: 'right', padding: '8px 4px', fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>FSRS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {EXPERIMENT_METRIC_ROWS.map(({ key, label }) => (
-              <tr key={key} style={{ borderBottom: '1px solid var(--md-sys-color-outline-variant)' }}>
-                <td style={{ padding: '8px 4px', fontSize: 13 }}>{label}</td>
-                <td style={{ padding: '8px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatExperimentValue(key, classic[key])}
-                </td>
-                <td style={{ padding: '8px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatExperimentValue(key, fsrs[key])}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
-// ── Review stats (Sprint11_ReviewStats) ──────────────────────────────────────
+// ── Review stats (Sprint11_ReviewStats, reworked Sprint12_FSRSAndUXOverhaul) ─
 //
 // "How did I do" — three rolling-window (day/week/month) cards over
-// GET /review-stats/summary. Deliberately distinct from the experiment
-// dashboard above: scheduler-agnostic, no per-scheduler split. Same
-// apiFetch<Dataset<T>>/isApiError/ErrorCard/Skeleton convention.
+// GET /review-stats/summary. Same apiFetch<Dataset<T>>/isApiError/ErrorCard/
+// Skeleton convention. The Sprint10 experiment dashboard that used to sit
+// alongside this (GET /experiment/summary, the Classic-vs-FSRS comparison)
+// is retired along with the dual-scheduler mechanism — see CLAUDE.md "FSRS
+// scheduling".
 
 const REVIEW_STATS_WINDOW_LABELS: Record<ReviewStatsSummaryRow['period'], string> = {
   day: 'Day',
@@ -4129,42 +4322,124 @@ function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
   );
 }
 
+const statsZoneHeadingStyle: React.CSSProperties = {
+  margin: '28px 0 4px',
+  fontSize: 15,
+};
+
+const statsZoneSubtextStyle: React.CSSProperties = {
+  color: 'var(--md-sys-color-on-surface-variant)',
+  fontSize: 12,
+  margin: '0 0 12px',
+};
+
+// Levels 0-4, in that fixed order — the x-axis of the "Essay learning
+// progress" histogram.
+const LEARNING_LEVELS = [0, 1, 2, 3, 4];
+
 function ReviewStatsView() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<ReviewStatsSummaryRow[]>([]);
+  const [summaryRows, setSummaryRows] = useState<ReviewStatsSummaryRow[]>([]);
+  const [activityDataset, setActivityDataset] = useState<PlatformDataset | null>(null);
+  const [intervalsDataset, setIntervalsDataset] = useState<PlatformDataset | null>(null);
+  const [forecastRow, setForecastRow] = useState<(number | null)[] | null>(null);
+  const [essays, setEssays] = useState<EssayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const res = await apiFetch<Dataset<ReviewStatsSummaryRow>>('/essaycards/review-stats/summary');
+      const [summaryRes, activityRes, intervalsRes, forecastRes, essaysRes] = await Promise.all([
+        apiFetch<Dataset<ReviewStatsSummaryRow>>('/essaycards/review-stats/summary'),
+        apiFetch<PlatformDataset>('/essaycards/review-stats/activity'),
+        apiFetch<PlatformDataset>('/essaycards/review-stats/intervals'),
+        apiFetch<Dataset<QueueStatRow>>('/essaycards/flashcards/stats'),
+        apiFetch<Dataset<EssayRow>>('/essaycards/essays'),
+      ]);
       setLoading(false);
-      if (isApiError(res)) {
-        setError(res);
+
+      if (isApiError(summaryRes)) {
+        setError(summaryRes);
         return;
       }
       setError(null);
-      setRows(res.rows);
+      setSummaryRows(summaryRes.rows);
+      setActivityDataset(isApiError(activityRes) ? null : activityRes);
+      setIntervalsDataset(isApiError(intervalsRes) ? null : intervalsRes);
+      if (!isApiError(forecastRes)) {
+        const byBucket = Object.fromEntries(forecastRes.rows.map(r => [r.bucket, r.count]));
+        setForecastRow(FORECAST_COLUMNS.map(c => byBucket[c.key] ?? 0));
+      }
+      if (!isApiError(essaysRes)) setEssays(essaysRes.rows);
     })();
   }, []);
+
+  const levelHistogramDataset: PlatformDataset = {
+    meta: { object_type: 'learning_level_bucket', label: 'Essay Learning Progress', total: LEARNING_LEVELS.length, page: 1, page_size: LEARNING_LEVELS.length, row_actions: [] },
+    schema: [
+      { key: 'level', label: 'Level', type: 'string', sortable: false, filterable: false },
+      { key: 'count', label: 'Essays', type: 'number', sortable: false, filterable: false },
+    ],
+    rows: LEARNING_LEVELS.map(level => ({
+      id: String(level),
+      level: `${level}/4`,
+      count: essays.filter(e => e.learning_level === level).length,
+    })),
+  };
 
   return (
     <div style={pageStyle}>
       <button style={jumpBtnStyle} onClick={() => navigate('/essaycards')}>← Back to all essays</button>
-      <h2 style={{ marginTop: 16 }}>Review stats</h2>
-      <p style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>
-        How you did over the trailing day, week, and month — across every essay
-        and both schedulers.
-      </p>
+      <h2 style={{ marginTop: 16 }}>Stats</h2>
 
       {loading && <Skeleton />}
       {error && <ErrorCard error={error} />}
 
-      {!loading && !error && rows.length === 3 && (
-        <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
-          {rows.map(row => <ReviewStatsCard key={row.period} row={row} />)}
-        </div>
+      {!loading && !error && (
+        <>
+          <h3 style={statsZoneHeadingStyle}>Study activity</h3>
+          <p style={statsZoneSubtextStyle}>Reviews completed per day, trailing 30 days.</p>
+          {activityDataset
+            ? <LineChart dataset={activityDataset} mapping={{ x: 'date', y: 'reviews', aggregation: 'sum' }} />
+            : <div style={{ color: '#888', fontSize: 13 }}>Activity data unavailable.</div>}
+
+          <h3 style={statsZoneHeadingStyle}>Scheduled reviews (forecast)</h3>
+          <p style={statsZoneSubtextStyle}>
+            A schedule FORECAST, not an observed fact — when currently-scheduled cards will next come due,
+            predicted by FSRS. Distinct from "Observed recall" below.
+          </p>
+          <div
+            style={{
+              background: 'var(--md-sys-color-surface-variant)',
+              borderRadius: 'var(--radius-card, 12px)',
+              padding: 12,
+            }}
+          >
+            <ForecastGrid rows={[{ label: 'All', values: forecastRow ?? FORECAST_COLUMNS.map(() => null) }]} />
+          </div>
+
+          <h3 style={statsZoneHeadingStyle}>Observed recall</h3>
+          <p style={statsZoneSubtextStyle}>
+            What actually happened over the trailing day/week/month — OBSERVED, not predicted. Sample size is
+            the review count shown on each card.
+          </p>
+          {summaryRows.length === 3 && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {summaryRows.map(row => <ReviewStatsCard key={row.period} row={row} />)}
+            </div>
+          )}
+
+          <h3 style={statsZoneHeadingStyle}>Scheduled intervals</h3>
+          <p style={statsZoneSubtextStyle}>How mature the deck is — current review_interval distribution across every scheduled card.</p>
+          {intervalsDataset
+            ? <BarChart dataset={intervalsDataset} mapping={{ x: 'label', y: 'count', aggregation: 'sum' }} />
+            : <div style={{ color: '#888', fontSize: 13 }}>Interval data unavailable.</div>}
+
+          <h3 style={statsZoneHeadingStyle}>Essay learning progress</h3>
+          <p style={statsZoneSubtextStyle}>Number of essays at each learning level, 0-4.</p>
+          <BarChart dataset={levelHistogramDataset} mapping={{ x: 'level', y: 'count', aggregation: 'sum' }} />
+        </>
       )}
     </div>
   );
@@ -4188,7 +4463,6 @@ export default function EssayCardsApp() {
         <Route path="/images" element={<ImagesView />} />
         <Route path="/nuggets/authoring" element={<NuggetAuthoringImportView />} />
         <Route path="/nuggets/:id/generate-flashcards" element={<GenerateFlashcardsImportView />} />
-        <Route path="/experiment" element={<ExperimentDashboardView />} />
         <Route path="/stats" element={<ReviewStatsView />} />
       </Routes>
     </>

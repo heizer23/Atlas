@@ -1,24 +1,31 @@
 """
-GET /review-stats/summary — the review-performance stats page's sole data
-endpoint (Sprint11_ReviewStats).
+GET /review-stats/summary, GET /review-stats/activity, GET /review-stats/intervals
+— the stats page's data endpoints.
 
-Reports on the reviewer's actual completed review history over three fixed,
-independent rolling windows off Postgres now() — day (24 hours), week (7
-days), month (30 days), in that order. Always exactly three rows, never
-omitted, even when a window has zero reviews.
+GET /review-stats/summary (Sprint11_ReviewStats). Reports on the reviewer's
+actual completed review history over three fixed, independent rolling windows
+off Postgres now() — day (24 hours), week (7 days), month (30 days), in that
+order. Always exactly three rows, never omitted, even when a window has zero
+reviews.
 
-Deliberately scheduler-agnostic: aggregates across both Classic and FSRS
-(unlike backend/routers/experiment.py, which compares the two schedulers
-against each other). Deliberately applies no prior_review_interval filter —
-unlike GET /experiment/summary's ordinary_due_reviews filter — because this
-page answers "how did I do", counting every completed review including
-relearning/rapid retries, not isolated evidence of long-term retention.
+Scheduler-agnostic by construction since Sprint12_FSRSAndUXOverhaul made FSRS
+the sole scheduler (docstring previously framed this as "across both Classic
+and FSRS" — that framing is now meaningless and has been dropped; the
+behavior/shape is otherwise unchanged).
 
 recall_rate is null (not 0) when a window has zero reviews — "no data yet"
-and "0% recall" are different facts, mirroring experiment.py's identical
-convention. failures is always exactly equal to again_count, named
-separately only because recall_rate is derived from it and the two must
-always be read together.
+and "0% recall" are different facts. failures is always exactly equal to
+again_count, named separately only because recall_rate is derived from it and
+the two must always be read together.
+
+GET /review-stats/activity (Sprint12_FSRSAndUXOverhaul, NEW). Daily review-
+count time series, trailing 30 UTC calendar days, zero-filled. See
+_activity_rows.
+
+GET /review-stats/intervals (Sprint12_FSRSAndUXOverhaul, NEW). Current
+review_interval distribution across every scheduled card, six fixed
+zero-filled buckets — "how mature is my deck", distinct from the next-due
+forecast GET /flashcards/stats already provides. See _interval_bucket_rows.
 """
 
 from typing import Any
@@ -138,6 +145,149 @@ def get_review_stats_summary() -> JSONResponse:
             row_actions=[],
         ),
         **{"schema": REVIEW_STATS_SUMMARY_SCHEMA},
+        rows=rows,
+    )
+    return _dataset_response(dataset)
+
+
+# ── GET /review-stats/activity (Sprint12_FSRSAndUXOverhaul) ─────────────────
+
+ACTIVITY_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="date",    label="Date",    type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="reviews", label="Reviews", type="number", sortable=False, filterable=False),
+]
+
+
+def _activity_rows(cur: Any) -> list[dict[str, Any]]:
+    """
+    One SQL statement producing exactly 30 zero-filled {date, reviews} rows,
+    oldest first — the 30 most recent UTC calendar days ending today (UTC).
+    generate_series builds the full day spine first (so a day with zero
+    reviews still appears), then a LEFT JOIN brings in actual counts.
+    date_trunc('day', ... at time zone 'utc') anchors every boundary
+    (R-CON-AL-06 — fixed UTC calendar days, no user-timezone awareness this
+    sprint; see 10_architecture.json deferred_decisions).
+    """
+    cur.execute(
+        """
+        with days as (
+            select generate_series(
+                date_trunc('day', now() at time zone 'utc') - interval '29 days',
+                date_trunc('day', now() at time zone 'utc'),
+                interval '1 day'
+            ) as day
+        ),
+        counts as (
+            select date_trunc('day', reviewed_at at time zone 'utc') as day, count(*) as n
+            from essaycards.review_events
+            where reviewed_at >= date_trunc('day', now() at time zone 'utc') - interval '29 days'
+            group by 1
+        )
+        select
+            to_char(d.day, 'YYYY-MM-DD') as date,
+            coalesce(c.n, 0)::int as reviews
+        from days d
+        left join counts c on c.day = d.day
+        order by d.day asc
+        """
+    )
+    return [dict(r) for r in cur.fetchall()]
+
+
+@router.get("/activity", response_model=None)
+def get_review_activity() -> JSONResponse:
+    """
+    Study activity over time — daily review counts, trailing 30 UTC calendar
+    days. No parameters. Always exactly 30 rows, oldest first, zero-filled.
+    Time basis: UTC calendar days (R-CON-AL-01/06) — see _activity_rows.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            rows = _activity_rows(cur)
+
+    dataset = Dataset(
+        meta=DatasetMeta(
+            object_type="review_activity_day",
+            label="Study Activity",
+            total=len(rows),
+            page=1,
+            page_size=len(rows),
+            row_actions=[],
+        ),
+        **{"schema": ACTIVITY_SCHEMA},
+        rows=rows,
+    )
+    return _dataset_response(dataset)
+
+
+# ── GET /review-stats/intervals (Sprint12_FSRSAndUXOverhaul) ────────────────
+
+INTERVALS_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="bucket", label="Bucket",  type="string", sortable=False, filterable=False),
+    ColumnSchema(key="label",  label="Horizon", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="count",  label="Cards",   type="number", sortable=False, filterable=False),
+]
+
+# Fixed near -> far bucket order, same closed-set discipline as
+# backend/routers/flashcards.py::STATS_BUCKETS. "new" = never reviewed
+# (review_interval = 0, the same sentinel used throughout this app). Open on
+# the lower edge, closed on the upper edge.
+INTERVAL_BUCKETS: list[tuple[str, str]] = [
+    ("new",            "New"),
+    ("within_1_day",   "< 1 day"),
+    ("within_7_days",  "1-7 days"),
+    ("within_30_days", "7-30 days"),
+    ("within_90_days", "30-90 days"),
+    ("beyond_90_days", "90+ days"),
+]
+
+
+def _interval_bucket_rows(cur: Any) -> list[dict[str, Any]]:
+    """One SQL statement, same FILTER-based zero-fill idiom as
+    backend/routers/flashcards.py::flashcard_queue_stats, over
+    flashcard_review_state.review_interval (a stored write-time cache, not
+    independently time-filtered — R-CON-AL-06)."""
+    cur.execute(
+        """
+        select
+          count(*) filter (where review_interval = interval '0')                                   as new,
+          count(*) filter (where review_interval > interval '0'
+                              and review_interval <= interval '1 day')                              as within_1_day,
+          count(*) filter (where review_interval >  interval '1 day'
+                              and review_interval <= interval '7 days')                              as within_7_days,
+          count(*) filter (where review_interval >  interval '7 days'
+                              and review_interval <= interval '30 days')                             as within_30_days,
+          count(*) filter (where review_interval >  interval '30 days'
+                              and review_interval <= interval '90 days')                             as within_90_days,
+          count(*) filter (where review_interval >  interval '90 days')                              as beyond_90_days
+        from essaycards.flashcard_review_state
+        """
+    )
+    counts = cur.fetchone()
+    return [{"bucket": key, "label": label, "count": int(counts[key])} for key, label in INTERVAL_BUCKETS]
+
+
+@router.get("/intervals", response_model=None)
+def get_review_intervals() -> JSONResponse:
+    """
+    Current scheduled-interval distribution across every card with a
+    review-state row. No parameters. Always exactly six rows, zero-filled;
+    the six counts sum to the total scheduled card count.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            rows = _interval_bucket_rows(cur)
+
+    dataset = Dataset(
+        meta=DatasetMeta(
+            object_type="review_interval_bucket",
+            label="Scheduled Interval Distribution",
+            total=len(rows),
+            page=1,
+            page_size=len(rows),
+            row_actions=[],
+        ),
+        **{"schema": INTERVALS_SCHEMA},
         rows=rows,
     )
     return _dataset_response(dataset)

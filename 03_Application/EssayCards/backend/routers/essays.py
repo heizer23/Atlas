@@ -58,12 +58,22 @@ ESSAY_SCHEMA: list[ColumnSchema] = [
 
 # List endpoint (GET /essays) — the roadmap view: base columns plus derived
 # per-essay knowledge indicators (see list_essays docstring).
+# Sprint12_FSRSAndUXOverhaul: oral_score/oral_date removed (replaced by the
+# derived 0-4 learning_level and its four milestones — see
+# _learning_progress_subquery_sql).
 ESSAY_OVERVIEW_SCHEMA: list[ColumnSchema] = ESSAY_SCHEMA + [
-    ColumnSchema(key="progress_established", label="Established", type="number", sortable=True,  filterable=False),
-    ColumnSchema(key="progress_total",       label="Total cards", type="number", sortable=True,  filterable=False),
-    ColumnSchema(key="open_count",           label="Open",        type="number", sortable=True,  filterable=False),
-    ColumnSchema(key="oral_score",           label="Oral score",  type="number", sortable=True,  filterable=False),
-    ColumnSchema(key="oral_date",            label="Oral date",   type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="progress_established",          label="Established",           type="number",  sortable=True,  filterable=False),
+    ColumnSchema(key="progress_total",                 label="Total cards",           type="number",  sortable=True,  filterable=False),
+    ColumnSchema(key="open_count",                     label="Open",                  type="number",  sortable=True,  filterable=False),
+    ColumnSchema(key="cards_seen_count",                label="Cards seen",            type="number",  sortable=True,  filterable=False),
+    ColumnSchema(key="cards_future_safe_count",         label="Cards future-safe",     type="number",  sortable=True,  filterable=False),
+    ColumnSchema(key="milestone_all_cards_seen",        label="All cards seen",        type="boolean", sortable=False, filterable=False),
+    ColumnSchema(key="milestone_all_cards_future_safe", label="All cards future-safe", type="boolean", sortable=False, filterable=False),
+    ColumnSchema(key="milestone_guided_passed",         label="Guided exam passed",    type="boolean", sortable=False, filterable=False),
+    ColumnSchema(key="milestone_unguided_passed",       label="Unguided exam passed",  type="boolean", sortable=False, filterable=False),
+    ColumnSchema(key="guided_passed_at",                label="Guided passed on",      type="date",    sortable=True,  filterable=False),
+    ColumnSchema(key="unguided_passed_at",              label="Unguided passed on",    type="date",    sortable=True,  filterable=False),
+    ColumnSchema(key="learning_level",                  label="Learning level",        type="number",  sortable=True,  filterable=False),
 ]
 
 # GET /essays/{essay_id}/questions — the question-overview screen. A flat row
@@ -92,7 +102,7 @@ QUESTION_SCHEMA: list[ColumnSchema] = [
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     d["id"] = str(d["id"])
-    for k in ("created_at", "updated_at", "oral_date"):
+    for k in ("created_at", "updated_at", "guided_passed_at", "unguided_passed_at"):
         if d.get(k):
             d[k] = d[k].isoformat()
     return d
@@ -166,7 +176,88 @@ def _main_spine_nuggets(cur: Any, main_spine_markdown: str) -> list[dict[str, st
     return [{"nugget_key": row["nugget_key"], "title": row["title"]} for row in cur.fetchall()]
 
 
-_OVERVIEW_QUERY = """
+# ── Learning progress (Sprint12_FSRSAndUXOverhaul) ──────────────────────────
+#
+# Shared LATERAL-join SQL fragment computing the nine derived learning-
+# progress fields for ONE essay — reused by both _OVERVIEW_QUERY (per-row,
+# list_essays) and get_essay's single-essay query, so the milestone logic
+# exists in exactly one place (R-CON-BP-09). Assumes the enclosing query's
+# essays row is aliased `e`. All against Postgres now() at query time
+# (R-CON-AL-06) — never cached/stored.
+#
+# "Active card" = every flashcard currently belonging to the essay (no
+# archival/retirement concept exists). Milestone 1/2 are explicitly false
+# (never vacuously true) for a zero-card essay — card_counts.total = 0 fails
+# the `> 0` guard on both. Milestone 3/4 ("passed") require (a) at least one
+# section, (b) EVERY section to have at least one examination of that
+# exam_type, and (c) EVERY such section's LATEST examination of that type to
+# score >= 3 (PASS_SCORE_THRESHOLD) — a per-section minimum gate, not an
+# average. *_passed_at is the OLDEST examined_at among those latest-per-
+# section rows, present only when the corresponding milestone is true.
+def _learning_progress_subquery_sql() -> str:
+    return """
+    left join lateral (
+      with sec as (
+        select s.id from essaycards.essay_sections s where s.essay_id = e.id
+      ),
+      cards as (
+        select frs.last_reviewed_at, frs.next_due_at
+        from essaycards.flashcards f
+        join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
+        where f.essay_id = e.id
+      ),
+      card_counts as (
+        select
+          count(*) as total,
+          count(*) filter (where last_reviewed_at is not null) as seen,
+          count(*) filter (
+            where last_reviewed_at is not null
+              and next_due_at > now() + interval '24 hours'
+          ) as future_safe
+        from cards
+      ),
+      section_counts as (select count(*) as n from sec),
+      guided_latest as (
+        select distinct on (se.section_id) se.section_id, se.score, se.examined_at
+        from essaycards.section_examinations se
+        where se.section_id in (select id from sec) and se.exam_type = 'guided'
+        order by se.section_id, se.examined_at desc
+      ),
+      unguided_latest as (
+        select distinct on (se.section_id) se.section_id, se.score, se.examined_at
+        from essaycards.section_examinations se
+        where se.section_id in (select id from sec) and se.exam_type = 'unguided'
+        order by se.section_id, se.examined_at desc
+      )
+      select
+        cc.seen                                     as cards_seen_count,
+        cc.future_safe                               as cards_future_safe_count,
+        (cc.total > 0 and cc.seen = cc.total)        as milestone_all_cards_seen,
+        (cc.total > 0 and cc.future_safe = cc.total) as milestone_all_cards_future_safe,
+        (
+          sc.n > 0 and sc.n = (select count(*) from guided_latest)
+          and not exists (select 1 from guided_latest where score < 3)
+        ) as milestone_guided_passed,
+        case
+          when sc.n > 0 and sc.n = (select count(*) from guided_latest)
+               and not exists (select 1 from guided_latest where score < 3)
+          then (select min(examined_at) from guided_latest)
+        end as guided_passed_at,
+        (
+          sc.n > 0 and sc.n = (select count(*) from unguided_latest)
+          and not exists (select 1 from unguided_latest where score < 3)
+        ) as milestone_unguided_passed,
+        case
+          when sc.n > 0 and sc.n = (select count(*) from unguided_latest)
+               and not exists (select 1 from unguided_latest where score < 3)
+          then (select min(examined_at) from unguided_latest)
+        end as unguided_passed_at
+      from card_counts cc, section_counts sc
+    ) lp on true
+    """
+
+
+_OVERVIEW_QUERY = f"""
 select
   e.id, e.title, e.slug, e.category, e.sort_index, e.status,
   e.created_at, e.updated_at,
@@ -182,28 +273,16 @@ select
      join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
      where f.essay_id = e.id and frs.next_due_at <= now())
       as open_count,
-  oral.oral_score,
-  oral.oral_date
+  lp.cards_seen_count, lp.cards_future_safe_count,
+  lp.milestone_all_cards_seen, lp.milestone_all_cards_future_safe,
+  lp.milestone_guided_passed, lp.milestone_unguided_passed,
+  lp.guided_passed_at, lp.unguided_passed_at,
+  (
+    lp.milestone_all_cards_seen::int + lp.milestone_all_cards_future_safe::int
+    + lp.milestone_guided_passed::int + lp.milestone_unguided_passed::int
+  ) as learning_level
 from essaycards.essays e
-left join lateral (
-  with sec as (
-    select s.id from essaycards.essay_sections s where s.essay_id = e.id
-  ),
-  latest as (
-    select distinct on (se.section_id) se.section_id, se.score, se.examined_at
-    from essaycards.section_examinations se
-    where se.section_id in (select id from sec)
-    order by se.section_id, se.examined_at desc
-  )
-  select
-    case when (select count(*) from sec) > 0
-          and (select count(*) from sec) = (select count(*) from latest)
-         then round(avg(l.score)::numeric / 6 * 100)::int end as oral_score,
-    case when (select count(*) from sec) > 0
-          and (select count(*) from sec) = (select count(*) from latest)
-         then min(l.examined_at) end                          as oral_date
-  from latest l
-) oral on true
+{_learning_progress_subquery_sql()}
 order by e.category asc nulls last, e.sort_index asc, e.created_at asc
 """
 
@@ -216,23 +295,23 @@ def list_essays() -> JSONResponse:
     asc) so the overview page renders the essays grouped by topic and in
     author-assigned sequence without re-sorting. Empty result is valid.
 
-    Each row carries, beyond id/title/slug/category/sort_index/status, five
-    derived knowledge indicators (all computed against Postgres now() at query
-    time — R-CON-AL-06):
+    Each row carries, beyond id/title/slug/category/sort_index/status, three
+    pre-existing knowledge indicators plus the nine Sprint12 learning-progress
+    fields (all computed against Postgres now() at query time — R-CON-AL-06):
       - progress_total (int)       — every flashcard in the essay.
       - progress_established (int) — those whose review_interval >= 24h.
       - open_count (int)           — those whose next_due_at <= now() (the
                                      existing `open` definition; NOT gated on
                                      established — a focus session would surface
                                      exactly this many).
-      - oral_score (int | null)    — round(avg(latest section_score) / 6 * 100)
-                                     over the most recent section_examinations
-                                     row per section. null unless EVERY section
-                                     has at least one examination.
-      - oral_date (ISO str | null) — the oldest examined_at among those
-                                     most-recent-per-section rows; null under
-                                     the same all-sections condition as
-                                     oral_score.
+      - cards_seen_count / cards_future_safe_count (int) — see
+        _learning_progress_subquery_sql.
+      - milestone_all_cards_seen / milestone_all_cards_future_safe /
+        milestone_guided_passed / milestone_unguided_passed (bool) — the four
+        independently-gated learning milestones.
+      - guided_passed_at / unguided_passed_at (ISO str | null) — present only
+        when the corresponding milestone is true.
+      - learning_level (int, 0-4) — count of the four milestones that are true.
     Topic-level progress / open count are not returned — the client sums the
     per-essay counts of a topic's rows.
     """
@@ -260,15 +339,32 @@ def list_essays() -> JSONResponse:
 def get_essay(essay_id: str) -> JSONResponse:
     """Single essay with its ordered sections embedded on the returned row.
 
+    Sprint12_FSRSAndUXOverhaul: now also carries the same nine derived
+    learning-progress fields as GET /essays (see _learning_progress_subquery_sql
+    — computed by the identical shared SQL fragment, R-CON-BP-09).
+
     404 ApiError if essay_id does not exist. An essay with zero sections is
     valid and returns sections: [].
     """
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, title, slug, category, sort_index, status, "
-                "main_spine_markdown, created_at, updated_at "
-                "from essaycards.essays where id = %s",
+                f"""
+                select
+                  e.id, e.title, e.slug, e.category, e.sort_index, e.status,
+                  e.main_spine_markdown, e.created_at, e.updated_at,
+                  lp.cards_seen_count, lp.cards_future_safe_count,
+                  lp.milestone_all_cards_seen, lp.milestone_all_cards_future_safe,
+                  lp.milestone_guided_passed, lp.milestone_unguided_passed,
+                  lp.guided_passed_at, lp.unguided_passed_at,
+                  (
+                    lp.milestone_all_cards_seen::int + lp.milestone_all_cards_future_safe::int
+                    + lp.milestone_guided_passed::int + lp.milestone_unguided_passed::int
+                  ) as learning_level
+                from essaycards.essays e
+                {_learning_progress_subquery_sql()}
+                where e.id = %s
+                """,
                 (essay_id,),
             )
             essay_row = cur.fetchone()

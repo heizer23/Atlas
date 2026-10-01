@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
-from backend.routers import essays, examinations, experiment, exploration, flashcards, images, nuggets, review_stats
+from backend.migrate_fsrs_state import migrate_legacy_fsrs_state
+from backend.routers import essays, examinations, exploration, flashcards, images, nuggets, review_stats
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.performance import install_request_timing
@@ -33,7 +34,6 @@ app.include_router(exploration.router, prefix="/api/essaycards")
 app.include_router(examinations.router, prefix="/api/essaycards")
 app.include_router(images.router, prefix="/api/essaycards")
 app.include_router(nuggets.router, prefix="/api/essaycards")
-app.include_router(experiment.router, prefix="/api/essaycards")
 app.include_router(review_stats.router, prefix="/api/essaycards")
 
 
@@ -45,6 +45,10 @@ def on_startup() -> None:
             init_pool()
             log.info("Running schema init...")
             init_schema()
+            log.info("Running legacy FSRS-state backfill...")
+            from backend.database import get_db
+            with get_db() as conn:
+                migrate_legacy_fsrs_state(conn)
             log.info("Ready.")
             return
         except Exception as exc:

@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-10-01 10:32 UTC
+> Last updated: 2026-10-01 12:28 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -266,7 +266,7 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 ### EssayCards
 
-**Summary:** Adds GET /api/essaycards/review-stats/summary and a Stats page reporting how the reviewer performed over the last day, week, and month, aggregated across every essay and both schedulers from the existing review_events history.
+**Summary:** Collapses EssayCards onto a single FSRS scheduler, replaces the ad-hoc essay-maturity signal with a derived 0-4 learning-progress level built from card-coverage and guided/unguided oral-exam milestones, consolidates the app's button surface into a primary+action-menu pattern with a persisted category collapse control, and reworks the stats page and main navigation around the app's existing Dataset/chart and Shell nav contracts.
 
 | | |
 |---|---|
@@ -277,7 +277,18 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 **Endpoints:**
 ```
-GET /api/essaycards/review-stats/summary — Dataset, always exactly three rows (day, week, month, in that fixed order)
+GET /api/essaycards/flashcards/due — scheduler field removed; selection/ordering SQL (WHERE/ORDER BY) is byte-for-byte unchanged from pre-sprint (binding invariant, see below)
+POST /api/essaycards/flashcards/{flashcard_id}/review — unchanged request/response shape; now unconditionally dispatches to the FSRS scheduler and always writes fsrs_card_state + one review_events row (no scheduler branch)
+GET /api/essaycards/essays — ESSAY_OVERVIEW_SCHEMA changes: oral_score/oral_date removed, replaced by cards_seen_count, cards_future_safe_count, milestone_all_cards_seen, milestone_all_cards_future_safe, milestone_guided_passed, milestone_unguided_passed, guided_passed_at, unguided_passed_at, learning_level (0-4)
+GET /api/essaycards/essays/{essay_id} — now also carries the same nine derived learning-progress fields as the list endpoint (previously carried none of the derived indicators)
+GET /api/essaycards/essays/{essay_id}/examination-package — gains a required exam_type query parameter ('guided'|'unguided'); package shape gains a top-level exam_type echo and, for exam_type=unguided, every section's last_examination is always null (no calibration context passed)
+GET /api/essaycards/sections/{section_id}/examinations — EXAMINATION_SCHEMA gains exam_type
+POST /api/essaycards/examinations/import — each result now requires an explicit exam_type ('guided'|'unguided', no default — see invariants)
+GET /api/essaycards/review-stats/summary — unchanged shape/behavior (already scheduler-agnostic); docstring only loses its now-meaningless 'across both Classic and FSRS' framing
+GET /api/essaycards/review-stats/activity — NEW. Daily review-count time series, trailing 30 UTC calendar days, zero-filled
+GET /api/essaycards/review-stats/intervals — NEW. Current review_interval distribution across every scheduled card, six fixed zero-filled buckets
+GET /api/essaycards/experiment/summary — REMOVED (whole router deleted, see dependencies.forbidden)
+New-card creation (essay/section ingest, POST /flashcards/upsert, exploration import's create_card) — each was_inserted-gated flashcard_review_state INSERT drops all scheduler-assignment columns/logic; otherwise unchanged
 ```
 
 ### FamilyAtlas ⚠️

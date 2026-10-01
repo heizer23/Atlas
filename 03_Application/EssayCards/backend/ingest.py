@@ -36,8 +36,6 @@ from typing import Any
 
 import yaml
 
-from backend.scheduling import EXPERIMENT_VERSION, decide_scheduler_assignment
-
 # ── Public API ──────────────────────────────────────────────────────────────
 
 # Essay lifecycle (schema.sql ck_essays_status). Shared with the JSON ingest
@@ -547,15 +545,13 @@ def _upsert_flashcard(cur: Any, essay_id: str, section_id: str, card: dict[str, 
     row = cur.fetchone()
 
     if row["was_inserted"]:
-        scheduler, reason = decide_scheduler_assignment(str(row["id"]))
         cur.execute(
             """
             insert into essaycards.flashcard_review_state
-                (flashcard_id, last_reviewed_at, next_due_at, review_interval,
-                 scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version)
-            values (%s, null, %s, interval '0', %s, now(), %s, %s)
+                (flashcard_id, last_reviewed_at, next_due_at, review_interval)
+            values (%s, null, %s, interval '0')
             """,
-            (row["id"], row["created_at"], scheduler, reason, EXPERIMENT_VERSION),
+            (row["id"], row["created_at"]),
         )
 
     return row["was_inserted"]

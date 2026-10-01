@@ -38,15 +38,19 @@ FC_E_NEW         = "fc000019-0000-0000-0000-000000000019"  # last_reviewed_at NU
 
 UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
 
-# Sprint10_DualSchedulerAB — Essay H fixture cards (see tests/fixtures.sql).
+# Essay H fixture cards (see tests/fixtures.sql). Ids/keys predate
+# Sprint12_FSRSAndUXOverhaul's single-scheduler model and retain
+# "classic"/"fsrs" wording for historical traceability only — every card is
+# reviewed through the one FSRS scheduler now.
 ESSAY_H = "ea000008-0000-0000-0000-000000000008"
-FC_FSRS_ESTABLISHED = "fc000023-0000-0000-0000-000000000023"  # fsrs, established, NOT due
-FC_FSRS_FRESH       = "fc000024-0000-0000-0000-000000000024"  # fsrs, never reviewed, no fsrs_card_state row, NOT due
-FC_CLASSIC_ESTABLISHED = "fc000025-0000-0000-0000-000000000025"  # classic, established, NOT due
-FC_MIX_RECENT_CLASSIC  = "fc000026-0000-0000-0000-000000000026"  # classic, RECENT, due 5m ago
-FC_MIX_RECENT_FSRS     = "fc000027-0000-0000-0000-000000000027"  # fsrs, RECENT, due 20m ago
-FC_MIX_BACKLOG_CLASSIC = "fc000028-0000-0000-0000-000000000028"  # classic, BACKLOG, 12h interval
-FC_MIX_BACKLOG_FSRS    = "fc000029-0000-0000-0000-000000000029"  # fsrs, BACKLOG, 6h interval
+FC_FSRS_ESTABLISHED = "fc000023-0000-0000-0000-000000000023"  # established, NOT due, has fsrs_card_state
+FC_FSRS_FRESH       = "fc000024-0000-0000-0000-000000000024"  # never reviewed, no fsrs_card_state row, NOT due
+FC_CLASSIC_ESTABLISHED = "fc000025-0000-0000-0000-000000000025"  # established, NOT due
+FC_MIX_RECENT_CLASSIC  = "fc000026-0000-0000-0000-000000000026"  # RECENT, due 5m ago
+FC_MIX_RECENT_FSRS     = "fc000027-0000-0000-0000-000000000027"  # RECENT, due 20m ago
+FC_MIX_BACKLOG_CLASSIC = "fc000028-0000-0000-0000-000000000028"  # BACKLOG, 12h interval
+FC_MIX_BACKLOG_FSRS    = "fc000029-0000-0000-0000-000000000029"  # BACKLOG, 6h interval
+FC_LEGACY_NO_FSRS_STATE = "fc000030-0000-0000-0000-000000000030"  # reviewed, no fsrs_card_state row, NOT due
 
 STATS_BUCKET_ORDER = [
     "due_now", "within_10_min", "within_1_day",
@@ -361,17 +365,27 @@ def test_due_card_with_no_review_row_history_is_never_reviewed(client):
     assert order.index(FC_E_NEW) > order.index(FC_E_BACK_20MIN)
 
 
-# ── Review ──────────────────────────────────────────────────────────────────────
+# ── Review — a review updates the due date through FSRS ─────────────────────
+#
+# Sprint12_FSRSAndUXOverhaul removes every Classic-formula exact-timing
+# assertion (the floor/doubling numbers no longer apply — FSRS is the sole
+# scheduler, see backend/scheduling.py). These tests assert the FSRS-generic
+# properties 10_test_spec.md's "A review updates the due date through FSRS"
+# scenario actually requires: next_due_at/review_interval are set from the
+# scheduler's output, a repeat review is computed from PERSISTED state (not
+# the original pre-review state), and grading harder/easier moves the result
+# in the expected direction — without hardcoding FSRS's internal numbers,
+# which stay an implementation detail of the `fsrs` library.
 
-def test_review_again_schedules_five_seconds(client):
-    """Scenario: Review — grade again schedules five seconds out."""
+def test_review_sets_next_due_at_after_last_reviewed_at(client):
+    """Scenario: A review updates the due date through FSRS — grading any
+    card produces next_due_at strictly after last_reviewed_at."""
     r = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_1}/review", json={"grade": "again"})
     assert r.status_code == 200
     body = r.json()
     last_reviewed = _parse_ts(body["last_reviewed_at"])
     next_due = _parse_ts(body["next_due_at"])
-    delta = (next_due - last_reviewed).total_seconds()
-    assert 4.5 <= delta <= 5.5
+    assert next_due > last_reviewed
 
 
 def test_review_materialises_review_interval(client, db_conn):
@@ -393,30 +407,72 @@ def test_review_materialises_review_interval(client, db_conn):
             "select review_interval from essaycards.flashcard_review_state where flashcard_id = %s",
             (FC_ORIGINS_1,),
         )
-        assert 4 <= cur.fetchone()["review_interval"].total_seconds() <= 6
+        # FSRS's 'again' on a fresh card uses its own first learning step
+        # (library default ~1 minute), not Classic's flat 5 seconds — assert
+        # only that a positive interval was materialised correctly.
+        assert cur.fetchone()["review_interval"].total_seconds() > 0
 
 
-def test_review_good_first_time_uses_floor(client):
-    """Scenario: Review — grade good on a never-reviewed card uses the floor."""
+def test_review_good_first_time_schedules_a_positive_interval(client):
+    """Scenario: grading a never-reviewed card 'good' schedules it into the
+    future by a positive interval (FSRS's own learning-step/stability
+    formula decides the exact value — not asserted here)."""
     r = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "good"})
     assert r.status_code == 200
     body = r.json()
     last_reviewed = _parse_ts(body["last_reviewed_at"])
     next_due = _parse_ts(body["next_due_at"])
-    delta = (next_due - last_reviewed).total_seconds()
-    assert 1190 <= delta <= 1210  # ~20 minutes
+    assert next_due > last_reviewed
 
 
-def test_review_good_repeat_uses_doubled_elapsed(client):
-    """Scenario: Review — grade good on a repeat review doubles elapsed time."""
-    r = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_3}/review", json={"grade": "good"})
+def test_review_grading_easy_schedules_further_out_than_again(client, db_conn):
+    """Scenario: for the same never-reviewed card state, a higher ('easy')
+    grade schedules further into the future than a failing ('again') grade —
+    FSRS's own rating-ordering property, exercised through the endpoint
+    rather than hardcoding its interval math. Uses two equivalent never-
+    reviewed fixture cards (fc-origins-1 and fc-origins-2) since each card
+    can only be reviewed once from the same starting state."""
+    r_again = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_1}/review", json={"grade": "again"})
+    r_easy = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "easy"})
+    assert r_again.status_code == 200 and r_easy.status_code == 200
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "select flashcard_id, review_interval from essaycards.flashcard_review_state "
+            "where flashcard_id = any(%s::uuid[])",
+            ([FC_ORIGINS_1, FC_ORIGINS_2],),
+        )
+        rows = {str(r["flashcard_id"]): r["review_interval"] for r in cur.fetchall()}
+    assert rows[FC_ORIGINS_2] > rows[FC_ORIGINS_1]
+
+
+def test_review_repeat_review_is_computed_from_persisted_state_not_original(client):
+    """Scenario: a second review on the same card is computed from the first
+    review's PERSISTED last_reviewed_at/state, not the card's original
+    pre-review state — back-to-back reviews (negligible elapsed time)
+    produce a non-decreasing last_reviewed_at and a well-formed due date each
+    time."""
+    r1 = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "good"})
+    assert r1.status_code == 200
+    first_last_reviewed = _parse_ts(r1.json()["last_reviewed_at"])
+
+    r2 = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "good"})
+    assert r2.status_code == 200
+    second_last_reviewed = _parse_ts(r2.json()["last_reviewed_at"])
+    second_next_due = _parse_ts(r2.json()["next_due_at"])
+
+    assert second_last_reviewed >= first_last_reviewed
+    assert second_next_due > second_last_reviewed
+
+
+def test_review_established_card_reviewed_again_via_endpoint(client):
+    """Scenario: reviewing an already-established (mature) card via the
+    endpoint succeeds and still produces a well-formed, strictly-future due
+    date — exercises the Review (not Learning) FSRS state path."""
+    r = client.post(f"/api/essaycards/flashcards/{FC_CLASSIC_ESTABLISHED}/review", json={"grade": "good"})
     assert r.status_code == 200
     body = r.json()
-    last_reviewed = _parse_ts(body["last_reviewed_at"])
-    next_due = _parse_ts(body["next_due_at"])
-    delta = (next_due - last_reviewed).total_seconds()
-    # fixture last_reviewed_at was ~60 minutes before now; 2*60=120min exceeds the 20min floor
-    assert 7100 <= delta <= 7300
+    assert _parse_ts(body["next_due_at"]) > _parse_ts(body["last_reviewed_at"])
 
 
 def test_review_invalid_grade_rejected(client):
@@ -454,116 +510,35 @@ def test_review_unknown_flashcard_not_found(client):
     assert r.json()["error"]["code"] == "NOT_FOUND"
 
 
-# ── Sprint10_DualSchedulerAB — Classic regression coverage via the HTTP endpoint ──
+# ── Due-queue selection/ordering is unaffected by the scheduler change ──────
 #
-# FC_ORIGINS_1/2/3/4 and the Essay E fixture cards are all pinned to
-# scheduler='classic' by tests/fixtures.sql's Sprint10 catch-all UPDATE, so
-# every review here still exercises compute_next_due_at exactly as before
-# this sprint — these are regression-pinning tests, not new behavior.
+# 10_architecture.json §contracts.invariants "VERIFICATION READING": identical
+# card data run through the SAME (now FSRS-only) scheduler must produce
+# identical selection/ordering behavior — not that FSRS's own next_due_at
+# output must numerically match historical Classic output. These tests
+# exercise exactly that: the due-queue WHERE/ORDER BY is purely a function of
+# next_due_at/last_reviewed_at/review_interval, computed identically for
+# every card regardless of what scheduler (if any) used to assign it pre-
+# Sprint12.
 
-def test_review_hard_first_time_and_repeat_via_endpoint(client):
-    """Scenario: Classic hard grade applies floor-or-doubled-elapsed via the
-    endpoint — never-reviewed uses the 1-minute floor; previously-reviewed
-    uses max(1 minute, 2 x elapsed)."""
-    r = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "hard"})
-    assert r.status_code == 200
-    body = r.json()
-    delta = (_parse_ts(body["next_due_at"]) - _parse_ts(body["last_reviewed_at"])).total_seconds()
-    assert 55 <= delta <= 65  # ~1 minute floor
-
-    r2 = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_3}/review", json={"grade": "hard"})
-    assert r2.status_code == 200
-    body2 = r2.json()
-    delta2 = (_parse_ts(body2["next_due_at"]) - _parse_ts(body2["last_reviewed_at"])).total_seconds()
-    # fixture last_reviewed_at ~60 minutes before now; 2*60min=120min exceeds the 1min floor
-    assert 7100 <= delta2 <= 7300
-
-
-def test_review_easy_first_time_and_repeat_via_endpoint(client):
-    """Scenario: Classic easy grade applies floor-or-doubled-elapsed via the
-    endpoint — never-reviewed uses the 1-day floor; previously-reviewed uses
-    max(1 day, 2 x elapsed)."""
-    r = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "easy"})
-    assert r.status_code == 200
-    body = r.json()
-    delta = (_parse_ts(body["next_due_at"]) - _parse_ts(body["last_reviewed_at"])).total_seconds()
-    assert 86300 <= delta <= 86500  # ~1 day floor
-
-    r2 = client.post(f"/api/essaycards/flashcards/{FC_CLASSIC_ESTABLISHED}/review", json={"grade": "easy"})
-    assert r2.status_code == 200
-    body2 = r2.json()
-    delta2 = (_parse_ts(body2["next_due_at"]) - _parse_ts(body2["last_reviewed_at"])).total_seconds()
-    # fixture last_reviewed_at ~40 days before now; 2*40d comfortably exceeds the 1-day floor
-    assert 79 * 86400 <= delta2 <= 81 * 86400
-
-
-def test_review_consecutive_reviews_chain_from_persisted_state(client):
-    """Scenario: Consecutive reviews on the same card chain from persisted
-    state — the second review is computed from the first review's persisted
-    last_reviewed_at, not the original pre-review state."""
-    r1 = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "good"})
-    first_last_reviewed = _parse_ts(r1.json()["last_reviewed_at"])
-    first_next_due = _parse_ts(r1.json()["next_due_at"])
-    assert (first_next_due - first_last_reviewed).total_seconds() < 1300  # first-time floor (~20min)
-
-    r2 = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "good"})
-    second_last_reviewed = _parse_ts(r2.json()["last_reviewed_at"])
-    second_next_due = _parse_ts(r2.json()["next_due_at"])
-    assert second_last_reviewed >= first_last_reviewed
-    # Second review's elapsed-since-last-review is tiny (back-to-back calls),
-    # so doubled-elapsed is far below the 20min floor -> floor wins again.
-    assert (second_next_due - second_last_reviewed).total_seconds() < 1300
-
-
-def test_review_again_after_several_successful_reviews_still_flat_five_seconds(client):
-    """Scenario: Failure after several successful reviews still resets to
-    flat five seconds, discarding the accumulated interval entirely."""
-    client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "good"})
-    client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "easy"})
-
-    r = client.post(f"/api/essaycards/flashcards/{FC_ORIGINS_2}/review", json={"grade": "again"})
-    assert r.status_code == 200
-    body = r.json()
-    delta = (_parse_ts(body["next_due_at"]) - _parse_ts(body["last_reviewed_at"])).total_seconds()
-    assert 4.5 <= delta <= 5.5
-
-
-def test_review_established_card_doubling_at_multiday_scale_via_endpoint(client):
-    """Scenario: Mature card reviewed again applies doubling at multi-day
-    scale via the endpoint — max(floor, 2 x elapsed), correctly computed at
-    a multi-day scale."""
-    r = client.post(f"/api/essaycards/flashcards/{FC_CLASSIC_ESTABLISHED}/review", json={"grade": "good"})
-    assert r.status_code == 200
-    body = r.json()
-    delta = (_parse_ts(body["next_due_at"]) - _parse_ts(body["last_reviewed_at"])).total_seconds()
-    # fixture last_reviewed_at ~40 days before now; 2*40d comfortably exceeds the 20min floor
-    assert 79 * 86400 <= delta <= 81 * 86400
-
-
-# ── Sprint10_DualSchedulerAB — scheduler field, dispatch, FSRS, assignment ──────
-
-def test_due_rows_carry_scheduler(client):
-    """Scenario: Due-queue selection is scheduler-agnostic (due-row field
-    part). Due rows carry scheduler: 'classic' for a legacy fixture card,
-    'fsrs' for an FSRS fixture card."""
+def test_due_rows_no_longer_carry_scheduler(client):
+    """Scenario: FSRS is the only scheduler for a new card / due rows no
+    longer carry a scheduler field at all — the column no longer exists."""
     r = client.get(f"/api/essaycards/flashcards/due?essay_id={ESSAY_H}")
     assert r.status_code == 200
-    rows = {row["flashcard_id"]: row for row in r.json()["rows"]}
-    assert rows[FC_MIX_RECENT_CLASSIC]["scheduler"] == "classic"
-    assert rows[FC_MIX_RECENT_FSRS]["scheduler"] == "fsrs"
-    assert rows[FC_MIX_BACKLOG_CLASSIC]["scheduler"] == "classic"
-    assert rows[FC_MIX_BACKLOG_FSRS]["scheduler"] == "fsrs"
+    rows = r.json()["rows"]
+    assert rows
+    assert all("scheduler" not in row for row in rows)
 
 
-def test_due_queue_ordering_is_scheduler_agnostic(client):
-    """Scenario: Due-queue selection is scheduler-agnostic. Eligibility,
-    RECENT-before-BACKLOG grouping, RECENT's next_due_at-DESC ordering,
-    BACKLOG's review_interval-DESC ordering are determined purely by
-    next_due_at/last_reviewed_at/review_interval across a deliberate mix of
-    classic and fsrs cards, with scheduler never a sort/filter key. Also
-    confirms is_new/is_recent/scheduled_interval_seconds still compute
-    correctly across the scheduler mix (11_design_review.md Recommended
-    Improvement #2 / 12_design_corrections.md item 4)."""
+def test_due_queue_ordering_unaffected_by_scheduler_removal(client):
+    """Scenario: Due-queue selection/ordering is unaffected by the scheduler
+    change. Eligibility, RECENT-before-BACKLOG grouping, RECENT's
+    next_due_at-DESC ordering, BACKLOG's review_interval-DESC ordering are
+    determined purely by next_due_at/last_reviewed_at/review_interval across
+    a mix of cards with different review histories — identical to the
+    pre-Sprint12 behavior on the same fixture data (11_design_review.md
+    Recommended Improvement #2 / 12_design_corrections.md item 4)."""
     r = client.get(f"/api/essaycards/flashcards/due?essay_id={ESSAY_H}")
     assert r.status_code == 200
     rows = r.json()["rows"]
@@ -582,18 +557,18 @@ def test_due_queue_ordering_is_scheduler_agnostic(client):
     assert by_id[FC_MIX_BACKLOG_CLASSIC]["scheduled_interval_seconds"] == 12 * 3600
     assert by_id[FC_MIX_BACKLOG_FSRS]["scheduled_interval_seconds"] == 6 * 3600
 
-    # The seven forecast bands remain unaffected by the scheduler mix — still
-    # exactly seven zero-filled rows, no scheduler-conditional behavior.
+    # The seven forecast bands remain unaffected — still exactly seven
+    # zero-filled rows, no scheduler-conditional behavior.
     stats_r = client.get(f"/api/essaycards/flashcards/stats?essay_id={ESSAY_H}")
     assert stats_r.status_code == 200
     assert stats_r.json()["meta"]["total"] == 7
 
 
 def test_fsrs_resurfacing_uses_recent_mechanism(client, db_conn):
-    """Scenario: FSRS resurfacing uses the same RECENT mechanism as Classic.
-    Grading an fsrs card 'again' produces a short interval; once that
-    interval elapses, the card reappears via the existing RECENT category —
-    no separate FSRS queue exists."""
+    """Scenario: FSRS resurfacing uses the existing RECENT mechanism.
+    Grading a card 'again' produces a short interval; once that interval
+    elapses, the card reappears via the existing RECENT category — no
+    separate FSRS queue exists."""
     r = client.post(f"/api/essaycards/flashcards/{FC_FSRS_FRESH}/review", json={"grade": "again"})
     assert r.status_code == 200
 
@@ -665,7 +640,7 @@ def test_fsrs_review_due_date_flows_through_existing_fields(client, db_conn):
     """Scenario: FSRS due date flows through the existing fields with no
     separate queue — the response and persisted flashcard_review_state show
     next_due_at/review_interval set from the library's calculated due date,
-    same fields/shape/single-writer as a classic-scheduler review."""
+    same fields/shape/single-writer as before this sprint."""
     r = client.post(f"/api/essaycards/flashcards/{FC_FSRS_FRESH}/review", json={"grade": "good"})
     assert r.status_code == 200
     body = r.json()
@@ -705,108 +680,31 @@ def test_fsrs_review_handles_first_ever_review_with_no_prior_state(client, db_co
     assert row["fsrs_state"] == 1  # State.Learning
 
 
-def test_new_card_creation_assigns_scheduler_permanently(client, db_conn):
-    """Scenario: New card creation assigns a scheduler permanently — via
-    POST /flashcards/upsert, its flashcard_review_state row is seeded with a
-    scheduler, scheduler_assigned_at, scheduler_assignment_reason=
-    'new_card_random', experiment_version='sprint10_v1' — and this
-    assignment never changes afterward."""
+def test_new_card_creation_has_no_scheduler_metadata(client, db_conn):
+    """Scenario: new card creation has no scheduler metadata — via
+    POST /flashcards/upsert, the seeded flashcard_review_state row carries no
+    scheduler-related column at all (they no longer exist on the table)."""
     r = client.post("/api/essaycards/flashcards/upsert", json={
         "essay_slug": "origins-of-long-form-formats",
         "section_id": SECTION_A1,
-        "card": {"level": 2, "q": "New scheduler-assignment question?", "a": "An answer."},
+        "card": {"level": 2, "q": "New card, no scheduler metadata?", "a": "An answer."},
     })
     assert r.status_code == 200
     flashcard_id = r.json()["flashcard_id"]
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select scheduler, scheduler_assigned_at, scheduler_assignment_reason, experiment_version "
-            "from essaycards.flashcard_review_state where flashcard_id = %s",
+            "select * from essaycards.flashcard_review_state where flashcard_id = %s",
             (flashcard_id,),
         )
         row = cur.fetchone()
-    assert row["scheduler"] in ("classic", "fsrs")
-    assert row["scheduler_assigned_at"] is not None
-    assert row["scheduler_assignment_reason"] == "new_card_random"
-    assert row["experiment_version"] == "sprint10_v1"
+    assert row is not None
+    for col in ("scheduler", "scheduler_assigned_at", "scheduler_assignment_reason", "experiment_version"):
+        assert col not in row
 
-    # Reviewing it does not change the assignment.
-    client.post(f"/api/essaycards/flashcards/{flashcard_id}/review", json={"grade": "good"})
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "select scheduler from essaycards.flashcard_review_state where flashcard_id = %s",
-            (flashcard_id,),
-        )
-        assert cur.fetchone()["scheduler"] == row["scheduler"]
-
-
-def test_upsert_edit_of_existing_card_never_changes_scheduler_assignment(client, db_conn):
-    """Scenario: Editing an existing card never reassigns its scheduler —
-    editing question/answer/level via POST /flashcards/upsert leaves
-    scheduler/scheduler_assigned_at/scheduler_assignment_reason unchanged."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "select scheduler, scheduler_assigned_at, scheduler_assignment_reason "
-            "from essaycards.flashcard_review_state where flashcard_id = %s",
-            (FC_ORIGINS_1,),
-        )
-        before = cur.fetchone()
-
-    r = client.post("/api/essaycards/flashcards/upsert", json={
-        "essay_slug": "origins-of-long-form-formats",
-        "section_id": SECTION_A1,
-        "card": {"id": "fc-origins-1", "level": 3, "q": "Edited question?", "a": "Edited answer."},
-    })
-    assert r.status_code == 200
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "select scheduler, scheduler_assigned_at, scheduler_assignment_reason "
-            "from essaycards.flashcard_review_state where flashcard_id = %s",
-            (FC_ORIGINS_1,),
-        )
-        after = cur.fetchone()
-    assert after == before
-
-
-def test_kill_switch_disabled_assigns_new_cards_classic(client, db_conn, monkeypatch):
-    """Scenario: Kill switch disables new assignment without disturbing
-    existing state — a new flashcard is assigned scheduler='classic',
-    scheduler_assignment_reason='assignment_disabled_classic', and no
-    existing card's assignment or FSRS state is altered."""
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "select scheduler from essaycards.flashcard_review_state where flashcard_id = %s",
-            (FC_FSRS_ESTABLISHED,),
-        )
-        existing_scheduler_before = cur.fetchone()["scheduler"]
-
-    monkeypatch.setenv("ESSAYCARDS_FSRS_EXPERIMENT_ENABLED", "false")
-    r = client.post("/api/essaycards/flashcards/upsert", json={
-        "essay_slug": "origins-of-long-form-formats",
-        "section_id": SECTION_A1,
-        "card": {"level": 2, "q": "Kill-switch question?", "a": "An answer."},
-    })
-    assert r.status_code == 200
-    flashcard_id = r.json()["flashcard_id"]
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "select scheduler, scheduler_assignment_reason "
-            "from essaycards.flashcard_review_state where flashcard_id = %s",
-            (flashcard_id,),
-        )
-        new_row = cur.fetchone()
-    assert new_row["scheduler"] == "classic"
-    assert new_row["scheduler_assignment_reason"] == "assignment_disabled_classic"
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "select scheduler from essaycards.flashcard_review_state where flashcard_id = %s",
-            (FC_FSRS_ESTABLISHED,),
-        )
-        assert cur.fetchone()["scheduler"] == existing_scheduler_before
+    # First review goes through FSRS regardless of creation path.
+    rr = client.post(f"/api/essaycards/flashcards/{flashcard_id}/review", json={"grade": "good"})
+    assert rr.status_code == 200
 
 
 # ── Queue stats ───────────────────────────────────────────────────────────────
@@ -833,18 +731,19 @@ def test_stats_system_wide_partitions_all_bands(client):
         # fix-mix-backlog-classic/-fsrs, due 1d12h/2d18h ago) -> due_now.
         "due_now": 19,
         "within_10_min": 1,
-        # +3 Sprint10_DualSchedulerAB Essay H cards, all next_due_at = now()
-        # + 1 hour (fix-fsrs-established, fix-fsrs-fresh, fix-classic-established
-        # — deliberately not due; see tests/fixtures.sql "Sprint10_DualSchedulerAB"
-        # section for why none of Essay H's cards may be both due AND
-        # established, to preserve this system-wide count).
-        "within_1_day": 5,
+        # +3 Essay H cards, all next_due_at = now() + 1 hour (fix-fsrs-
+        # established, fix-fsrs-fresh, fix-classic-established — deliberately
+        # not due; see tests/fixtures.sql "Essay H" section for why none of
+        # Essay H's cards may be both due AND established, to preserve this
+        # system-wide count) + 1 Sprint12_FSRSAndUXOverhaul migration-backfill
+        # fixture card (fix-legacy-no-fsrs-state, next_due_at = now() + 2h).
+        "within_1_day": 6,
         "within_7_days": 1,
         "within_30_days": 1,
         "within_90_days": 1,   # fc-stats-60day
         "beyond_90_days": 1,   # fc-stats-120day
     }
-    assert sum(counts.values()) == 29  # every scheduled card lands in exactly one band
+    assert sum(counts.values()) == 30  # every scheduled card lands in exactly one band
 
 
 def test_stats_scoped_to_essay(client):
