@@ -1,0 +1,173 @@
+{
+  "component_name": "essaycards",
+  "target_root": "03_Application/EssayCards",
+  "directories": [
+    "03_Application/EssayCards",
+    "03_Application/EssayCards/backend",
+    "03_Application/EssayCards/backend/routers",
+    "03_Application/EssayCards/src",
+    "03_Application/EssayCards/tests",
+    "[NEW] 03_Application/EssayCards/tests/ui"
+  ],
+  "files": [
+    {
+      "path": "03_Application/EssayCards/backend/routers/review_stats.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "GET /review-stats/summary — the review-performance stats page's sole data endpoint. Module docstring states: real recorded review_events history only, three fixed rolling windows (day/week/month) in that order, scheduler-agnostic (aggregates across both Classic and FSRS, unlike backend/routers/experiment.py), no prior_review_interval filter (counts every completed review including rapid retries), recall_rate null (not 0) when a window has zero reviews.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "router",
+          "purpose": "APIRouter(prefix='/review-stats', tags=['review_stats']) — included by main.py under /api/essaycards, after experiment.router."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "REVIEW_STATS_SUMMARY_SCHEMA",
+          "purpose": "ColumnSchema list: period, reviews, unique_cards, again_count, hard_count, good_count, easy_count, failures, recall_rate. All sortable=False, filterable=False (fixed 3-row summary, not a data grid)."
+        },
+        {
+          "kind": "constant",
+          "name": "_WINDOWS",
+          "purpose": "Ordered tuple of (period, interval_literal) pairs: ('day', '24 hours'), ('week', '7 days'), ('month', '30 days') — the single source of both the SQL window boundaries and the fixed output row order."
+        },
+        {
+          "kind": "constant",
+          "name": "_GRADES",
+          "purpose": "('again', 'hard', 'good', 'easy') — the fixed grade vocabulary this endpoint's per-grade breakdown iterates over."
+        },
+        {
+          "kind": "function",
+          "name": "_review_stats_aggregate",
+          "purpose": "Given cur: runs the single SQL statement described in 10_architecture.json internal_flow step 1 (one row of 18 filter(where ...) aggregates over essaycards.review_events, outer-restricted to the last 30 days) and returns it as one dict."
+        },
+        {
+          "kind": "function",
+          "name": "_build_summary_rows",
+          "purpose": "Given the aggregate row dict: builds and returns the 3 row dicts (day, week, month, in that order) per internal_flow step 2, computing failures=again_count and recall_rate=(reviews-failures)/reviews if reviews>0 else None per window."
+        },
+        {
+          "kind": "function",
+          "name": "_dataset_response",
+          "purpose": "Same pattern as the other routers' private helper of the same name — wraps a Dataset in a JSONResponse via model_dump(by_alias=True, mode='json')."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/EssayCards/backend/main.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "FastAPI application entry point. This sprint: import backend.routers.review_stats and app.include_router(review_stats.router, prefix='/api/essaycards') after the existing seven app.include_router(...) calls (after experiment.router).",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "fastapi_app",
+          "purpose": "Router set gains review_stats.router this sprint, mounted last."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/src/ShellEntry.tsx",
+      "change": "changed",
+      "stub_kind": "tsx_module",
+      "role": "React entry point. This sprint: (1) a new ReviewStatsSummaryRow TS interface mirroring REVIEW_STATS_SUMMARY_SCHEMA (period: 'day' | 'week' | 'month', reviews, unique_cards, again_count, hard_count, good_count, easy_count, failures: number, recall_rate: number | null); (2) a new ReviewStatsView component fetching GET /essaycards/review-stats/summary on mount (apiFetch<Dataset<ReviewStatsSummaryRow>>/isApiError/ErrorCard/Skeleton, same convention as ExperimentDashboardView) and rendering three window cards; (3) a new Route for /stats.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "default",
+          "pattern": "react_component",
+          "methods": [],
+          "purpose": "Default export: Routes wiring gains <Route path=\"/stats\" element={<ReviewStatsView />} />. Internal view/helper components (existing ones unchanged; new: ReviewStatsView) are not individually enumerated, per this file's established scaffold convention."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/src/shellConfig.ts",
+      "change": "changed",
+      "stub_kind": "ts_module",
+      "role": "Add a top-level nav entry {id: 'essaycards-stats', label: 'Stats', path: '/essaycards/stats', order: 5} to both mobilePrimaryNav and desktopNav, immediately after the existing essaycards-experiment entry (order: 4) — same registration mechanism already used for every other top-level EssayCards view.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/fixtures.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Add essaycards.review_events rows spanning: within-24h, within-7d-but-not-24h, within-30d-but-not-7d, and older-than-30d (must be excluded from every window) timestamps; a mix of grades including at least one 'again'; both scheduler='classic' and scheduler='fsrs' rows within the same window (scheduler-agnostic aggregation coverage); at least one row with a short prior_review_interval (rapid retry) to exercise the no-prior_review_interval-filter invariant. All new fixture ids prefixed fix- per existing convention. No existing fixture row's identity/timing is altered.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_review_stats.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Tests for GET /api/essaycards/review-stats/summary.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_review_stats_summary_returns_three_fixed_rows_in_order",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Always three fixed rows in day/week/month order."
+        },
+        {
+          "kind": "function",
+          "name": "test_review_stats_day_window_excludes_reviews_older_than_24_hours",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Day window counts only reviews within the last 24 hours; week/month windows are wider and overlapping, not exclusive."
+        },
+        {
+          "kind": "function",
+          "name": "test_review_stats_grade_breakdown_sums_to_reviews",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Grade breakdown sums to reviews count; failures equals again_count."
+        },
+        {
+          "kind": "function",
+          "name": "test_review_stats_recall_rate_is_null_when_window_has_zero_reviews",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Recall rate is null (not 0) when a window has zero reviews."
+        },
+        {
+          "kind": "function",
+          "name": "test_review_stats_recall_rate_computed_from_reviews_and_failures",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Recall rate computed correctly when reviews exist."
+        },
+        {
+          "kind": "function",
+          "name": "test_review_stats_aggregation_is_scheduler_agnostic",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: Aggregation combines classic and fsrs reviews with no per-scheduler breakdown in the response."
+        },
+        {
+          "kind": "function",
+          "name": "test_review_stats_includes_rapid_retry_reviews",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: A review_events row with a short prior_review_interval (rapid retry) is still counted — no prior_review_interval filter, unlike GET /experiment/summary."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/ui/review_stats.spec.ts",
+      "change": "new",
+      "stub_kind": "playwright_spec",
+      "role": "[UI] scenario from 10_test_spec.md — EssayCards' first UI spec file, following the pattern established by 03_Application/NumericSeries/tests/ui/series.spec.ts and 03_Application/StoryReader/tests/ui/scroll_and_resume.spec.ts. Runs against http://atlas-shell via the shared atlas-playwright container, per 02_Platform/Atlas_Shell/playwright.config.ts.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "sprint_note": "Adds a read-only, additive-only review-performance statistics endpoint and page: three rolling trailing windows (day/week/month) aggregated from the existing essaycards.review_events table, scheduler-agnostic, no schema change.",
+  "component_name": "essaycards",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Adds GET /api/essaycards/review-stats/summary and a Stats page reporting how the reviewer performed over the last day, week, and month, aggregated across every essay and both schedulers from the existing review_events history.",
+  "classification": {
+    "why_application": "The three window definitions, the grade-breakdown vocabulary (again/hard/good/easy, recall_rate, failures), and the choice to aggregate across schedulers rather than per-scheduler are EssayCards-specific interpretations of its own review history (CLAUDE.md glossary) — a 'how did I do' report meaningful only in terms of this app's due-queue/session model, not a reusable technical capability.",
+    "non_goals": [
+      "Per-essay/topic/section scoping of the statistics",
+      "Per-scheduler breakdown (already covered by GET /experiment/summary)",
+      "Historical trend charts or graphs over time",
+      "Calendar-aligned 'today'/'this week' boundaries (as opposed to the rolling windows this sprint uses)",
+      "Export of this data",
+      "Any change to essaycards.review_events, backend/routers/experiment.py, or GET /flashcards/stats",
+      "Streaks or gamification",
+      "Any write/mutation endpoint — this entire sprint is read-only"
+    ],
+    "not_platform": "This is a narrow, app-specific rollup of one application's own append-only review log, using vocabulary (grade, recall_rate, failures, established/learning thresholds by convention elsewhere in the app) that has no meaning outside EssayCards. It is not exposed to, or reusable by, any other Atlas application."
+  },
+  "contracts": {
+    "consumes": [
+      "essaycards.review_events (Sprint10, append-only) — read-only, no schema change; columns used: reviewed_at, grade, flashcard_id, prior_review_interval is NOT used as a filter this sprint (see invariants)",
+      "Postgres now() — sole time authority (R-CON-AL-06); no client-supplied time input anywhere in this feature",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema",
+      "platform_errorhandling — existing exception handlers / request timing, unchanged",
+      "backend/database.py::get_db() — unchanged connection/pool mechanism"
+    ],
+    "provides": [
+      "GET /api/essaycards/review-stats/summary — Dataset, always exactly three rows (day, week, month, in that fixed order)"
+    ],
+    "invariants": [
+      "Windows are rolling and off Postgres now(), computed fresh on every request, matching the existing rolling-window convention already established elsewhere in this app (GET /flashcards/due's RECENT window, GET /flashcards/stats' forecast bands): day = reviewed_at >= now() - interval '24 hours'; week = reviewed_at >= now() - interval '7 days'; month = reviewed_at >= now() - interval '30 days'.",
+      "The three windows are independent and overlapping, not a partition — a review counted in day is also counted in week and month. This is the opposite shape from GET /flashcards/stats' seven non-overlapping zero-filled bands, and that difference is intentional (see classification.non_goals and 00_draft.md §1).",
+      "The response always has exactly three rows in the fixed order day, then week, then month — a window with zero reviews still appears, zero-filled in every count column, never omitted.",
+      "recall_rate = (reviews - failures) / reviews, and is null (never 0) when reviews == 0 for that window — the same 'no data yet vs. 0% recall' distinction already established in backend/routers/experiment.py. recall_rate must never be rendered or computed without its reviews count read together (R-CON-BP-08 self-containment).",
+      "failures is always exactly equal to again_count — named separately only because recall_rate is derived from it and the two must always be read together, mirroring GET /experiment/summary's identical convention.",
+      "again_count + hard_count + good_count + easy_count always sums to reviews for the same window row.",
+      "unique_cards = count(distinct flashcard_id) within the window; may be less than reviews when a card was reviewed more than once inside the same window.",
+      "The aggregation is scheduler-agnostic by construction: no query in this feature groups by, filters on, or otherwise reads essaycards.review_events.scheduler. This is deliberately a different, complementary report to GET /experiment/summary (Classic vs FSRS comparison) — a reviewer performance rollup, not an algorithm comparison. Do not add a scheduler column or a per-scheduler variant to this endpoint; that already exists at /experiment/summary.",
+      "Unlike GET /experiment/summary's ordinary_due_reviews filter (prior_review_interval >= interval '24 hours'), this endpoint applies no prior_review_interval filter — every completed review in the window counts, including relearning/rapid retries, because this page reports the reviewer's actual completed work in the window, not isolated evidence of long-term retention.",
+      "No query parameters this sprint (R-CON-AL-01) — the endpoint takes no input beyond the implicit request; every allowed 'combination' is the single no-parameter case, trivially closed (R-CON-AL-02).",
+      "All three window rows are computed by exactly one SQL query against essaycards.review_events using count(*) filter (where ...) / count(distinct ...) filter (where ...) expressions per window and per grade, mirroring the filter (where ...) style already used in backend/routers/experiment.py's _review_counts_by_scheduler — never three separate round trips."
+    ],
+    "failure_modes": [
+      "Unexpected DB/query failure surfaces as ApiError (500) via the existing platform_errorhandling exception handlers, installed unchanged in backend/main.py — there is no endpoint-specific validation failure mode, since the endpoint accepts no parameters."
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor, unchanged",
+      "platform_contracts, platform_errorhandling — unchanged"
+    ],
+    "provides": [
+      "backend.routers.review_stats — a new router (prefix /review-stats) included by main.py after the existing seven routers (essays/flashcards/exploration/examinations/images/nuggets/experiment)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/review-stats/summary",
+        "purpose": "Review-performance dashboard data source: how the reviewer did over the trailing day/week/month, aggregated across every essay and both schedulers.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a — no parameters",
+          "allowed_combinations": "n/a — the single no-parameter request is the only allowed call shape",
+          "ordering": "fixed: day row, then week row, then month row — always exactly these three, in this order",
+          "grouping": "one row per rolling window (day/week/month); no scheduler/essay/topic grouping this sprint",
+          "time_basis": "server time only — Postgres now(), read fresh on every request (R-CON-AL-06); no client-supplied time anywhere in this feature",
+          "boundary_construction": "day: reviewed_at >= now() - interval '24 hours'; week: reviewed_at >= now() - interval '7 days'; month: reviewed_at >= now() - interval '30 days'; windows are independent/overlapping, not exclusive bands",
+          "empty_result_behavior": "not applicable to the row set (always exactly 3 rows); a window with zero reviews still appears with reviews=0, unique_cards=0, all four grade counts=0, failures=0, recall_rate=null",
+          "zero_fill_behavior": "always exactly 3 rows in fixed order; every count column zero-fills when a window has no reviews; recall_rate is null (not 0) in that case, never conflated with a real 0% recall rate",
+          "row_shape": "period (string: 'day' | 'week' | 'month'), reviews (number), unique_cards (number), again_count (number), hard_count (number), good_count (number), easy_count (number), failures (number, always equal to again_count), recall_rate (number 0..1, nullable)"
+        }
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "review_stats_aggregate_query",
+      "description": "get_review_stats_summary (backend/routers/review_stats.py) runs one SQL statement against essaycards.review_events, outer-restricted by WHERE reviewed_at >= now() - interval '30 days' (the widest of the three windows; day and week are subsets, so this bound never excludes a row any window needs while avoiding a full-table scan). For each window w in (day: 24 hours, week: 7 days, month: 30 days) it computes count(*) filter (where reviewed_at >= now() - interval '<w>') as <w>_reviews, count(distinct flashcard_id) filter (where reviewed_at >= now() - interval '<w>') as <w>_unique_cards, and count(*) filter (where reviewed_at >= now() - interval '<w>' and grade = '<g>') as <w>_<g>_count for each grade g in (again, hard, good, easy) — one row of 3*(2+4)=18 scalar aggregates returned.",
+      "inputs": [
+        "essaycards.review_events",
+        "server now()"
+      ],
+      "outputs": [
+        "single aggregate row dict keyed by <window>_<metric>"
+      ]
+    },
+    {
+      "step": 2,
+      "name": "build_summary_rows",
+      "description": "Python-side: for period in ('day', 'week', 'month'), in that fixed order, read the aggregate row's <period>_reviews/<period>_unique_cards/<period>_<grade>_count columns; failures = again_count; recall_rate = (reviews - failures) / reviews if reviews > 0 else None. Builds exactly 3 row dicts in fixed order — no coalescing against a fixed label list is needed (unlike GET /experiment/summary's per-scheduler GROUP BY), because the single aggregate query already returns one row covering all three windows regardless of whether any reviews exist.",
+      "inputs": [
+        "aggregate row dict from step 1"
+      ],
+      "outputs": [
+        "list of exactly 3 row dicts, period='day' then 'week' then 'month'"
+      ]
+    },
+    {
+      "step": 3,
+      "name": "review_stats_dataset_response",
+      "description": "Wraps the 3 rows in Dataset(meta=DatasetMeta(object_type='review_stats_summary', label='Review Stats Summary', total=3, page=1, page_size=3, row_actions=[]), schema=REVIEW_STATS_SUMMARY_SCHEMA, rows=rows), returned via the same _dataset_response(dataset) -> JSONResponse pattern used by backend/routers/experiment.py.",
+      "inputs": [
+        "3 row dicts from step 2"
+      ],
+      "outputs": [
+        "Dataset JSON response"
+      ]
+    },
+    {
+      "step": 4,
+      "name": "review_stats_view_fetch_render",
+      "description": "ReviewStatsView (src/ShellEntry.tsx) fetches GET /essaycards/review-stats/summary once on mount via the existing apiFetch<Dataset<T>>/isApiError/ErrorCard/Skeleton convention (same as ExperimentDashboardView). Renders three cards/columns in the fixed row order (Day, Week, Month), each showing its reviews count, recall_rate as a rounded percentage or the literal string 'No reviews yet' when recall_rate is null (never '0%' for that case), and the four-grade breakdown (again/hard/good/easy counts). Reuses existing Material 3 surface tokens (var(--md-sys-color-surface-variant) etc.) already used by ExperimentDashboardView/ReviewStatsPanel — no new visual tokens introduced.",
+      "inputs": [
+        "GET /essaycards/review-stats/summary Dataset"
+      ],
+      "outputs": [
+        "visible three-window stats page"
+      ]
+    },
+    {
+      "step": 5,
+      "name": "stats_nav_registration",
+      "description": "src/shellConfig.ts gains a nav entry {id: 'essaycards-stats', label: 'Stats', path: '/essaycards/stats', order: 5} in both mobilePrimaryNav and desktopNav, immediately after the existing essaycards-experiment entry (order: 4) — same registration mechanism already used for every other top-level EssayCards view, no new nav pattern. src/ShellEntry.tsx's Routes gains <Route path=\"/stats\" element={<ReviewStatsView />} />.",
+      "inputs": [],
+      "outputs": [
+        "Stats entry visible in both nav surfaces; /essaycards/stats resolves to ReviewStatsView"
+      ]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {
+        "component": "03_Application/EssayCards/backend/database.py",
+        "role": "get_db() — unchanged connection pool this new endpoint reads through"
+      },
+      {
+        "component": "03_Application/EssayCards/schema.sql (essaycards.review_events, Sprint10_DualSchedulerAB)",
+        "role": "The sole data source for this feature — read-only, no schema change"
+      }
+    ],
+    "internal_optional": [],
+    "external_required": [],
+    "external_optional": [],
+    "forbidden": [
+      "Any change to essaycards.review_events' schema, backend/routers/experiment.py, or GET /flashcards/stats",
+      "Grouping, filtering, or otherwise branching this endpoint's query on essaycards.review_events.scheduler",
+      "A prior_review_interval filter on this endpoint's query (that filter is /experiment/summary's, not this endpoint's)",
+      "Any query parameter on GET /review-stats/summary this sprint",
+      "Any write/mutation endpoint in this sprint's scope"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "postgres",
+    "ownership": "none"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Create backend/routers/review_stats.py per internal_flow steps 1-3, following backend/routers/experiment.py's structure (router, a module-level ColumnSchema list, private query helper(s), private _dataset_response, the GET handler) — one single aggregate SQL statement, not three round trips.",
+      "Register the router in backend/main.py: import backend.routers.review_stats and app.include_router(review_stats.router, prefix='/api/essaycards') after the existing seven include_router calls (after experiment.router).",
+      "Add ReviewStatsSummaryRow (TS interface mirroring REVIEW_STATS_SUMMARY_SCHEMA) and ReviewStatsView to src/ShellEntry.tsx per internal_flow step 4, and the /stats route per step 5.",
+      "Add the nav entry to src/shellConfig.ts per internal_flow step 5, in both mobilePrimaryNav and desktopNav, immediately after the existing essaycards-experiment entry.",
+      "Do not add a scheduler column, a prior_review_interval filter, or any query parameter to this endpoint — see dependencies.forbidden."
+    ],
+    "ui_implementer": [
+      "Three cards/columns (Day / Week / Month, fixed left-to-right or stacked order matching the row order) — reuse ExperimentDashboardView's/ReviewStatsPanel's existing Material 3 surface tokens, no new visual language.",
+      "Render recall_rate as a rounded percentage when non-null; render the literal string 'No reviews yet' when null — never '0%' for the null case.",
+      "Render the four-grade breakdown (again/hard/good/easy) per card."
+    ],
+    "test_writer": [
+      "Implement every scenario in 10_test_spec.md as a concrete pytest function in a new tests/test_review_stats.py, following the existing per-endpoint test-file convention (e.g. test_experiment.py).",
+      "Extend tests/fixtures.sql with essaycards.review_events rows spanning: multiple windows (some only within 24h, some only within 7d, some only within 30d, some older than 30d so they must be excluded from every window), a mix of grades including at least one 'again', a mix of schedulers (classic and fsrs) within the same window, and at least one row with a short prior_review_interval (a rapid retry) to exercise the no-prior_review_interval-filter invariant. Prefix new fixture ids fix- per existing convention; do not alter any existing fixture row's identity/timing.",
+      "Add tests/ui/review_stats.spec.ts for the [UI] scenario, following the existing pattern established by 03_Application/NumericSeries/tests/ui/series.spec.ts and 03_Application/StoryReader/tests/ui/scroll_and_resume.spec.ts (this is EssayCards' first UI spec file) — run against http://atlas-shell per 02_Platform/Atlas_Shell/playwright.config.ts."
+    ],
+    "reviewer": [
+      "Confirm the endpoint's query never reads, filters, or groups on essaycards.review_events.scheduler.",
+      "Confirm the endpoint's query never applies a prior_review_interval filter (that would silently turn this into a second /experiment/summary).",
+      "Confirm recall_rate is null, not 0, whenever a window's reviews count is 0.",
+      "Confirm the response is always exactly 3 rows in fixed day/week/month order, never omitting a zero-review window.",
+      "Confirm essaycards.review_events' schema, backend/routers/experiment.py, and GET /flashcards/stats are byte-for-byte untouched by this sprint.",
+      "Confirm the aggregate query is a single SQL statement (not three round trips) per contracts.invariants."
+    ]
+  },
+  "deferred_decisions": [
+    "Whether a future sprint should add per-essay/topic scoping or a per-scheduler breakdown to this page (explicitly out of scope this sprint per non_goals)."
+  ],
+  "risks": [
+    {
+      "risk": "essaycards.review_events has no index with reviewed_at as a leading column (existing indexes are (flashcard_id, reviewed_at desc) and (scheduler, prior_review_interval)); the outer WHERE reviewed_at >= now() - interval '30 days' restriction in step 1 cannot use an index scan and falls back to a sequential scan bounded only by table size, not by the 30-day window.",
+      "impact": "Acceptable at current review_events volume; if row count grows significantly (Sprint10's own deferred_decisions already flags review_events' unbounded append-only growth), this endpoint's latency will degrade before an index on reviewed_at is added — a future-sprint indexing follow-up, not a defect in this design."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should essaycards.review_events eventually get an index on reviewed_at (or (reviewed_at) alone) once its row count/latency profile is measured against this endpoint?",
+      "owner": "architecture"
+    }
+  ]
+}

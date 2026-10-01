@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-09-23 18:15 UTC
+> Last updated: 2026-10-01 10:32 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -29,6 +29,20 @@ Components marked ⚠️ have no `00_architecture/` yet — entries are stubs.
 
 **Caller notes:**
 - Claude Code does not call Chronos. Separate agent world.
+
+### ClaudeConsole_CredsSync ⚠️
+
+**Summary:** No 00_architecture yet.
+
+| | |
+|---|---|
+| Container | — |
+| Host port | — |
+| Network | atlas-net |
+| URL prefix | — |
+
+**Caller notes:**
+- Stub — no architecture.json available.
 
 ### test ⚠️
 
@@ -252,7 +266,7 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 ### EssayCards
 
-**Summary:** Introduces FSRS as a second scheduling algorithm, persistently A/B-assigned 50/50 against the existing Classic scheduler per flashcard, with both algorithms writing next_due_at/review_interval through the existing single interface so the card-selection mechanism is completely untouched, plus a scheduler badge and a first-version experiment comparison dashboard.
+**Summary:** Adds GET /api/essaycards/review-stats/summary and a Stats page reporting how the reviewer performed over the last day, week, and month, aggregated across every essay and both schedulers from the existing review_events history.
 
 | | |
 |---|---|
@@ -263,10 +277,7 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 **Endpoints:**
 ```
-GET /api/essaycards/flashcards/due — rows gain scheduler ('classic' | 'fsrs'), feeding the review screen's badge
-POST /api/essaycards/flashcards/{flashcard_id}/review — unchanged request/response contract; internally dispatches to ClassicScheduler or FSRSScheduler per the card's persisted scheduler and additionally persists fsrs_card_state (fsrs cards only) and one review_events row (every review) in the same transaction
-GET /api/essaycards/experiment/summary — new Dataset endpoint, always exactly two rows ('classic', 'fsrs'), the experiment comparison dashboard's data source
-New-card creation (backend/ingest.py essay/section ingest, POST /flashcards/upsert, POST /flashcards/exploration/import's create_card action) — each of the three existing was_inserted-gated INSERT sites additionally performs a one-time, permanent scheduler assignment; no change to any of their request/response shapes
+GET /api/essaycards/review-stats/summary — Dataset, always exactly three rows (day, week, month, in that fixed order)
 ```
 
 ### FamilyAtlas ⚠️
@@ -353,6 +364,20 @@ PATCH /api/shopping-tasks/{id} — update task; body: {status: done|dismissed, n
 DELETE /api/shopping-tasks/{id} — delete task; returns empty Dataset on success, 404 ApiError if not found
 GET /api/shopping-tasks/views/by_source — open tasks expanded by source_tag; one flat row per (task, source_tag); tasks with no source tags produce one row with source_tag='Other'; tasks with multiple source tags appear in each group; rows are ShoppingTaskRow columns plus source_tag; returns Dataset
 ```
+
+### StoryReader ⚠️
+
+**Summary:** No 00_architecture yet.
+
+| | |
+|---|---|
+| Container | `atlas-storyreader` |
+| Host port | `localhost:8026` |
+| Network | atlas-net |
+| URL prefix | — |
+
+**Caller notes:**
+- Stub — no architecture.json available.
 
 ### TaskTracker
 

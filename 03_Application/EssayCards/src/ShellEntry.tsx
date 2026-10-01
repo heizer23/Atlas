@@ -10,6 +10,9 @@
  *   /essaycards/experiment     → ExperimentDashboardView (Sprint10_DualSchedulerAB:
  *                                 Classic vs FSRS scheduler comparison, real recorded
  *                                 data only — see GET /experiment/summary)
+ *   /essaycards/stats          → ReviewStatsView (Sprint11_ReviewStats: how the
+ *                                 reviewer did over the trailing day/week/month,
+ *                                 scheduler-agnostic — see GET /review-stats/summary)
  *
  * Review session note: the due queue is re-fetched from GET /flashcards/due
  * after every grade (and via a manual "Check again" on the completion screen).
@@ -103,6 +106,18 @@ interface ExperimentSummaryRow {
   ordinary_due_reviews: number;
   recall_rate: number | null;
   failures: number;
+}
+
+interface ReviewStatsSummaryRow {
+  period: 'day' | 'week' | 'month';
+  reviews: number;
+  unique_cards: number;
+  again_count: number;
+  hard_count: number;
+  good_count: number;
+  easy_count: number;
+  failures: number;
+  recall_rate: number | null;
 }
 
 interface ReviewResult {
@@ -4059,6 +4074,102 @@ function ExperimentDashboardView() {
   );
 }
 
+// ── Review stats (Sprint11_ReviewStats) ──────────────────────────────────────
+//
+// "How did I do" — three rolling-window (day/week/month) cards over
+// GET /review-stats/summary. Deliberately distinct from the experiment
+// dashboard above: scheduler-agnostic, no per-scheduler split. Same
+// apiFetch<Dataset<T>>/isApiError/ErrorCard/Skeleton convention.
+
+const REVIEW_STATS_WINDOW_LABELS: Record<ReviewStatsSummaryRow['period'], string> = {
+  day: 'Day',
+  week: 'Week',
+  month: 'Month',
+};
+
+function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
+  return (
+    <div
+      style={{
+        background: 'var(--md-sys-color-surface-variant)',
+        borderRadius: 12,
+        padding: 16,
+        flex: '1 1 200px',
+        minWidth: 180,
+      }}
+    >
+      <h3 style={{ margin: '0 0 8px' }}>{REVIEW_STATS_WINDOW_LABELS[row.period]}</h3>
+      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>Reviews</div>
+      <div style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>{row.reviews}</div>
+      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 8 }}>Recall rate</div>
+      <div style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>
+        {row.recall_rate == null ? 'No reviews yet' : `${Math.round(row.recall_rate * 100)}%`}
+      </div>
+      <table style={{ width: '100%', marginTop: 12, borderCollapse: 'collapse' }}>
+        <tbody>
+          <tr>
+            <td style={{ padding: '2px 4px', fontSize: 13 }}>Again</td>
+            <td style={{ padding: '2px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.again_count}</td>
+          </tr>
+          <tr>
+            <td style={{ padding: '2px 4px', fontSize: 13 }}>Hard</td>
+            <td style={{ padding: '2px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.hard_count}</td>
+          </tr>
+          <tr>
+            <td style={{ padding: '2px 4px', fontSize: 13 }}>Good</td>
+            <td style={{ padding: '2px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.good_count}</td>
+          </tr>
+          <tr>
+            <td style={{ padding: '2px 4px', fontSize: 13 }}>Easy</td>
+            <td style={{ padding: '2px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.easy_count}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ReviewStatsView() {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState<ReviewStatsSummaryRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const res = await apiFetch<Dataset<ReviewStatsSummaryRow>>('/essaycards/review-stats/summary');
+      setLoading(false);
+      if (isApiError(res)) {
+        setError(res);
+        return;
+      }
+      setError(null);
+      setRows(res.rows);
+    })();
+  }, []);
+
+  return (
+    <div style={pageStyle}>
+      <button style={jumpBtnStyle} onClick={() => navigate('/essaycards')}>← Back to all essays</button>
+      <h2 style={{ marginTop: 16 }}>Review stats</h2>
+      <p style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>
+        How you did over the trailing day, week, and month — across every essay
+        and both schedulers.
+      </p>
+
+      {loading && <Skeleton />}
+      {error && <ErrorCard error={error} />}
+
+      {!loading && !error && rows.length === 3 && (
+        <div style={{ display: 'flex', gap: 12, marginTop: 16, flexWrap: 'wrap' }}>
+          {rows.map(row => <ReviewStatsCard key={row.period} row={row} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function EssayCardsApp() {
@@ -4078,6 +4189,7 @@ export default function EssayCardsApp() {
         <Route path="/nuggets/authoring" element={<NuggetAuthoringImportView />} />
         <Route path="/nuggets/:id/generate-flashcards" element={<GenerateFlashcardsImportView />} />
         <Route path="/experiment" element={<ExperimentDashboardView />} />
+        <Route path="/stats" element={<ReviewStatsView />} />
       </Routes>
     </>
   );

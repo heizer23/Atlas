@@ -28,6 +28,19 @@ def test_essaycards_proxy_returns_json():
     )
 
 
+def test_review_stats_summary_proxy_returns_json():
+    """GET /api/essaycards/review-stats/summary (Sprint11_ReviewStats) must be
+    proxied to the backend and reach the new review_stats router mounted in
+    backend/main.py — same /api/essaycards prefix as every other EssayCards
+    route, so no nginx/main.tsx/Dockerfile changes were needed this sprint,
+    but a missing app.include_router(review_stats.router, ...) would still
+    surface here as a 404."""
+    r = httpx.get(f"{SHELL}/api/essaycards/review-stats/summary", timeout=5)
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+    ct = r.headers.get("content-type", "")
+    assert "application/json" in ct, f"Expected JSON content-type, got '{ct}'"
+
+
 def test_shell_serves_app_at_basepath():
     """GET /essaycards must return the shell HTML (app is registered in main.tsx)."""
     r = httpx.get(f"{SHELL}/essaycards", timeout=5)

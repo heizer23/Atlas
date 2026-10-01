@@ -2,63 +2,47 @@
   "component_name": "essaycards",
   "layer": "03_Application",
   "source_definition": "00_draft.md",
-  "summary": "Introduces FSRS as a second scheduling algorithm, persistently A/B-assigned 50/50 against the existing Classic scheduler per flashcard, with both algorithms writing next_due_at/review_interval through the existing single interface so the card-selection mechanism is completely untouched, plus a scheduler badge and a first-version experiment comparison dashboard.",
+  "summary": "Adds GET /api/essaycards/review-stats/summary and a Stats page reporting how the reviewer performed over the last day, week, and month, aggregated across every essay and both schedulers from the existing review_events history.",
   "classification": {
-    "why_application": "Which spaced-repetition algorithm a card uses, how it is assigned, and how its outcomes are compared are EssayCards-specific domain decisions about this app's own learning model — not a reusable technical capability. The Classic formula and the FSRS wrapper both exist only to answer 'what should this app's next_due_at be', which has meaning solely inside EssayCards' existing due-queue/session semantics documented in CLAUDE.md.",
+    "why_application": "The three window definitions, the grade-breakdown vocabulary (again/hard/good/easy, recall_rate, failures), and the choice to aggregate across schedulers rather than per-scheduler are EssayCards-specific interpretations of its own review history (CLAUDE.md glossary) — a 'how did I do' report meaningful only in terms of this app's due-queue/session model, not a reusable technical capability.",
     "non_goals": [
-      "FSRS parameter optimization",
-      "Switching individual cards between algorithms after assignment",
-      "Per-essay scheduler configuration",
-      "Redesigned review selection, ordering, resurfacing, or Focus/Review eligibility",
-      "Redesigned Directed Study",
-      "New card prioritization rules",
-      "FSRS-native learning/established vocabulary anywhere in code, UI, or docs",
-      "Major changes to the flashcard UI beyond the badge and dashboard",
-      "Advanced statistical analysis or automatic winner selection on the dashboard",
-      "Unrelated architectural refactoring",
-      "A retroactive FSRS state reconstruction for cards with real review history (no per-review history table exists to replay — see contracts.invariants)",
-      "An admin escape hatch to reassign an FSRS-cohort card back to Classic (rollback = kill switch stops new assignment only, per Phase B §7)"
+      "Per-essay/topic/section scoping of the statistics",
+      "Per-scheduler breakdown (already covered by GET /experiment/summary)",
+      "Historical trend charts or graphs over time",
+      "Calendar-aligned 'today'/'this week' boundaries (as opposed to the rolling windows this sprint uses)",
+      "Export of this data",
+      "Any change to essaycards.review_events, backend/routers/experiment.py, or GET /flashcards/stats",
+      "Streaks or gamification",
+      "Any write/mutation endpoint — this entire sprint is read-only"
     ],
-    "not_platform": "FSRS is being integrated as a second scheduling engine feeding EssayCards' own next_due_at/review_interval model, not exposed as a reusable spaced-repetition service for other Atlas applications. The assignment mechanism, its persisted metadata, and the dashboard are meaningful only in terms of EssayCards' own due-queue vocabulary (new/learning/established, RECENT/BACKLOG, Focus/Review). If another Atlas app later needs its own scheduling comparison, that is a platform-extraction question to consider then, not now."
+    "not_platform": "This is a narrow, app-specific rollup of one application's own append-only review log, using vocabulary (grade, recall_rate, failures, established/learning thresholds by convention elsewhere in the app) that has no meaning outside EssayCards. It is not exposed to, or reusable by, any other Atlas application."
   },
   "contracts": {
     "consumes": [
-      "Shared Atlas Postgres instance (02_Platform/Postgres) — essaycards schema, unchanged connection mechanism (backend/database.py, psycopg2 pool, RealDictCursor)",
+      "essaycards.review_events (Sprint10, append-only) — read-only, no schema change; columns used: reviewed_at, grade, flashcard_id, prior_review_interval is NOT used as a filter this sprint (see invariants)",
+      "Postgres now() — sole time authority (R-CON-AL-06); no client-supplied time input anywhere in this feature",
       "platform_contracts — Dataset, DatasetMeta, ColumnSchema",
-      "platform_errorhandling — api_error helper, exception handlers, request timing",
-      "backend/scheduling.py::compute_next_due_at and VALID_GRADES — kept byte-for-byte unchanged; this sprint wraps them, never edits their logic (binding per Phase B §1)",
-      "fsrs>=6.3.2 (PyPI package name 'fsrs') — the official py-fsrs library, FSRS-6, the only algorithm version it ships. NEW external dependency — must be added to pyproject.toml's [project].dependencies."
+      "platform_errorhandling — existing exception handlers / request timing, unchanged",
+      "backend/database.py::get_db() — unchanged connection/pool mechanism"
     ],
     "provides": [
-      "GET /api/essaycards/flashcards/due — rows gain scheduler ('classic' | 'fsrs'), feeding the review screen's badge",
-      "POST /api/essaycards/flashcards/{flashcard_id}/review — unchanged request/response contract; internally dispatches to ClassicScheduler or FSRSScheduler per the card's persisted scheduler and additionally persists fsrs_card_state (fsrs cards only) and one review_events row (every review) in the same transaction",
-      "GET /api/essaycards/experiment/summary — new Dataset endpoint, always exactly two rows ('classic', 'fsrs'), the experiment comparison dashboard's data source",
-      "New-card creation (backend/ingest.py essay/section ingest, POST /flashcards/upsert, POST /flashcards/exploration/import's create_card action) — each of the three existing was_inserted-gated INSERT sites additionally performs a one-time, permanent scheduler assignment; no change to any of their request/response shapes"
+      "GET /api/essaycards/review-stats/summary — Dataset, always exactly three rows (day, week, month, in that fixed order)"
     ],
     "invariants": [
-      "backend/scheduling.py::compute_next_due_at and VALID_GRADES are byte-for-byte unchanged by this sprint. All existing unit tests in tests/test_scheduling.py must keep passing unmodified.",
-      "Both ClassicScheduler.review(...) and FSRSScheduler.review(...) write exactly next_due_at, review_interval, and last_reviewed_at through the existing flashcard_review_state columns and the existing single UPDATE statement shape in review_flashcard — FSRS's own stability/difficulty/state are a SEPARATE, additional persisted concept (essaycards.fsrs_card_state) and are never confused with or substituted for review_interval. FSRS calculates next_due_at; EssayCards persists it through the existing field, exactly as Classic already does.",
-      "The existing 24-hour learning/established threshold (review_interval >= interval '24 hours'), the RECENT/BACKLOG due-queue categorization and ordering (GET /flashcards/due), the seven forecast bands (GET /flashcards/stats), and Focus/Review eligibility are read ONLY from next_due_at/last_reviewed_at/review_interval — none of these queries reads or branches on the scheduler column. This sprint adds zero WHERE/ORDER BY changes to list_due_flashcards or flashcard_queue_stats beyond the new scheduler column appearing as an additive SELECT field (same precedent as nugget_id, Sprint09).",
-      "FSRS short learning/relearning intervals (sub-hour, a real default-configuration output of py-fsrs per Agent 3's research) are accepted as-is and flow through next_due_at exactly like Classic's own 5s/1min/20min floors already do — resurfaced via the existing RECENT category mechanism. No separate FSRS queue, no scheduler-type-specific selection branch anywhere.",
-      "fsrs.Scheduler is constructed once, module-level, as Scheduler(desired_retention=0.9) with library-default 21-parameter weights (FSRS-6) and library-default learning_steps/relearning_steps (NOT overridden to learning_steps=()). No FSRS optimizer use this sprint.",
-      "Rating mapping is a direct 1:1 name match: grade strings 'again'/'hard'/'good'/'easy' map to fsrs.Rating.Again/Hard/Good/Easy by name, via one fixed dict — no numeric or semantic translation.",
-      "Every datetime passed into py-fsrs (review_card's review_datetime, and any datetime read back off a loaded Card) is normalized to exactly `.astimezone(timezone.utc)` before use — py-fsrs raises ValueError on a naive datetime and raises on a tz-aware-but-not-identically-timezone.utc datetime (R-CON-AL-06: the single time authority remains the same Postgres `select now()` read already used by review_flashcard; this is a representation conversion of that same value, not a second time source).",
-      "essaycards.fsrs_card_state.raw_state (the full fsrs.Card.to_dict() output) is the SOLE source of truth for reconstructing a Card object (Card.from_dict(raw_state)) on the next review. The discrete columns (stability, difficulty, fsrs_state, step, last_review_at) exist only for dashboard queryability/audit and must always be written from the SAME to_dict() call that produced raw_state in the same statement — never derived independently, never allowed to drift from raw_state.",
-      "A brand-new FSRS-cohort card being reviewed for the first time (no existing essaycards.fsrs_card_state row) starts from a fresh fsrs.Card() (library defaults: State.Learning, step=0, stability=None, difficulty=None) — the library's own internal card_id (an auto-generated int, unrelated to the flashcard's uuid) is never persisted or round-tripped anywhere in EssayCards' schema; it exists only inside raw_state for the library's own bookkeeping and is never read back out by EssayCards code.",
-      "review_flashcard writes flashcard_review_state (last_reviewed_at/next_due_at/review_interval/updated_at), fsrs_card_state (fsrs cards only, upsert), and one essaycards.review_events row (every review, both schedulers) inside the SAME transaction as the existing single commit() call — a review can never persist its new due date while failing to persist its scheduler state or its review-event record (mission §5 'a review cannot save its due date while failing to save its associated scheduler state or review history').",
-      "review_events.was_due is computed as (the card's next_due_at BEFORE this review) <= (the single now() read for this review) — a technical/diagnostic record of whether the due-queue's own base eligibility condition held for this review (mirroring GET /flashcards/due's unchanged `next_due_at <= now()`). Because that base condition applies to every session type and a card only ever re-enters the queue once its own next_due_at has elapsed, was_due evaluates true for virtually every review the application can produce — including RECENT-category rapid retries — so it cannot by itself separate ordinary due-review evidence from immediate-relearning/rapid-retry reviews, and the experiment dashboard does NOT use it for that purpose. The dashboard instead restricts ordinary_due_reviews/recall_rate/failures to review_events rows where prior_review_interval >= interval '24 hours' — i.e. the card had already graduated to established BEFORE this review, mirroring the app's existing 24-hour learning/established threshold (CLAUDE.md). A rapid retry always follows a short (learning-phase) prior_review_interval and is excluded by that filter regardless of was_due (mission §7: do not count multiple rapid retries as independent evidence of long-term retention). was_due remains stored as an audit/diagnostic field only.",
-      "Scheduler assignment happens exactly once per flashcard, at creation, inside the existing `if was_inserted:` gate already present at all three insertion call sites (backend/ingest.py::_upsert_flashcard, backend/routers/flashcards.py::_upsert_question, backend/exploration.py::execute_plan's create_card branch) — never on update/re-ingest/regeneration, inheriting the same idempotency already proven for review-state seeding at those exact gates (Agent 4's finding). No endpoint request body anywhere accepts a scheduler field; assignment is exclusively a server-side side effect of card creation and the one-time migration backfill below. There is no admin or API path to reassign an already-assigned card.",
-      "Assignment is decided by backend/scheduling.py::decide_scheduler_assignment(flashcard_id, migrated_never_reviewed=False) -> (scheduler, reason): if the kill switch (ESSAYCARDS_FSRS_EXPERIMENT_ENABLED, default true, read fresh from os.environ on every call — never cached at import — so tests can monkeypatch it) is false, returns ('classic', 'assignment_disabled_classic') unconditionally; otherwise returns a scheduler chosen by a stable hash of flashcard_id mod 2 (sha256(str(flashcard_id)) mod 2 — no stored RNG seed, naturally balanced ~50/50 in expectation across any stratum without a stratified sampler, computed once and persisted, never recomputed), with reason 'new_card_random' if migrated_never_reviewed is False else 'migrated_never_reviewed_random'.",
-      "scheduler_assignment_reason is a closed, fixed vocabulary of exactly four values, enforced by a CHECK constraint: 'new_card_random' (a genuinely new card, or the kill switch was disabled), 'assignment_disabled_classic' (kill switch was disabled at creation time), 'migrated_never_reviewed_random' (a pre-existing but never-reviewed card, assigned at the one-time migration backfill using the same balanced mechanism as a new card), 'legacy_retained_classic' (a pre-existing card with real review history — see the migration invariant below).",
-      "Migration (10_schema.sql, folded into schema.sql, run idempotently at every startup via init_schema()) is a one-time, additive, sentinel-guarded backfill, gated on scheduler_assigned_at IS NULL so a rerun is a no-op: (1) every flashcard_review_state row with last_reviewed_at IS NOT NULL (already reviewed under Classic pre-sprint) is set to scheduler='classic', scheduler_assignment_reason='legacy_retained_classic' — no FSRS state is ever created for such a card, and next_due_at/review_interval/last_reviewed_at are NEVER touched by this backfill (per Phase B §5: py-fsrs's only history-based initialization path, reschedule_card, requires a complete ordered per-review rating history EssayCards has never persisted, so reliable FSRS initialization is impossible for any card with real history — the mission's documented fallback applies to every such card, not a subset); (2) every row with last_reviewed_at IS NULL (existing but never reviewed) is assigned via the identical balanced mechanism as a brand-new card, because a fresh fsrs.Card() IS the correct FSRS initialization for a never-reviewed card — zero replay needed.",
-      "Both migration UPDATEs use Postgres-native hashing (hashtext(flashcard_id::text) % 2) rather than the Python sha256-based helper used for new-card assignment at INSERT time — this is a deliberate, safe divergence: the two cohorts (existing never-reviewed cards at migration time vs. cards created from this sprint forward) are disjoint and never need cross-language hash parity with each other.",
-      "All read endpoints returning UI-visible tabular data continue to return Dataset per R-CON-BP-04: GET /flashcards/due (extended) and the new GET /experiment/summary. No FSRS-native vocabulary (stability, difficulty, FSRS state names) appears in any ColumnSchema label, UI string, or the scheduler badge — the badge shows exactly 'Classic' or 'FSRS' (plain algorithm names) per CLAUDE.md's glossary discipline and 00_draft.md §6."
+      "Windows are rolling and off Postgres now(), computed fresh on every request, matching the existing rolling-window convention already established elsewhere in this app (GET /flashcards/due's RECENT window, GET /flashcards/stats' forecast bands): day = reviewed_at >= now() - interval '24 hours'; week = reviewed_at >= now() - interval '7 days'; month = reviewed_at >= now() - interval '30 days'.",
+      "The three windows are independent and overlapping, not a partition — a review counted in day is also counted in week and month. This is the opposite shape from GET /flashcards/stats' seven non-overlapping zero-filled bands, and that difference is intentional (see classification.non_goals and 00_draft.md §1).",
+      "The response always has exactly three rows in the fixed order day, then week, then month — a window with zero reviews still appears, zero-filled in every count column, never omitted.",
+      "recall_rate = (reviews - failures) / reviews, and is null (never 0) when reviews == 0 for that window — the same 'no data yet vs. 0% recall' distinction already established in backend/routers/experiment.py. recall_rate must never be rendered or computed without its reviews count read together (R-CON-BP-08 self-containment).",
+      "failures is always exactly equal to again_count — named separately only because recall_rate is derived from it and the two must always be read together, mirroring GET /experiment/summary's identical convention.",
+      "again_count + hard_count + good_count + easy_count always sums to reviews for the same window row.",
+      "unique_cards = count(distinct flashcard_id) within the window; may be less than reviews when a card was reviewed more than once inside the same window.",
+      "The aggregation is scheduler-agnostic by construction: no query in this feature groups by, filters on, or otherwise reads essaycards.review_events.scheduler. This is deliberately a different, complementary report to GET /experiment/summary (Classic vs FSRS comparison) — a reviewer performance rollup, not an algorithm comparison. Do not add a scheduler column or a per-scheduler variant to this endpoint; that already exists at /experiment/summary.",
+      "Unlike GET /experiment/summary's ordinary_due_reviews filter (prior_review_interval >= interval '24 hours'), this endpoint applies no prior_review_interval filter — every completed review in the window counts, including relearning/rapid retries, because this page reports the reviewer's actual completed work in the window, not isolated evidence of long-term retention.",
+      "No query parameters this sprint (R-CON-AL-01) — the endpoint takes no input beyond the implicit request; every allowed 'combination' is the single no-parameter case, trivially closed (R-CON-AL-02).",
+      "All three window rows are computed by exactly one SQL query against essaycards.review_events using count(*) filter (where ...) / count(distinct ...) filter (where ...) expressions per window and per grade, mirroring the filter (where ...) style already used in backend/routers/experiment.py's _review_counts_by_scheduler — never three separate round trips."
     ],
     "failure_modes": [
-      "NOT_FOUND — POST /flashcards/{id}/review with an unknown flashcard_id — 404 ApiError (unchanged from pre-sprint behavior)",
-      "VALIDATION_ERROR — POST /flashcards/{id}/review with a malformed/invalid grade — 400 ApiError (unchanged from pre-sprint behavior; scheduler dispatch happens only after grade validation succeeds)",
-      "Startup/migration failure — if the additive schema.sql (including the two guarded backfill UPDATEs) fails to apply, init_schema() raises and the existing main.py startup retry loop (10 attempts, 3s apart) applies unchanged; the app never serves traffic against a partially-migrated schema because schema.sql runs as one transaction",
-      "FSRS library invariant violation (documented as a risk, not a normal API failure mode — it can only occur from a corrupted or hand-edited raw_state row, never from normal application flow): fsrs.Card.from_dict raising on a malformed persisted raw_state would surface as an unhandled 500 from review_flashcard; there is no user input path that can trigger this, since raw_state is only ever written by FSRSScheduler.review itself"
+      "Unexpected DB/query failure surfaces as ApiError (500) via the existing platform_errorhandling exception handlers, installed unchanged in backend/main.py — there is no endpoint-specific validation failure mode, since the endpoint accepts no parameters."
     ]
   },
   "shared_views": {
@@ -72,55 +56,28 @@
   "interfaces": {
     "consumes": [
       "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor, unchanged",
-      "platform_contracts, platform_errorhandling — unchanged",
-      "fsrs (PyPI 'fsrs' >=6.3.2) — Scheduler, Card, Rating classes; review_card, to_dict/from_dict"
+      "platform_contracts, platform_errorhandling — unchanged"
     ],
     "provides": [
-      "HTTP API mounted at /api/essaycards (FastAPI, uvicorn) — unchanged mount, methods, CORS policy",
-      "backend.routers.experiment — a new router (prefix /experiment) included by main.py alongside essays/flashcards/exploration/examinations/images/nuggets",
-      "backend.scheduling.ClassicScheduler / FSRSScheduler / SchedulerResult / decide_scheduler_assignment / EXPERIMENT_VERSION — new public symbols consumed by backend/routers/flashcards.py (review dispatch, due-row scheduler field) and by the three new-card creation call sites (backend/ingest.py, backend/routers/flashcards.py, backend/exploration.py)"
+      "backend.routers.review_stats — a new router (prefix /review-stats) included by main.py after the existing seven routers (essays/flashcards/exploration/examinations/images/nuggets/experiment)"
     ],
     "exposed_surfaces": [
       {
         "type": "http_endpoint",
-        "name": "GET /api/essaycards/flashcards/due",
-        "purpose": "Unchanged eligibility/ordering/scoping; rows gain scheduler, the value the review screen's badge renders.",
-        "ui_contract": "Dataset | ApiError",
-        "query_behavior": {
-          "supported_parameters": "topic, essay_id, section_id — unchanged from pre-sprint",
-          "defaults": "unchanged",
-          "allowed_combinations": "unchanged — {}, {topic}, {essay_id}, {essay_id, section_id} only",
-          "ordering": "unchanged — RECENT-then-BACKLOG, exactly as documented in CLAUDE.md 'Due-queue ordering'; scheduler is never a sort key",
-          "grouping": "none",
-          "time_basis": "unchanged — server-side now(), R-CON-AL-06",
-          "boundary_construction": "unchanged",
-          "empty_result_behavior": "unchanged — valid, empty rows",
-          "zero_fill_behavior": "not applicable — flat list",
-          "row_shape": "existing DUE_SCHEMA columns plus scheduler (string, 'classic' | 'fsrs', not sortable, not filterable — no /due?scheduler= filter this sprint)"
-        }
-      },
-      {
-        "type": "http_endpoint",
-        "name": "POST /api/essaycards/flashcards/{flashcard_id}/review",
-        "purpose": "Grade a flashcard. Unchanged request/response shape; internally dispatches to ClassicScheduler or FSRSScheduler per the card's persisted scheduler, and additionally writes fsrs_card_state (fsrs only) and always writes one review_events row, all in the same transaction as the existing flashcard_review_state UPDATE.",
-        "ui_contract": "none — mutation endpoint per R-CON-BP-04; response shape unchanged: {flashcard_id, last_reviewed_at, next_due_at}"
-      },
-      {
-        "type": "http_endpoint",
-        "name": "GET /api/essaycards/experiment/summary",
-        "purpose": "Experiment comparison dashboard data source: real recorded per-scheduler counts, never theoretical predictions.",
+        "name": "GET /api/essaycards/review-stats/summary",
+        "purpose": "Review-performance dashboard data source: how the reviewer did over the trailing day/week/month, aggregated across every essay and both schedulers.",
         "ui_contract": "Dataset | ApiError",
         "query_behavior": {
           "supported_parameters": "none",
-          "defaults": "n/a",
-          "allowed_combinations": "n/a — no parameters",
-          "ordering": "fixed: 'classic' row, then 'fsrs' row — always exactly these two, in this order",
-          "grouping": "one row per scheduler",
-          "time_basis": "server time — all counts read live at request time (R-CON-AL-06); no client-supplied time",
-          "boundary_construction": "not applicable",
-          "empty_result_behavior": "not applicable to the row set (always exactly 2 rows); every count column is 0 (and recall_rate is null) for a scheduler with zero assigned cards or zero due reviews — same zero-fill discipline as STATS_BUCKETS, computed by coalescing a fixed ('classic','fsrs') row list against whatever the aggregate queries return, not by omitting a scheduler",
-          "zero_fill_behavior": "always exactly 2 rows; a scheduler with no data yields 0 in every count column and null (not 0) in recall_rate, since a 0% recall rate and 'no data yet' are different facts and must not be conflated",
-          "row_shape": "scheduler (string), assigned_cards (number), new_cards_assigned (number), migrated_cards_assigned (number), cards_new (number), cards_learning (number), cards_established (number), reviewed_cards (number), completed_reviews (number), ordinary_due_reviews (number — the sample size for recall_rate/failures), recall_rate (number 0..1, nullable), failures (number)"
+          "defaults": "n/a — no parameters",
+          "allowed_combinations": "n/a — the single no-parameter request is the only allowed call shape",
+          "ordering": "fixed: day row, then week row, then month row — always exactly these three, in this order",
+          "grouping": "one row per rolling window (day/week/month); no scheduler/essay/topic grouping this sprint",
+          "time_basis": "server time only — Postgres now(), read fresh on every request (R-CON-AL-06); no client-supplied time anywhere in this feature",
+          "boundary_construction": "day: reviewed_at >= now() - interval '24 hours'; week: reviewed_at >= now() - interval '7 days'; month: reviewed_at >= now() - interval '30 days'; windows are independent/overlapping, not exclusive bands",
+          "empty_result_behavior": "not applicable to the row set (always exactly 3 rows); a window with zero reviews still appears with reviews=0, unique_cards=0, all four grade counts=0, failures=0, recall_rate=null",
+          "zero_fill_behavior": "always exactly 3 rows in fixed order; every count column zero-fills when a window has no reviews; recall_rate is null (not 0) in that case, never conflated with a real 0% recall rate",
+          "row_shape": "period (string: 'day' | 'week' | 'month'), reviews (number), unique_cards (number), again_count (number), hard_count (number), good_count (number), easy_count (number), failures (number, always equal to again_count), recall_rate (number 0..1, nullable)"
         }
       }
     ]
@@ -128,266 +85,127 @@
   "internal_flow": [
     {
       "step": 1,
-      "name": "scheduler_review_dispatch",
-      "description": "review_flashcard (backend/routers/flashcards.py) reads scheduler (in addition to the existing last_reviewed_at) from the card's flashcard_review_state row, reads existing fsrs_card_state.raw_state for that card when scheduler=='fsrs' (may be None), then calls (ClassicScheduler() if scheduler=='classic' else FSRSScheduler()).review(grade, last_reviewed_at, now, existing_state) -> SchedulerResult(next_due_at, review_interval, extra_state).",
+      "name": "review_stats_aggregate_query",
+      "description": "get_review_stats_summary (backend/routers/review_stats.py) runs one SQL statement against essaycards.review_events, outer-restricted by WHERE reviewed_at >= now() - interval '30 days' (the widest of the three windows; day and week are subsets, so this bound never excludes a row any window needs while avoiding a full-table scan). For each window w in (day: 24 hours, week: 7 days, month: 30 days) it computes count(*) filter (where reviewed_at >= now() - interval '<w>') as <w>_reviews, count(distinct flashcard_id) filter (where reviewed_at >= now() - interval '<w>') as <w>_unique_cards, and count(*) filter (where reviewed_at >= now() - interval '<w>' and grade = '<g>') as <w>_<g>_count for each grade g in (again, hard, good, easy) — one row of 3*(2+4)=18 scalar aggregates returned.",
       "inputs": [
-        "grade (validated)",
-        "flashcard_review_state row (last_reviewed_at, next_due_at, review_interval, scheduler)",
-        "fsrs_card_state.raw_state (fsrs only, nullable)",
-        "now (single select now() read)"
+        "essaycards.review_events",
+        "server now()"
       ],
       "outputs": [
-        "SchedulerResult"
+        "single aggregate row dict keyed by <window>_<metric>"
       ]
     },
     {
       "step": 2,
-      "name": "classic_scheduler_review",
-      "description": "ClassicScheduler.review(...) is a thin pass-through: calls the UNCHANGED compute_next_due_at(grade, last_reviewed_at, now), returns SchedulerResult(next_due_at, next_due_at - now, extra_state=None). Ignores existing_state entirely (Classic never persists extra per-card state beyond the existing three columns).",
+      "name": "build_summary_rows",
+      "description": "Python-side: for period in ('day', 'week', 'month'), in that fixed order, read the aggregate row's <period>_reviews/<period>_unique_cards/<period>_<grade>_count columns; failures = again_count; recall_rate = (reviews - failures) / reviews if reviews > 0 else None. Builds exactly 3 row dicts in fixed order — no coalescing against a fixed label list is needed (unlike GET /experiment/summary's per-scheduler GROUP BY), because the single aggregate query already returns one row covering all three windows regardless of whether any reviews exist.",
       "inputs": [
-        "grade",
-        "last_reviewed_at",
-        "now"
+        "aggregate row dict from step 1"
       ],
       "outputs": [
-        "SchedulerResult(extra_state=None)"
+        "list of exactly 3 row dicts, period='day' then 'week' then 'month'"
       ]
     },
     {
       "step": 3,
-      "name": "fsrs_scheduler_review",
-      "description": "FSRSScheduler.review(...): now_utc = now.astimezone(timezone.utc); card = Card.from_dict(existing_state['raw_state']) if existing_state else Card() (fresh Learning-state card for a card's first-ever FSRS review); rating = the fixed grade->Rating dict lookup; new_card, _log = the module-level Scheduler(desired_retention=0.9).review_card(card, rating, review_datetime=now_utc); returns SchedulerResult(next_due_at=new_card.due, review_interval=new_card.due - now_utc, extra_state={stability, difficulty, fsrs_state: int(new_card.state), step, last_review_at: new_card.last_review, raw_state: new_card.to_dict()}).",
+      "name": "review_stats_dataset_response",
+      "description": "Wraps the 3 rows in Dataset(meta=DatasetMeta(object_type='review_stats_summary', label='Review Stats Summary', total=3, page=1, page_size=3, row_actions=[]), schema=REVIEW_STATS_SUMMARY_SCHEMA, rows=rows), returned via the same _dataset_response(dataset) -> JSONResponse pattern used by backend/routers/experiment.py.",
       "inputs": [
-        "grade",
-        "now",
-        "existing_state (nullable dict with a 'raw_state' key)"
+        "3 row dicts from step 2"
       ],
       "outputs": [
-        "SchedulerResult(extra_state=dict)"
+        "Dataset JSON response"
       ]
     },
     {
       "step": 4,
-      "name": "review_transactional_writes",
-      "description": "Inside the existing single transaction (same get_db()/commit() block already in review_flashcard): (a) UPDATE flashcard_review_state SET last_reviewed_at=now, next_due_at=result.next_due_at, review_interval=result.review_interval, updated_at=now — same statement shape as pre-sprint, values now sourced from the SchedulerResult instead of a direct compute_next_due_at call; (b) if scheduler=='fsrs': INSERT ... ON CONFLICT (flashcard_id) DO UPDATE into fsrs_card_state from result.extra_state; (c) always: INSERT one row into review_events (flashcard_id, scheduler, grade, reviewed_at=now, was_due = (pre-review next_due_at <= now), prior_review_interval = the row's review_interval value BEFORE this update, resulting_review_interval = result.review_interval). All three writes commit together.",
+      "name": "review_stats_view_fetch_render",
+      "description": "ReviewStatsView (src/ShellEntry.tsx) fetches GET /essaycards/review-stats/summary once on mount via the existing apiFetch<Dataset<T>>/isApiError/ErrorCard/Skeleton convention (same as ExperimentDashboardView). Renders three cards/columns in the fixed row order (Day, Week, Month), each showing its reviews count, recall_rate as a rounded percentage or the literal string 'No reviews yet' when recall_rate is null (never '0%' for that case), and the four-grade breakdown (again/hard/good/easy counts). Reuses existing Material 3 surface tokens (var(--md-sys-color-surface-variant) etc.) already used by ExperimentDashboardView/ReviewStatsPanel — no new visual tokens introduced.",
       "inputs": [
-        "SchedulerResult",
-        "the pre-review flashcard_review_state row (next_due_at, review_interval) read in step 1",
-        "scheduler",
-        "grade",
-        "now"
+        "GET /essaycards/review-stats/summary Dataset"
       ],
       "outputs": [
-        "flashcard_review_state updated",
-        "fsrs_card_state upserted (fsrs only)",
-        "review_events row inserted"
+        "visible three-window stats page"
       ]
     },
     {
       "step": 5,
-      "name": "scheduler_assignment_decision",
-      "description": "backend/scheduling.py::decide_scheduler_assignment(flashcard_id, migrated_never_reviewed=False) -> (scheduler, reason). Reads ESSAYCARDS_FSRS_EXPERIMENT_ENABLED from os.environ fresh on every call (default true); if disabled, returns ('classic', 'assignment_disabled_classic'). Otherwise computes sha256(str(flashcard_id).encode()).digest()[0] % 2 (or equivalent stable hash) to pick 'classic' or 'fsrs', with reason 'new_card_random' (migrated_never_reviewed False) or 'migrated_never_reviewed_random' (True).",
-      "inputs": [
-        "flashcard_id: str",
-        "migrated_never_reviewed: bool"
-      ],
+      "name": "stats_nav_registration",
+      "description": "src/shellConfig.ts gains a nav entry {id: 'essaycards-stats', label: 'Stats', path: '/essaycards/stats', order: 5} in both mobilePrimaryNav and desktopNav, immediately after the existing essaycards-experiment entry (order: 4) — same registration mechanism already used for every other top-level EssayCards view, no new nav pattern. src/ShellEntry.tsx's Routes gains <Route path=\"/stats\" element={<ReviewStatsView />} />.",
+      "inputs": [],
       "outputs": [
-        "(scheduler: str, reason: str)"
-      ]
-    },
-    {
-      "step": 6,
-      "name": "new_card_seeding_ingest",
-      "description": "backend/ingest.py::_upsert_flashcard, inside its existing `if row['was_inserted']:` block, calls decide_scheduler_assignment(row['id']) and extends the existing flashcard_review_state INSERT to also set scheduler, scheduler_assigned_at=now(), scheduler_assignment_reason, experiment_version='sprint10_v1'.",
-      "inputs": [
-        "new flashcard id (uuid)"
-      ],
-      "outputs": [
-        "flashcard_review_state row seeded with scheduler metadata, exactly as today for last_reviewed_at/next_due_at/review_interval"
-      ]
-    },
-    {
-      "step": 7,
-      "name": "new_card_seeding_upsert",
-      "description": "backend/routers/flashcards.py::_upsert_question, inside its existing `if row['was_inserted']:` block, applies the identical treatment as step 6.",
-      "inputs": [
-        "new flashcard id (uuid)"
-      ],
-      "outputs": [
-        "flashcard_review_state row seeded with scheduler metadata"
-      ]
-    },
-    {
-      "step": 8,
-      "name": "new_card_seeding_exploration",
-      "description": "backend/exploration.py::execute_plan's create_card loop applies the identical treatment as step 6/7 to its own flashcard_review_state INSERT.",
-      "inputs": [
-        "new flashcard id (uuid)"
-      ],
-      "outputs": [
-        "flashcard_review_state row seeded with scheduler metadata"
-      ]
-    },
-    {
-      "step": 9,
-      "name": "migration_backfill_legacy_classic",
-      "description": "One-time, sentinel-guarded UPDATE in schema.sql (folded from 10_schema.sql): every flashcard_review_state row with scheduler_assigned_at IS NULL AND last_reviewed_at IS NOT NULL -> scheduler='classic', scheduler_assigned_at=now(), scheduler_assignment_reason='legacy_retained_classic', experiment_version='sprint10_v1'. next_due_at/review_interval/last_reviewed_at are not in the SET list — untouched.",
-      "inputs": [
-        "existing flashcard_review_state rows at first post-sprint startup"
-      ],
-      "outputs": [
-        "every previously-reviewed row permanently classified 'classic', 'legacy_retained_classic'"
-      ]
-    },
-    {
-      "step": 10,
-      "name": "migration_backfill_never_reviewed",
-      "description": "One-time, sentinel-guarded UPDATE in schema.sql: every flashcard_review_state row with scheduler_assigned_at IS NULL AND last_reviewed_at IS NULL -> scheduler = (hashtext(flashcard_id::text) % 2 = 0 ? 'classic' : 'fsrs'), scheduler_assigned_at=now(), scheduler_assignment_reason='migrated_never_reviewed_random', experiment_version='sprint10_v1'. Runs after step 9 in the same transaction so the two UPDATEs' WHERE clauses never overlap.",
-      "inputs": [
-        "existing never-reviewed flashcard_review_state rows at first post-sprint startup"
-      ],
-      "outputs": [
-        "every previously-existing-but-unreviewed row permanently assigned via the balanced mechanism"
-      ]
-    },
-    {
-      "step": 11,
-      "name": "due_row_scheduler_field",
-      "description": "list_due_flashcards' SELECT gains frs.scheduler; _due_row_to_dict passes it through unchanged (plain string, no transformation needed).",
-      "inputs": [
-        "flashcard_review_state.scheduler"
-      ],
-      "outputs": [
-        "due row dict gains scheduler"
-      ]
-    },
-    {
-      "step": 12,
-      "name": "scheduler_badge_render",
-      "description": "ReviewSessionView (src/ShellEntry.tsx) renders a small badge in the question card's top corner from queue[0].scheduler — 'Classic' or 'FSRS', visible before and after the answer is revealed, using existing Material 3 tokens. No new fetch — the value is already present on the same /due row the session already renders from.",
-      "inputs": [
-        "current.scheduler (from the already-fetched /due row)"
-      ],
-      "outputs": [
-        "visible badge, unchanged surrounding card layout/buttons"
-      ]
-    },
-    {
-      "step": 13,
-      "name": "experiment_summary_query",
-      "description": "backend/routers/experiment.py::get_experiment_summary runs two aggregate queries — (a) GROUP BY scheduler over flashcard_review_state for assigned_cards/new_cards_assigned/migrated_cards_assigned/cards_new/cards_learning/cards_established (using the same review_interval='0'/<24h/>=24h thresholds CLAUDE.md already defines); (b) GROUP BY scheduler over review_events for reviewed_cards (count distinct flashcard_id)/completed_reviews (count *)/ordinary_due_reviews (count * filter prior_review_interval >= interval '24 hours')/failures (count * filter prior_review_interval >= interval '24 hours' and grade='again') — was_due is NOT used as the ordinary-due-review gate (see contracts.invariants); prior_review_interval >= 24h mirrors the app's existing learning/established threshold and correctly excludes rapid-retry/immediate-relearning reviews, which always follow a short (learning-phase) prior interval — then merges the two result sets in Python keyed by scheduler against a fixed ['classic','fsrs'] row list, coalescing every missing count to 0 and computing recall_rate = (ordinary_due_reviews - failures) / ordinary_due_reviews if ordinary_due_reviews > 0 else null.",
-      "inputs": [
-        "essaycards.flashcard_review_state",
-        "essaycards.review_events"
-      ],
-      "outputs": [
-        "2-row Dataset, fixed order"
-      ]
-    },
-    {
-      "step": 14,
-      "name": "experiment_dashboard_render",
-      "description": "A new ExperimentDashboardView (src/ShellEntry.tsx) fetches GET /experiment/summary once on mount and renders a compact two-row comparison table, reachable via a new shellConfig.ts nav entry (same discoverability precedent as the Sprint03_Images 'Images' entry).",
-      "inputs": [
-        "GET /experiment/summary Dataset"
-      ],
-      "outputs": [
-        "visible dashboard view"
+        "Stats entry visible in both nav surfaces; /essaycards/stats resolves to ReviewStatsView"
       ]
     }
   ],
   "dependencies": {
     "internal_required": [
       {
-        "component": "03_Application/EssayCards/backend/scheduling.py",
-        "role": "Home of compute_next_due_at (unchanged) and the new ClassicScheduler/FSRSScheduler/decide_scheduler_assignment — the single seam both this sprint's new code and review_flashcard depend on"
+        "component": "03_Application/EssayCards/backend/database.py",
+        "role": "get_db() — unchanged connection pool this new endpoint reads through"
       },
       {
-        "component": "03_Application/EssayCards/backend/database.py",
-        "role": "get_db()/init_schema() — unchanged connection/schema-bootstrap mechanism this sprint's additive schema.sql changes rely on"
+        "component": "03_Application/EssayCards/schema.sql (essaycards.review_events, Sprint10_DualSchedulerAB)",
+        "role": "The sole data source for this feature — read-only, no schema change"
       }
     ],
     "internal_optional": [],
-    "external_required": [
-      {
-        "name": "fsrs>=6.3.2",
-        "role": "Official py-fsrs library — FSRS-6 Scheduler/Card/Rating and serialization",
-        "reuse_existing": false
-      }
-    ],
+    "external_required": [],
     "external_optional": [],
     "forbidden": [
-      "fsrs[optimizer] / torch — the optimizer extra is explicitly out of scope this sprint (mission §9); do not install it",
-      "Any code path in list_due_flashcards, flashcard_queue_stats, or list_essays that branches on the scheduler column — selection/ordering/forecast logic must remain scheduler-agnostic by construction",
-      "A scheduler field on any request body (upsert, ingest, exploration import, review) — assignment is exclusively server-side and permanent"
+      "Any change to essaycards.review_events' schema, backend/routers/experiment.py, or GET /flashcards/stats",
+      "Grouping, filtering, or otherwise branching this endpoint's query on essaycards.review_events.scheduler",
+      "A prior_review_interval filter on this endpoint's query (that filter is /experiment/summary's, not this endpoint's)",
+      "Any query parameter on GET /review-stats/summary this sprint",
+      "Any write/mutation endpoint in this sprint's scope"
     ]
   },
   "persistence": {
-    "owns_persistent_state": true,
-    "schema_artifact": "10_schema.sql",
+    "owns_persistent_state": false,
+    "schema_artifact": null,
     "persistence_type": "postgres",
-    "ownership": "private_application_state"
+    "ownership": "none"
   },
   "deferrals": {
     "application_implementer": [
-      "Implement SchedulerResult (NamedTuple: next_due_at, review_interval, extra_state), ClassicScheduler, FSRSScheduler, decide_scheduler_assignment, and EXPERIMENT_VERSION='sprint10_v1' in backend/scheduling.py exactly per internal_flow steps 1-5; compute_next_due_at and VALID_GRADES remain byte-for-byte unchanged.",
-      "Rewrite review_flashcard's body per internal_flow steps 1 and 4 — dispatch, then all three writes inside the existing single transaction/commit.",
-      "Add scheduler assignment at the three was_inserted gates per internal_flow steps 6-8 — do not create a fourth assignment call site or duplicate the assignment logic inline; always call decide_scheduler_assignment.",
-      "Add backend/routers/experiment.py per internal_flow step 13; register in main.py alongside the existing six routers.",
-      "Add fsrs>=6.3.2 to pyproject.toml's [project].dependencies and confirm the essaycards Docker image installs it (rebuild required).",
-      "Extend DUE_SCHEMA and the due-row SQL/dict mapping per internal_flow step 11.",
-      "Read ESSAYCARDS_FSRS_EXPERIMENT_ENABLED fresh from os.environ on every decide_scheduler_assignment call (not cached at import) so tests can monkeypatch it per-test.",
-      "Frontend: SchedulerBadge in ReviewSessionView (step 12) and ExperimentDashboardView + route + shellConfig.ts nav entry (step 14).",
-      "Before relying on the module-level _FSRS_SCHEDULER singleton under FastAPI's concurrent request handling, confirm against the installed fsrs>=6.3.2 source that Scheduler.review_card mutates only the passed-in Card, never the Scheduler instance itself (open uncertainty raised in 11_design_review.md — not independently confirmed at design time). If any doubt remains, construct a Scheduler per call instead — a trivial, cheap mitigation."
+      "Create backend/routers/review_stats.py per internal_flow steps 1-3, following backend/routers/experiment.py's structure (router, a module-level ColumnSchema list, private query helper(s), private _dataset_response, the GET handler) — one single aggregate SQL statement, not three round trips.",
+      "Register the router in backend/main.py: import backend.routers.review_stats and app.include_router(review_stats.router, prefix='/api/essaycards') after the existing seven include_router calls (after experiment.router).",
+      "Add ReviewStatsSummaryRow (TS interface mirroring REVIEW_STATS_SUMMARY_SCHEMA) and ReviewStatsView to src/ShellEntry.tsx per internal_flow step 4, and the /stats route per step 5.",
+      "Add the nav entry to src/shellConfig.ts per internal_flow step 5, in both mobilePrimaryNav and desktopNav, immediately after the existing essaycards-experiment entry.",
+      "Do not add a scheduler column, a prior_review_interval filter, or any query parameter to this endpoint — see dependencies.forbidden."
     ],
     "ui_implementer": [
-      "Badge placement/styling: small pill, question card's top corner, visible both before and after answer reveal, using only existing Material 3 tokens already in src/ShellEntry.tsx — do not introduce new visual tokens or redesign the card.",
-      "Dashboard table layout: reuse whichever existing generic Dataset-rendering pattern ShellEntry.tsx already uses for a small comparison table (e.g. the same convention as ReviewStatsPanel's forecast strip) rather than inventing a new one."
+      "Three cards/columns (Day / Week / Month, fixed left-to-right or stacked order matching the row order) — reuse ExperimentDashboardView's/ReviewStatsPanel's existing Material 3 surface tokens, no new visual language.",
+      "Render recall_rate as a rounded percentage when non-null; render the literal string 'No reviews yet' when null — never '0%' for the null case.",
+      "Render the four-grade breakdown (again/hard/good/easy) per card."
     ],
     "test_writer": [
-      "Implement every scenario in 10_test_spec.md as a concrete pytest function, following each existing test file's established per-endpoint/per-module convention (test_scheduling.py for pure-function/unit coverage, test_flashcards.py for HTTP-level review/due coverage, test_ingest.py / test_exploration.py for their respective creation-path assignment coverage, new test_migration.py, new test_experiment.py).",
-      "Extend tests/fixtures.sql with: an FSRS-cohort card that already has an fsrs_card_state row (established, due) for the state-persistence/reload/relearning scenarios; an FSRS-cohort card with NO fsrs_card_state row yet (first-ever FSRS review, fresh Card() path); a handful of review_events rows spanning both schedulers and both was_due states, for the dashboard scenarios. Prefix new fixture ids fix- per existing convention.",
-      "Do not modify any existing fixture row's identity/timing in a way that would change an already-passing pre-sprint test's expected result."
+      "Implement every scenario in 10_test_spec.md as a concrete pytest function in a new tests/test_review_stats.py, following the existing per-endpoint test-file convention (e.g. test_experiment.py).",
+      "Extend tests/fixtures.sql with essaycards.review_events rows spanning: multiple windows (some only within 24h, some only within 7d, some only within 30d, some older than 30d so they must be excluded from every window), a mix of grades including at least one 'again', a mix of schedulers (classic and fsrs) within the same window, and at least one row with a short prior_review_interval (a rapid retry) to exercise the no-prior_review_interval-filter invariant. Prefix new fixture ids fix- per existing convention; do not alter any existing fixture row's identity/timing.",
+      "Add tests/ui/review_stats.spec.ts for the [UI] scenario, following the existing pattern established by 03_Application/NumericSeries/tests/ui/series.spec.ts and 03_Application/StoryReader/tests/ui/scroll_and_resume.spec.ts (this is EssayCards' first UI spec file) — run against http://atlas-shell per 02_Platform/Atlas_Shell/playwright.config.ts."
     ],
     "reviewer": [
-      "Diff backend/scheduling.py's compute_next_due_at and VALID_GRADES against the pre-sprint version — must be byte-for-byte identical.",
-      "Confirm no code path in list_due_flashcards, flashcard_queue_stats, or list_essays reads or branches on the scheduler column.",
-      "Confirm every datetime passed into fsrs.Scheduler.review_card is exactly tzinfo == datetime.timezone.utc (not merely UTC-offset-equivalent).",
-      "Confirm all three new-card insertion sites call the single decide_scheduler_assignment helper (no duplicated/drifted inline assignment logic).",
-      "Confirm the two migration UPDATEs are guarded on scheduler_assigned_at IS NULL and never appear in the SET list for next_due_at/review_interval/last_reviewed_at.",
-      "Confirm no endpoint request body anywhere accepts or writes a scheduler field."
+      "Confirm the endpoint's query never reads, filters, or groups on essaycards.review_events.scheduler.",
+      "Confirm the endpoint's query never applies a prior_review_interval filter (that would silently turn this into a second /experiment/summary).",
+      "Confirm recall_rate is null, not 0, whenever a window's reviews count is 0.",
+      "Confirm the response is always exactly 3 rows in fixed day/week/month order, never omitting a zero-review window.",
+      "Confirm essaycards.review_events' schema, backend/routers/experiment.py, and GET /flashcards/stats are byte-for-byte untouched by this sprint.",
+      "Confirm the aggregate query is a single SQL statement (not three round trips) per contracts.invariants."
     ]
   },
   "deferred_decisions": [
-    "Exact review_events retention/archival policy (unbounded append-only growth is accepted for this sprint; flagged as a Sprint 2 housekeeping follow-up)",
-    "Whether the experiment dashboard should eventually support per-essay/topic scoping (explicitly out of scope this sprint per non-goals; a natural Sprint 2 candidate)"
+    "Whether a future sprint should add per-essay/topic scoping or a per-scheduler breakdown to this page (explicitly out of scope this sprint per non_goals)."
   ],
   "risks": [
     {
-      "risk": "FSRS-cohort cards will visibly reappear on a different rhythm (sub-hour learning-step intervals) than Classic cards during their first few reviews, since both flow through the identical RECENT/BACKLOG mechanism by design.",
-      "impact": "Expected and intentional per the mission ('the two algorithms will produce different due dates'), but early dashboard readings may look noisy until enough FSRS cards graduate past their learning steps — worth noting in the sprint report, not a defect."
-    },
-    {
-      "risk": "fsrs_card_state.raw_state and its discrete sibling columns (stability/difficulty/fsrs_state/step/last_review_at) could drift if a future change writes one without the other.",
-      "impact": "Silent data-quality degradation in dashboard queries (which read the discrete columns) versus actual scheduling behavior (which reads raw_state) — mitigated by the invariant that both must always come from the same to_dict() call in the same statement."
-    },
-    {
-      "risk": "The hash-based 50/50 split is only balanced in expectation, not exact, and is not stratified by essay/section/nugget/level.",
-      "impact": "Small cohorts (a newly-ingested essay) may show a visibly uneven local split even though the global split trends toward 50/50 — accepted per Phase B's explicit reasoning (a UUID-derived hash already balances any stratum in expectation); do not build a stratified sampler without a new design decision."
-    },
-    {
-      "risk": "Review time is not reliably recorded anywhere in the current system (confirmed by Agent 1) and is therefore dropped from the dashboard scope entirely.",
-      "impact": "The dashboard cannot show a review-time/workload-per-minute comparison this sprint — documented as a known limitation, candidate for a Sprint 2 follow-up if review duration is ever captured."
+      "risk": "essaycards.review_events has no index with reviewed_at as a leading column (existing indexes are (flashcard_id, reviewed_at desc) and (scheduler, prior_review_interval)); the outer WHERE reviewed_at >= now() - interval '30 days' restriction in step 1 cannot use an index scan and falls back to a sequential scan bounded only by table size, not by the 30-day window.",
+      "impact": "Acceptable at current review_events volume; if row count grows significantly (Sprint10's own deferred_decisions already flags review_events' unbounded append-only growth), this endpoint's latency will degrade before an index on reviewed_at is added — a future-sprint indexing follow-up, not a defect in this design."
     }
   ],
   "open_questions": [
     {
-      "question": "Should review_events eventually get a retention or summarization policy once it has accumulated many sprints of history?",
-      "owner": "product"
-    },
-    {
-      "question": "Should the experiment dashboard eventually support per-essay/topic scoping, or remain system-wide only?",
-      "owner": "product"
+      "question": "Should essaycards.review_events eventually get an index on reviewed_at (or (reviewed_at) alone) once its row count/latency profile is measured against this endpoint?",
+      "owner": "architecture"
     }
   ]
 }

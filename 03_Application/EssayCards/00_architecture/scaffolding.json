@@ -6,477 +6,80 @@
     "03_Application/EssayCards/backend",
     "03_Application/EssayCards/backend/routers",
     "03_Application/EssayCards/src",
-    "03_Application/EssayCards/tests"
+    "03_Application/EssayCards/tests",
+    "03_Application/EssayCards/tests/ui"
   ],
   "files": [
     {
-      "path": "03_Application/EssayCards/backend/scheduling.py",
+      "path": "03_Application/EssayCards/backend/routers/review_stats.py",
       "stub_kind": "python_module",
-      "role": "Pure spaced-repetition scheduling seam. compute_next_due_at and VALID_GRADES are UNCHANGED this sprint. Adds the Classic/FSRS dispatch wrappers, the SchedulerResult shape, the scheduler-assignment decision helper, and the FSRS-config module constants.",
-      "public_objects": [
-        {
-          "kind": "constant",
-          "name": "VALID_GRADES",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "compute_next_due_at",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "compute_next_due_at",
-              "visibility": "public",
-              "args": [
-                "grade: str",
-                "last_reviewed_at: datetime | None",
-                "now: datetime"
-              ],
-              "returns": "datetime",
-              "purpose": "Unchanged — byte-for-byte identical to pre-sprint."
-            }
-          ]
-        },
-        {
-          "kind": "class",
-          "name": "SchedulerResult",
-          "pattern": "data_model",
-          "methods": [],
-          "purpose": "typing.NamedTuple(next_due_at: datetime, review_interval: timedelta, extra_state: dict | None). Common return shape for both scheduler adapters."
-        },
-        {
-          "kind": "class",
-          "name": "ClassicScheduler",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "review",
-              "visibility": "public",
-              "args": [
-                "grade: str",
-                "last_reviewed_at: datetime | None",
-                "now: datetime",
-                "existing_state: dict | None = None"
-              ],
-              "returns": "SchedulerResult",
-              "purpose": "Thin pass-through to compute_next_due_at; extra_state always None. existing_state is accepted but ignored (Classic persists no state beyond the existing three columns)."
-            }
-          ]
-        },
-        {
-          "kind": "class",
-          "name": "FSRSScheduler",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "review",
-              "visibility": "public",
-              "args": [
-                "grade: str",
-                "last_reviewed_at: datetime | None",
-                "now: datetime",
-                "existing_state: dict | None = None"
-              ],
-              "returns": "SchedulerResult",
-              "purpose": "Loads or creates an fsrs.Card (Card.from_dict(existing_state['raw_state']) if existing_state else Card()), converts now to exactly timezone.utc, calls the module-level fsrs.Scheduler.review_card, and returns next_due_at/review_interval plus extra_state (stability, difficulty, fsrs_state, step, last_review_at, raw_state)."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "decide_scheduler_assignment",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "decide_scheduler_assignment",
-              "visibility": "public",
-              "args": [
-                "flashcard_id: str",
-                "migrated_never_reviewed: bool = False"
-              ],
-              "returns": "tuple[str, str]",
-              "purpose": "Reads ESSAYCARDS_FSRS_EXPERIMENT_ENABLED fresh from os.environ (default true) each call. If disabled: ('classic', 'assignment_disabled_classic'). Else: a stable hash-of-flashcard_id split into ('classic'|'fsrs', 'new_card_random'|'migrated_never_reviewed_random'). Asserts the chosen reason is in _SCHEDULER_ASSIGNMENT_REASONS before returning."
-            }
-          ]
-        },
-        {
-          "kind": "constant",
-          "name": "EXPERIMENT_VERSION",
-          "pattern": "constant",
-          "purpose": "'sprint10_v1' — written into flashcard_review_state.experiment_version at every assignment (new-card and migration)."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "constant",
-          "name": "_AGAIN_INTERVAL",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "_FLOORS",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "_FSRS_SCHEDULER",
-          "purpose": "Module-level fsrs.Scheduler(desired_retention=0.9), library-default parameters/learning_steps/relearning_steps. Constructed once at import time and reused (fsrs.Scheduler carries no per-card state)."
-        },
-        {
-          "kind": "constant",
-          "name": "_GRADE_TO_FSRS_RATING",
-          "purpose": "dict mapping 'again'/'hard'/'good'/'easy' -> fsrs.Rating.Again/Hard/Good/Easy by name."
-        },
-        {
-          "kind": "constant",
-          "name": "_SCHEDULER_ASSIGNMENT_REASONS",
-          "purpose": "The closed 4-value vocabulary ('new_card_random', 'migrated_never_reviewed_random', 'legacy_retained_classic', 'assignment_disabled_classic'); the CHECK constraint in schema.sql is the actual enforcement point. Must be wired into decide_scheduler_assignment's return value as a defensive assertion (assert reason in _SCHEDULER_ASSIGNMENT_REASONS before returning) so it is an active guard, not dead code."
-        },
-        {
-          "kind": "function",
-          "name": "_experiment_enabled",
-          "purpose": "os.environ.get('ESSAYCARDS_FSRS_EXPERIMENT_ENABLED', 'true') truthiness check, read fresh every call."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/routers/flashcards.py",
-      "stub_kind": "python_module",
-      "role": "GET /flashcards/due, GET /flashcards/stats, POST /flashcards/upsert, GET /flashcards/{id}/export, POST /flashcards/{id}/review. This sprint: DUE_SCHEMA and the due-row query gain scheduler; _upsert_question's was_inserted branch gains scheduler-assignment metadata on its flashcard_review_state INSERT; review_flashcard is rewritten to dispatch via backend.scheduling's ClassicScheduler/FSRSScheduler and additionally write fsrs_card_state/review_events in the same transaction.",
+      "role": "GET /review-stats/summary — the review-performance stats page's sole data endpoint. Module docstring states: real recorded review_events history only, three fixed rolling windows (day/week/month) in that order, scheduler-agnostic (aggregates across both Classic and FSRS, unlike backend/routers/experiment.py), no prior_review_interval filter (counts every completed review including rapid retries), recall_rate null (not 0) when a window has zero reviews.",
       "public_objects": [
         {
           "kind": "constant",
           "name": "router",
           "pattern": "router",
-          "purpose": "Unchanged."
+          "purpose": "APIRouter(prefix='/review-stats', tags=['review_stats']) — included by main.py under /api/essaycards, after experiment.router."
         }
       ],
       "private_objects": [
         {
           "kind": "constant",
-          "name": "DUE_SCHEMA",
-          "purpose": "[CHANGED] Gains a scheduler ColumnSchema entry (type string, not sortable, not filterable)."
+          "name": "REVIEW_STATS_SUMMARY_SCHEMA",
+          "purpose": "ColumnSchema list: period, reviews, unique_cards, again_count, hard_count, good_count, easy_count, failures, recall_rate. All sortable=False, filterable=False (fixed 3-row summary, not a data grid)."
         },
         {
           "kind": "constant",
-          "name": "STATS_SCHEMA",
-          "purpose": "Unchanged."
+          "name": "_WINDOWS",
+          "purpose": "Ordered tuple of (period, interval_literal) pairs: ('day', '24 hours'), ('week', '7 days'), ('month', '30 days') — the single source of both the SQL window boundaries and the fixed output row order."
         },
         {
           "kind": "constant",
-          "name": "STATS_BUCKETS",
-          "purpose": "Unchanged."
+          "name": "_GRADES",
+          "purpose": "('again', 'hard', 'good', 'easy') — the fixed grade vocabulary this endpoint's per-grade breakdown iterates over."
         },
         {
           "kind": "function",
-          "name": "_due_row_to_dict",
-          "purpose": "[CHANGED] Passes through scheduler unchanged (plain string)."
+          "name": "_review_stats_aggregate",
+          "purpose": "Given cur: runs the single SQL statement described in 10_architecture.json internal_flow step 1 (one row of 18 filter(where ...) aggregates over essaycards.review_events, outer-restricted to the last 30 days) and returns it as one dict."
+        },
+        {
+          "kind": "function",
+          "name": "_build_summary_rows",
+          "purpose": "Given the aggregate row dict: builds and returns the 3 row dicts (day, week, month, in that order) per internal_flow step 2, computing failures=again_count and recall_rate=(reviews-failures)/reviews if reviews>0 else None per window."
         },
         {
           "kind": "function",
           "name": "_dataset_response",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_due_dataset",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_validate_upsert_body",
-          "purpose": "Unchanged — no scheduler field accepted in any request body."
-        },
-        {
-          "kind": "constant",
-          "name": "_UNSET",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_new_card_key",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_question",
-          "purpose": "[CHANGED] Its `if row['was_inserted']:` branch now also calls backend.scheduling.decide_scheduler_assignment(row['id']) and extends the flashcard_review_state INSERT with scheduler/scheduler_assigned_at/scheduler_assignment_reason/experiment_version."
-        },
-        {
-          "kind": "function",
-          "name": "_parse_review_grade",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_load_fsrs_existing_state",
-          "purpose": "[NEW] Given cur and flashcard_id: SELECT raw_state FROM essaycards.fsrs_card_state WHERE flashcard_id = %s; returns {'raw_state': row['raw_state']} or None. Used only when the card's persisted scheduler is 'fsrs'."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_fsrs_card_state",
-          "purpose": "[NEW] Given cur, flashcard_id, and a SchedulerResult.extra_state dict: INSERT ... ON CONFLICT (flashcard_id) DO UPDATE into essaycards.fsrs_card_state (stability, difficulty, fsrs_state, step, last_review_at, raw_state, updated_at=now())."
-        },
-        {
-          "kind": "function",
-          "name": "_insert_review_event",
-          "purpose": "[NEW] Given cur, flashcard_id, scheduler, grade, now, was_due, prior_review_interval, resulting_review_interval: INSERT one row into essaycards.review_events. Called unconditionally for every review, both schedulers."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/routers/experiment.py",
-      "stub_kind": "python_module",
-      "role": "[NEW] The experiment dashboard's sole data endpoint: GET /experiment/summary. Module docstring states it returns real recorded per-scheduler counts only (mission §7 'not theoretical scheduler predictions') and that recall_rate/sample-size are always exposed together, never recall_rate alone.",
-      "public_objects": [
-        {
-          "kind": "constant",
-          "name": "router",
-          "pattern": "router",
-          "purpose": "APIRouter(prefix='/experiment', tags=['experiment']) — included by main.py under /api/essaycards."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "constant",
-          "name": "EXPERIMENT_SUMMARY_SCHEMA",
-          "purpose": "ColumnSchema list: scheduler, assigned_cards, new_cards_assigned, migrated_cards_assigned, cards_new, cards_learning, cards_established, reviewed_cards, completed_reviews, ordinary_due_reviews, recall_rate, failures. No FSRS-native vocabulary in any label."
-        },
-        {
-          "kind": "function",
-          "name": "_assignment_counts_by_scheduler",
-          "purpose": "GROUP BY scheduler over essaycards.flashcard_review_state -> dict[scheduler, {assigned_cards, new_cards_assigned, migrated_cards_assigned, cards_new, cards_learning, cards_established}]."
-        },
-        {
-          "kind": "function",
-          "name": "_review_counts_by_scheduler",
-          "purpose": "GROUP BY scheduler over essaycards.review_events -> dict[scheduler, {reviewed_cards, completed_reviews, ordinary_due_reviews, failures}]. ordinary_due_reviews/failures are filtered on prior_review_interval >= interval '24 hours' (NOT was_due, which is true for virtually every reachable review and stored only as an audit field) — mirrors the app's existing learning/established threshold and excludes rapid-retry/immediate-relearning reviews per 11_design_review.md's Minimal Change Set."
-        },
-        {
-          "kind": "function",
-          "name": "_dataset_response",
-          "purpose": "Same pattern as the other routers' private helper of the same name."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/ingest.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Markdown ingestion CLI plus the shared upsert core. This sprint: _upsert_flashcard's `if row['was_inserted']:` branch gains scheduler-assignment metadata on its flashcard_review_state INSERT, via backend.scheduling.decide_scheduler_assignment. No other change.",
-      "public_objects": [
-        {
-          "kind": "constant",
-          "name": "SLUG_LIKE_RE",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "VALID_ESSAY_STATUSES",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "DEFAULT_ESSAY_STATUS",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "class",
-          "name": "IngestionError",
-          "pattern": "data_model",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "ingest",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "upsert_document",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged (this sprint touches only its private _upsert_flashcard helper)."
-        },
-        {
-          "kind": "class",
-          "name": "IngestSummary",
-          "pattern": "data_model",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "extract_nugget_keys",
-          "pattern": "validator",
-          "methods": [],
-          "purpose": "Unchanged."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "function",
-          "name": "_parse_front_matter",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_split_sections",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_split_body_and_cards",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_parse_cards_yaml",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_validate_uniqueness",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_essay",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_section",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_flashcard",
-          "purpose": "[CHANGED] Its `if row['was_inserted']:` branch now also calls backend.scheduling.decide_scheduler_assignment(row['id']) and extends the flashcard_review_state INSERT with scheduler/scheduler_assigned_at/scheduler_assignment_reason/experiment_version (the review_interval column keeps its existing explicit interval '0')."
-        },
-        {
-          "kind": "function",
-          "name": "_resolve_nugget_references",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_resync_section_nuggets",
-          "purpose": "Unchanged."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/exploration.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] build/validate/plan/execute behind routers/exploration.py. This sprint: execute_plan's create_card loop gains scheduler-assignment metadata on its flashcard_review_state INSERT, via backend.scheduling.decide_scheduler_assignment. No other change.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "build_exploration_package",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "validate_import_body",
-          "pattern": "validator",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "resolve_and_plan",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "execute_plan",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "execute_plan",
-              "visibility": "public",
-              "args": [
-                "cur",
-                "plan: dict"
-              ],
-              "returns": "dict",
-              "purpose": "[CHANGED] Its create_card loop's flashcard_review_state INSERT now also calls decide_scheduler_assignment(crow['id']) and sets scheduler/scheduler_assigned_at/scheduler_assignment_reason/experiment_version."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "plan_to_public",
-          "pattern": "mapper",
-          "methods": [],
-          "purpose": "Unchanged."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "function",
-          "name": "_new_card_key",
-          "purpose": "Unchanged."
+          "purpose": "Same pattern as the other routers' private helper of the same name — wraps a Dataset in a JSONResponse via model_dump(by_alias=True, mode='json')."
         }
       ]
     },
     {
       "path": "03_Application/EssayCards/backend/main.py",
       "stub_kind": "python_module",
-      "role": "[CHANGED] FastAPI application entry point. This sprint: import backend.routers.experiment and app.include_router(experiment.router, prefix='/api/essaycards') alongside the existing six routers.",
+      "role": "FastAPI application entry point. This sprint: import backend.routers.review_stats and app.include_router(review_stats.router, prefix='/api/essaycards') after the existing seven app.include_router(...) calls (after experiment.router).",
       "public_objects": [
         {
           "kind": "constant",
           "name": "app",
           "pattern": "fastapi_app",
-          "purpose": "Router set gains experiment.router this sprint."
+          "purpose": "Router set gains review_stats.router this sprint, mounted last."
         }
       ],
       "private_objects": []
     },
     {
-      "path": "03_Application/EssayCards/schema.sql",
-      "stub_kind": "sql",
-      "role": "[CHANGED] Canonical runtime schema DDL, loaded idempotently at startup and by tests/conftest.py. This sprint: fold Sprint10_DualSchedulerAB/10_schema.sql verbatim (essaycards.fsrs_card_state, essaycards.review_events, flashcard_review_state.scheduler/scheduler_assigned_at/scheduler_assignment_reason/experiment_version + their CHECK constraints and index, and the two guarded migration-backfill UPDATEs) before the closing commit.",
-      "public_objects": [],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/pyproject.toml",
-      "stub_kind": "config",
-      "role": "[CHANGED] Add \"fsrs>=6.3.2\" to [project].dependencies. No other dependency change.",
-      "public_objects": [],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/CLAUDE.md",
-      "stub_kind": "doc",
-      "role": "[CHANGED] App-local guidance. Add a 'Dual scheduler A/B (Sprint10)' section documenting: scheduler/scheduler_assignment_reason vocabulary, the badge shows plain 'Classic'/'FSRS' names only (never FSRS-native terms), the kill-switch env var, and the experiment dashboard endpoint — same documentation-density precedent as the existing 'Roadmap, focus and review' / 'Nuggets' sections. Add a Sprint scope line for Sprint10.",
-      "public_objects": [],
-      "private_objects": []
-    },
-    {
       "path": "03_Application/EssayCards/src/ShellEntry.tsx",
       "stub_kind": "tsx_module",
-      "role": "[CHANGED] React entry point. This sprint: (1) DueRow TS type gains scheduler: 'classic' | 'fsrs'; (2) a new SchedulerBadge component rendered in ReviewSessionView's question card (top corner, existing Material 3 tokens, visible pre/post reveal); (3) a new ExperimentDashboardView component + route (/essaycards/experiment) fetching GET /experiment/summary and rendering a compact two-row comparison table; (4) a new ExperimentSummaryRow TS type mirroring EXPERIMENT_SUMMARY_SCHEMA.",
+      "role": "React entry point. This sprint: (1) a new ReviewStatsSummaryRow TS interface mirroring REVIEW_STATS_SUMMARY_SCHEMA (period: 'day' | 'week' | 'month', reviews, unique_cards, again_count, hard_count, good_count, easy_count, failures: number, recall_rate: number | null); (2) a new ReviewStatsView component fetching GET /essaycards/review-stats/summary on mount (apiFetch<Dataset<ReviewStatsSummaryRow>>/isApiError/ErrorCard/Skeleton, same convention as ExperimentDashboardView) and rendering three window cards; (3) a new Route for /stats.",
       "public_objects": [
         {
           "kind": "function",
           "name": "default",
           "pattern": "react_component",
           "methods": [],
-          "purpose": "Default export: Routes wiring gains the new /essaycards/experiment route. Internal view/helper components (existing ones unchanged; new: SchedulerBadge, ExperimentDashboardView) are not individually enumerated, per this scaffold's established convention."
+          "purpose": "Default export: Routes wiring gains <Route path=\"/stats\" element={<ReviewStatsView />} />. Internal view/helper components (existing ones unchanged; new: ReviewStatsView) are not individually enumerated, per this file's established scaffold convention."
         }
       ],
       "private_objects": []
@@ -484,350 +87,79 @@
     {
       "path": "03_Application/EssayCards/src/shellConfig.ts",
       "stub_kind": "ts_module",
-      "role": "[CHANGED] Add a top-level nav entry for the new Experiment dashboard view (/essaycards/experiment), same discoverability precedent as the Sprint03_Images 'Images' entry.",
+      "role": "Add a top-level nav entry {id: 'essaycards-stats', label: 'Stats', path: '/essaycards/stats', order: 5} to both mobilePrimaryNav and desktopNav, immediately after the existing essaycards-experiment entry (order: 4) — same registration mechanism already used for every other top-level EssayCards view.",
       "public_objects": [],
       "private_objects": []
     },
     {
       "path": "03_Application/EssayCards/tests/fixtures.sql",
       "stub_kind": "sql",
-      "role": "[CHANGED] Add: an FSRS-cohort card with an existing fsrs_card_state row (established, due — exercises state reload/relearning); an FSRS-cohort card with NO fsrs_card_state row yet (exercises the first-ever-review fresh-Card() path); a Classic-cohort established card distinct from existing fixtures if needed for the new mature-card-reviewed-again HTTP scenario; a handful of essaycards.review_events rows spanning both schedulers and both prior_review_interval regimes (>= 24h established and < 24h learning-phase — the dashboard's actual ordinary_due_reviews/recall_rate/failures filter, per 11_design_review.md's Minimal Change Set; was_due may also vary across these rows but is not itself the filter under test). All new fixture ids prefixed fix- per existing convention. Existing fixture rows (essays A-G, flashcards, review state, images, nuggets) are unchanged; they will pick up scheduler='classic' via the migration backfill's legacy_retained_classic / migrated_never_reviewed_random paths automatically at test schema init.",
+      "role": "Add essaycards.review_events rows spanning: within-24h, within-7d-but-not-24h, within-30d-but-not-7d, and older-than-30d (must be excluded from every window) timestamps; a mix of grades including at least one 'again'; both scheduler='classic' and scheduler='fsrs' rows within the same window (scheduler-agnostic aggregation coverage); at least one row with a short prior_review_interval (rapid retry) to exercise the no-prior_review_interval-filter invariant. All new fixture ids prefixed fix- per existing convention. No existing fixture row's identity/timing is altered.",
       "public_objects": [],
       "private_objects": []
     },
     {
-      "path": "03_Application/EssayCards/tests/test_scheduling.py",
+      "path": "03_Application/EssayCards/tests/test_review_stats.py",
       "stub_kind": "python_module",
-      "role": "[CHANGED] Existing compute_next_due_at unit tests are UNCHANGED. This sprint adds unit coverage for the boundary/consecutive/failure-chain gaps Agent 1 identified, plus unit coverage for ClassicScheduler/FSRSScheduler/decide_scheduler_assignment.",
+      "role": "Tests for GET /api/essaycards/review-stats/summary.",
       "public_objects": [
         {
           "kind": "function",
-          "name": "test_again_is_flat_five_seconds_regardless_of_last_reviewed_at",
+          "name": "test_review_stats_summary_returns_three_fixed_rows_in_order",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Unchanged scenario."
+          "purpose": "Scenario: Always three fixed rows in day/week/month order."
         },
         {
           "kind": "function",
-          "name": "test_first_time_review_uses_floor_only",
+          "name": "test_review_stats_day_window_excludes_reviews_older_than_24_hours",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Unchanged scenario."
+          "purpose": "Scenario: Day window counts only reviews within the last 24 hours; week/month windows are wider and overlapping, not exclusive."
         },
         {
           "kind": "function",
-          "name": "test_repeat_review_doubles_elapsed_when_it_exceeds_floor",
+          "name": "test_review_stats_grade_breakdown_sums_to_reviews",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Unchanged scenario."
+          "purpose": "Scenario: Grade breakdown sums to reviews count; failures equals again_count."
         },
         {
           "kind": "function",
-          "name": "test_repeat_review_uses_floor_when_it_exceeds_doubled_elapsed",
+          "name": "test_review_stats_recall_rate_is_null_when_window_has_zero_reviews",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Unchanged scenario."
+          "purpose": "Scenario: Recall rate is null (not 0) when a window has zero reviews."
         },
         {
           "kind": "function",
-          "name": "test_invalid_grade_raises_value_error",
+          "name": "test_review_stats_recall_rate_computed_from_reviews_and_failures",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Unchanged scenario."
+          "purpose": "Scenario: Recall rate computed correctly when reviews exist."
         },
         {
           "kind": "function",
-          "name": "test_floor_crossing_boundary_pins_max_tiebreak",
+          "name": "test_review_stats_aggregation_is_scheduler_agnostic",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "[NEW] Scenario: Boundary case at the exact floor crossing pins max() tie-break behavior"
+          "purpose": "Scenario: Aggregation combines classic and fsrs reviews with no per-scheduler breakdown in the response."
         },
         {
           "kind": "function",
-          "name": "test_classic_scheduler_review_matches_compute_next_due_at",
+          "name": "test_review_stats_includes_rapid_retry_reviews",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "[NEW] Scenario: ClassicScheduler.review produces identical results to calling compute_next_due_at directly, with extra_state always None"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_scheduler_review_maps_ratings_correctly",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: FSRS rating mapping"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_scheduler_review_fresh_card_when_no_existing_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: FSRS scheduler starts a fresh Card when existing_state is None"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_scheduler_review_loads_existing_state_from_raw_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: FSRS scheduler reconstructs from raw_state and produces state that reflects prior history"
-        },
-        {
-          "kind": "function",
-          "name": "test_decide_scheduler_assignment_disabled_by_kill_switch",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Kill switch forces classic with the disabled reason"
-        },
-        {
-          "kind": "function",
-          "name": "test_decide_scheduler_assignment_deterministic_for_same_id",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Assignment is deterministic — calling decide_scheduler_assignment twice for the same id returns the same scheduler"
-        },
-        {
-          "kind": "function",
-          "name": "test_decide_scheduler_assignment_approximately_balanced",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Assignment across many distinct ids is approximately balanced"
+          "purpose": "Scenario: A review_events row with a short prior_review_interval (rapid retry) is still counted — no prior_review_interval filter, unlike GET /experiment/summary."
         }
       ],
       "private_objects": []
     },
     {
-      "path": "03_Application/EssayCards/tests/test_flashcards.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Existing due/stats/review/upsert tests UNCHANGED. This sprint adds HTTP-level regression coverage (hard/easy/consecutive/failure-after-success/mature-card), the scheduler due-row field, FSRS review-flow coverage, selection-mechanism protection coverage, and assignment-permanence coverage.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_due_no_params_returns_review_queue",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_review_again_schedules_five_seconds",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_review_good_first_time_uses_floor",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_review_good_repeat_uses_doubled_elapsed",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_review_hard_first_time_and_repeat_via_endpoint",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Classic hard grade, first-time and repeat, via the HTTP endpoint"
-        },
-        {
-          "kind": "function",
-          "name": "test_review_easy_first_time_and_repeat_via_endpoint",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Classic easy grade, first-time and repeat, via the HTTP endpoint"
-        },
-        {
-          "kind": "function",
-          "name": "test_review_consecutive_reviews_chain_from_persisted_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Consecutive reviews on the same card"
-        },
-        {
-          "kind": "function",
-          "name": "test_review_again_after_several_successful_reviews_still_flat_five_seconds",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Failure after several successful reviews"
-        },
-        {
-          "kind": "function",
-          "name": "test_review_established_card_doubling_at_multiday_scale_via_endpoint",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Mature/established card reviewed again"
-        },
-        {
-          "kind": "function",
-          "name": "test_due_rows_carry_scheduler",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Due rows carry scheduler ('classic' for a legacy fixture card, 'fsrs' for an FSRS fixture card)"
-        },
-        {
-          "kind": "function",
-          "name": "test_due_queue_ordering_is_scheduler_agnostic",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Due-queue selection (RECENT/BACKLOG, 24h threshold, ordering) is scheduler-agnostic across mixed classic/fsrs cards"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_review_persists_and_reloads_state_across_requests",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: FSRS card state persists and reloads correctly across separate requests (simulating an application restart)"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_review_enters_relearning_on_again_after_review_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: FSRS relearning"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_review_due_date_flows_through_existing_fields",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: FSRS due date flows through next_due_at/review_interval, no separate queue"
-        },
-        {
-          "kind": "function",
-          "name": "test_new_card_creation_assigns_scheduler_permanently",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: New card creation via POST /flashcards/upsert is assigned a scheduler exactly once, persistently"
-        },
-        {
-          "kind": "function",
-          "name": "test_upsert_edit_of_existing_card_never_changes_scheduler_assignment",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Editing an existing card's question/answer/level never changes its scheduler assignment"
-        },
-        {
-          "kind": "function",
-          "name": "test_kill_switch_disabled_assigns_new_cards_classic",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Kill switch disables new assignment, defaulting new cards to classic"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_ingest.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Existing scenarios unchanged. Adds scheduler-assignment coverage for the ingest.py creation path.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_ingest_creates_essay_sections_and_cards",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_reingest_preserves_review_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_ingest_new_card_receives_scheduler_assignment",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: A new card created via markdown/JSON ingest receives a permanent scheduler assignment"
-        },
-        {
-          "kind": "function",
-          "name": "test_reingest_never_changes_existing_card_scheduler_assignment",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: Re-ingesting an essay/section never changes an existing card's scheduler assignment"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_exploration.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Existing scenarios unchanged. Adds scheduler-assignment coverage for the exploration create_card path.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_create_card_via_exploration_import_receives_scheduler_assignment",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: A card created via the flashcard-exploration import's create_card action receives a permanent scheduler assignment"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_migration.py",
-      "stub_kind": "python_module",
-      "role": "[NEW] Verifies the two guarded schema.sql migration backfills: record counts, no due-date/interval drift, and idempotency across a second schema-init run.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_migration_assigns_legacy_reviewed_cards_to_classic_without_touching_due_dates",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: Migration backfill assigns a previously-reviewed card to classic/legacy_retained_classic without altering next_due_at/review_interval/last_reviewed_at"
-        },
-        {
-          "kind": "function",
-          "name": "test_migration_assigns_never_reviewed_existing_cards_via_balanced_mechanism",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: Migration backfill assigns a never-reviewed existing card via the same balanced mechanism as a new card"
-        },
-        {
-          "kind": "function",
-          "name": "test_migration_backfill_is_idempotent_on_rerun",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: Re-running schema.sql's migration backfill after it has already run once is a no-op (no reassignment, no record-count change)"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_experiment.py",
-      "stub_kind": "python_module",
-      "role": "[NEW] Tests for GET /api/essaycards/experiment/summary.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_experiment_summary_returns_two_fixed_rows_zero_filled",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: Experiment summary always returns exactly two rows (classic, fsrs), zero-filled counts and null recall_rate when a scheduler has no due reviews"
-        },
-        {
-          "kind": "function",
-          "name": "test_experiment_summary_reports_assigned_reviewed_completed_and_recall_with_sample_size",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: Experiment summary reports per-scheduler assigned/reviewed/completed/recall/failure counts with the sample size (ordinary_due_reviews) exposed alongside recall_rate"
-        },
-        {
-          "kind": "function",
-          "name": "test_experiment_summary_excludes_non_due_reviews_from_recall_sample",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: A rapid-retry review with a short prior interval is excluded from ordinary due-review evidence — a review_events row with prior_review_interval < 24 hours (was_due may still be true, per 11_design_review.md's Major finding) is counted in completed_reviews but excluded from ordinary_due_reviews/recall_rate/failures, because the filter is prior_review_interval >= interval '24 hours', not was_due"
-        }
-      ],
+      "path": "03_Application/EssayCards/tests/ui/review_stats.spec.ts",
+      "stub_kind": "playwright_spec",
+      "role": "[UI] scenario from 10_test_spec.md — EssayCards' first UI spec file, following the pattern established by 03_Application/NumericSeries/tests/ui/series.spec.ts and 03_Application/StoryReader/tests/ui/scroll_and_resume.spec.ts. Runs against http://atlas-shell via the shared atlas-playwright container, per 02_Platform/Atlas_Shell/playwright.config.ts.",
+      "public_objects": [],
       "private_objects": []
     }
   ]

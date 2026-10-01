@@ -397,3 +397,51 @@ INSERT INTO essaycards.review_events
   ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '30 minutes', true, interval '10 minutes', interval '20 minutes'),
   ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'good',  now() - interval '5 days', true, interval '5 days', interval '10 days'),
   ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'again', now() - interval '20 minutes', true, interval '30 seconds', interval '60 seconds');
+
+-- ── Sprint11_ReviewStats — review-performance stats page fixtures ───────────
+--
+-- GET /review-stats/summary aggregates essaycards.review_events with NO
+-- essay/section scoping (global, across everything) — the same shape of
+-- global aggregation backend/routers/experiment.py already performs over
+-- the same table. Adding review_events rows tied to a NEW flashcard would
+-- require a matching flashcard_review_state row too (or the two exact
+-- hardcoded fixture-count assertions in tests/test_experiment.py, whose own
+-- ground truth query JOINs flashcard_review_state to review_events, would
+-- silently under-count relative to the real endpoint) — and ANY new
+-- flashcard_review_state row would also perturb
+-- test_stats_system_wide_partitions_all_bands' exact system-wide horizon-band
+-- total in tests/test_flashcards.py. To avoid both, every new review_events
+-- row below is attached to one of the two PRE-EXISTING established cards
+-- from "Sprint10_DualSchedulerAB — dual-scheduler fixtures" above
+-- (fc000025 classic / fc000023 fsrs, both already carry a
+-- flashcard_review_state row), and every new row's prior_review_interval is
+-- kept below 24 hours so it can never enter experiment.py's
+-- prior_review_interval >= '24 hours' (ordinary_due_reviews/recall_rate/
+-- failures) filter — that endpoint's existing hardcoded exact assertions
+-- (ordinary_due_reviews == 2/1, recall_rate == 0.5/1.0) are therefore
+-- unaffected; only its unfiltered completed_reviews count grows, which that
+-- test only asserts with >=.
+--
+--   now()-2h  on fc000025 (classic, good)  -> counted in day/week/month
+--   now()-3d  on fc000023 (fsrs,    hard)  -> counted in week/month, NOT day
+--   now()-20d on fc000025 (classic, easy)  -> counted in month only
+--   now()-40d on fc000025 (classic, good)  -> excluded from every window
+--   now()-1h  on fc000023 (fsrs,    again, prior_review_interval 30s — a
+--             rapid retry) -> counted in day/week/month same as any other
+--             review (this endpoint applies no prior_review_interval
+--             filter, unlike /experiment/summary's ordinary_due_reviews)
+--   now()-2d  on fc000025 (classic, again) -> counted in week/month, NOT
+--             day; exercises the grade breakdown / failures / recall_rate
+--             math together with the now()-2h/-3d rows above
+--
+-- Schedulers are deliberately mixed within the same window (the now()-2h
+-- classic row and the now()-1h fsrs row both land in the day window) to
+-- exercise the scheduler-agnostic aggregation invariant.
+INSERT INTO essaycards.review_events
+    (flashcard_id, scheduler, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval) VALUES
+  ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '2 hours',  true, interval '10 minutes', interval '6 hours'),
+  ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'hard',  now() - interval '3 days',   true, interval '5 minutes',  interval '9 hours'),
+  ('fc000025-0000-0000-0000-000000000025', 'classic', 'easy',  now() - interval '20 days',  true, interval '1 minute',   interval '25 hours'),
+  ('fc000025-0000-0000-0000-000000000025', 'classic', 'good',  now() - interval '40 days',  true, interval '2 minutes',  interval '20 hours'),
+  ('fc000023-0000-0000-0000-000000000023', 'fsrs',    'again', now() - interval '1 hour',   true, interval '30 seconds', interval '60 seconds'),
+  ('fc000025-0000-0000-0000-000000000025', 'classic', 'again', now() - interval '2 days',   true, interval '15 minutes', interval '5 seconds');

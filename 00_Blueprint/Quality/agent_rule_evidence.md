@@ -831,3 +831,20 @@ severity: major
 recurrence_hint: "First observed. The A/B itself was sound methodology and produced the decisive evidence (it is what proved the loading-dependency root cause over an earlier incorrect fonts.ready theory) — the failure is purely the choice of target. atlas-shell is the single shared serving container for EVERY Atlas app's frontend, so breaking it is never local to the app under test. Safer options: run the comparison against a throwaway copy of the container/directory, serve the reverted bundle under a distinct path, or (minimum) warn the human not to test for the duration and restore immediately after. Generalises to any deliberate break-it-to-confirm experiment on shared infrastructure a human is concurrently using."
 linked_immediate_artifact: 03_Application/StoryReader/Sprint03_ScrollAndResume/99_sprint_log.md
 ---
+
+---
+entry_id: EVD-2026-09-26-001
+date: 2026-09-26
+source_agent: application_implementer
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint11_ReviewStats
+pattern_name: new_review_events_fixture_rows_perturb_unrelated_endpoints_global_aggregation
+short_description: 10_scaffolding.json's fixture guidance for GET /review-stats/summary ("add essaycards.review_events rows spanning ... at least one row with a short prior_review_interval") did not flag that any NEW flashcard/review-state row added to satisfy it would silently break two OTHER endpoints' pre-existing exact-count fixture assertions, because /review-stats/summary and /experiment/summary both aggregate essaycards.review_events with no essay/scope filter, and GET /flashcards/stats aggregates flashcard_review_state the same way.
+evidence: "First attempt added a new essay/section/6 flashcards (fc000030-035) with dedicated review_events rows: tests/test_experiment.py::test_experiment_summary_reports_assigned_reviewed_completed_and_recall_with_sample_size failed ('assert 7 == 3' on completed_reviews) and test_experiment_summary_excludes_non_due_reviews_from_recall_sample failed ('assert 6 == 2' on ordinary_due_reviews) — because experiment.py's real query (`select scheduler, count(*) ... from essaycards.review_events group by scheduler`, no frs join) counts every row regardless of flashcard, while that test's own ground-truth query joins through flashcard_review_state, silently excluding orphan rows and diverging from reality once new flashcards without an frs row exist. Adding an frs row per new flashcard to fix that would in turn have broken tests/test_flashcards.py::test_stats_system_wide_partitions_all_bands's hardcoded exact system-wide horizon-band total (sum==29), which the Sprint10_DualSchedulerAB fixture comment already documents having to carefully dodge by construction."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed. Resolved by attaching every new Sprint11 review_events row to the two PRE-EXISTING established cards (fc000025 classic / fc000023 fsrs) that already carry a flashcard_review_state row, and keeping every new row's prior_review_interval < 24h so it can never enter /experiment/summary's ordinary_due_reviews filter — zero new flashcards/frs rows introduced, so neither hardcoded assertion moved. Generalises to any future sprint adding review_events (or flashcard_review_state) fixture rows: check every OTHER unscoped-aggregation endpoint's existing tests for hardcoded exact totals over that same table before picking fixture ids, not just the new endpoint's own scenarios. A design/test-spec candidate_response would be a standing note in CLAUDE.md's '## Pattern references' or a fixtures.sql header enumerating which endpoints aggregate review_events/flashcard_review_state globally, so this is checked by construction rather than discovered by a failing run."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint11_ReviewStats/99_sprint_log.md
+---

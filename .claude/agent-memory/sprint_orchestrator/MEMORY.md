@@ -22,6 +22,7 @@
 - [EssayCards Sprint01 Pattern](project_essaycards_sprint01.md) — New app: essay reader + SRS flashcards; DESIGN_APPROVED, stopped by request before implementation; port 8024; recurring ApiError-bypass gap found in Pydantic body-model mutation endpoints (fixed by dropping Pydantic body model, no prior working precedent in repo)
 - [EssayCards Sprint02 Pattern](project_essaycards_sprint02.md) — JSON ingest endpoint + shared upsert refactor; TESTS_PASSING; fully unattended single-pass loop (0 correction/fix loops); designer caught scope item already built in prior sprint's live code
 - [StoryReader Sprint01 Pattern](project_storyreader_sprint01.md) — New app: mobile markdown reader + tap-to-save reactions; TESTS_PASSING; one correction cycle (missing main.tsx import + missing Dataset `id` field); placeholder-rename correctly deferred (no file-move tool); central `01_System/test/compose.test.yml` missing this component's `-test` entry (non-blocking, needs human fix); port 8026
+- [EssayCards Sprint11 Pattern](project_essaycards_sprint11.md) — Review-stats read-only endpoint + UI; TESTS_PASSING, zero corrections/fix loops; confirms not-copying-forward-stale-00_architecture-baseline is legitimate (precedent: Sprint09/Sprint10); pre-existing test_examinations.py date flake reconfirmed, non-blocking
 
 ## Feedback
 - [Skip specs reviewer stage](feedback_skip_specs_stage.md) — DRAFT_READY routes directly to designer; sprint_specs_reviewer is never used
