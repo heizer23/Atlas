@@ -48,6 +48,7 @@ import '../../../../03_Application/Calendar/src/shellConfig';
 import '../../../../03_Application/EssayCards/src/shellConfig';
 import '../../../../03_Application/ClaudeConsole/src/shellConfig';
 import '../../../../03_Application/StoryReader/src/shellConfig';
+import '../../../../03_Application/HabitTracker/src/shellConfig';
 
 // ─────────────────────────────────────────────────────────────────────────────
 
