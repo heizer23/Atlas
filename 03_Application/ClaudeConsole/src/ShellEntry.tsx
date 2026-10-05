@@ -208,19 +208,43 @@ function StartSessionPanel({ onStarted }: { onStarted: () => void }) {
 
 function MessageBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
   const isUser = role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   return (
-    <div style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: 10 }}>
-      <div style={{
-        maxWidth:     '75%',
-        padding:      '8px 12px',
-        borderRadius: 12,
-        background:   isUser ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-variant)',
-        color:        isUser ? 'var(--md-sys-color-on-primary-container, inherit)' : 'var(--md-sys-color-on-surface-variant)',
-        fontSize:     14,
-        whiteSpace:   'pre-wrap',
-      }}>
-        {content}
-      </div>
+    <div style={{
+      padding:      '8px 12px',
+      borderRadius: 8,
+      marginBottom: 10,
+      background:   isUser ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-variant)',
+      color:        isUser ? 'var(--md-sys-color-on-primary-container, inherit)' : 'var(--md-sys-color-on-surface-variant)',
+      fontSize:     14,
+      whiteSpace:   'pre-wrap',
+    }}>
+      {content}
+      {!isUser && (
+        <div style={{ marginTop: 6 }}>
+          <button
+            onClick={handleCopy}
+            style={{
+              fontSize: 11, padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
+              border: '1px solid var(--md-sys-color-outline, #888)', background: 'transparent',
+              color: 'inherit', opacity: 0.75,
+            }}
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
