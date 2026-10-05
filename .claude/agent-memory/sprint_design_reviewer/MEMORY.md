@@ -1,3 +1,5 @@
 # Memory Index — sprint_design_reviewer
 
 - [EssayCards Sprint09_Nuggets correction round](project_essaycards_sprint09_nuggets.md) — scoped re-review pattern for design-corrections rounds; recurring EssayCards regex-parity and tri-state-UI issues; corrector quality bar observed in this sprint.
+- [EssayCards Sprint14_SectionProgressionAndRevalidation](project_essaycards_sprint14_section_progression.md) — APPROVED_WITH_CHANGES round 1; one Major (revalidation grade control undecided); NOT NULL-without-default vs existing fixtures, nested begin/commit fold-in, purpose-vs-boundary contradictions as reusable checks.
+- [EssayCards Sprint13_ReviewStatsSentenceFeedback](project_essaycards_sprint13_reviewstats_sentencefeedback.md) — APPROVED_WITH_CHANGES; two new recurring-pattern candidates (dual-purpose state variable partial removal; nested-interactive-element tap precedence unspecified when adapting a plain-text interaction pattern onto rendered markdown); verification-by-grep-against-real-source technique confirmed worthwhile even when the design self-reports having fact-checked itself.
