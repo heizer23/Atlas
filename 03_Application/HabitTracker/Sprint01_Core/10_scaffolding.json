@@ -1,0 +1,370 @@
+{
+  "component_name": "habittracker",
+  "target_root": "03_Application/HabitTracker",
+  "directories": [
+    "03_Application/HabitTracker",
+    "03_Application/HabitTracker/backend",
+    "03_Application/HabitTracker/backend/routers",
+    "03_Application/HabitTracker/src",
+    "03_Application/HabitTracker/tests"
+  ],
+  "files": [
+    {
+      "path": "03_Application/HabitTracker/pyproject.toml",
+      "stub_kind": "config",
+      "role": "Python project manifest. Dependencies: fastapi, uvicorn, psycopg2-binary, pydantic. Dev dependencies: pytest, httpx. Mirror StoryReader/StorageTracker's pyproject.toml structure.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/Dockerfile",
+      "stub_kind": "config",
+      "role": "Container image. Build context is repo root. Copies 02_Platform/packages to /platform_packages, sets PYTHONPATH. Copies backend/, schema.sql, tests/. CMD: uvicorn backend.main:app --host 0.0.0.0 --port 8000. Identical structure to StoryReader/Dockerfile.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/compose.yml",
+      "stub_kind": "config",
+      "role": "Docker Compose service definition. container_name atlas-habittracker. Port 127.0.0.1:8027:8000 (least exposure — next unused Atlas application port as of this design; see 10_architecture.json deferrals). Environment: ATLAS_PG_* vars, ATLAS_PG_HOST=atlas-postgres. Volumes: ${DATA_ROOT}/habittracker/logs:/app/logs. Joins atlas-net.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool management plus the one-time starter-habit seed. Identical pool pattern to StorageTracker/EssayCards/StoryReader: _build_url() from ATLAS_PG_* or DATABASE_URL, SimpleConnectionPool(minconn=1, maxconn=5, RealDictCursor), get_db() context manager, init_schema() reads schema.sql relative to module path.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "init_pool",
+          "pattern": "factory",
+          "methods": [
+            {"name": "init_pool", "visibility": "public", "args": [], "returns": "None", "purpose": "Construct the module-level psycopg2 SimpleConnectionPool."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "init_schema",
+          "pattern": "factory",
+          "methods": [
+            {"name": "init_schema", "visibility": "public", "args": [], "returns": "None", "purpose": "Execute schema.sql idempotently against the pool on startup."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_db",
+          "pattern": "repository",
+          "methods": [
+            {"name": "get_db", "visibility": "public", "args": [], "returns": "contextmanager yielding a psycopg2 connection", "purpose": "Borrow a pooled connection, roll back on exception, always return it to the pool."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "seed_starter_habits",
+          "pattern": "factory",
+          "methods": [
+            {"name": "seed_starter_habits", "visibility": "public", "args": [], "returns": "None", "purpose": "If habittracker.habits is currently empty, insert the five starter rows (10_architecture.json internal_flow step 1). Called once at startup immediately after init_schema(). Idempotent by table-emptiness, not by name."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/review_logic.py",
+      "stub_kind": "python_module",
+      "role": "The canonical day-model/merge/expected-set/period-boundary module — the single source of truth for every piece of 'real logic' in this app, imported by backend/routers/reviews.py and backend/routers/reports.py. No HTTP concerns in this file.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "berlin_today",
+          "pattern": "mapper",
+          "methods": [
+            {"name": "berlin_today", "visibility": "public", "args": [], "returns": "date", "purpose": "Return today's calendar date in Europe/Berlin via Python's stdlib zoneinfo (R-CON-AL-06). No DB access."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "resolve_active_habits_for_date",
+          "pattern": "repository",
+          "methods": [
+            {"name": "resolve_active_habits_for_date", "visibility": "public", "args": ["cur", "target_date: date"], "returns": "list[dict] — habit rows, display_order asc", "purpose": "10_architecture.json internal_flow step 6. The single canonical query for 'habits whose active window covers this date'."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_review_view",
+          "pattern": "service",
+          "methods": [
+            {"name": "get_review_view", "visibility": "public", "args": ["cur", "target_date: date"], "returns": "dict — { id, review_date, status, confirmed_at, habits: [...] }", "purpose": "10_architecture.json internal_flow step 7. Builds the full merged-or-frozen response shape for a date. Reused by both GET and PUT /reviews/{date}."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "compute_expected_habit_ids",
+          "pattern": "validator",
+          "methods": [
+            {"name": "compute_expected_habit_ids", "visibility": "public", "args": ["cur", "target_date: date"], "returns": "set[str] — expected habit_id set", "purpose": "10_architecture.json internal_flow step 8. The frozen-vs-active-window branching rule PUT /reviews/{date} validates its body against."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "upsert_review",
+          "pattern": "service",
+          "methods": [
+            {"name": "upsert_review", "visibility": "public", "args": ["conn", "target_date: date", "status: str", "habit_results: list[dict]"], "returns": "dict — same shape as get_review_view", "purpose": "10_architecture.json internal_flow step 9. Performs the daily_reviews + habit_results upsert transaction, then returns get_review_view(cur, target_date)."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "resolve_report_period",
+          "pattern": "mapper",
+          "methods": [
+            {"name": "resolve_report_period", "visibility": "public", "args": ["period: str", "anchor_date: date"], "returns": "tuple[date, date, list[str]] — (period_start, period_end, dates)", "purpose": "10_architecture.json internal_flow step 10. Pure date-range arithmetic, no I/O."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Empty package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/routers/habits.py",
+      "stub_kind": "python_module",
+      "role": "Habit definition endpoints: list, create, partial update, reorder.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "HabitCreate",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "HabitUpdate",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ReorderBody",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "list_habits",
+          "pattern": "router",
+          "methods": [
+            {"name": "list_habits", "visibility": "public", "args": [], "returns": "Dataset", "purpose": "GET /habits — internal_flow step 2."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "create_habit",
+          "pattern": "router",
+          "methods": [
+            {"name": "create_habit", "visibility": "public", "args": ["body: HabitCreate"], "returns": "Habit record | ApiError", "purpose": "POST /habits — internal_flow step 3. 201 on success."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "update_habit",
+          "pattern": "router",
+          "methods": [
+            {"name": "update_habit", "visibility": "public", "args": ["habit_id: str", "body: HabitUpdate"], "returns": "Habit record | ApiError", "purpose": "PATCH /habits/{habit_id} — internal_flow step 4. Uses body.model_fields_set to distinguish omitted from explicit null, exactly per contracts.invariants."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "reorder_habits",
+          "pattern": "router",
+          "methods": [
+            {"name": "reorder_habits", "visibility": "public", "args": ["body: ReorderBody"], "returns": "200 empty | ApiError", "purpose": "POST /habits/reorder — internal_flow step 5. DEFERRABLE-constraint single-statement reorder."}
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_row_to_dict",
+          "pattern": "mapper",
+          "methods": [
+            {"name": "_row_to_dict", "visibility": "private", "args": ["row"], "returns": "dict", "purpose": "Stringify uuid/date fields for JSON serialization, StorageTracker _row_to_dict convention."}
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/routers/reviews.py",
+      "stub_kind": "python_module",
+      "role": "Daily review endpoints: GET and PUT /reviews/{date}. Thin HTTP wrappers around backend/review_logic.py — no merge/expected-set logic duplicated here.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "HabitResultIn",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ReviewPutBody",
+          "pattern": "data_model",
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "get_review",
+          "pattern": "router",
+          "methods": [
+            {"name": "get_review", "visibility": "public", "args": ["date: str"], "returns": "Dataset | ApiError", "purpose": "GET /reviews/{date} — internal_flow step 7 via review_logic.get_review_view."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "put_review",
+          "pattern": "router",
+          "methods": [
+            {"name": "put_review", "visibility": "public", "args": ["date: str", "body: ReviewPutBody"], "returns": "Dataset | ApiError", "purpose": "PUT /reviews/{date} — internal_flow step 9 via review_logic.compute_expected_habit_ids + upsert_review."}
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_parse_date_param",
+          "pattern": "validator",
+          "methods": [
+            {"name": "_parse_date_param", "visibility": "private", "args": ["date_str: str"], "returns": "date", "purpose": "Parse a YYYY-MM-DD path segment; raises the appropriate ApiError VALIDATION_ERROR on failure. Shared by both endpoints in this file only."}
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/routers/reports.py",
+      "stub_kind": "python_module",
+      "role": "GET /reports — the grid + per-habit stats + period-level confirmed-vs-elapsed endpoint. Mechanism for attaching the additive period_summary sibling field (10_architecture.json internal_flow step 11): the route is declared `@router.get(\"/reports\", response_model=None)`; before calling review_logic.resolve_report_period, the handler parses the required `anchor_date` query param (str) into `anchor_date_parsed: date` via a file-local `_parse_date_param` helper (VALIDATION_ERROR if unparseable) — a same-named duplicate of reviews.py's private `_parse_date_param`, since that function is explicitly scoped file-local to reviews.py (R-CON-BP-10) and must not be imported cross-file; the original `anchor_date` string is kept unchanged for use in period_summary; the handler builds the Dataset as usual, converts `period_start`/`period_end` (raw `datetime.date` objects from review_logic.resolve_report_period) to `YYYY-MM-DD` strings via `.isoformat()` before building period_summary — required because these values are merged into the response dict AFTER `dataset.model_dump()` runs and so never pass through its JSON serializer; Starlette's `JSONResponse.render()` uses stdlib `json.dumps()` with no custom encoder and raises `TypeError` on a raw `date` otherwise (R-CON-AL-03) — then returns `JSONResponse(content={**dataset.model_dump(by_alias=True, mode=\"json\"), \"period_summary\": {\"anchor_date\": anchor_date (the original, unparsed request string — never anchor_date_parsed), ..., \"period_start\": period_start.isoformat(), \"period_end\": period_end.isoformat(), ...}})` instead of returning the Dataset object directly. period_summary is never passed as a `Dataset(...)` constructor kwarg. Follows the same response_model=None + model_dump() + JSONResponse bypass pattern as EssayCards' `backend/routers/review_stats.py::_dataset_response()` helper (03_Application/EssayCards/backend/routers/review_stats.py); that helper never merges a sibling key into the dict and never needed date-formatting (its dates are pre-stringified via SQL `to_char()`) — the sibling-field merge and date-conversion are this design's own addition, not reused from that precedent.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "get_reports",
+          "pattern": "router",
+          "methods": [
+            {"name": "get_reports", "visibility": "public", "args": ["period: str", "anchor_date: str"], "returns": "JSONResponse — dataset.model_dump(by_alias=True, mode=\"json\") merged with a period_summary key whose anchor_date is the original, unparsed request string (never the date object parsed for resolve_report_period) and whose period_start/period_end are .isoformat() YYYY-MM-DD strings (never raw date objects); route declares response_model=None so FastAPI does not validate/strip the extra key", "purpose": "GET /reports — internal_flow step 11, via review_logic.resolve_report_period. Parses the anchor_date query param (str) into anchor_date_parsed: date via the file-local _parse_date_param helper (VALIDATION_ERROR if unparseable) before calling resolve_report_period, keeping the original anchor_date string unchanged for period_summary (R-CON-BP-10). Attaches period_summary using the response_model=None + model_dump() + dict-merge mechanism (see role text above), converting period_start/period_end to YYYY-MM-DD strings via .isoformat() before the merge so JSONResponse's stdlib json.dumps() does not raise TypeError on a raw date object, and keeping anchor_date as the original string rather than anchor_date_parsed (R-CON-AL-03) — not a Dataset constructor kwarg."}
+          ]
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "_cell_state",
+          "pattern": "mapper",
+          "methods": [
+            {"name": "_cell_state", "visibility": "private", "args": ["habit: dict", "target_date: date", "review_status_by_date: dict", "checked_by_date_habit: dict"], "returns": "str — 'completed'|'not_completed'|'not_active'|'unreviewed'", "purpose": "Pure function implementing the four-way cell-state rule from 10_architecture.json contracts.invariants. Used only within this file's compute_report loop (get_reports)."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "_parse_date_param",
+          "pattern": "validator",
+          "methods": [
+            {"name": "_parse_date_param", "visibility": "private", "args": ["date_str: str"], "returns": "date", "purpose": "Parse the anchor_date query param (YYYY-MM-DD) into a date object before calling review_logic.resolve_report_period (10_architecture.json internal_flow step 11); raises the appropriate ApiError VALIDATION_ERROR on failure. A same-named, file-local duplicate of reviews.py's private _parse_date_param — that function is explicitly scoped file-local to reviews.py (10_scaffolding.json backend/routers/reviews.py) and must not be imported cross-file into reports.py (R-CON-BP-10)."}
+          ]
+        }
+      ]
+    },
+    {
+      "path": "03_Application/HabitTracker/schema.sql",
+      "stub_kind": "sql",
+      "role": "Canonical schema DDL — copy of Sprint01_Core/10_schema.sql promoted to component root. Idempotent (create schema/table if not exists). Executed at startup by backend/database.py::init_schema().",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI app entry point. Installs CORS (allow_origin_regex localhost), exception handlers, request timing. Includes habits/reviews/reports routers at prefix /api/habittracker. On startup: init_pool(), init_schema(), seed_starter_habits(). Identical structure to StoryReader's backend/main.py, allow_methods=[GET, POST, PATCH, PUT].",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "factory",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/src/ShellEntry.tsx",
+      "stub_kind": "react_component",
+      "role": "React entry point registered with Atlas Shell. Routing and all UI views.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "DailyReviewView",
+          "pattern": "view",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "HabitDefinitionsView",
+          "pattern": "view",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ReportsView",
+          "pattern": "view",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "DayStatusBadge",
+          "pattern": "component",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ReportGridCell",
+          "pattern": "component",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/src/shellConfig.ts",
+      "stub_kind": "config",
+      "role": "Shell registration config. appId 'habittracker', basePath '/habittracker'. mobilePrimaryNav is the primary target (daily one-handed phone use); desktopNav mirrors it, per StoryReader/StorageTracker's shellConfig.ts pattern.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/HabitTracker/CLAUDE.md",
+      "stub_kind": "docs",
+      "role": "App-local guidance for Claude Code. States the day-model/merge/frozen-display invariants as the authoritative quick-reference, the port (8027), and the schema (habittracker), StoryReader/StorageTracker-style.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ],
+  "nginx_note": "Not a file in this component — the implementer must additionally add a `location /api/habittracker { set $upstream_habittracker atlas-habittracker:8000; ... }` block to 02_Platform/Atlas_Shell/nginx.conf, matching the existing per-app block shape (see the /api/storyreader block for the exact pattern). Listed here rather than as a scaffolded file because it lives outside 03_Application/HabitTracker.",
+  "main_tsx_note": "Not a file in this component — the implementer must additionally add a side-effect import for src/shellConfig.ts to 02_Platform/Atlas_Shell/src/shell/main.tsx's REGISTER APPLICATION SHELLS block: `import '../../../../03_Application/HabitTracker/src/shellConfig';`, matching the existing per-app import shape (see StoryReader's import in main.tsx). Without this import, AppRegistry.register() for habittracker never executes and the app is unreachable through the shell despite a healthy backend. Listed here rather than as a scaffolded file because it lives outside 03_Application/HabitTracker.",
+  "env_vars": {
+    "required": ["ATLAS_PG_HOST", "ATLAS_PG_PORT", "ATLAS_PG_DB", "ATLAS_PG_USER", "ATLAS_PG_PASSWORD"],
+    "compose_only_host_side": [],
+    "optional": ["DATABASE_URL (overrides ATLAS_PG_* if set)"]
+  },
+  "route_registration_note": "FastAPI path-parameter routes are unambiguous here: /habits/reorder (static) must be registered on the habits router BEFORE any dynamic /habits/{habit_id} route of the same method if the framework's routing is order-sensitive for same-prefix static-vs-dynamic segments (FastAPI resolves by declaration order within a router) — reorder is POST while the dynamic PATCH /habits/{habit_id} is a different method, so no actual collision exists, but the implementer should still declare POST /habits/reorder before any future POST /habits/{habit_id}-shaped route to avoid an easy future mistake."
+}

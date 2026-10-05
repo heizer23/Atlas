@@ -1,0 +1,38 @@
+services:
+  habittracker:
+    build:
+      context: ../..
+      dockerfile: 03_Application/HabitTracker/Dockerfile
+    container_name: atlas-habittracker
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8027:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    volumes:
+      - ${DATA_ROOT}/habittracker/logs:/app/logs
+    networks:
+      - atlas-net
+
+  habittracker-test:
+    container_name: atlas-habittracker-test
+    build:
+      context: ../..
+      dockerfile: 03_Application/HabitTracker/Dockerfile
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+    command: ["sleep", "infinity"]
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true

@@ -1,0 +1,356 @@
+{
+  "component_name": "habittracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "A mobile-first daily habit tracker: review and confirm a day's habits against configured defaults, maintain habit definitions, and view weekly/monthly completion grids with per-habit rates, all server-side anchored to Europe/Berlin calendar dates.",
+  "classification": {
+    "why_application": "Day-state semantics (unreviewed/draft/confirmed), the default-merge-vs-frozen-confirmed-display rule, and the reporting cell-state/rate derivations are meaningful only in terms of this app's own domain vocabulary (habit, review, result). This is app-specific behavior and private data ownership, not a reusable technical capability.",
+    "non_goals": [
+      "Any automatic data source (workouts, EssayCards review activity, blood-pressure tracker) — every result is a manual checkbox this sprint; the reserved `source` column exists for a later sprint, no integration exists yet",
+      "Reminders/notifications",
+      "Automatic promotion of a habit's default_checked based on performance — default changes are always an explicit manual edit",
+      "Schedules, weekly targets, quantities, or non-daily habits — every habit is daily",
+      "Gamification (streaks, badges, scoring)",
+      "Multi-user accounts, sharing, or permissions",
+      "Deleting a habit definition — archiving (setting end_date) is the only retirement path"
+    ],
+    "not_platform": "The day-model/merge logic and the reporting cell-state rules exist only to answer 'what did I actually do today, and how consistent have I been' for this one app's own data — they are not exposed or intended for reuse by any other Atlas application."
+  },
+  "contracts": {
+    "consumes": [
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — habittracker schema, psycopg2 pool, RealDictCursor (StorageTracker/EssayCards/StoryReader pattern)",
+      "platform_contracts — Dataset, DatasetMeta, ColumnSchema",
+      "platform_errorhandling — setup_logging, install_exception_handlers, install_request_timing, api_error"
+    ],
+    "provides": [
+      "GET /api/habittracker/habits — every habit (including archived), ordered by display_order",
+      "POST /api/habittracker/habits — create a habit",
+      "PATCH /api/habittracker/habits/{habit_id} — partial update, including archive/un-archive via end_date",
+      "POST /api/habittracker/habits/reorder — set display_order for every habit at once",
+      "GET /api/habittracker/reviews/{date} — a day's merged or frozen review view",
+      "PUT /api/habittracker/reviews/{date} — upsert a day's draft or confirmed results",
+      "GET /api/habittracker/reports — period grid + per-habit stats + period-level confirmed-vs-elapsed stat"
+    ],
+    "invariants": [
+      "A day's state (Unreviewed / Draft / Confirmed) is derived entirely from whether a habittracker.daily_reviews row exists for that review_date and its status column — there is no stored 'unreviewed' row (draft §Day Model).",
+      "Habit list for a date (Unreviewed/Draft only) = habits where active_from <= date AND (end_date IS NULL OR date <= end_date), ordered by display_order. This is habittracker.review_logic::resolve_active_habits_for_date — the single canonical query for this rule, imported everywhere it is needed (GET /reviews/{date} unreviewed/draft branch; PUT /reviews/{date}'s expected-set computation when the day was not already confirmed; see next invariant).",
+      "Checked value on an Unreviewed/Draft day: if a habittracker.habit_results row already exists for (date, habit), use its stored checked value; otherwise use that habit's CURRENT default_checked. Editing a habit's default_checked therefore never changes an already-saved draft/confirmed value — it only supplies the starting value for a habit the day's draft hasn't seen yet (draft §Defaults and Merging, R-CON-AL per-field semantics).",
+      "Confirmed day display is frozen: GET /reviews/{date} for a Confirmed day returns exactly the saved habit_results rows for that date (joined to each habit's CURRENT name/description for display only), never recomputed from current habit active-window state. Archiving or editing a habit after the fact never changes a previously confirmed day's displayed habit set or values.",
+      "PUT /reviews/{date} expected habit_id set (resolved, not left ambiguous by the draft — R-CON-AL-02/03): if the day's daily_reviews row exists AND its status is 'confirmed' BEFORE this call, the expected set is the habit_ids currently present in habit_results for that date (the frozen set — a correction must resubmit exactly what was last loaded via GET, keeping the frozen-display invariant consistent with what can be legally re-saved). Otherwise (no row yet, or row exists with status='draft'), the expected set is resolve_active_habits_for_date(review_date) computed fresh at PUT time. habit_results in the body must match this expected set exactly (no missing id, no extra id) or the call fails VALIDATION_ERROR before any write.",
+      "PUT /reviews/{date} is idempotent: repeating the identical call never creates duplicate rows (daily_reviews unique on review_date; habit_results unique on (review_date, habit_id); both upserted). Setting status='confirmed' always stamps confirmed_at=now(); setting status='draft' leaves confirmed_at exactly as it was (null if never confirmed, unchanged timestamp if re-opened and edited after a prior confirm).",
+      "Editing a checkbox on an already-Confirmed day (before the user taps Confirm day again) is a PUT with status='draft' against a date whose prior status was 'confirmed'. This legally downgrades daily_reviews.status back to 'draft' (so the day is excluded from report counts again until re-confirmed) while confirmed_at is left untouched, per the previous two invariants.",
+      "Reporting cell state for (habit, date) in a period: 'completed' = a habit_results row exists AND that date's daily_reviews.status='confirmed' AND checked=true; 'not_completed' = same but checked=false; 'not_active' = no habit_results row exists AND the habit's CURRENT active window excludes that date (date < active_from OR (end_date IS NOT NULL AND date > end_date)); 'unreviewed' = every other case (no row + window covers date; OR a row exists but that date's status is still 'draft', never 'confirmed'). The presence of a saved row (confirmed OR draft) is what decides not_active vs. the other three — a habit's current window only matters when no row exists at all for that date (draft note on the asymmetry with the frozen-display rule).",
+      "Per-habit period stats: eligible confirmed days = count of dates in the period where daily_reviews.status='confirmed' AND a habit_results row exists for that habit; completed count = subset with checked=true; rate = completed/eligible when eligible > 0, else null (never a fabricated '0%'). The denominator (eligible count) is always shown regardless of rate being null.",
+      "Period-level stat: confirmed_days = count of distinct dates in the period with daily_reviews.status='confirmed' (day-level, independent of any one habit); elapsed_days = count of dates from period_start through min(period_end, today_berlin) inclusive. today_berlin is computed server-side via Europe/Berlin (R-CON-AL-06); future dates are never counted.",
+      "Europe/Berlin is authoritative for every calendar-date concept computed server-side (GET /reviews/{date}'s implicit 'today' is never computed server-side — the date is always an explicit path param; GET /reports' elapsed_days bound and the week/month boundary construction anchor on Europe/Berlin 'today' only where the draft specifies it). The client never sends a raw timestamp or an 'is this today' boolean — only explicit date/anchor_date strings (R-CON-AL-06).",
+      "created_at/updated_at on every table are set from Postgres now() at write time. No endpoint accepts a client-supplied timestamp anywhere in this app.",
+      "The five starter habits are seeded exactly once: backend/database.py::seed_starter_habits() runs at every startup but only inserts when habittracker.habits is currently empty (count = 0). Because this check is table-emptiness, not a per-name ON CONFLICT, it is correct even though habit names are editable immediately after seeding — a later rename does not cause a duplicate reseed on next restart, since the table is then non-empty regardless of what the rows are named.",
+      "habits.display_order is unique and DEFERRABLE INITIALLY IMMEDIATE. POST /habits/reorder performs `SET CONSTRAINTS uq_habits_display_order DEFERRED` then a single multi-row UPDATE (one UPDATE ... FROM (VALUES ...) statement) inside the same transaction, so a full permutation (including swaps) never trips the uniqueness constraint mid-statement; the constraint is checked at commit against the final state only."
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR — POST /habits: missing or empty name",
+      "VALIDATION_ERROR — POST /habits: active_from missing or not a parseable date",
+      "NOT_FOUND — PATCH /habits/{habit_id}: unknown habit_id",
+      "VALIDATION_ERROR — PATCH /habits/{habit_id}: name present in body as explicit null or empty string (name is NOT NULL and cannot be cleared)",
+      "VALIDATION_ERROR — PATCH /habits/{habit_id}: default_checked present in body as explicit null (NOT NULL, cannot be cleared)",
+      "VALIDATION_ERROR — PATCH /habits/{habit_id}: active_from present in body as explicit null, or not a parseable date (NOT NULL, cannot be cleared)",
+      "VALIDATION_ERROR — PATCH /habits/{habit_id}: resulting end_date < active_from after applying the requested change (checked in backend before write; also enforced as a DB CHECK constraint backstop — resolved design question, both layers per R-CON-BP-09)",
+      "VALIDATION_ERROR — POST /habits/reorder: habit_ids does not exactly match the current set of existing habit ids (missing id, unknown id, or duplicate id in the list)",
+      "VALIDATION_ERROR — GET or PUT /reviews/{date}: {date} path segment is not a parseable YYYY-MM-DD date",
+      "VALIDATION_ERROR — PUT /reviews/{date}: status is not one of 'draft'/'confirmed'",
+      "VALIDATION_ERROR — PUT /reviews/{date}: habit_results' habit_id set does not exactly equal the computed expected set (contracts.invariants) — missing id, extra id, or an id referencing an unknown habit",
+      "VALIDATION_ERROR — GET /reports: period is not 'week' or 'month'",
+      "VALIDATION_ERROR — GET /reports: anchor_date missing or not a parseable date"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor, same pattern as StorageTracker/EssayCards/StoryReader backend/database.py",
+      "platform_contracts, platform_errorhandling — unchanged platform packages",
+      "Python zoneinfo (stdlib) — Europe/Berlin time authority, no external dependency needed"
+    ],
+    "provides": [
+      "HTTP API mounted at /api/habittracker (FastAPI, uvicorn), bound to 127.0.0.1 only on the host (least exposure, R-OPS-BP-02) — reached by the browser through Atlas Shell's nginx reverse proxy over atlas-net, same mechanism as every other app",
+      "backend.review_logic — the canonical day-model/merge/expected-set functions, importable by any router in this component",
+      "Atlas Shell registration (src/shellConfig.ts) with mobilePrimaryNav as the primary target — daily, one-handed phone use is the main use case, same rationale as StoryReader/StorageTracker"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/habittracker/habits",
+        "purpose": "Full habit list (including archived) for the Habit Definitions screen and for building any client-side habit lookup.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "none",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a",
+          "ordering": "display_order asc",
+          "grouping": "none",
+          "time_basis": "n/a — habits.active_from/end_date are stored values, not compared against now() here",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "valid only before the starter-habit seed has run; otherwise the five starters are always present at minimum",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "{ id, name, description, default_checked, display_order, active_from, end_date, created_at, updated_at }"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/habittracker/habits",
+        "purpose": "Create a new habit. display_order is server-assigned, never client-supplied.",
+        "ui_contract": "none — mutation endpoint, R-CON-BP-04 exempt. Body: { name, description?, default_checked, active_from }. Success: 201 with the created Habit record (typed, same field set as a GET /habits row). Failure: ApiError VALIDATION_ERROR."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/habittracker/habits/{habit_id}",
+        "purpose": "Partial update of a habit, including archive (set end_date) / un-archive (clear end_date) as a plain field edit.",
+        "ui_contract": "none — mutation endpoint, R-CON-BP-04 exempt. Partial update per R-CON-AL-04: name/default_checked/active_from are omit-or-set only (explicit null is VALIDATION_ERROR, NOT NULL columns); description is omit=unchanged / explicit null=clears / string=sets; end_date is omit=unchanged / explicit null=un-archives / date=archives. Success: 200 with the updated Habit record. Failure: ApiError NOT_FOUND or VALIDATION_ERROR."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/habittracker/habits/reorder",
+        "purpose": "Set display_order for every habit at once from a full ordered id list (including archived habits).",
+        "ui_contract": "none — mutation endpoint, R-CON-BP-04 exempt. Body: { habit_ids: [...] } — must exactly match the current set of existing habit ids. Success: 200, no body required. Failure: ApiError VALIDATION_ERROR."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/habittracker/reviews/{date}",
+        "purpose": "The merged-or-frozen view of one calendar date's habits for the Daily Review screen. Always 200 — Unreviewed is a valid computed response, not a 404.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "date (path, required, YYYY-MM-DD, interpreted as an Europe/Berlin calendar date — not validated against 'today'; any past or future date is a valid lookup)",
+          "defaults": "none — date is always explicit; 'defaults to today' is a frontend-only presentation default (contracts.invariants), never an implicit server default",
+          "allowed_combinations": "n/a — single required path parameter",
+          "ordering": "habits array is display_order asc (Unreviewed/Draft) or the order the confirmed rows were originally saved in, which was itself display_order asc at confirm time (Confirmed; stored order is not re-sorted)",
+          "grouping": "none",
+          "time_basis": "server-side Europe/Berlin only for interpreting the date path segment; no 'today' comparison happens inside this endpoint",
+          "boundary_construction": "not applicable",
+          "empty_result_behavior": "a date whose active-window habit list is currently empty (e.g. before any habit's active_from) returns status='unreviewed' with habits: [] — valid, not an error",
+          "zero_fill_behavior": "not applicable",
+          "row_shape": "single Dataset row: { id (= review_date string, synthetic — an Unreviewed day has no underlying DB row to supply a surrogate id from; R-CON-BP-04 Dataset row-identity requirement), review_date, status ('unreviewed'|'draft'|'confirmed'), confirmed_at, habits: [{ habit_id, name, description, display_order, checked }] }. VALIDATION_ERROR if {date} does not parse as YYYY-MM-DD."
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/habittracker/reviews/{date}",
+        "purpose": "Upsert a day's draft or confirmed results. The single endpoint behind both automatic draft-saving and the Confirm day button — only the status field in the body differs.",
+        "ui_contract": "Dataset | ApiError — a valid set-and-return-all mutation per R-CON-BP-04 §9; returns the exact same shape as GET /reviews/{date} on success, reflecting the just-saved state. Body: { status: 'draft'|'confirmed', habit_results: [{ habit_id, checked }] }. Idempotent (contracts.invariants). Failure: ApiError VALIDATION_ERROR."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/habittracker/reports",
+        "purpose": "Weekly/monthly completion grid, per-habit stats, and the period-level confirmed-vs-elapsed stat, for the Reports screen.",
+        "ui_contract": "Dataset | ApiError, PLUS one additive top-level sibling field outside the meta/schema/rows triad (period_summary — see risks for why; consumed only by this app's bespoke ReportsView, never by a generic platform TableView/Chart primitive). Mechanism (R-CON-BP-08 — stated here, not only in internal_flow): before calling resolve_report_period (step 10), the route parses the required query param `anchor_date` (str) into `anchor_date_parsed: date` via a file-local `_parse_date_param` helper in backend/routers/reports.py (VALIDATION_ERROR if unparseable) — this helper duplicates, under the same name, `reviews.py`'s private `_parse_date_param`, since that function is explicitly scoped file-local to reviews.py (R-CON-BP-10) and must not be imported cross-file into reports.py. The original `anchor_date` string is kept unchanged alongside `anchor_date_parsed` for later use. The route declares `@router.get(..., response_model=None)`, builds `content = dataset.model_dump(by_alias=True, mode=\"json\")`, converts `period_start`/`period_end` (raw `datetime.date` objects from resolve_report_period) to `YYYY-MM-DD` strings via `.isoformat()` — required because these two values are merged into `content` AFTER `model_dump(mode=\"json\")` runs and therefore never pass through pydantic's JSON serializer, and Starlette's `JSONResponse.render()` uses stdlib `json.dumps()` with no custom encoder, which raises `TypeError` on a raw `date` (R-CON-AL-03) — sets `content[\"period_summary\"] = {period, anchor_date: anchor_date (the original, unparsed request string — `anchor_date_parsed` is used only for the resolve_report_period call and is never written into content, closing the same str-vs-date ambiguity R-CON-AL-03 flagged), period_start: period_start.isoformat(), period_end: period_end.isoformat(), dates, confirmed_days, elapsed_days}`, and returns `JSONResponse(content=content)` — period_summary is never passed as a Dataset(...) constructor kwarg (which would be silently dropped, since Dataset has no extra=\"allow\"). Follows the same response_model=None + model_dump() + JSONResponse bypass pattern as EssayCards' `backend/routers/review_stats.py::_dataset_response()` helper (03_Application/EssayCards/backend/routers/review_stats.py); that helper never merges a sibling key into the dict and never needed date-formatting (its dates are pre-stringified via SQL `to_char()`) — the sibling-field merge and date-conversion are this design's own addition, not reused from that precedent.",
+        "query_behavior": {
+          "supported_parameters": "period ('week'|'month', required); anchor_date (YYYY-MM-DD, required — no implicit server-side 'today' fallback; the frontend always resolves and sends an explicit value, per R-CON-AL-01/06)",
+          "defaults": "none — both parameters are required on every call",
+          "allowed_combinations": "period x any valid anchor_date; no other combination exists",
+          "ordering": "rows: display_order asc. Each row's cells array is period_summary.dates order (chronological)",
+          "grouping": "none — one row per habit, not grouped further",
+          "time_basis": "elapsed_days bounds at min(period_end, today_berlin); today_berlin computed server-side via Europe/Berlin (R-CON-AL-06). All other computation is pure date-range arithmetic off anchor_date, no further now() dependency",
+          "boundary_construction": "week = Monday-Sunday (ISO week) containing anchor_date; month = the calendar month containing anchor_date, in Europe/Berlin",
+          "empty_result_behavior": "a period with zero habits ever active in it (before the starter seed, or a period entirely before every habit's active_from) returns rows: [] — valid, not an error. period_summary is still always present and correctly computed even when rows is empty, since it is a day-level (not per-habit) stat",
+          "zero_fill_behavior": "cells array always has exactly one entry per date in the period, in order, even when a habit's window does not cover a given date (state='not_active' for that cell rather than the cell being omitted)",
+          "row_shape": "{ id (= habit_id), habit_id, name, description, display_order, cells: [{ date, state }], eligible_confirmed_days, completed_count, rate (number|null) }. Top-level sibling: period_summary: { period, anchor_date, period_start, period_end, dates: [YYYY-MM-DD, ...], confirmed_days, elapsed_days }. VALIDATION_ERROR if period is not 'week'/'month' or anchor_date does not parse."
+        }
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "seed_starter_habits",
+      "description": "backend/database.py, called once at startup immediately after init_schema(). If SELECT count(*) FROM habittracker.habits = 0, insert the five starter rows (Worked out / No sweets / No vaping / Measured blood pressure / Reviewed EssayCards), all default_checked=false, display_order 0..4 in that order, active_from = Europe/Berlin 'today' at the moment this function runs. Idempotent by table-emptiness, not by name (contracts.invariants) — safe even after habits are renamed.",
+      "inputs": ["habittracker.habits current row count"],
+      "outputs": ["five habits rows inserted, or no-op"]
+    },
+    {
+      "step": 2,
+      "name": "list_habits",
+      "description": "GET /habits: SELECT * FROM habittracker.habits ORDER BY display_order ASC.",
+      "inputs": [],
+      "outputs": ["Dataset rows per exposed_surfaces row_shape"]
+    },
+    {
+      "step": 3,
+      "name": "create_habit",
+      "description": "POST /habits. Validate name non-empty, active_from parses. display_order = COALESCE((SELECT max(display_order) FROM habittracker.habits), -1) + 1. INSERT ... RETURNING *.",
+      "inputs": ["POST body: name, description?, default_checked, active_from"],
+      "outputs": ["created Habit record (201), or ApiError VALIDATION_ERROR"]
+    },
+    {
+      "step": 4,
+      "name": "update_habit",
+      "description": "PATCH /habits/{habit_id}. Fetch the row (404 NOT_FOUND if missing). For each of name/default_checked/active_from present in body.model_fields_set: VALIDATION_ERROR if the supplied value is null (or, for name, empty string). For description/end_date present in model_fields_set: value (including null) is accepted as-is. Resolve the EFFECTIVE active_from and end_date (existing value unless overridden by this call) and check end_date is null or end_date >= active_from before writing (VALIDATION_ERROR otherwise; the DB CHECK constraint is the backstop for any path that bypasses this, per contracts.failure_modes). Build an UPDATE SET clause from only the fields present in model_fields_set, updated_at=now(). RETURNING *.",
+      "inputs": ["habit_id", "PATCH body (HabitUpdate model)"],
+      "outputs": ["updated Habit record (200), or ApiError NOT_FOUND/VALIDATION_ERROR"]
+    },
+    {
+      "step": 5,
+      "name": "reorder_habits",
+      "description": "POST /habits/reorder. Fetch the current full set of habit ids. Validate body.habit_ids is exactly that set (same length, same members, no duplicates) — VALIDATION_ERROR otherwise. In one transaction: SET CONSTRAINTS uq_habits_display_order DEFERRED; one UPDATE habittracker.habits AS h SET display_order = v.ord FROM (VALUES ($1::uuid,0), ($2::uuid,1), ...) AS v(id, ord) WHERE h.id = v.id; commit (constraint_backstop invariant).",
+      "inputs": ["POST body: { habit_ids: [uuid, ...] }"],
+      "outputs": ["200 no body, or ApiError VALIDATION_ERROR"]
+    },
+    {
+      "step": 6,
+      "name": "resolve_active_habits_for_date",
+      "description": "backend/review_logic.py, pure DB read, no mutation. SELECT * FROM habittracker.habits WHERE active_from <= $1 AND (end_date IS NULL OR $1 <= end_date) ORDER BY display_order ASC. The single canonical implementation of the Habit List rule (contracts.invariants) — imported by get_review_view (step 7) and compute_expected_habit_ids (step 8). Never re-implemented elsewhere.",
+      "inputs": ["target_date: date"],
+      "outputs": ["list of active habit rows, display_order asc"]
+    },
+    {
+      "step": 7,
+      "name": "get_review_view",
+      "description": "GET /reviews/{date} (and reused verbatim by PUT's response construction, step 9). Parse {date} (VALIDATION_ERROR if unparseable). Fetch habittracker.daily_reviews WHERE review_date = $1. Case no row: status='unreviewed', confirmed_at=null, habits = resolve_active_habits_for_date(date) with checked=default_checked for every habit (no habit_results rows exist yet by construction). Case row.status='draft': status='draft', habits = resolve_active_habits_for_date(date); for each, LEFT JOIN habit_results WHERE review_date=date AND habit_id=habit.id — checked = that row's checked if present, else habit.default_checked. Case row.status='confirmed': status='confirmed', confirmed_at=row.confirmed_at, habits = SELECT hr.habit_id, h.name, h.description, h.display_order, hr.checked FROM habittracker.habit_results hr JOIN habittracker.habits h ON h.id=hr.habit_id WHERE hr.review_date=$1 ORDER BY h.display_order ASC — the frozen set, never recomputed from current active-window state.",
+      "inputs": ["date path segment (string)"],
+      "outputs": ["Dataset single row per exposed_surfaces row_shape, or ApiError VALIDATION_ERROR"]
+    },
+    {
+      "step": 8,
+      "name": "compute_expected_habit_ids",
+      "description": "backend/review_logic.py. Fetch habittracker.daily_reviews WHERE review_date=$1. If a row exists AND its status is 'confirmed' (checked BEFORE this PUT call applies any change): expected set = SELECT habit_id FROM habittracker.habit_results WHERE review_date=$1 (the frozen set). Otherwise: expected set = {h.id for h in resolve_active_habits_for_date($1)} (step 6). This is the resolved PUT-validation rule from contracts.invariants.",
+      "inputs": ["target_date: date"],
+      "outputs": ["set[uuid] — the exact habit_id set a PUT body's habit_results must match"]
+    },
+    {
+      "step": 9,
+      "name": "upsert_review",
+      "description": "PUT /reviews/{date}. Parse {date} (VALIDATION_ERROR if unparseable). Validate body.status in {'draft','confirmed'}. Compute expected = compute_expected_habit_ids(date) (step 8); validate {r.habit_id for r in body.habit_results} == expected exactly (VALIDATION_ERROR otherwise, before any write). In one transaction: INSERT INTO habittracker.daily_reviews (review_date, status, confirmed_at) VALUES ($1, $2, CASE WHEN $2='confirmed' THEN now() ELSE NULL END) ON CONFLICT (review_date) DO UPDATE SET status=excluded.status, confirmed_at = CASE WHEN excluded.status='confirmed' THEN now() ELSE habittracker.daily_reviews.confirmed_at END, updated_at=now(); then for each habit_result: INSERT INTO habittracker.habit_results (review_date, habit_id, checked, source) VALUES ($1, $2, $3, 'manual') ON CONFLICT (review_date, habit_id) DO UPDATE SET checked=excluded.checked, updated_at=now(). Commit. Then call get_review_view(date) (step 7) and return it as the response (Dataset, same shape as GET).",
+      "inputs": ["date path segment", "PUT body: { status, habit_results: [{ habit_id, checked }] }"],
+      "outputs": ["Dataset single row (same shape as step 7), or ApiError VALIDATION_ERROR"]
+    },
+    {
+      "step": 10,
+      "name": "resolve_report_period",
+      "description": "backend/review_logic.py, pure function, no I/O. Given period ('week'|'month') and anchor_date: week -> (Monday, Sunday) of the ISO week containing anchor_date; month -> (first day, last day) of the calendar month containing anchor_date. Returns (period_start, period_end, dates) where dates is the full ordered list of calendar-date strings from period_start to period_end inclusive.",
+      "inputs": ["period: str", "anchor_date: date"],
+      "outputs": ["period_start: date, period_end: date, dates: list[str]"]
+    },
+    {
+      "step": 11,
+      "name": "compute_report",
+      "description": "GET /reports. Validate period (VALIDATION_ERROR if not 'week'/'month'). Parse the required anchor_date query param (str) into anchor_date_parsed: date via a file-local `_parse_date_param` helper in backend/routers/reports.py (VALIDATION_ERROR if unparseable) — this helper duplicates, under the same name, reviews.py's private `_parse_date_param` (R-CON-BP-10), since that function is explicitly scoped file-local to reviews.py and must not be imported cross-file into reports.py; the original anchor_date string is kept unchanged alongside anchor_date_parsed for later use in period_summary. (period_start, period_end, dates) = resolve_report_period(period, anchor_date_parsed) (step 10). habit_rows = SELECT * FROM habittracker.habits WHERE active_from <= period_end AND (end_date IS NULL OR end_date >= period_start) ORDER BY display_order ASC (any overlap with the period, including archived-but-relevant habits). Fetch all daily_reviews rows with review_date BETWEEN period_start AND period_end into a {date: status} map. Fetch all habit_results rows with review_date BETWEEN period_start AND period_end AND habit_id IN (habit_rows ids) into a {(date, habit_id): checked} map. For each habit row, for each date in dates: derive cell state per contracts.invariants' four-way rule using the two maps plus the habit's own active_from/end_date for the not_active branch; accumulate eligible_confirmed_days/completed_count per habit. rate = completed_count/eligible_confirmed_days if eligible_confirmed_days > 0 else None. confirmed_days (period-level) = count of distinct dates in the {date: status} map with status='confirmed' (NOT scoped to habit_rows — a pure day-level count). elapsed_days = count of dates in `dates` <= min(period_end, today_berlin). Assemble rows (one per habit) and build the Dataset as usual (meta/schema/rows), then build the final response explicitly rather than returning the Dataset object directly: `content = dataset.model_dump(by_alias=True, mode=\"json\")`; convert `period_start` and `period_end` (raw `datetime.date` objects returned by resolve_report_period, step 10) to `YYYY-MM-DD` strings via `.isoformat()` — this conversion is required because these two values are merged into `content` AFTER `model_dump(mode=\"json\")` runs, so unlike the Dataset's own fields they never pass through pydantic's JSON serializer, and Starlette's `JSONResponse.render()` calls stdlib `json.dumps()` with no custom encoder, which raises `TypeError` on a raw `date` (R-CON-AL-03); `content[\"period_summary\"] = {period, anchor_date: anchor_date (the original, unparsed request string — anchor_date_parsed is used only for the resolve_report_period call and is never written into content), period_start: period_start.isoformat(), period_end: period_end.isoformat(), dates, confirmed_days, elapsed_days}`; `return JSONResponse(content=content)`. The route function (`get_reports` in backend/routers/reports.py) declares `response_model=None` so FastAPI does not attempt to validate the return value against `Dataset` and strip the extra key. This follows the same response_model=None + dataset.model_dump() + JSONResponse bypass pattern EssayCards' `backend/routers/review_stats.py::_dataset_response()` helper uses to return a Dataset without response_model validation/stripping (03_Application/EssayCards/backend/routers/review_stats.py) — that helper never merges an additional sibling key into the dict and never needed date-formatting (its dates are pre-stringified via SQL `to_char()`), so the period_summary sibling-field merge and its date-conversion step are this design's own addition, not reused from that precedent. Passing period_summary as a `Dataset(...)` constructor kwarg is explicitly forbidden, since pydantic's default extra=\"ignore\" would silently drop it.",
+      "inputs": ["period: str", "anchor_date: str"],
+      "outputs": ["Dataset rows + period_summary sibling, or ApiError VALIDATION_ERROR"]
+    },
+    {
+      "step": 12,
+      "name": "daily_review_ui_interactions",
+      "description": "Frontend only. On mount (or date change), GET /reviews/{date}. Each checkbox toggle updates local state immediately and schedules a debounced (resolved: 400ms, matching StoryReader's debounce-the-network-call convention) PUT /reviews/{date} with status='draft' and the full current habit_results set (every habit currently shown, with its current checked value) — never a partial subset, per the endpoint's full-set-replace contract. A navigation-away or component-unmount event flushes any pending debounced call immediately (no edit is ever silently lost, per contracts.invariants). Tapping Confirm day issues an immediate (non-debounced) PUT with status='confirmed' using the same full current set, and any pending debounced draft call is cancelled/superseded by it.",
+      "inputs": ["GET /reviews/{date} response", "user checkbox toggles", "Confirm day tap"],
+      "outputs": ["PUT /reviews/{date} calls (debounced for draft, immediate for confirm); updated local day-status indicator"]
+    },
+    {
+      "step": 13,
+      "name": "reports_drill_through",
+      "description": "Frontend only. Tapping any grid cell or a date column header in the Reports grid navigates to /habittracker/review/:date for that cell/column's date — no new backend endpoint is needed, the date is already present on every cell via period_summary.dates / cells[].date.",
+      "inputs": ["tapped cell or date column (carries a date string already in memory)"],
+      "outputs": ["route navigation to the Daily Review screen for that date"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP API framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request body validation models", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "A DELETE endpoint for habits — archiving (end_date) is the only retirement path (draft Out of Scope)",
+      "Any code path that lets a client supply display_order directly on POST /habits",
+      "Any code path that recomputes a Confirmed day's habit set from current habit active-window state (the frozen-display invariant)",
+      "Any schedule/weekly-target/quantity field on Habit — every habit is daily this sprint",
+      "Accepting a client-supplied created_at/updated_at/confirmed_at/today anywhere",
+      "Any automatic promotion of default_checked based on observed performance"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Implement backend/review_logic.py exactly per internal_flow steps 6/8/10 — the canonical shared module for the active-habits-for-date query, the PUT expected-set rule, and the week/month period-boundary resolver. Import it from backend/routers/reviews.py and backend/routers/reports.py; never re-implement any of these three functions a second time.",
+      "Implement backend/routers/habits.py per internal_flow steps 2-5, including the model_fields_set-based null-vs-omit handling in update_habit (step 4) and the DEFERRABLE-constraint reorder transaction (step 5) exactly as specified.",
+      "Implement backend/routers/reviews.py per internal_flow steps 7/9, including the Dataset row-identity resolution (id = review_date) and reusing get_review_view for both GET and PUT's response.",
+      "Implement backend/routers/reports.py per internal_flow steps 10-11, including the additive period_summary sibling field alongside the standard meta/schema/rows Dataset triad (see risks for why this is not folded into a per-row field).",
+      "Implement backend/database.py::seed_starter_habits() per internal_flow step 1, called once at startup immediately after init_schema().",
+      "Add the habittracker compose.yml service: host port 127.0.0.1:8027:8000 (least exposure, R-OPS-BP-02 — 8027 is the next unused Atlas application port as of this design; see atlas_dev_ref.md), ATLAS_PG_* env vars, logs volume — same shape as StoryReader's compose.yml.",
+      "Add a `location /api/habittracker { set $upstream_habittracker atlas-habittracker:8000; proxy_pass http://$upstream_habittracker; ... }` block to 02_Platform/Atlas_Shell/nginx.conf, matching the existing per-app block shape (see the /api/storyreader block).",
+      "Write the component's CLAUDE.md restating the port/schema/pattern-reference sections, StoryReader/StorageTracker-style.",
+      "Confirm gen_random_uuid() (pgcrypto) is available in the shared Postgres instance the same way it already is for the other apps; do not add a redundant CREATE EXTENSION if one already exists at the instance level."
+    ],
+    "ui_implementer": [
+      "Daily Review (`/habittracker`, `/habittracker/review/:date`): date picker/prev-next defaulting to today (client-computed, then always sent as an explicit date — contracts.invariants); checkbox list in display_order; a status indicator distinguishing Unreviewed / Draft / Confirmed at a glance (resolved visual-treatment baseline: Unreviewed = neutral/gray 'Not reviewed yet'; Draft = amber 'Draft — not confirmed'; Confirmed = green 'Confirmed' — exact tokens/colors are implementer's choice within Atlas Shell's existing design-language tokens, not a new palette); single Confirm day button; implement the debounced-draft-save / immediate-confirm / flush-on-navigate-away behavior exactly per internal_flow step 12.",
+      "Habit Definitions (`/habittracker/habits`): list in display_order with reorder controls (drag or up/down — implementer's choice; posts the full ordered id list to POST /habits/reorder); each row editable (name, description, default_checked, active_from, archive toggle / end_date, using PATCH's omit/null/value semantics correctly — explicit null must be SENT, never omitted, to clear description or un-archive); add-new-habit form (POST /habits); archived habits shown, visually distinguished (e.g. muted/dimmed row), never hidden.",
+      "Reports (`/habittracker/reports`): period switcher (week/month) with prev/next navigation recomputing anchor_date client-side and re-fetching; grid (habits rows x period_summary.dates columns) with the four resolved cell states visually distinguished (baseline: completed = filled/affirmative color; not_completed = filled/muted-negative color; not_active = empty/dashed/very-low-contrast; unreviewed = hollow/light outline — exact tokens implementer's choice); per-habit stat rows showing 'completed / eligible confirmed days' with no percentage shown when eligible=0 (contracts.invariants); period_summary's confirmed_days/elapsed_days shown as the period-level summary; tapping a grid cell or date column implements internal_flow step 13 exactly (no new endpoint).",
+      "src/shellConfig.ts: register with AppRegistry, basePath '/habittracker', mobilePrimaryNav as the primary target (daily one-handed use, same rationale as StoryReader/StorageTracker); desktopNav mirrored for consistency.",
+      "Add the required side-effect import for src/shellConfig.ts to 02_Platform/Atlas_Shell/src/shell/main.tsx's REGISTER APPLICATION SHELLS block (R-CON-BP-06) — without it AppRegistry.register() never executes and the app is unreachable through the shell despite a healthy backend."
+    ],
+    "test_writer": [
+      "Cover every scenario in 10_test_spec.md as a concrete pytest function, StorageTracker/StoryReader conftest.py + fixtures.sql (fix- prefixed rows) convention.",
+      "Include a direct test of the Defaults and Merging rule: an Unreviewed day shows each habit's current default_checked; a Draft day with one saved habit_results row shows that row's stored value while an untouched habit still shows its current default_checked, even after the habit's default_checked is changed after the draft was first saved.",
+      "Include a test that a Confirmed day's GET response is unaffected by a habit being archived or renamed after confirmation (the frozen-display invariant).",
+      "Include a test of the PUT expected-set rule in both branches: an Unreviewed/Draft day accepts exactly the active-window set and rejects any other set; re-confirming an already-Confirmed day accepts exactly the previously saved set even if the habit's active window has since changed.",
+      "Include a test that PUT with the same payload twice (draft or confirmed) does not create duplicate rows and is a no-op beyond timestamps (idempotency invariant).",
+      "Include a test that editing a checkbox (PUT status='draft') on an already-Confirmed day downgrades daily_reviews.status back to 'draft' while leaving confirmed_at unchanged.",
+      "Include tests covering all four reporting cell states (completed, not_completed, not_active, unreviewed) including the specific case of a habit_results row existing on a still-draft day (must report as 'unreviewed', never completed/not_completed).",
+      "Include a test of the reorder endpoint performing a full permutation (e.g. swapping the first and last habit) succeeding in one call without a uniqueness-constraint error, and a test that a mismatched id set is rejected with no partial write.",
+      "Include a test that GET /reports' period_summary.confirmed_days/elapsed_days are correct and present even when rows is empty (zero habits active in the period)."
+    ],
+    "reviewer": [
+      "Confirm resolve_active_habits_for_date / compute_expected_habit_ids / resolve_report_period are each implemented exactly once and imported, never duplicated, across habits.py/reviews.py/reports.py.",
+      "Confirm no code path recomputes a Confirmed day's habit set from current active-window state (frozen-display invariant) — this is the single most important correctness property in this sprint.",
+      "Confirm PATCH /habits/{habit_id} correctly rejects explicit null for name/default_checked/active_from (NOT NULL columns) while correctly accepting explicit null for description/end_date (nullable columns) — verify model_fields_set is used, not a plain `is not None` check, which would silently misinterpret omission as no-op but fail to reject explicit null on non-nullable fields.",
+      "Confirm the GET /reports additive period_summary sibling field is intentional and documented (risks) rather than an accidental Dataset-contract deviation — flag if a future reviewer believes this should instead become a stable, versioned Dataset extension.",
+      "Confirm the reorder transaction's DEFERRABLE constraint handling actually works as designed (SET CONSTRAINTS ... DEFERRED issued inside the same transaction as the UPDATE, both before commit).",
+      "Confirm nginx.conf and compose.yml port (8027, 127.0.0.1-bound) match the design."
+    ]
+  },
+  "deferred_decisions": [],
+  "risks": [
+    {
+      "risk": "Resolved (draft open question 1 — draft-save debounce timing): a short client-side debounce (400ms) on checkbox toggles before issuing PUT status='draft', with an immediate flush on navigation-away/unmount so no edit is ever silently lost. Confirm day always issues an immediate, non-debounced PUT.",
+      "impact": "Documented in internal_flow step 12 and deferrals.ui_implementer rather than left as an open question, per this design pass's resolution mandate."
+    },
+    {
+      "risk": "Resolved (draft open question 2 — where end_date ordering validation lives): both layers. A pre-write backend check in update_habit (internal_flow step 4) returns a friendly VALIDATION_ERROR; a DB CHECK constraint (ck_habits_end_date_after_active_from, 10_schema.sql) is the correctness backstop for any write path that bypasses the backend check.",
+      "impact": "Documented in contracts.failure_modes and 10_schema.sql, per R-CON-BP-09 (schema constraints override ambiguity)."
+    },
+    {
+      "risk": "Resolved (draft open question 3 — visual treatment of day-status and grid-cell states): a minimal baseline is specified in deferrals.ui_implementer (neutral/amber/green day-status; filled-affirmative/filled-muted/dashed/hollow-outline grid cells) using Atlas Shell's existing design tokens, with exact colors left to the UI implementer's judgment within that baseline — not a new palette.",
+      "impact": "Prevents an unconstrained visual design pass while still leaving concrete token choices to implementation, consistent with the draft's own framing ('functionally specified above, visual design left to implementation')."
+    },
+    {
+      "risk": "GET /reports returns a Dataset (meta/schema/rows) PLUS one additive top-level sibling field, period_summary, that does not fit any single habit row (it is a day-level, not per-habit, stat) and would be lost entirely in the draft's explicitly-required empty-rows case (a period with zero active habits) if folded into per-row duplication instead.",
+      "impact": "This is a deliberate, surfaced deviation from a pure meta/schema/rows triad (R-OPS-BP-01) — period_summary is consumed only by this app's bespoke ReportsView (never by a generic platform TableView/Chart primitive, which ignores undeclared fields per the UI Data Contract's Dataset Rules and would simply never read it). Flagged for reviewer confirmation rather than silently resolved; see open_questions."
+    },
+    {
+      "risk": "The nginx.conf proxy block and the main.tsx side-effect import for src/shellConfig.ts are platform/ops-adjacent edits outside this component's own backend/ and src/ code — easy to forget since neither is part of the Python/TS diff for habittracker alone.",
+      "impact": "Without the nginx block, the browser UI cannot reach the API even though the container is healthy. Without the main.tsx import, AppRegistry.register() never executes and the app is unreachable through the shell. Both flagged explicitly in deferrals.application_implementer/ui_implementer."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Is the GET /reports additive period_summary sibling field (outside the strict meta/schema/rows Dataset triad) an acceptable pattern long-term, or should a future sprint promote a 'Dataset with period-level aggregate' shape into the platform_contracts Dataset definition itself (a deliberate, versioned contract change per R-CON-BP-04 §11)?",
+      "owner": "architecture"
+    },
+    {
+      "question": "When a later sprint adds an automatic result source (workouts, EssayCards, blood pressure), will GET /reviews/{date}'s habits[] row shape need to surface the reserved `source` column (currently persisted but not exposed in the API this sprint), and will the UI need a visual distinction between a manually-checked and an automatically-populated result?",
+      "owner": "product"
+    }
+  ]
+}
