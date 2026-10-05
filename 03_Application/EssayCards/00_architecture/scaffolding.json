@@ -6,554 +6,180 @@
     "03_Application/EssayCards/backend",
     "03_Application/EssayCards/backend/routers",
     "03_Application/EssayCards/src",
-    "03_Application/EssayCards/tests"
+    "03_Application/EssayCards/tests",
+    "03_Application/EssayCards/tests/ui"
   ],
   "files": [
     {
-      "path": "03_Application/EssayCards/backend/scheduling.py",
+      "path": "03_Application/EssayCards/backend/sentences.py",
       "stub_kind": "python_module",
-      "role": "Scheduling seam. Loses every Classic/experiment-assignment symbol; gains DESIRED_RETENTION and estimate_initial_fsrs_state for the one-time legacy migration.",
-      "public_objects": [
-        {
-          "kind": "constant",
-          "name": "VALID_GRADES",
-          "pattern": "constant",
-          "purpose": "Unchanged — the four grade names, independent of which scheduler algorithm is used."
-        },
-        {
-          "kind": "constant",
-          "name": "DESIRED_RETENTION",
-          "pattern": "constant",
-          "purpose": "float(os.environ.get('ESSAYCARDS_FSRS_DESIRED_RETENTION', '0.9')), read once at import. Used to construct the module-level fsrs.Scheduler AND by estimate_initial_fsrs_state so both use the identical value."
-        },
-        {
-          "kind": "class",
-          "name": "SchedulerResult",
-          "pattern": "data_model",
-          "methods": [],
-          "purpose": "NamedTuple(next_due_at: datetime, review_interval: timedelta, extra_state: dict) — unchanged shape; extra_state is now always populated (no Classic no-state case)."
-        },
-        {
-          "kind": "class",
-          "name": "FSRSScheduler",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "review",
-              "visibility": "public",
-              "args": [
-                "grade: str",
-                "last_reviewed_at: datetime | None",
-                "now: datetime",
-                "existing_state: dict | None = None"
-              ],
-              "returns": "SchedulerResult",
-              "purpose": "Unchanged from Sprint10 — loads or creates an fsrs.Card, drives the module-level fsrs.Scheduler(desired_retention=DESIRED_RETENTION), returns next_due_at/review_interval plus extra_state."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "estimate_initial_fsrs_state",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "estimate_initial_fsrs_state",
-              "visibility": "public",
-              "args": [
-                "review_interval: timedelta",
-                "last_reviewed_at: datetime",
-                "desired_retention: float = DESIRED_RETENTION"
-              ],
-              "returns": "dict",
-              "purpose": "Pure function. Synthesizes {stability, difficulty, fsrs_state, step, last_review_at, raw_state} for a card with real review history but no native FSRS state, per 10_architecture.json §contracts.invariants' legacy-migration-approximation entry. Stability via the FSRS-6 interval<->stability inversion (constants confirmed against the installed fsrs==6.3.2 source); difficulty via one review_card() call on a fresh Card() with Rating.Good; raw_state via Card(...).to_dict(), never a hand-assembled dict."
-            }
-          ]
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "constant",
-          "name": "_FSRS_SCHEDULER",
-          "purpose": "Module-level fsrs.Scheduler(desired_retention=DESIRED_RETENTION). Unchanged singleton-safety rationale from Sprint10."
-        },
-        {
-          "kind": "constant",
-          "name": "_GRADE_TO_FSRS_RATING",
-          "purpose": "Unchanged — grade name -> fsrs.Rating by name."
-        },
-        {
-          "kind": "constant",
-          "name": "_FSRS6_FACTOR",
-          "purpose": "19/81 — FSRS-6's fixed forgetting-curve constant, confirmed against the installed library source before use in estimate_initial_fsrs_state."
-        },
-        {
-          "kind": "constant",
-          "name": "_FSRS6_DECAY",
-          "purpose": "-0.5 — FSRS-6's fixed forgetting-curve constant, confirmed against the installed library source before use in estimate_initial_fsrs_state."
-        },
-        {
-          "kind": "constant",
-          "name": "_MIN_STABILITY_DAYS",
-          "purpose": "Floor applied to the inverted stability so a very short review_interval never produces a non-positive stability — confirm against the installed library's own minimum if one is exposed, else use a small fixed floor (e.g. 0.01)."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/migrate_fsrs_state.py",
-      "stub_kind": "python_module",
-      "role": "[NEW] One-time, idempotent startup migration: backfills fsrs_card_state for every flashcard_review_state row with real review history and no native FSRS state yet, using backend.scheduling.estimate_initial_fsrs_state. Invoked once from backend/main.py's startup sequence, after init_schema() succeeds.",
+      "role": "The single canonical sentence-split function for essay section body_markdown. Pure function, no I/O, no DB access. Shared verbatim by backend/routers/sentence_feedback.py's three endpoints (sentences list, feedback write-time validation) — see 10_architecture.json internal_flow step 5 for the exact algorithm, which this module's docstring must restate verbatim (StoryReader backend/paragraphs.py convention).",
       "public_objects": [
         {
           "kind": "function",
-          "name": "migrate_legacy_fsrs_state",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "migrate_legacy_fsrs_state",
-              "visibility": "public",
-              "args": [
-                "conn"
-              ],
-              "returns": "dict",
-              "purpose": "Selects every flashcard_review_state row with last_reviewed_at IS NOT NULL and no fsrs_card_state row; for each, computes and INSERTs the synthesized state in its own small transaction so one bad row is logged and skipped, not startup-blocking. Returns a summary dict ({attempted, succeeded, skipped}) for startup logging."
-            }
-          ]
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/backend/routers/flashcards.py",
-      "stub_kind": "python_module",
-      "role": "GET /flashcards/due, GET /flashcards/stats, POST /flashcards/upsert, GET /flashcards/{id}/export, POST /flashcards/{id}/review. This sprint: drops the scheduler column everywhere; review dispatch is unconditional FSRS.",
-      "public_objects": [
-        {
-          "kind": "constant",
-          "name": "router",
-          "pattern": "router",
-          "purpose": "Unchanged."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "constant",
-          "name": "DUE_SCHEMA",
-          "purpose": "[CHANGED] scheduler ColumnSchema entry removed."
-        },
-        {
-          "kind": "constant",
-          "name": "STATS_SCHEMA",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "STATS_BUCKETS",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_due_row_to_dict",
-          "purpose": "Unchanged logic — scheduler simply no longer present in the row."
-        },
-        {
-          "kind": "function",
-          "name": "_dataset_response",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_due_dataset",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_validate_upsert_body",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "_UNSET",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_new_card_key",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_question",
-          "purpose": "[CHANGED] Its was_inserted branch drops decide_scheduler_assignment and all scheduler-metadata columns from the flashcard_review_state INSERT."
-        },
-        {
-          "kind": "function",
-          "name": "_parse_review_grade",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_load_fsrs_existing_state",
-          "purpose": "Unchanged — now called unconditionally on every review, not just when scheduler=='fsrs'."
-        },
-        {
-          "kind": "function",
-          "name": "_upsert_fsrs_card_state",
-          "purpose": "Unchanged — now called unconditionally."
-        },
-        {
-          "kind": "function",
-          "name": "_insert_review_event",
-          "purpose": "[CHANGED] Drops the scheduler parameter (column removed from review_events)."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/ingest.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] _upsert_flashcard's was_inserted branch drops decide_scheduler_assignment and all scheduler-metadata columns. No other change.",
-      "public_objects": [
-        {
-          "kind": "constant",
-          "name": "SLUG_LIKE_RE",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "VALID_ESSAY_STATUSES",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "DEFAULT_ESSAY_STATUS",
-          "pattern": "constant",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "class",
-          "name": "IngestionError",
-          "pattern": "data_model",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "ingest",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "upsert_document",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "class",
-          "name": "IngestSummary",
-          "pattern": "data_model",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "extract_nugget_keys",
-          "pattern": "validator",
-          "methods": [],
-          "purpose": "Unchanged."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "function",
-          "name": "_upsert_flashcard",
-          "purpose": "[CHANGED] was_inserted branch: bare flashcard_review_state INSERT, no scheduler columns, no decide_scheduler_assignment import/call."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/exploration.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] execute_plan's create_card loop drops decide_scheduler_assignment and all scheduler-metadata columns. No other change.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "build_exploration_package",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "validate_import_body",
-          "pattern": "validator",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "resolve_and_plan",
-          "pattern": "service",
-          "methods": [],
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "execute_plan",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "execute_plan",
-              "visibility": "public",
-              "args": [
-                "cur",
-                "plan: dict"
-              ],
-              "returns": "dict",
-              "purpose": "[CHANGED] create_card loop's flashcard_review_state INSERT drops scheduler columns."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "plan_to_public",
+          "name": "split_sentences",
           "pattern": "mapper",
-          "methods": [],
-          "purpose": "Unchanged."
+          "methods": [
+            {
+              "name": "split_sentences",
+              "visibility": "public",
+              "args": [
+                "body_markdown: str"
+              ],
+              "returns": "list[str]",
+              "purpose": "Splits raw section body_markdown into an ordered list of sentence-fragment strings, preserving inline markdown syntax verbatim inside each fragment (NOT stripped — contrast StoryReader's split_paragraphs). See 10_architecture.json internal_flow step 5 for the exact normalize/fence-drop/join/regex-split algorithm."
+            }
+          ]
         }
       ],
       "private_objects": [
         {
-          "kind": "function",
-          "name": "_new_card_key",
-          "purpose": "Unchanged."
+          "kind": "constant",
+          "name": "_FENCE_RE",
+          "purpose": "^```.*$ — matches a fenced-code delimiter line, dropped entirely along with its content lines. Same pattern as StoryReader paragraphs.py's _FENCE_RE."
+        },
+        {
+          "kind": "constant",
+          "name": "_SENTENCE_BOUNDARY_RE",
+          "purpose": "(?<=[.!?])\\s+(?=[A-Z0-9\"'(\\[]) — the sentence-boundary split regex per internal_flow step 5."
         }
       ]
     },
     {
-      "path": "03_Application/EssayCards/backend/routers/essays.py",
+      "path": "03_Application/EssayCards/backend/routers/sentence_feedback.py",
       "stub_kind": "python_module",
-      "role": "[CHANGED] GET /essays, GET /essays/{id}, GET /essays/{id}/questions, exports, POST /ingest. This sprint: ESSAY_OVERVIEW_SCHEMA loses oral_score/oral_date, gains the nine learning-progress fields; get_essay gains the same fields via a shared helper.",
-      "public_objects": [],
-      "private_objects": [
-        {
-          "kind": "constant",
-          "name": "ESSAY_SCHEMA",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "constant",
-          "name": "ESSAY_OVERVIEW_SCHEMA",
-          "purpose": "[CHANGED] oral_score/oral_date removed; cards_seen_count, cards_future_safe_count, milestone_all_cards_seen, milestone_all_cards_future_safe, milestone_guided_passed, milestone_unguided_passed, guided_passed_at, unguided_passed_at, learning_level added."
-        },
-        {
-          "kind": "constant",
-          "name": "QUESTION_SCHEMA",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_row_to_dict",
-          "purpose": "[CHANGED] isoformat list gains guided_passed_at/unguided_passed_at, drops oral_date."
-        },
-        {
-          "kind": "function",
-          "name": "_section_row_to_dict",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_dataset_response",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_nuggets_by_section",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_main_spine_nuggets",
-          "purpose": "Unchanged."
-        },
-        {
-          "kind": "function",
-          "name": "_learning_progress_subquery_sql",
-          "purpose": "[NEW] Returns the shared SQL fragment (LATERAL join shape) computing the nine learning-progress fields for one essay id — used by both _OVERVIEW_QUERY (per-row) and a new single-essay query in get_essay, so the milestone logic exists in exactly one place (R-CON-BP-09)."
-        },
-        {
-          "kind": "constant",
-          "name": "_OVERVIEW_QUERY",
-          "purpose": "[CHANGED] oral LATERAL join replaced by the shared learning-progress computation from _learning_progress_subquery_sql."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/examinations.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Oral-exam round trip. build_export_package/validate_import_body/import_results all gain exam_type handling.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "build_export_package",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "build_export_package",
-              "visibility": "public",
-              "args": [
-                "cur",
-                "essay_id: str",
-                "exam_type: str"
-              ],
-              "returns": "dict | None",
-              "purpose": "[CHANGED] exam_type is now a required parameter. last_exam_by_section is computed filtered to exam_type='guided' when exam_type=='guided'; always empty when exam_type=='unguided'. Package gains a top-level exam_type field."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "validate_import_body",
-          "pattern": "validator",
-          "methods": [
-            {
-              "name": "validate_import_body",
-              "visibility": "public",
-              "args": [
-                "body"
-              ],
-              "returns": "tuple",
-              "purpose": "[CHANGED] Each result requires exam_type ('guided'|'unguided', no default) — VALIDATION_ERROR if missing or invalid, same discipline as card.level."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "import_results",
-          "pattern": "service",
-          "methods": [
-            {
-              "name": "import_results",
-              "visibility": "public",
-              "args": [
-                "cur",
-                "results"
-              ],
-              "returns": "tuple",
-              "purpose": "[CHANGED] INSERT statement's column list and values gain exam_type."
-            }
-          ]
-        },
-        {
-          "kind": "function",
-          "name": "nugget_freshness_flags",
-          "pattern": "validator",
-          "methods": [],
-          "purpose": "Unchanged."
-        }
-      ],
-      "private_objects": [
-        {
-          "kind": "function",
-          "name": "_parse_timestamp",
-          "purpose": "Unchanged."
-        }
-      ]
-    },
-    {
-      "path": "03_Application/EssayCards/backend/routers/examinations.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] GET /essays/{id}/examination-package gains a manually-validated required exam_type query param; GET /sections/{id}/examinations gains exam_type in its schema/rows.",
+      "role": "GET /essays/{essay_id}/sentences, GET /essays/{essay_id}/sentence-feedback, PATCH /sections/{section_id}/sentence-feedback. New router, mounted at /api/essaycards in backend/main.py.",
       "public_objects": [
         {
           "kind": "constant",
           "name": "router",
           "pattern": "router",
-          "purpose": "Unchanged."
+          "purpose": "APIRouter(), no prefix of its own (mounted with prefix='/api/essaycards' in main.py, same convention as every other router file)."
         }
       ],
       "private_objects": [
         {
+          "kind": "class",
+          "name": "SentenceFeedbackUpdate",
+          "purpose": "Pydantic BaseModel: sentence_index: int, sentence_text: str, flag: str, value: bool. flag's allowed-value check ({'difficult','thumbs_up'}) is manual (api_error VALIDATION_ERROR), same style as StoryReader's AnnotationCreate.reaction check — not a Pydantic Literal, so an invalid value is ApiError-shaped, not FastAPI's default 422."
+        },
+        {
           "kind": "constant",
-          "name": "EXAMINATION_SCHEMA",
-          "purpose": "[CHANGED] Gains an exam_type ColumnSchema entry."
+          "name": "SENTENCE_SCHEMA",
+          "purpose": "ColumnSchema list: section_id, sentence_index, text."
+        },
+        {
+          "kind": "constant",
+          "name": "SENTENCE_FEEDBACK_SCHEMA",
+          "purpose": "ColumnSchema list: section_id, sentence_index, sentence_text, is_difficult, is_thumbs_up, created_at, updated_at."
         },
         {
           "kind": "function",
           "name": "_dataset_response",
-          "purpose": "Unchanged."
+          "purpose": "Same JSONResponse(dataset.model_dump(by_alias=True, mode='json')) helper as every other router file."
+        },
+        {
+          "kind": "function",
+          "name": "list_essay_sentences",
+          "purpose": "GET /essays/{essay_id}/sentences handler. For each essay_sections row (essay_id=path param, order by order_index asc), calls backend.sentences.split_sentences(body_markdown) and emits one {section_id, sentence_index, text} row per sentence. 404 NOT_FOUND if essay_id does not exist."
+        },
+        {
+          "kind": "function",
+          "name": "list_essay_sentence_feedback",
+          "purpose": "GET /essays/{essay_id}/sentence-feedback handler. Selects essaycards.sentence_feedback rows joined to essay_sections (essay_id=path param), ordered (section order_index asc, sentence_index asc). No re-validation against current content (10_architecture.json contracts.invariants). 404 NOT_FOUND if essay_id does not exist."
+        },
+        {
+          "kind": "function",
+          "name": "update_sentence_feedback",
+          "purpose": "PATCH /sections/{section_id}/sentence-feedback handler. Loads the section (404 if missing); recomputes split_sentences(section.body_markdown); validates sentence_index in range and sentence_text matches exactly (VALIDATION_ERROR otherwise); reads the current essaycards.sentence_feedback row if any; computes the new (is_difficult, is_thumbs_up) pair per body.flag/body.value, leaving the other flag unchanged; upserts if at least one flag is true, else DELETEs; returns {section_id, sentence_index, is_difficult, is_thumbs_up} status 200. See 10_architecture.json internal_flow step 7."
         }
       ]
     },
     {
       "path": "03_Application/EssayCards/backend/routers/review_stats.py",
       "stub_kind": "python_module",
-      "role": "[CHANGED] GET /review-stats/summary unchanged behavior (docstring only). Adds GET /review-stats/activity and GET /review-stats/intervals.",
+      "role": "GET /review-stats/summary (gains new_count), GET /review-stats/activity (reshaped), GET /review-stats/intervals (unchanged), plus new GET /review-stats/today.",
       "public_objects": [
         {
           "kind": "constant",
           "name": "router",
           "pattern": "router",
-          "purpose": "Unchanged object, two new routes registered on it."
+          "purpose": "Unchanged object, one new route registered on it."
         }
       ],
       "private_objects": [
         {
           "kind": "constant",
           "name": "REVIEW_STATS_SUMMARY_SCHEMA",
-          "purpose": "Unchanged."
+          "purpose": "[CHANGED] Gains a new_count ColumnSchema entry (number)."
+        },
+        {
+          "kind": "constant",
+          "name": "_FIRST_EVER_CTE_SQL",
+          "purpose": "[NEW] Module-level SQL fragment string: 'select flashcard_id, min(reviewed_at) as first_reviewed_at from essaycards.review_events group by flashcard_id' — the single canonical FIRST-EVER REVIEW definition (10_architecture.json contracts.invariants), composed identically into _review_stats_aggregate, _activity_rows, and the new get_review_today."
         },
         {
           "kind": "function",
           "name": "_review_stats_aggregate",
-          "purpose": "Unchanged."
+          "purpose": "[CHANGED] Per-window SELECT list gains a count(distinct flashcard_id) filter (...) expression for new_count per window, joined against _FIRST_EVER_CTE_SQL."
         },
         {
           "kind": "function",
           "name": "_build_summary_rows",
-          "purpose": "Unchanged."
+          "purpose": "[CHANGED] Rows gain new_count."
         },
         {
           "kind": "constant",
           "name": "ACTIVITY_SCHEMA",
-          "purpose": "[NEW] ColumnSchema list: date, reviews."
-        },
-        {
-          "kind": "constant",
-          "name": "INTERVAL_BUCKETS",
-          "purpose": "[NEW] Fixed (bucket key, label) list, same STATS_BUCKETS idiom: new, within_1_day, within_7_days, within_30_days, within_90_days, beyond_90_days."
+          "purpose": "[CHANGED] Columns become: date, recalls, unique_cards_seen, first_cards_seen, recall_rate (reviews renamed to recalls; three new columns added)."
         },
         {
           "kind": "function",
           "name": "_activity_rows",
-          "purpose": "[NEW] One SQL statement producing 30 zero-filled {date, reviews} rows over essaycards.review_events, UTC calendar days anchored on date_trunc('day', now() at time zone 'utc')."
+          "purpose": "[CHANGED] Reshaped per 10_architecture.json internal_flow step 9 — joins the existing days spine CTE to _FIRST_EVER_CTE_SQL and a day_events/day_agg aggregation producing recalls/unique_cards_seen/first_cards_seen/recall_rate per UTC day."
+        },
+        {
+          "kind": "constant",
+          "name": "INTERVAL_BUCKETS",
+          "purpose": "Unchanged."
         },
         {
           "kind": "function",
           "name": "_interval_bucket_rows",
-          "purpose": "[NEW] One SQL statement producing six zero-filled {bucket, label, count} rows over essaycards.flashcard_review_state.review_interval, same FILTER-based idiom as flashcard_queue_stats."
+          "purpose": "Unchanged."
         },
         {
           "kind": "function",
           "name": "_dataset_response",
           "purpose": "Unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "TODAY_SCHEMA",
+          "purpose": "[NEW] ColumnSchema list: recalls, unique_cards_seen, first_cards_seen."
+        },
+        {
+          "kind": "function",
+          "name": "_resolve_today_scope",
+          "purpose": "[NEW] Validates topic/essay_id/section_id per the same closed-set rules as flashcard_queue_stats (section_id requires essay_id; topic excludes essay_id/section_id); returns (extra_join, conditions, params) or raises/returns an ApiError, same shape as flashcard_queue_stats' inline validation (copied, not shared via a new helper — matches this file's existing duplication style)."
+        },
+        {
+          "kind": "function",
+          "name": "get_review_today",
+          "purpose": "[NEW] GET /review-stats/today handler. Builds a scoped_flashcards CTE from the resolved scope, joins today's (UTC calendar day) essaycards.review_events, joins _FIRST_EVER_CTE_SQL, returns a one-row Dataset: recalls=count(*), unique_cards_seen=count(distinct flashcard_id), first_cards_seen=count(distinct flashcard_id) filter (where is_first_ever). See 10_architecture.json internal_flow step 2."
         }
       ]
     },
     {
       "path": "03_Application/EssayCards/backend/main.py",
       "stub_kind": "python_module",
-      "role": "[CHANGED] FastAPI entry point. Removes backend.routers.experiment import/include_router; adds the migrate_legacy_fsrs_state() startup call after init_schema().",
+      "role": "[CHANGED] Registers the new sentence_feedback router.",
       "public_objects": [
         {
           "kind": "constant",
           "name": "app",
           "pattern": "fastapi_app",
-          "purpose": "Router set loses experiment.router."
+          "purpose": "Router set gains sentence_feedback.router."
         }
       ],
       "private_objects": []
@@ -561,492 +187,324 @@
     {
       "path": "03_Application/EssayCards/schema.sql",
       "stub_kind": "sql",
-      "role": "[CHANGED] Canonical runtime schema DDL. Folds in: the pre-migration backup table, the Sprint10 scheduler-column drops, and the additive section_examinations.exam_type column, in that order, within the existing single startup transaction.",
+      "role": "[CHANGED] Canonical runtime schema DDL. Folds in essaycards.sentence_feedback (Sprint13_ReviewStatsSentenceFeedback/10_schema.sql) after the existing Sprint12_FSRSAndUXOverhaul block.",
       "public_objects": [],
       "private_objects": []
     },
     {
       "path": "03_Application/EssayCards/CLAUDE.md",
       "stub_kind": "doc",
-      "role": "[CHANGED] Replace the 'Dual scheduler A/B (Sprint10)' section with an 'FSRS scheduling (Sprint12)' section documenting: the sole-scheduler model, DESIRED_RETENTION, the legacy-migration approximation and its backup table, and the removal of the experiment dashboard. Add a new '## Learning progress' section documenting the four milestones, learning_level, and exam_type (mirroring the existing '## Roadmap, focus and review' / '## Nuggets' documentation density). Add a Sprint scope line for Sprint12.",
+      "role": "[CHANGED] Add a '## Sentence feedback (Sprint13)' section (table/schema, addressing model, the StoryReader-pattern-adapted-not-reused rationale, the documented known gap about content drift) mirroring the existing density of '## Nuggets (Sprint09)'. Extend '## Queue stats' / review-stats documentation with GET /review-stats/today and the reshaped GET /review-stats/activity shape. Add a Sprint scope line for Sprint13.",
       "public_objects": [],
       "private_objects": []
     },
     {
       "path": "03_Application/EssayCards/src/ShellEntry.tsx",
       "stub_kind": "tsx_module",
-      "role": "[CHANGED] React entry point. Removes DueCardRow.scheduler, SchedulerBadge, ExperimentSummaryRow, EXPERIMENT_METRIC_ROWS, formatExperimentValue, ExperimentDashboardView, and its route. Adds ActionMenu, category-collapse localStorage helpers, learning-level badge/tooltip, exam_type-aware oral-exam export (moved into ReaderView), a new ForecastGrid sub-component extracted from ReviewStatsPanel's forecast rendering, and the reworked ReviewStatsView.",
+      "role": "[CHANGED] React entry point. Review page: five-metric row, trimmed forecast grid, conditional scopeCaption, dead-code removal (sessionForecast family). Essay reader: new SectionSentences/SentenceFeedbackPopover components replacing the whole-section ReactMarkdown render. Stats page: new DailyActivityChart replacing LineChart for Study Activity; day/week/month Observed Recall selector; extended ReviewStatsCard.",
       "public_objects": [
         {
           "kind": "function",
           "name": "default",
           "pattern": "react_component",
           "methods": [],
-          "purpose": "Default export: Routes wiring drops the /experiment route. Internal view/helper components are not individually enumerated in public_objects, per this scaffold's established convention (see private_objects below for the ones that change)."
+          "purpose": "Default export: Routes wiring unchanged (no new/removed routes this sprint)."
         }
       ],
       "private_objects": [
         {
           "kind": "interface",
-          "name": "EssayRow",
-          "purpose": "[CHANGED] oral_score/oral_date removed; gains cards_seen_count, cards_future_safe_count, milestone_all_cards_seen, milestone_all_cards_future_safe, milestone_guided_passed, milestone_unguided_passed, guided_passed_at, unguided_passed_at, learning_level."
+          "name": "ReviewStatsSummaryRow",
+          "purpose": "[CHANGED] Gains new_count: number."
         },
         {
           "kind": "interface",
-          "name": "DueCardRow",
-          "purpose": "[CHANGED] scheduler field removed."
+          "name": "ReviewTodayRow",
+          "purpose": "[NEW] {recalls: number; unique_cards_seen: number; first_cards_seen: number} — mirrors TODAY_SCHEMA."
         },
         {
           "kind": "interface",
-          "name": "ExperimentSummaryRow",
-          "purpose": "[REMOVED]"
+          "name": "ActivityDayRow",
+          "purpose": "[NEW, replaces the prior inline {date, reviews} shape consumed via PlatformDataset] {date: string; recalls: number; unique_cards_seen: number; first_cards_seen: number; recall_rate: number | null} — mirrors the reshaped ACTIVITY_SCHEMA."
         },
         {
           "kind": "interface",
-          "name": "ActivityRow",
-          "purpose": "[NEW] {date: string; reviews: number} — mirrors ACTIVITY_SCHEMA."
+          "name": "SentenceRow",
+          "purpose": "[NEW] {section_id: string; sentence_index: number; text: string} — mirrors SENTENCE_SCHEMA."
         },
         {
           "kind": "interface",
-          "name": "IntervalBucketRow",
-          "purpose": "[NEW] {bucket: string; label: string; count: number} — mirrors INTERVAL_BUCKETS."
-        },
-        {
-          "kind": "interface",
-          "name": "SectionExaminationRow",
-          "purpose": "[CHANGED] gains exam_type: 'guided' | 'unguided'."
-        },
-        {
-          "kind": "interface",
-          "name": "ExaminationPackage",
-          "purpose": "[CHANGED] gains top-level exam_type: 'guided' | 'unguided'."
+          "name": "SentenceFeedbackRow",
+          "purpose": "[NEW] {section_id: string; sentence_index: number; sentence_text: string; is_difficult: boolean; is_thumbs_up: boolean; created_at: string; updated_at: string} — mirrors SENTENCE_FEEDBACK_SCHEMA."
         },
         {
           "kind": "function",
-          "name": "SchedulerBadge",
-          "purpose": "[REMOVED]"
+          "name": "Forecast",
+          "purpose": "[REMOVED] Type alias, sole consumer (sessionForecast) removed."
         },
         {
           "kind": "function",
-          "name": "ActionMenu",
-          "purpose": "[NEW] Generic primary-button + accessible dropdown. Props: primary {label, onClick, disabled?}, items {label, onClick, disabled?}[]. role=menu/menuitem, Escape + click-outside to close, keyboard-operable. Used by ReaderView's essay header and each section's end-of-section controls."
+          "name": "emptyForecast",
+          "purpose": "[REMOVED] Sole consumer (sessionForecast initial state) removed."
         },
         {
           "kind": "function",
-          "name": "LearningLevelBadge",
-          "purpose": "[NEW] Renders the compact 0-4 level with a tooltip/accessible explanation of the four milestones (props: level, milestone booleans, guided_passed_at, unguided_passed_at). Used by EssayListView's per-essay row and ReaderView's header."
-        },
-        {
-          "kind": "function",
-          "name": "loadCategoryCollapsed",
-          "purpose": "[NEW] Reads essaycards:categoryCollapsed:<category> from localStorage -> boolean, defaulting false (expanded) when absent."
-        },
-        {
-          "kind": "function",
-          "name": "saveCategoryCollapsed",
-          "purpose": "[NEW] Writes the same localStorage key."
-        },
-        {
-          "kind": "constant",
-          "name": "EXAM_PROMPT_INTRO_GUIDED",
-          "purpose": "[CHANGED, renamed from EXAM_PROMPT_INTRO] Same calibration-aware text as before, now explicitly bakes \"exam_type\": \"guided\" into the described reply shape."
-        },
-        {
-          "kind": "constant",
-          "name": "EXAM_PROMPT_INTRO_UNGUIDED",
-          "purpose": "[NEW] Explicitly instructs the model NOT to use any prior-history/calibration context — start cold every time — and bakes \"exam_type\": \"unguided\" into the described reply shape."
-        },
-        {
-          "kind": "function",
-          "name": "buildExamClipboardText",
-          "purpose": "[CHANGED] Takes (pkg, examType) and selects the matching intro constant."
-        },
-        {
-          "kind": "function",
-          "name": "EssayListView",
-          "purpose": "[CHANGED] Per-essay row drops Study/Oral-exam buttons and the oral line, renders LearningLevelBadge instead. Category heading gains a collapse/expand toggle (step 12); essay rows beneath a collapsed category are not rendered. handleExportExam/examMsg/examBusyId state removed (moved to ReaderView)."
-        },
-        {
-          "kind": "function",
-          "name": "ReaderView",
-          "purpose": "[CHANGED] Header becomes a standalone back button + ActionMenu (primary Study or Question overview fallback; secondary Question overview/Guided oral exam/Unguided oral exam/Export essay/+ New nugget) plus a LearningLevelBadge. Each section's end-of-section row becomes one ActionMenu (primary Review this section; secondary Export section/Insert section after). Gains handleExportExam(examType)/examMsg/examBusyId state, moved from EssayListView."
-        },
-        {
-          "kind": "function",
-          "name": "SectionExaminationHistory",
-          "purpose": "[CHANGED] Each history entry additionally shows its exam_type."
-        },
-        {
-          "kind": "function",
-          "name": "ExperimentDashboardView",
-          "purpose": "[REMOVED]"
-        },
-        {
-          "kind": "constant",
-          "name": "EXPERIMENT_METRIC_ROWS",
-          "purpose": "[REMOVED]"
-        },
-        {
-          "kind": "function",
-          "name": "formatExperimentValue",
-          "purpose": "[REMOVED]"
+          "name": "forecastKeyForInterval",
+          "purpose": "[REMOVED] Sole consumer (handleGrade's setSessionForecast call) removed."
         },
         {
           "kind": "function",
           "name": "ForecastGrid",
-          "purpose": "[NEW] Extracted from ReviewStatsPanel's inline 'Upcoming' grid markup (the FORECAST_COLUMNS header row + one or more ForecastRow lines). Props: {rows: {label: string; values: (number | null)[]}[]} — deliberately NOT given topic/essayId/sectionId/refreshToken/reviewed/backlog/newRemaining/sessionForecast, so it carries no session-only dependency. Renders the same grid markup ReviewStatsPanel rendered inline before this sprint (column count/widths driven by the module-level FORECAST_COLUMNS constant). Imported by both ReviewStatsPanel (rows=[All, Session]) and ReviewStatsView's 'Scheduled reviews (forecast)' zone (rows=[All] only, no session on the stats page)."
+          "purpose": "Unchanged component — still takes {rows: {label: string; values: (number | null)[]}[]}; both call sites (ReviewStatsPanel, ReviewStatsView) now pass a single-row array, one with label: '' (ReviewStatsPanel, per step 4), the other unaffected (ReviewStatsView's 'Scheduled reviews (forecast)' zone, not touched by this sprint)."
         },
         {
           "kind": "function",
           "name": "ReviewStatsPanel",
-          "purpose": "[CHANGED] Unchanged props/behavior (topic/essayId/sectionId/refreshToken/reviewed/backlog/newRemaining/sessionForecast; still fetches its own scoped GET /flashcards/stats). Its inline 'Upcoming' grid markup is replaced by a call to the new ForecastGrid(rows=[{label:'All', values: allRow}, {label:'Session', values: sessionRow}]) — pure extraction, same rendered output, no behavior change."
+          "purpose": "[CHANGED] Fetches GET /review-stats/today(scope) in addition to its existing GET /flashcards/stats(scope) fetch. Renders a five-metric row (Recalls/Unique/First from the new fetch; Due=queue.length renamed from Backlog; New=newRemaining, both passed down unchanged from ReviewSessionView) in place of the old Session/Backlog/New trio. Renders ForecastGrid with a single row, label: '' (drops the Session row and the 'All' label). Drops the Current/Upcoming gutter <span> elements. Its `reviewed: number` prop (fed `reviewedCount` from ReviewSessionView, formerly backing the Session metric) is REMOVED from its props signature — this is the only change to `reviewedCount`'s two consumers; the underlying `reviewedCount` state in ReviewSessionView is NOT touched (see ReviewSessionView entry below)."
         },
         {
           "kind": "function",
-          "name": "ReviewStatsView",
-          "purpose": "[CHANGED] Fetches summary + activity + intervals + essays + a scope-free GET /flashcards/stats in parallel; renders the four labeled zones per 10_architecture.json internal_flow step 13 (Study activity via LineChart, Scheduled reviews (forecast) via ForecastGrid(rows=[All]) against the scope-free /flashcards/stats response, Observed recall via the existing ReviewStatsCard set, Scheduled intervals via BarChart, Essay learning progress via a client-side 0-4 histogram)."
+          "name": "ReviewSessionView",
+          "purpose": "[CHANGED] scopeCaption only rendered when scopeLabel !== 'Review' (Focus-mode captions unaffected). sessionForecast state, its setSessionForecast call inside handleGrade, and the Forecast/emptyForecast/forecastKeyForInterval imports are removed (dead code after step 4). lastNewIntervalSec and the diagnostics frame are UNCHANGED. `reviewedCount`/`setReviewedCount` (src/ShellEntry.tsx:2705) are explicitly RETAINED, not dead code: `setReviewedCount` keeps its existing call sites (reset at :2751, increment at :2804) and `reviewedCount` keeps driving the completion-screen message (:2858, 'Nothing due right now.' / 'Session complete — nothing left in the queue.'), which this sprint does not change. The only edit to this variable's call sites is removing the now-unused `reviewed={reviewedCount}` prop passed into ReviewStatsPanel (:2830)."
+        },
+        {
+          "kind": "interface",
+          "name": "EssaySection",
+          "purpose": "[CHANGED] No field change, but its body_markdown is no longer rendered directly by ReaderView — SectionSentences renders per-sentence instead (sentences/feedback fetched separately, keyed by section.id)."
+        },
+        {
+          "kind": "function",
+          "name": "SectionSentences",
+          "purpose": "[NEW] Props: {section: EssaySection; sentences: SentenceRow[]; feedbackByIndex: Record<number, SentenceFeedbackRow>; onToggle: (sentenceIndex: number, text: string, flag: 'difficult' | 'thumbs_up', value: boolean) => void}. Renders each sentence as a tappable <span data-sentence-index> wrapping a <ReactMarkdown remarkPlugins={[[remarkNuggetRefs, ...]]} urlTransform={nuggetAwareUrlTransform} components={{a: NuggetLink...}}> instance (identical props to the whole-section render it replaces) followed by trailing ⚠/👍 indicator icons when feedbackByIndex has an entry. Tapping a sentence opens SentenceFeedbackPopover positioned below it. CLICK PRECEDENCE (binding, 10_architecture.json internal_flow step 8): the `components={{a: ...}}` anchor renderer used inside this instance's ReactMarkdown (covering both NuggetLink-resolved nugget refs and plain markdown links) must call `event.stopPropagation()` in its onClick before any navigation/overlay-open logic, so a tap on a link or nugget-ref inside a sentence is swallowed before it reaches the sentence span's own onClick — the span's tap-to-open-popover handler never fires for those taps."
+        },
+        {
+          "kind": "function",
+          "name": "SentenceFeedbackPopover",
+          "purpose": "[NEW] Props: {sentenceIndex: number; rect: DOMRect; current: SentenceFeedbackRow | undefined; onToggle: (flag: 'difficult' | 'thumbs_up', value: boolean) => void; onClose: () => void}. Fixed-position below `rect` (same positioning convention as StoryReader's ReactionPopover — top: rect.bottom + 8), two independently-toggleable buttons (Difficult, Thumbs up), pressed state from `current`. Closes on tap-elsewhere or re-tap of the open sentence (does NOT auto-close on a flag toggle). Not itself part of the click-precedence rule (that rule governs SectionSentences' nested anchors vs. its own sentence-span tap, see SectionSentences entry above) — included here only because it is the popover opened by that tap."
+        },
+        {
+          "kind": "function",
+          "name": "ReaderView",
+          "purpose": "[CHANGED] Fetches GET /essays/{id}/sentences and GET /essays/{id}/sentence-feedback alongside the existing essay-detail fetch; builds sentencesBySection/feedbackBySection; each section's body renders via SectionSentences instead of a single whole-body <ReactMarkdown>. PATCHes .../sentence-feedback on popover toggle and optimistically updates feedbackBySection."
+        },
+        {
+          "kind": "function",
+          "name": "DailyActivityChart",
+          "purpose": "[NEW] Props: {rows: ActivityDayRow[]}. Plain div/flexbox composition (no recharts, no platform-ui import) rendering 30 columns: three stacked segments (repeat/unique_segment/first, computed client-side per 10_architecture.json's DAILY ACTIVITY SEGMENT FORMULAS invariant) and a recall-rate percentage label above each column ('—' when recall_rate is null), plus a 'Repeat · Unique · First' legend."
+        },
+        {
+          "kind": "constant",
+          "name": "REVIEW_STATS_WINDOW_LABELS",
+          "purpose": "Unchanged."
         },
         {
           "kind": "function",
           "name": "ReviewStatsCard",
-          "purpose": "Unchanged — reused inside the new 'Observed recall' zone."
+          "purpose": "[CHANGED] Gains 'Unique Cards Seen' (row.unique_cards) and 'New Cards Seen' (row.new_count) display rows; 'Reviews' label renamed 'Cards Seen' (same row.reviews value). Again/Hard/Good/Easy breakdown table unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "ReviewStatsView",
+          "purpose": "[CHANGED] Fetches GET /review-stats/activity (reshaped) instead of the Sprint12 shape, feeds it to the new DailyActivityChart instead of LineChart. Adds a day/week/month selector (new local state, default 'day') driving which single summaryRows[...] entry is passed to ReviewStatsCard, replacing the always-render-all-three grid. 'Scheduled reviews (forecast)', 'Scheduled intervals', and 'Essay learning progress' zones are UNCHANGED."
         }
       ]
     },
     {
-      "path": "03_Application/EssayCards/src/shellConfig.ts",
-      "stub_kind": "ts_module",
-      "role": "[CHANGED] Removes the Experiment nav entry; trims mobilePrimaryNav to Essays/Due for review/Stats; adds secondaryMenu with Add / Update Essay; keeps desktopNav's four remaining items in matching adjacent order.",
-      "public_objects": [],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/pyproject.toml",
-      "stub_kind": "config",
-      "role": "Unchanged — fsrs>=6.3.2 already pinned, no version bump needed (Phase A investigation A3).",
-      "public_objects": [],
-      "private_objects": []
-    },
-    {
       "path": "03_Application/EssayCards/tests/fixtures.sql",
       "stub_kind": "sql",
-      "role": "[CHANGED] Adds fixtures per 10_architecture.json §deferrals.test_writer: a reviewed card with no fsrs_card_state row (migration backfill target); an essay with zero cards; an essay at learning_level 4; essays spanning every level 0-4; section_examinations rows split across both exam_type values, including a mixed pass/fail-per-section case.",
+      "role": "[CHANGED] Adds fixtures per 10_architecture.json §deferrals.test_writer: review_events rows spanning multiple UTC calendar days (including one near a day boundary) with a mix of first-ever and repeat reviews for the activity/today/summary scenarios; an essay section with multiple plain-prose sentences, one containing a markdown link and one containing a [[nugget:key]] reference, for the sentence-splitting scenarios; a sentence_feedback row with only is_difficult true and one with both flags true.",
       "public_objects": [],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_scheduling.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Removes every Classic/compute_next_due_at/decide_scheduler_assignment test. Adds estimate_initial_fsrs_state unit coverage.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_fsrs_scheduler_review_maps_ratings_correctly",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Retained from Sprint10 — still valid, FSRS is now the only scheduler."
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_scheduler_review_fresh_card_when_no_existing_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Retained from Sprint10."
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_scheduler_review_loads_existing_state_from_raw_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Retained from Sprint10."
-        },
-        {
-          "kind": "function",
-          "name": "test_estimate_initial_fsrs_state_established_card_yields_review_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: a card with review_interval >= 24h yields fsrs_state=2 (Review), step=null"
-        },
-        {
-          "kind": "function",
-          "name": "test_estimate_initial_fsrs_state_learning_card_yields_learning_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: a card with review_interval < 24h yields fsrs_state=1 (Learning), step=0"
-        },
-        {
-          "kind": "function",
-          "name": "test_estimate_initial_fsrs_state_stability_increases_with_longer_interval",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: a longer review_interval yields a larger synthesized stability, monotonically"
-        },
-        {
-          "kind": "function",
-          "name": "test_estimate_initial_fsrs_state_raw_state_round_trips_through_card_from_dict",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: the synthesized raw_state can be loaded by fsrs.Card.from_dict without error and used for a subsequent real review"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_flashcards.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Removes every scheduler-assignment/due-row-scheduler/kill-switch scenario. Review/due scenarios otherwise retained, now exercising the single FSRS path unconditionally.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_due_no_params_returns_review_queue",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Retained."
-        },
-        {
-          "kind": "function",
-          "name": "test_due_rows_no_longer_carry_scheduler",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: a /due row has no scheduler key at all"
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_review_persists_and_reloads_state_across_requests",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Retained from Sprint10."
-        },
-        {
-          "kind": "function",
-          "name": "test_fsrs_review_due_date_flows_through_existing_fields",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Retained from Sprint10."
-        },
-        {
-          "kind": "function",
-          "name": "test_new_card_creation_has_no_scheduler_metadata",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "[NEW] Scenario: creating a card via POST /flashcards/upsert seeds flashcard_review_state with no scheduler columns (dropped)"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_ingest.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Removes scheduler-assignment scenarios added in Sprint10.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_ingest_creates_essay_sections_and_cards",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        },
-        {
-          "kind": "function",
-          "name": "test_reingest_preserves_review_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Unchanged scenario."
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_exploration.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Removes its Sprint10 scheduler-assignment scenario; otherwise unchanged.",
-      "public_objects": [],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_migration.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Rewritten for Sprint12: verifies the backup table, the scheduler-column drops, and the Python legacy FSRS-state backfill — replaces Sprint10's assignment-backfill scenarios entirely.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_backup_table_snapshots_pre_migration_scheduler_data_once",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: the backup table is created and populated from pre-migration data, and a rerun does not duplicate or overwrite it"
-        },
-        {
-          "kind": "function",
-          "name": "test_scheduler_columns_are_dropped_from_flashcard_review_state_and_review_events",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: the four flashcard_review_state scheduler columns and review_events.scheduler no longer exist after migration"
-        },
-        {
-          "kind": "function",
-          "name": "test_legacy_fsrs_backfill_creates_state_for_reviewed_card_without_one",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: a card with last_reviewed_at set and no fsrs_card_state row gets one, without altering next_due_at/review_interval/last_reviewed_at"
-        },
-        {
-          "kind": "function",
-          "name": "test_legacy_fsrs_backfill_skips_card_that_already_has_state",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: a card that already has fsrs_card_state is left untouched by the backfill"
-        },
-        {
-          "kind": "function",
-          "name": "test_legacy_fsrs_backfill_is_idempotent_on_rerun",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: running the backfill twice produces the same end state, no duplicate rows, no second write"
-        },
-        {
-          "kind": "function",
-          "name": "test_exam_type_column_defaults_pre_sprint_rows_to_guided",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: a section_examinations row inserted before this sprint's migration reads exam_type='guided' after migration"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_essays.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Adds learning-progress coverage; removes any oral_score/oral_date assertions that no longer apply.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_essay_with_zero_cards_has_card_milestones_false_and_level_bounded_by_exam_milestones",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: an essay with no cards never satisfies milestones 1/2, regardless of exam state"
-        },
-        {
-          "kind": "function",
-          "name": "test_essay_all_cards_seen_and_future_safe_satisfies_card_milestones",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: every card reviewed and next_due_at > now()+24h satisfies both card milestones"
-        },
-        {
-          "kind": "function",
-          "name": "test_essay_one_unseen_card_fails_cards_seen_milestone",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: a single never-reviewed card among many keeps milestone 1 false"
-        },
-        {
-          "kind": "function",
-          "name": "test_essay_guided_passed_requires_every_section_at_or_above_threshold",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: one section below the score-3 threshold keeps guided_passed false even if other sections pass"
-        },
-        {
-          "kind": "function",
-          "name": "test_essay_guided_and_unguided_milestones_are_independent",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: an essay can have guided_passed true and unguided_passed false simultaneously"
-        },
-        {
-          "kind": "function",
-          "name": "test_essay_learning_level_sums_four_independent_milestones_in_any_order",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: learning_level equals the count of true milestones regardless of which ones are true"
-        },
-        {
-          "kind": "function",
-          "name": "test_get_essay_detail_carries_same_learning_progress_fields_as_list",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: GET /essays/{id} returns the same nine fields, computed identically, as the corresponding GET /essays row"
-        }
-      ],
-      "private_objects": []
-    },
-    {
-      "path": "03_Application/EssayCards/tests/test_examinations.py",
-      "stub_kind": "python_module",
-      "role": "[CHANGED] Adds exam_type coverage to export/import.",
-      "public_objects": [
-        {
-          "kind": "function",
-          "name": "test_examination_package_requires_exam_type_query_param",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: missing/invalid exam_type on GET .../examination-package is VALIDATION_ERROR"
-        },
-        {
-          "kind": "function",
-          "name": "test_examination_package_unguided_never_includes_last_examination",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: exam_type=unguided always returns last_examination: null per section, even when guided history exists"
-        },
-        {
-          "kind": "function",
-          "name": "test_examination_package_guided_uses_only_guided_history_for_calibration",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: exam_type=guided's last_examination reflects only prior guided-type exams, never unguided ones"
-        },
-        {
-          "kind": "function",
-          "name": "test_import_examinations_requires_exam_type_per_result",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: a result missing exam_type is rejected VALIDATION_ERROR, whole batch fails"
-        },
-        {
-          "kind": "function",
-          "name": "test_import_examinations_rejects_invalid_exam_type_value",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: exam_type outside ('guided','unguided') is rejected"
-        },
-        {
-          "kind": "function",
-          "name": "test_section_examinations_history_includes_exam_type",
-          "pattern": "pytest_test",
-          "methods": [],
-          "purpose": "Scenario: GET /sections/{id}/examinations rows carry exam_type"
-        }
-      ],
       "private_objects": []
     },
     {
       "path": "03_Application/EssayCards/tests/test_review_stats.py",
       "stub_kind": "python_module",
-      "role": "[CHANGED] Adds coverage for the two new endpoints; summary scenarios unchanged.",
+      "role": "[CHANGED] Adds coverage for GET /review-stats/today and the reshaped GET /review-stats/activity and extended GET /review-stats/summary; existing intervals scenarios unchanged.",
       "public_objects": [
         {
           "kind": "function",
-          "name": "test_activity_returns_thirty_zero_filled_utc_days",
+          "name": "test_today_no_scope_returns_global_counts",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Scenario: GET /review-stats/activity always returns exactly 30 rows, zero-filled, oldest first"
+          "purpose": "Scenario: GET /review-stats/today with no params aggregates across every flashcard."
         },
         {
           "kind": "function",
-          "name": "test_activity_counts_reviews_on_the_correct_utc_day",
+          "name": "test_today_rejects_section_id_without_essay_id",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Scenario: a review recorded near a UTC day boundary is counted on the correct side of it"
+          "purpose": "Scenario: VALIDATION_ERROR, same wording family as GET /flashcards/due."
         },
         {
           "kind": "function",
-          "name": "test_intervals_returns_six_zero_filled_buckets_summing_to_total_scheduled",
+          "name": "test_today_rejects_topic_with_essay_id",
           "pattern": "pytest_test",
           "methods": [],
-          "purpose": "Scenario: GET /review-stats/intervals always returns exactly six rows whose counts sum to the total scheduled-card count"
+          "purpose": "Scenario: VALIDATION_ERROR."
+        },
+        {
+          "kind": "function",
+          "name": "test_today_unique_cards_seen_counts_repeat_reviews_once",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a card reviewed three times today contributes 3 to recalls and 1 to unique_cards_seen."
+        },
+        {
+          "kind": "function",
+          "name": "test_today_first_cards_seen_only_counts_true_first_ever_review",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a card first reviewed yesterday, reviewed again today, does not count in today's first_cards_seen."
+        },
+        {
+          "kind": "function",
+          "name": "test_activity_reshaped_row_sums_match_worked_example",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a fixture day with 20 recalls/12 unique/2 first yields recalls=20, unique_cards_seen=12, first_cards_seen=2 (00_draft.md §6 worked example)."
+        },
+        {
+          "kind": "function",
+          "name": "test_activity_recall_rate_null_when_zero_recalls",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a zero-review day has recall_rate null, not 0."
+        },
+        {
+          "kind": "function",
+          "name": "test_summary_new_count_reflects_first_ever_reviews_in_window",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a card first reviewed 10 days ago contributes to month's new_count but not day's."
         }
       ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/test_sentence_feedback.py",
+      "stub_kind": "python_module",
+      "role": "[NEW] Coverage for backend/sentences.py::split_sentences and the three new endpoints.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "test_split_sentences_splits_plain_prose_into_sentences",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a multi-sentence paragraph splits at each '. '/'! '/'? ' boundary."
+        },
+        {
+          "kind": "function",
+          "name": "test_split_sentences_does_not_split_inside_markdown_link",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a sentence containing [text](http://example.com/a.b) is not split at the URL's internal period."
+        },
+        {
+          "kind": "function",
+          "name": "test_split_sentences_does_not_split_inside_nugget_reference",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: a sentence containing [[nugget:some-key]] stays intact."
+        },
+        {
+          "kind": "function",
+          "name": "test_split_sentences_drops_fenced_code_block_content",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: text inside a fenced code block is excluded from every resulting sentence."
+        },
+        {
+          "kind": "function",
+          "name": "test_list_essay_sentences_orders_by_section_then_sentence_index",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: GET /essays/{id}/sentences rows are ordered (section order_index asc, sentence_index asc) across multiple sections."
+        },
+        {
+          "kind": "function",
+          "name": "test_list_sentence_feedback_empty_when_nothing_marked",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: an essay with no sentence_feedback rows returns an empty Dataset."
+        },
+        {
+          "kind": "function",
+          "name": "test_list_sentence_feedback_returns_only_marked_sentences",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: only sentences with at least one true flag appear."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_sets_difficult_then_thumbs_up_on_same_sentence_yields_one_row_both_true",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: two independent PATCH calls on the same sentence result in exactly one row with both flags true."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_clearing_the_only_true_flag_deletes_the_row",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: setting the last true flag to false removes the row (confirmed via a follow-up GET)."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_clearing_one_flag_leaves_the_other_flag_and_row_intact",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: with both flags true, clearing one leaves the row present with only the other true."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_rejects_sentence_index_out_of_range",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: VALIDATION_ERROR."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_rejects_sentence_text_mismatch",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: VALIDATION_ERROR — simulates a section edited since the client last fetched /sentences."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_rejects_unknown_section_id",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: NOT_FOUND."
+        },
+        {
+          "kind": "function",
+          "name": "test_patch_rejects_invalid_flag_value",
+          "pattern": "pytest_test",
+          "methods": [],
+          "purpose": "Scenario: VALIDATION_ERROR."
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/ui/review_stats.spec.ts",
+      "stub_kind": "ts_module",
+      "role": "[CHANGED] Extend with the day/week/month Observed Recall selector and the reworked Study Activity chart, per 10_test_spec.md's [UI] scenarios. Follows the existing Sprint12 Playwright conventions already in this file.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/ui/review_page_daily_summary.spec.ts",
+      "stub_kind": "ts_module",
+      "role": "[NEW] Covers the Review page [UI] scenarios in 10_test_spec.md — no 'Review' caption on the plain session, 'Focus · ...' caption retained on a scoped session, the five-metric row, and the single unlabeled interval-forecast row. Same atlas-playwright/atlas-shell convention as the existing tests/ui/*.spec.ts files.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/EssayCards/tests/ui/sentence_feedback.spec.ts",
+      "stub_kind": "ts_module",
+      "role": "[NEW] Covers the essay-reader sentence-feedback [UI] scenarios in 10_test_spec.md — tap a sentence, toggle both flags independently, reload and confirm persistence. Same atlas-playwright/atlas-shell convention as the other tests/ui/*.spec.ts files.",
+      "public_objects": [],
       "private_objects": []
     }
   ]

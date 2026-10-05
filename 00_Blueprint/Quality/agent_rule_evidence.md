@@ -899,3 +899,107 @@ severity: major
 recurrence_hint: "First observed"
 linked_immediate_artifact: 03_Application/EssayCards/Sprint12_FSRSAndUXOverhaul/11_design_review.md
 ---
+
+---
+entry_id: EVD-2026-10-01-004
+date: 2026-10-01
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: HabitTracker
+sprint: Sprint01_Core
+pattern_name: dataset_sibling_field_mechanism_unspecified
+short_description: Design declares a Dataset response with an additive top-level sibling field (period_summary) outside meta/schema/rows but never specifies the technical serialization mechanism, even though the canonical platform_contracts.Dataset pydantic model silently drops unrecognized constructor kwargs (no extra="allow"), and a working precedent for this exact pattern already exists unreferenced elsewhere in the codebase.
+evidence: "10_architecture.json §interfaces.exposed_surfaces 'GET /api/habittracker/reports': 'ui_contract: Dataset | ApiError, PLUS one additive top-level sibling field outside the meta/schema/rows triad (period_summary ...)'; §internal_flow step 11: 'return as the additive Dataset response' (no mechanism named); platform_contracts/contracts.py:32-37 Dataset(BaseModel) has no extra='allow' in model_config; EssayCards backend/routers/review_stats.py:123-150 already solves this via response_model=None + dataset.model_dump() + manual JSONResponse, not cited anywhere in HabitTracker's design"
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: a designer correctly flags a Dataset-envelope deviation as a risk/open_question (good R-OPS-BP-01 practice) but stops short of specifying the concrete serialization mechanism required to make the deviation actually work against the canonical pydantic Dataset model, leaving a self-containment gap (R-CON-BP-08) even though a working precedent exists elsewhere in the codebase."
+linked_immediate_artifact: 03_Application/HabitTracker/Sprint01_Core/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-01-005
+date: 2026-10-01
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: HabitTracker
+sprint: Sprint01_Core
+pattern_name: non_pydantic_sibling_field_bypasses_json_serialization
+short_description: The design correction that named the response_model=None + dataset.model_dump() + JSONResponse mechanism for attaching a non-Dataset sibling field specified the attachment structurally but did not account for the fact that values merged into the dict after model_dump() no longer pass through pydantic's JSON-mode serializer, so raw datetime.date fields in the sibling object will raise TypeError in Starlette's default json.dumps-based JSONResponse.
+evidence: "10_architecture.json §internal_flow step 11: content[\"period_summary\"] = {period, anchor_date, period_start, period_end, dates, confirmed_days, elapsed_days} built from step 10's typed output (period_start: date, period_end: date — deliberately real date objects, used as SQL bind params in the same step's habit_rows query) and merged into content AFTER content = dataset.model_dump(by_alias=True, mode=\"json\") has already run; Starlette JSONResponse.render() uses stdlib json.dumps with no custom encoder."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: critical
+recurrence_hint: "Directly follows EVD-2026-10-01-004 (same sprint, same endpoint) — general pattern: once a correction specifies a response_model=None + manual JSONResponse escape hatch to attach a non-Dataset sibling field, every value merged into that dict after model_dump() must be independently re-verified for JSON-native types, since it no longer benefits from pydantic's mode=\"json\" serialization; likely to recur anywhere this attachment pattern is reused with a date/datetime/UUID/Decimal-bearing sibling field."
+linked_immediate_artifact: 03_Application/HabitTracker/Sprint01_Core/13_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-01-006
+date: 2026-10-01
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: HabitTracker
+sprint: Sprint01_Core
+pattern_name: non_pydantic_sibling_field_bypasses_json_serialization
+short_description: The correction that fixed period_start/period_end's raw-date serialization bug in the same manually-built JSONResponse dict did not audit the one other value (anchor_date) undergoing the identical str-to-date type transition in the same function, leaving the predicted recurrence (EVD-2026-10-01-005) only partially closed.
+evidence: "10_architecture.json §internal_flow step 10: resolve_report_period args 'period: str, anchor_date: date'; step 11 (compute_report) declared input 'anchor_date: str' with no named conversion pre-step; the corrected ui_contract Mechanism clause applies .isoformat() to period_start/period_end but not to anchor_date in the same content[\"period_summary\"] = {period, anchor_date, period_start: period_start.isoformat(), period_end: period_end.isoformat(), ...} dict literal."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "Also seen in EVD-2026-10-01-005 (same sprint, same endpoint, same correction round) — the predicted recurrence ('every value merged into that dict after model_dump() must be independently re-verified') materialized a second time, within the very fix meant to close the first instance. Strengthens the case for a design_template/checklist response: whenever a response_model=None + manual JSONResponse pattern is used to attach a sibling field, every field in that sibling dict must be enumerated and individually checked for JSON-native type, not just the field(s) already known to be problematic."
+linked_immediate_artifact: 03_Application/HabitTracker/Sprint01_Core/15_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-01-007
+date: 2026-10-01
+source_agent: application_implementer
+run_type: implementer_note
+component: HabitTracker
+sprint: Sprint01_Core
+pattern_name: fixtures_sql_cannot_represent_both_populated_and_empty_table_preconditions
+short_description: 10_test_spec.md's "starter seed present on first run" scenario requires a genuinely empty habittracker.habits table at GET-time, which conflicts with every other scenario needing fix-habit-* fixtures already loaded by the same shared tests/fixtures.sql, and with the conftest convention of never deleting/truncating inside a test body.
+evidence: "10_test_spec.md: 'Given: a freshly started HabitTracker instance with no prior habits. When: GET /api/habittracker/habits is called. Then: exactly five habits are returned...' — this precondition (zero rows) cannot coexist with fixtures.sql populating the fix-habit-worked-out/no-sweets/no-vaping/bp/essaycards/archived rows that ~20 other scenarios in the same spec reference by name, since tests/conftest.py's autouse clean_tables fixture always truncates-then-reloads fixtures.sql identically before every test."
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: major
+recurrence_hint: "First observed. Likely to recur for any component whose test spec includes both a 'fresh/empty state' scenario and many named-fixture scenarios sharing one global fixtures.sql — worth a design_template note if it recurs a second time."
+linked_immediate_artifact: 03_Application/HabitTracker/Sprint01_Core/99_sprint_log.md
+
+Resolution (not a design or rule change, a test-implementation choice): tests/fixtures.sql populates the six named habit fixtures needed by nearly every scenario (habittracker.habits is never left empty by the shared fixture load). The one scenario requiring true table-emptiness (`test_habit_list_starter_seed_on_first_run` in tests/test_habits.py) is the single, deliberate, explicitly-commented exception to "no truncate/delete in the test body": it truncates habittracker.daily_reviews/habits locally, within that one test only, then calls backend.database.seed_starter_habits() directly to exercise the real seeding code path. No other test performs a delete or truncate. The companion idempotency scenario ("seeding is a one-time, table-emptiness check") needed no such exception — it re-invokes seed_starter_habits() against the already-non-empty fixture state and asserts a no-op, which is what the scenario actually tests.
+---
+
+---
+entry_id: EVD-2026-10-05-001
+date: 2026-10-05
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint13_ReviewStatsSentenceFeedback
+pattern_name: dual_purpose_state_variable_partial_removal_unaddressed
+short_description: Design instructs removing one consumer of a dual-purpose frontend state variable (the Review page's old "Session" metric) without noting the variable's second, unrelated consumer (the completion-screen message) that must survive, unlike the adjacent sessionForecast removal in the same sprint which explicitly names its sole consumer and asks for a grep-confirmation before deletion.
+evidence: "10_architecture.json internal_flow step 3/4 and 10_scaffolding.json ReviewStatsPanel/ReviewSessionView entries describe removing the Session/Backlog/New trio and the sessionForecast family (with an explicit 'confirm via grep that nothing else... references them before deleting' instruction) but say nothing about reviewedCount, which src/ShellEntry.tsx:2830 passes into ReviewStatsPanel as the now-obsolete 'Session' value AND src/ShellEntry.tsx:2858 independently uses for the completion-screen message, unaffected by this sprint."
+likely_root_cause: definition_quality
+candidate_response: agent_instruction
+severity: major
+recurrence_hint: "Related to EVD-2026-04-09-008 (incomplete call-site enumeration) — here the gap is not a missed call site but a missed SECOND PURPOSE of a variable whose first purpose is being removed, within a design that otherwise sets a good precedent (sessionForecast) for exactly this kind of check."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint13_ReviewStatsSentenceFeedback/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-05-002
+date: 2026-10-05
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint13_ReviewStatsSentenceFeedback
+pattern_name: nested_interactive_element_tap_precedence_unspecified
+short_description: Design requires a tappable parent unit (sentence span, opens a feedback popover) to contain independently-tappable child elements (nugget/external links, preserved verbatim per an explicit requirement) with no stated click-event precedence or stopPropagation rule between the two.
+evidence: "10_architecture.json internal_flow step 8 requires each sentence to be both a tap target opening SentenceFeedbackPopover and a ReactMarkdown render preserving 'nugget-ref clicks, links, images, bold per sentence fragment' with the identical remarkPlugins/urlTransform/components props as the whole-section render it replaces, but neither this step nor 10_scaffolding.json's SectionSentences/SentenceFeedbackPopover entries state which handler wins when a tap lands on the nested link."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: a design that explicitly reuses an existing interaction pattern (whole-unit-tap-opens-popover) while also requiring preservation of independently-interactive content nested inside that same unit should state event-propagation precedence between the two, not just each behavior individually."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint13_ReviewStatsSentenceFeedback/11_design_review.md
+---

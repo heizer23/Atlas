@@ -33,7 +33,6 @@ import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
 import BarChart from '@platform-ui/components/BarChart';
-import LineChart from '@platform-ui/components/LineChart';
 import type { ApiError, Dataset as PlatformDataset } from '@platform-ui/api/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -121,6 +120,15 @@ interface ReviewStatsSummaryRow {
   good_count: number;
   easy_count: number;
   failures: number;
+  recall_rate: number | null;
+  new_count: number;
+}
+
+interface ActivityDayRow {
+  date: string;
+  recalls: number;
+  unique_cards_seen: number;
+  first_cards_seen: number;
   recall_rate: number | null;
 }
 
@@ -603,10 +611,9 @@ const jumpBtnStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
-// UPCOMING forecast columns. Keys/edges mirror the backend /stats forward
+// Interval forecast columns. Keys/edges mirror the backend /stats forward
 // bands (STATS_BUCKETS minus due_now); `maxIntervalMs` is the closed upper
-// edge used to bucket a card's freshly-scheduled interval client-side for the
-// `Session` row. Last column has no upper edge.
+// edge of each band. Last column has no upper edge.
 const FORECAST_COLUMNS: { key: string; label: string; maxIntervalMs: number | null }[] = [
   { key: 'within_10_min',  label: '≤10m', maxIntervalMs: 10 * 60_000 },
   { key: 'within_1_day',   label: '<1d',  maxIntervalMs: 24 * 60 * 60_000 },
@@ -615,21 +622,6 @@ const FORECAST_COLUMNS: { key: string; label: string; maxIntervalMs: number | nu
   { key: 'within_90_days', label: '<3mo', maxIntervalMs: 90 * 24 * 60 * 60_000 },
   { key: 'beyond_90_days', label: '≥3mo', maxIntervalMs: null },
 ];
-
-type Forecast = Record<string, number>;
-
-const emptyForecast = (): Forecast =>
-  Object.fromEntries(FORECAST_COLUMNS.map(c => [c.key, 0]));
-
-// Which UPCOMING column a card scheduled `intervalMs` into the future lands in.
-// `intervalMs` = next_due_at − last_reviewed_at from the review response, i.e.
-// the gap measured from the server's own now() at review time (R-CON-AL-06).
-function forecastKeyForInterval(intervalMs: number): string {
-  for (const col of FORECAST_COLUMNS) {
-    if (col.maxIntervalMs === null || intervalMs <= col.maxIntervalMs) return col.key;
-  }
-  return 'beyond_90_days';
-}
 
 // Compact human interval for the review-screen diagnostics frame.
 function formatInterval(seconds: number | null): string {
@@ -1131,7 +1123,7 @@ function NuggetLink({ href, children, onOpenNugget }: {
     return (
       <a
         href="#"
-        onClick={e => { e.preventDefault(); onOpenNugget(key); }}
+        onClick={e => { e.preventDefault(); e.stopPropagation(); onOpenNugget(key); }}
         style={{ color: 'var(--md-sys-color-primary)', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}
       >
         {children}
@@ -1149,7 +1141,9 @@ function NuggetLink({ href, children, onOpenNugget }: {
       </span>
     );
   }
-  return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+  // stopPropagation: a link tap inside a feedback-enabled sentence must never
+  // also open the sentence feedback popover (Sprint13 click precedence).
+  return <a href={href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{children}</a>;
 }
 
 // Cached key -> {id, title} index built from GET /nuggets (small, unfiltered
@@ -1654,6 +1648,108 @@ function EssayListView() {
   );
 }
 
+// ── Sentence feedback (Sprint13_ReviewStatsSentenceFeedback) ─────────────────
+//
+// Sentence boundaries come ONLY from GET /essays/{id}/sentences (backend
+// split_sentences) — never re-split client-side. Each sentence is an
+// independent ReactMarkdown instance (paragraph wrapper flattened so sentences
+// flow inline). Tapping a sentence opens SentenceFeedbackPopover; links inside
+// a sentence stopPropagation (NuggetLink) so they never also open it.
+
+interface SentenceRow { section_id: string; sentence_index: number; text: string }
+interface SentenceFeedbackRow {
+  section_id: string; sentence_index: number; sentence_text: string;
+  is_difficult: boolean; is_thumbs_up: boolean;
+}
+type FeedbackFlags = { is_difficult: boolean; is_thumbs_up: boolean };
+type FeedbackMap = Record<string, FeedbackFlags>;
+const feedbackKey = (sectionId: string, index: number) => `${sectionId}:${index}`;
+
+function SectionSentences({ sentences, nuggetTitles, feedback, openIndex, onTap, onOpenNugget }: {
+  sentences: SentenceRow[];
+  nuggetTitles: Record<string, string>;
+  feedback: FeedbackMap;
+  openIndex: number | null;
+  onTap: (index: number, el: HTMLElement) => void;
+  onOpenNugget: (key: string) => void;
+}) {
+  return (
+    <p>
+      {sentences.map(sn => {
+        const fb = feedback[feedbackKey(sn.section_id, sn.sentence_index)];
+        return (
+          <React.Fragment key={sn.sentence_index}>
+            <span
+              data-sentence-index={sn.sentence_index}
+              onClick={e => onTap(sn.sentence_index, e.currentTarget)}
+              style={{
+                cursor: 'pointer',
+                background: openIndex === sn.sentence_index ? 'var(--md-sys-color-surface-variant)' : undefined,
+              }}
+            >
+              <ReactMarkdown
+                remarkPlugins={[[remarkNuggetRefs, nuggetTitles]]}
+                urlTransform={nuggetAwareUrlTransform}
+                components={{
+                  a: (p: any) => <NuggetLink {...p} onOpenNugget={onOpenNugget} />,
+                  p: ({ children }: any) => <>{children}</>,
+                }}
+              >
+                {sn.text}
+              </ReactMarkdown>
+              {fb && (
+                <span data-testid="sentence-indicator" style={{ fontSize: 11, marginLeft: 2, opacity: 0.8 }}>
+                  {fb.is_difficult && <span title="Marked difficult">⚠</span>}
+                  {fb.is_thumbs_up && <span title="Thumbs up">👍</span>}
+                </span>
+              )}
+            </span>{' '}
+          </React.Fragment>
+        );
+      })}
+    </p>
+  );
+}
+
+function SentenceFeedbackPopover({ top, left, flags, onToggle }: {
+  top: number;
+  left: number;
+  flags: FeedbackFlags;
+  onToggle: (flag: 'difficult' | 'thumbs_up') => void;
+}) {
+  const btn = (label: string, icon: string, flag: 'difficult' | 'thumbs_up', active: boolean) => (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onToggle(flag)}
+      style={{
+        padding: '6px 10px',
+        borderRadius: 8,
+        cursor: 'pointer',
+        fontSize: 13,
+        border: `1px solid ${active ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)'}`,
+        background: active ? 'var(--md-sys-color-primary)' : 'transparent',
+        color: active ? 'var(--md-sys-color-on-primary, #fff)' : 'var(--md-sys-color-on-surface)',
+      }}
+    >
+      {icon} {label}
+    </button>
+  );
+  return (
+    <div
+      data-testid="sentence-feedback-popover"
+      style={{
+        position: 'fixed', top, left, zIndex: 50, display: 'flex', gap: 8, padding: 8,
+        background: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline-variant)',
+        borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+      }}
+    >
+      {btn('Difficult', '⚠', 'difficult', flags.is_difficult)}
+      {btn('Thumbs up', '👍', 'thumbs_up', flags.is_thumbs_up)}
+    </div>
+  );
+}
+
 // ── Reader View ───────────────────────────────────────────────────────────────
 
 function ReaderView() {
@@ -1791,20 +1887,102 @@ function ReaderView() {
     });
   };
 
+  // Sprint13 sentence feedback: server-computed sentences + saved flags.
+  const [sentences, setSentences] = useState<SentenceRow[]>([]);
+  const [feedback, setFeedback] = useState<FeedbackMap>({});
+  const [openSentence, setOpenSentence] =
+    useState<{ sectionId: string; index: number; text: string; top: number; left: number } | null>(null);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     setError(null);
     const res = await apiFetch<Dataset<EssayDetailRow>>(`/essaycards/essays/${id}`);
-    setLoading(false);
     if (isApiError(res)) {
+      setLoading(false);
       setError(res);
       return;
     }
+    // Sentence endpoints are best-effort: on failure the reader falls back to
+    // rendering each section's whole body (see sentencesBySection below).
+    const [sentRes, fbRes] = await Promise.all([
+      apiFetch<Dataset<SentenceRow>>(`/essaycards/essays/${id}/sentences`),
+      apiFetch<Dataset<SentenceFeedbackRow>>(`/essaycards/essays/${id}/sentence-feedback`),
+    ]);
+    setSentences(isApiError(sentRes) ? [] : sentRes.rows);
+    setFeedback(
+      isApiError(fbRes)
+        ? {}
+        : Object.fromEntries(
+            fbRes.rows.map(r => [
+              feedbackKey(r.section_id, r.sentence_index),
+              { is_difficult: r.is_difficult, is_thumbs_up: r.is_thumbs_up },
+            ]),
+          ),
+    );
+    setLoading(false);
     setEssay(res.rows[0] ?? null);
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Close the popover on any press outside it and outside a sentence (a press
+  // on a sentence is handled by that sentence's own toggle).
+  useEffect(() => {
+    if (!openSentence) return;
+    const onDown = (e: MouseEvent | TouchEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-testid="sentence-feedback-popover"], [data-sentence-index]')) return;
+      setOpenSentence(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [openSentence]);
+
+  const toggleFlag = async (flag: 'difficult' | 'thumbs_up') => {
+    if (!openSentence) return;
+    const { sectionId, index, text } = openSentence;
+    const key = feedbackKey(sectionId, index);
+    const prev = feedback[key] ?? { is_difficult: false, is_thumbs_up: false };
+    const value = flag === 'difficult' ? !prev.is_difficult : !prev.is_thumbs_up;
+    const next: FeedbackFlags = flag === 'difficult'
+      ? { ...prev, is_difficult: value }
+      : { ...prev, is_thumbs_up: value };
+    const apply = (f: FeedbackFlags | null) =>
+      setFeedback(m => {
+        const copy = { ...m };
+        if (f && (f.is_difficult || f.is_thumbs_up)) copy[key] = f; else delete copy[key];
+        return copy;
+      });
+    setFeedbackError(null);
+    apply(next); // optimistic
+    const res = await apiFetch<FeedbackFlags>(`/essaycards/sections/${sectionId}/sentence-feedback`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sentence_index: index, sentence_text: text, flag, value }),
+    });
+    if (isApiError(res)) {
+      apply(prev);
+      setFeedbackError(res.error.message);
+    }
+  };
+
+  const handleSentenceTap = (sectionId: string, index: number, text: string, el: HTMLElement) => {
+    if (openSentence && openSentence.sectionId === sectionId && openSentence.index === index) {
+      setOpenSentence(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    setOpenSentence({
+      sectionId, index, text,
+      top: Math.min(r.bottom + 4, window.innerHeight - 56),
+      left: Math.max(8, Math.min(r.left, window.innerWidth - 220)),
+    });
+  };
 
   // "Jump to passage" navigates here with a #anchor_slug hash — scroll to it
   // once the essay (and its section DOM anchors) has rendered.
@@ -1905,13 +2083,34 @@ function ReaderView() {
         <section key={section.id} id={section.anchor_slug} style={{ marginBottom: 32 }}>
           <h2>{section.heading}</h2>
           <div className="essaycards-section-body">
-            <ReactMarkdown
-              remarkPlugins={[[remarkNuggetRefs, Object.fromEntries(section.nuggets.map(n => [n.nugget_key, n.title]))]]}
-              urlTransform={nuggetAwareUrlTransform}
-              components={{ a: (p: any) => <NuggetLink {...p} onOpenNugget={key => openNuggetByKey(key, section.id)} /> }}
-            >
-              {section.body_markdown}
-            </ReactMarkdown>
+            {(() => {
+              const titles = Object.fromEntries(section.nuggets.map(n => [n.nugget_key, n.title]));
+              const sectionSentences = sentences.filter(sn => sn.section_id === section.id);
+              if (sectionSentences.length === 0) {
+                // No server sentences (empty section or sentence fetch failed): plain render.
+                return (
+                  <ReactMarkdown
+                    remarkPlugins={[[remarkNuggetRefs, titles]]}
+                    urlTransform={nuggetAwareUrlTransform}
+                    components={{ a: (p: any) => <NuggetLink {...p} onOpenNugget={key => openNuggetByKey(key, section.id)} /> }}
+                  >
+                    {section.body_markdown}
+                  </ReactMarkdown>
+                );
+              }
+              return (
+                <SectionSentences
+                  sentences={sectionSentences}
+                  nuggetTitles={titles}
+                  feedback={feedback}
+                  openIndex={openSentence?.sectionId === section.id ? openSentence.index : null}
+                  onTap={(index, el) =>
+                    handleSentenceTap(section.id, index, sectionSentences[index].text, el)
+                  }
+                  onOpenNugget={key => openNuggetByKey(key, section.id)}
+                />
+              );
+            })()}
           </div>
           <ActionMenu
             primary={{
@@ -1941,6 +2140,20 @@ function ReaderView() {
           <SectionExaminationHistory sectionId={section.id} />
         </section>
       ))}
+
+      {openSentence && (
+        <SentenceFeedbackPopover
+          top={openSentence.top}
+          left={openSentence.left}
+          flags={feedback[feedbackKey(openSentence.sectionId, openSentence.index)] ?? { is_difficult: false, is_thumbs_up: false }}
+          onToggle={toggleFlag}
+        />
+      )}
+      {feedbackError && (
+        <div role="alert" style={{ position: 'fixed', bottom: 8, left: 8, right: 8, fontSize: 12, color: '#b00020' }}>
+          {feedbackError}
+        </div>
+      )}
 
       {activeNugget && (
         <NuggetPanel
@@ -2517,18 +2730,6 @@ const statMetricLabelStyle: React.CSSProperties = {
 };
 
 // "CURRENT" / "UPCOMING" rotated to read bottom-to-top in the left gutter.
-const gutterLabelStyle: React.CSSProperties = {
-  writingMode: 'vertical-rl',
-  transform: 'rotate(180deg)',
-  textTransform: 'uppercase',
-  fontSize: 10,
-  fontWeight: 600,
-  letterSpacing: 1.5,
-  color: 'var(--md-sys-color-on-surface-variant)',
-  flexShrink: 0,
-  textAlign: 'center',
-};
-
 function ForecastRow({ label, values }: { label: string; values: (number | null)[] }) {
   return (
     <>
@@ -2587,26 +2788,25 @@ function ForecastGrid({ rows }: { rows: { label: string; values: (number | null)
   );
 }
 
+interface TodayRow { recalls: number; unique_cards_seen: number; first_cards_seen: number }
+
 function ReviewStatsPanel({
   topic,
   essayId,
   sectionId,
   refreshToken,
-  reviewed,
   backlog,
   newRemaining,
-  sessionForecast,
 }: {
   topic: string | null;
   essayId: string | null;
   sectionId: string | null;
   refreshToken: number;
-  reviewed: number;
   backlog: number;
   newRemaining: number;
-  sessionForecast: Forecast;
 }) {
   const [stats, setStats] = useState<Record<string, number> | null>(null);
+  const [today, setToday] = useState<TodayRow | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -2614,23 +2814,28 @@ function ReviewStatsPanel({
       if (topic) qs.set('topic', topic);
       if (essayId) qs.set('essay_id', essayId);
       if (sectionId) qs.set('section_id', sectionId);
-      const url = `/essaycards/flashcards/stats${qs.toString() ? `?${qs.toString()}` : ''}`;
-      const res = await apiFetch<Dataset<QueueStatRow>>(url);
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      const res = await apiFetch<Dataset<QueueStatRow>>(`/essaycards/flashcards/stats${suffix}`);
       if (isApiError(res)) {
         setStats(null);
-        return;
+      } else {
+        setStats(Object.fromEntries(res.rows.map(r => [r.bucket, r.count])));
       }
-      setStats(Object.fromEntries(res.rows.map(r => [r.bucket, r.count])));
+      const todayRes = await apiFetch<Dataset<TodayRow>>(`/essaycards/review-stats/today${suffix}`);
+      setToday(isApiError(todayRes) ? null : todayRes.rows[0] ?? null);
     })();
   }, [topic, essayId, sectionId, refreshToken]);
 
-  const metrics: [number, string][] = [
-    [reviewed, 'Session'],
-    [backlog, 'Backlog'],
-    [newRemaining, 'New'],
+  // Recalls/Unique/First are backend-owned (GET /review-stats/today, UTC day);
+  // Due/New are derived from the already-scoped due queue.
+  const metrics: [string, string][] = [
+    [today ? String(today.recalls) : '·', 'Recalls'],
+    [today ? String(today.unique_cards_seen) : '·', 'Unique'],
+    [today ? String(today.first_cards_seen) : '·', 'First'],
+    [String(backlog), 'Due'],
+    [String(newRemaining), 'New'],
   ];
   const allRow = FORECAST_COLUMNS.map(c => (stats ? stats[c.key] ?? 0 : null));
-  const sessionRow = FORECAST_COLUMNS.map(c => sessionForecast[c.key] ?? 0);
 
   return (
     <div
@@ -2643,25 +2848,19 @@ function ReviewStatsPanel({
         gap: 12,
       }}
     >
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span style={gutterLabelStyle}>Current</span>
-        <div style={{ flex: 1, display: 'flex', gap: 8 }}>
-          {metrics.map(([value, label]) => (
-            <div key={label} style={{ flex: 1, textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 500, lineHeight: 1.1, color: 'var(--md-sys-color-on-surface)' }}>
-                {value}
-              </div>
-              <div style={{ ...statMetricLabelStyle, marginTop: 2 }}>{label}</div>
+      <div data-testid="review-daily-metrics" style={{ display: 'flex', gap: 8 }}>
+        {metrics.map(([value, label]) => (
+          <div key={label} style={{ flex: 1, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 500, lineHeight: 1.1, color: 'var(--md-sys-color-on-surface)' }}>
+              {value}
             </div>
-          ))}
-        </div>
+            <div style={{ ...statMetricLabelStyle, marginTop: 2 }}>{label}</div>
+          </div>
+        ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-        <span style={gutterLabelStyle}>Upcoming</span>
-        <div style={{ flex: 1 }}>
-          <ForecastGrid rows={[{ label: 'All', values: allRow }, { label: 'Session', values: sessionRow }]} />
-        </div>
+      <div data-testid="review-interval-row">
+        <ForecastGrid rows={[{ label: '', values: allRow }]} />
       </div>
     </div>
   );
@@ -2703,9 +2902,6 @@ function ReviewSessionView() {
   const [grading, setGrading] = useState(false);
   const [statsRefresh, setStatsRefresh] = useState(0);
   const [reviewedCount, setReviewedCount] = useState(0);
-  // UPCOMING `Session` row — histogram of the intervals cards were rescheduled
-  // into during this session. Built purely from review responses.
-  const [sessionForecast, setSessionForecast] = useState<Forecast>(emptyForecast);
   const [lastNewIntervalSec, setLastNewIntervalSec] = useState<number | null>(null);
   // flashcard_ids graded `again` at least once this session — drives only the
   // diagnostics-frame label, not queue behaviour. The server's RECENT ordering
@@ -2747,7 +2943,6 @@ function ReviewSessionView() {
       setLoading(true);
       setError(null);
       setFlipped(false);
-      setSessionForecast(emptyForecast());
       setReviewedCount(0);
       setLastNewIntervalSec(null);
       setAgainIds(new Set());
@@ -2799,8 +2994,6 @@ function ReviewSessionView() {
 
     const newIntervalSec = (Date.parse(res.next_due_at) - Date.parse(res.last_reviewed_at)) / 1000;
     setLastNewIntervalSec(newIntervalSec);
-    const key = forecastKeyForInterval(newIntervalSec * 1000);
-    setSessionForecast(f => ({ ...f, [key]: (f[key] ?? 0) + 1 }));
     setReviewedCount(n => n + 1);
     setFlipped(false);
     setExploreMsg(null);
@@ -2827,14 +3020,14 @@ function ReviewSessionView() {
       essayId={essayId}
       sectionId={sectionId}
       refreshToken={statsRefresh}
-      reviewed={reviewedCount}
       backlog={queue.length}
       newRemaining={queue.filter(c => c.is_new).length}
-      sessionForecast={sessionForecast}
     />
   );
 
-  const scopeCaption = (
+  // The plain review session has no caption (the Shell header already names
+  // the app); focus sessions keep their distinguishing "Focus · ..." caption.
+  const scopeCaption = scopeLabel === 'Review' ? null : (
     <div
       style={{
         fontSize: 12,
@@ -4281,6 +4474,12 @@ const REVIEW_STATS_WINDOW_LABELS: Record<ReviewStatsSummaryRow['period'], string
 };
 
 function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
+  const figure = (label: string, value: string) => (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>{label}</div>
+      <div style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+    </div>
+  );
   return (
     <div
       style={{
@@ -4292,12 +4491,10 @@ function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
       }}
     >
       <h3 style={{ margin: '0 0 8px' }}>{REVIEW_STATS_WINDOW_LABELS[row.period]}</h3>
-      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>Reviews</div>
-      <div style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>{row.reviews}</div>
-      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 8 }}>Recall rate</div>
-      <div style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>
-        {row.recall_rate == null ? 'No reviews yet' : `${Math.round(row.recall_rate * 100)}%`}
-      </div>
+      {figure('Cards Seen', String(row.reviews))}
+      {figure('Unique Cards Seen', String(row.unique_cards))}
+      {figure('New Cards Seen', String(row.new_count))}
+      {figure('Recall Rate', row.recall_rate == null ? 'No reviews yet' : `${Math.round(row.recall_rate * 100)}%`)}
       <table style={{ width: '100%', marginTop: 12, borderCollapse: 'collapse' }}>
         <tbody>
           <tr>
@@ -4337,10 +4534,64 @@ const statsZoneSubtextStyle: React.CSSProperties = {
 // progress" histogram.
 const LEARNING_LEVELS = [0, 1, 2, 3, 4];
 
+// Study activity: one stacked column per UTC day (Repeat / Unique / First),
+// total height = recalls, recall-rate percentage above each column. Local,
+// CSS-only (platform-ui BarChart has no per-bar label slot — see
+// Sprint13 10_architecture.json internal_flow step 11). Segment formulas:
+// repeat = recalls - unique; unique = unique - first; first = first.
+const ACTIVITY_COLORS = {
+  repeat: 'var(--md-sys-color-outline)',
+  unique: 'var(--md-sys-color-secondary, #6b7a8f)',
+  first: 'var(--md-sys-color-primary)',
+};
+
+function DailyActivityChart({ rows }: { rows: ActivityDayRow[] }) {
+  const maxRecalls = Math.max(1, ...rows.map(r => r.recalls));
+  const barArea = 120;
+  const seg = (n: number, color: string, label: string) =>
+    n > 0 ? <div title={`${label}: ${n}`} style={{ height: (n / maxRecalls) * barArea, background: color }} /> : null;
+  return (
+    <div data-testid="daily-activity-chart">
+      <div style={{ overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', minWidth: rows.length * 30 }}>
+          {rows.map(r => (
+            <div
+              key={r.date}
+              data-testid="activity-column"
+              style={{ width: 26, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}
+            >
+              <div
+                data-testid="activity-rate"
+                style={{ fontSize: 9, height: 14, color: 'var(--md-sys-color-on-surface-variant)', whiteSpace: 'nowrap' }}
+              >
+                {r.recall_rate == null ? '—' : `${Math.round(r.recall_rate * 100)}%`}
+              </div>
+              <div style={{ width: '100%', height: barArea, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                {seg(r.recalls - r.unique_cards_seen, ACTIVITY_COLORS.repeat, 'Repeat')}
+                {seg(r.unique_cards_seen - r.first_cards_seen, ACTIVITY_COLORS.unique, 'Unique')}
+                {seg(r.first_cards_seen, ACTIVITY_COLORS.first, 'First')}
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--md-sys-color-on-surface-variant)' }}>{r.date.slice(8)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontSize: 12, marginTop: 8, display: 'flex', gap: 12 }}>
+        <span><span style={{ color: ACTIVITY_COLORS.repeat }}>■</span> Repeat</span>
+        <span>·</span>
+        <span><span style={{ color: ACTIVITY_COLORS.unique }}>■</span> Unique</span>
+        <span>·</span>
+        <span><span style={{ color: ACTIVITY_COLORS.first }}>■</span> First</span>
+      </div>
+    </div>
+  );
+}
+
 function ReviewStatsView() {
   const navigate = useNavigate();
   const [summaryRows, setSummaryRows] = useState<ReviewStatsSummaryRow[]>([]);
-  const [activityDataset, setActivityDataset] = useState<PlatformDataset | null>(null);
+  const [activityRows, setActivityRows] = useState<ActivityDayRow[] | null>(null);
+  const [period, setPeriod] = useState<ReviewStatsSummaryRow['period']>('day');
   const [intervalsDataset, setIntervalsDataset] = useState<PlatformDataset | null>(null);
   const [forecastRow, setForecastRow] = useState<(number | null)[] | null>(null);
   const [essays, setEssays] = useState<EssayRow[]>([]);
@@ -4352,7 +4603,7 @@ function ReviewStatsView() {
       setLoading(true);
       const [summaryRes, activityRes, intervalsRes, forecastRes, essaysRes] = await Promise.all([
         apiFetch<Dataset<ReviewStatsSummaryRow>>('/essaycards/review-stats/summary'),
-        apiFetch<PlatformDataset>('/essaycards/review-stats/activity'),
+        apiFetch<Dataset<ActivityDayRow>>('/essaycards/review-stats/activity'),
         apiFetch<PlatformDataset>('/essaycards/review-stats/intervals'),
         apiFetch<Dataset<QueueStatRow>>('/essaycards/flashcards/stats'),
         apiFetch<Dataset<EssayRow>>('/essaycards/essays'),
@@ -4365,7 +4616,7 @@ function ReviewStatsView() {
       }
       setError(null);
       setSummaryRows(summaryRes.rows);
-      setActivityDataset(isApiError(activityRes) ? null : activityRes);
+      setActivityRows(isApiError(activityRes) ? null : activityRes.rows);
       setIntervalsDataset(isApiError(intervalsRes) ? null : intervalsRes);
       if (!isApiError(forecastRes)) {
         const byBucket = Object.fromEntries(forecastRes.rows.map(r => [r.bucket, r.count]));
@@ -4399,9 +4650,11 @@ function ReviewStatsView() {
       {!loading && !error && (
         <>
           <h3 style={statsZoneHeadingStyle}>Study activity</h3>
-          <p style={statsZoneSubtextStyle}>Reviews completed per day, trailing 30 days.</p>
-          {activityDataset
-            ? <LineChart dataset={activityDataset} mapping={{ x: 'date', y: 'reviews', aggregation: 'sum' }} />
+          <p style={statsZoneSubtextStyle}>
+            Recalls per UTC day, trailing 30 days; recall rate shown above each day.
+          </p>
+          {activityRows
+            ? <DailyActivityChart rows={activityRows} />
             : <div style={{ color: '#888', fontSize: 13 }}>Activity data unavailable.</div>}
 
           <h3 style={statsZoneHeadingStyle}>Scheduled reviews (forecast)</h3>
@@ -4422,12 +4675,30 @@ function ReviewStatsView() {
           <h3 style={statsZoneHeadingStyle}>Observed recall</h3>
           <p style={statsZoneSubtextStyle}>
             What actually happened over the trailing day/week/month — OBSERVED, not predicted. Sample size is
-            the review count shown on each card.
+            Cards Seen.
           </p>
-          {summaryRows.length === 3 && (
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {summaryRows.map(row => <ReviewStatsCard key={row.period} row={row} />)}
-            </div>
+          <div role="group" aria-label="Observed recall period" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            {(['day', 'week', 'month'] as const).map(p => (
+              <button
+                key={p}
+                type="button"
+                aria-pressed={period === p}
+                onClick={() => setPeriod(p)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 16,
+                  cursor: 'pointer',
+                  border: '1px solid var(--md-sys-color-outline)',
+                  background: period === p ? 'var(--md-sys-color-primary)' : 'transparent',
+                  color: period === p ? 'var(--md-sys-color-on-primary, #fff)' : 'var(--md-sys-color-on-surface)',
+                }}
+              >
+                {REVIEW_STATS_WINDOW_LABELS[p]}
+              </button>
+            ))}
+          </div>
+          {summaryRows.find(r => r.period === period) && (
+            <ReviewStatsCard row={summaryRows.find(r => r.period === period)!} />
           )}
 
           <h3 style={statsZoneHeadingStyle}>Scheduled intervals</h3>

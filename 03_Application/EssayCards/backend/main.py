@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
 from backend.migrate_fsrs_state import migrate_legacy_fsrs_state
-from backend.routers import essays, examinations, exploration, flashcards, images, nuggets, review_stats
+from backend.routers import essays, examinations, exploration, flashcards, images, nuggets, review_stats, sentence_feedback
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.performance import install_request_timing
@@ -35,6 +35,7 @@ app.include_router(examinations.router, prefix="/api/essaycards")
 app.include_router(images.router, prefix="/api/essaycards")
 app.include_router(nuggets.router, prefix="/api/essaycards")
 app.include_router(review_stats.router, prefix="/api/essaycards")
+app.include_router(sentence_feedback.router, prefix="/api/essaycards")
 
 
 @app.on_event("startup")

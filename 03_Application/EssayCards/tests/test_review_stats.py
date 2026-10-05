@@ -144,7 +144,7 @@ def test_review_stats_aggregation_is_scheduler_agnostic(client, db_conn):
         assert "scheduler" not in row
         assert set(row.keys()) == {
             "period", "reviews", "unique_cards", "again_count", "hard_count",
-            "good_count", "easy_count", "failures", "recall_rate",
+            "good_count", "easy_count", "failures", "recall_rate", "new_count",
         }
 
     with db_conn.cursor() as cur:
@@ -197,11 +197,11 @@ def test_activity_returns_thirty_zero_filled_utc_days(client):
 
     dates = [row["date"] for row in rows]
     assert dates == sorted(dates)  # oldest first
-    assert all(row["reviews"] >= 0 for row in rows)
+    assert all(row["recalls"] >= 0 for row in rows)
     # Every fixture review is recent (within the last 40 days at most, per
     # tests/fixtures.sql); at least one day in the trailing 30-day window has
     # zero reviews (the window is mostly empty).
-    assert any(row["reviews"] == 0 for row in rows)
+    assert any(row["recalls"] == 0 for row in rows)
 
 
 def test_activity_counts_reviews_on_the_correct_utc_day(client, db_conn):
@@ -223,8 +223,148 @@ def test_activity_counts_reviews_on_the_correct_utc_day(client, db_conn):
     r = client.get(ACTIVITY_URL)
     assert r.status_code == 200
     rows = r.json()["rows"]
-    assert rows[-1]["reviews"] == 1  # today (UTC) is the last row — oldest-first order
-    assert sum(row["reviews"] for row in rows) == 1
+    assert rows[-1]["recalls"] == 1  # today (UTC) is the last row — oldest-first order
+    assert sum(row["recalls"] for row in rows) == 1
+
+
+# ── Sprint13_ReviewStatsSentenceFeedback ────────────────────────────────────
+
+TODAY_URL = "/api/essaycards/review-stats/today"
+A1 = "fc000001-0000-0000-0000-000000000001"   # essay A
+A2 = "fc000002-0000-0000-0000-000000000002"   # essay A
+B1 = "fc000005-0000-0000-0000-000000000005"   # essay B
+ESSAY_A = "ea000001-0000-0000-0000-000000000001"
+ESSAY_B = "ea000002-0000-0000-0000-000000000002"
+SECTION_A_ORIGINS = "ec000001-0000-0000-0000-000000000001"
+
+# UTC midnight of today as a timestamptz expression.
+_TODAY_START = "(date_trunc('day', now() at time zone 'utc') at time zone 'utc')"
+
+
+def _clear_events(db_conn):
+    with db_conn.cursor() as cur:
+        cur.execute("delete from essaycards.review_events")
+
+
+def _add_event(db_conn, card_id, when_sql, grade="good"):
+    with db_conn.cursor() as cur:
+        cur.execute(
+            f"""
+            insert into essaycards.review_events
+                (flashcard_id, grade, reviewed_at, was_due, prior_review_interval, resulting_review_interval)
+            values (%s, %s, {when_sql}, true, interval '1 day', interval '2 days')
+            """,
+            (card_id, grade),
+        )
+
+
+def _today_row(client, qs=""):
+    r = client.get(TODAY_URL + qs)
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    assert len(rows) == 1
+    return rows[0]
+
+
+def test_today_endpoint_no_scope_returns_global_counts(client, db_conn):
+    _clear_events(db_conn)
+    _add_event(db_conn, A1, f"{_TODAY_START} + interval '1 minute'")
+    _add_event(db_conn, A2, f"{_TODAY_START} + interval '2 minutes'")
+    _add_event(db_conn, B1, f"{_TODAY_START} + interval '3 minutes'")
+    row = _today_row(client)
+    assert row["recalls"] == 3
+    assert row["unique_cards_seen"] == 3
+
+
+def test_today_endpoint_scoped_by_essay_and_section(client, db_conn):
+    _clear_events(db_conn)
+    _add_event(db_conn, A1, f"{_TODAY_START} + interval '1 minute'")
+    _add_event(db_conn, B1, f"{_TODAY_START} + interval '2 minutes'")
+    assert _today_row(client, f"?essay_id={ESSAY_A}")["recalls"] == 1
+    assert _today_row(client, f"?essay_id={ESSAY_B}")["recalls"] == 1
+    assert _today_row(client, f"?essay_id={ESSAY_A}&section_id={SECTION_A_ORIGINS}")["recalls"] == 1
+    assert _today_row(client, f"?essay_id={ESSAY_B}&section_id={SECTION_A_ORIGINS}")["recalls"] == 0
+
+
+def test_today_endpoint_no_reviews_yields_zero_row_not_empty(client, db_conn):
+    _clear_events(db_conn)
+    row = _today_row(client)
+    assert (row["recalls"], row["unique_cards_seen"], row["first_cards_seen"]) == (0, 0, 0)
+
+
+def test_today_endpoint_section_id_without_essay_id_is_rejected(client):
+    r = client.get(f"{TODAY_URL}?section_id={SECTION_A_ORIGINS}")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_today_endpoint_topic_combined_with_essay_id_is_rejected(client):
+    r = client.get(f"{TODAY_URL}?topic=Philosophy&essay_id={ESSAY_A}")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_today_endpoint_repeat_reviews_count_once_in_unique(client, db_conn):
+    _clear_events(db_conn)
+    for minutes in (1, 2, 3):
+        _add_event(db_conn, A1, f"{_TODAY_START} + interval '{minutes} minutes'")
+    row = _today_row(client, f"?essay_id={ESSAY_A}")
+    assert row["recalls"] == 3
+    assert row["unique_cards_seen"] == 1
+    assert row["first_cards_seen"] == 1
+
+
+def test_today_endpoint_first_review_from_yesterday_does_not_count_as_first_today(client, db_conn):
+    _clear_events(db_conn)
+    _add_event(db_conn, A1, f"{_TODAY_START} - interval '1 hour'")
+    _add_event(db_conn, A1, f"{_TODAY_START} + interval '1 minute'")
+    row = _today_row(client, f"?essay_id={ESSAY_A}")
+    assert row["recalls"] == 1
+    assert row["unique_cards_seen"] == 1
+    assert row["first_cards_seen"] == 0
+
+
+def test_activity_endpoint_reshaped_row_matches_the_worked_example(client, db_conn):
+    """20 recalls, 12 distinct cards, 2 first-ever -> repeat 8 / unique 10 / first 2."""
+    _clear_events(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("select id::text as id from essaycards.flashcards order by card_key limit 12")
+        cards = [r["id"] for r in cur.fetchall()]
+    assert len(cards) == 12
+    day = f"({_TODAY_START} - interval '3 days' + interval '12 hours')"
+    # 10 cards were already seen earlier, so only cards[0] and cards[1] are first-ever on that day.
+    for c in cards[2:]:
+        _add_event(db_conn, c, f"{day} - interval '10 days'")
+    for i, c in enumerate(cards):
+        _add_event(db_conn, c, f"{day} + interval '{i} minutes'")
+    for i in range(8):  # 8 repeats of cards[0]
+        _add_event(db_conn, cards[0], f"{day} + interval '{30 + i} minutes'", grade="again" if i < 2 else "good")
+
+    rows = client.get(ACTIVITY_URL).json()["rows"]
+    row = rows[-4]  # today is rows[-1]; 3 days ago is rows[-4]
+    assert (row["recalls"], row["unique_cards_seen"], row["first_cards_seen"]) == (20, 12, 2)
+    repeat = row["recalls"] - row["unique_cards_seen"]
+    unique_segment = row["unique_cards_seen"] - row["first_cards_seen"]
+    assert (repeat, unique_segment, row["first_cards_seen"]) == (8, 10, 2)
+    assert row["recall_rate"] == (20 - 2) / 20
+
+
+def test_activity_endpoint_recall_rate_is_null_not_zero_on_a_day_with_no_reviews(client, db_conn):
+    _clear_events(db_conn)
+    rows = client.get(ACTIVITY_URL).json()["rows"]
+    assert len(rows) == 30
+    for row in rows:
+        assert row["recalls"] == 0 and row["unique_cards_seen"] == 0 and row["first_cards_seen"] == 0
+        assert row["recall_rate"] is None
+
+
+def test_summary_endpoint_new_cards_seen_reflects_first_ever_reviews_inside_each_window(client, db_conn):
+    _clear_events(db_conn)
+    _add_event(db_conn, A1, "now() - interval '10 days'")
+    rows = _rows_by_period(client.get(URL).json())
+    assert rows["day"]["new_count"] == 0
+    assert rows["week"]["new_count"] == 0
+    assert rows["month"]["new_count"] == 1
 
 
 # ── GET /review-stats/intervals (Sprint12_FSRSAndUXOverhaul) ────────────────

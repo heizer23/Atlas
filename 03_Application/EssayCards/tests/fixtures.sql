@@ -476,3 +476,32 @@ INSERT INTO essaycards.review_events
   ('fc000025-0000-0000-0000-000000000025', 'good',  now() - interval '40 days',  true, interval '2 minutes',  interval '20 hours'),
   ('fc000023-0000-0000-0000-000000000023', 'again', now() - interval '1 hour',   true, interval '30 seconds', interval '60 seconds'),
   ('fc000025-0000-0000-0000-000000000025', 'again', now() - interval '2 days',   true, interval '15 minutes', interval '5 seconds');
+
+-- ── Sprint13_ReviewStatsSentenceFeedback — sentence splitting + feedback ─────
+--
+-- Essay S has no flashcards (so it perturbs no due-queue/progress assertion).
+--   ec000012 fix-sent-plain    -> 3 sentences (the draft's "sky is blue" example)
+--   ec000013 fix-sent-link     -> 2 sentences; first contains a markdown link
+--                                 whose URL has an internal period
+--   ec000014 fix-sent-nugget   -> 2 sentences; first contains [[nugget:...]]
+--   ec000015 fix-sent-code     -> 2 prose sentences around a fenced code block
+--   ec000016 fix-sent-feedback -> 4 sentences; index 0 marked difficult only,
+--                                 index 1 marked thumbs-up only, 2 and 3 unmarked
+INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
+  ('ea00000b-0000-0000-0000-00000000000b', 'Essay S (sentences)', 'essay-s-sentences', now() - interval '1 hour', now() - interval '1 hour');
+
+INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, anchor_slug, body_markdown) VALUES
+  ('ec000012-0000-0000-0000-000000000012', 'ea00000b-0000-0000-0000-00000000000b', 0, 'S Plain', 'fix-sent-plain',
+    'The sky is blue. The grass is green. Is that surprising?'),
+  ('ec000013-0000-0000-0000-000000000013', 'ea00000b-0000-0000-0000-00000000000b', 1, 'S Link', 'fix-sent-link',
+    'See [source](http://example.com/a.b) for details on this. Another sentence follows.'),
+  ('ec000014-0000-0000-0000-000000000014', 'ea00000b-0000-0000-0000-00000000000b', 2, 'S Nugget', 'fix-sent-nugget',
+    'Consider [[nugget:some-key]] carefully before moving on. Then continue.'),
+  ('ec000015-0000-0000-0000-000000000015', 'ea00000b-0000-0000-0000-00000000000b', 3, 'S Code', 'fix-sent-code',
+    E'Before the code block. Still before it.\n\n```python\nx = 1. Y = 2\n```\n\nAfter the code.'),
+  ('ec000016-0000-0000-0000-000000000016', 'ea00000b-0000-0000-0000-00000000000b', 4, 'S Feedback', 'fix-sent-feedback',
+    'Alpha is first. Beta is second. Gamma is third. Delta is fourth.');
+
+INSERT INTO essaycards.sentence_feedback (section_id, sentence_index, sentence_text, is_difficult, is_thumbs_up) VALUES
+  ('ec000016-0000-0000-0000-000000000016', 0, 'Alpha is first.',  true,  false),
+  ('ec000016-0000-0000-0000-000000000016', 1, 'Beta is second.',  false, true);

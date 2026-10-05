@@ -145,6 +145,16 @@ they must be built.
   persisted category collapse control, and a reworked stats page (`GET /review-stats/activity`,
   `GET /review-stats/intervals`) plus regrouped main nav (see `## FSRS scheduling (Sprint12)` and
   `## Learning progress` below).
+- Sprint 13: Review page shows a day-based five-metric row (Recalls / Unique / First from
+  `GET /review-stats/today`, UTC calendar day; Due / New derived client-side from the due queue) and a
+  single unlabeled interval row (the Current/Upcoming/Session UI of `## Review screen` below is
+  superseded); Stats page Study Activity is a day-based stacked Repeat/Unique/First chart
+  (`GET /review-stats/activity` now returns `recalls`/`unique_cards_seen`/`first_cards_seen`/`recall_rate`)
+  and Observed Recall is a day/week/month selector (`/review-stats/summary` gains `new_count`);
+  essay reader sentence feedback (`backend/sentences.py::split_sentences`,
+  `backend/routers/sentence_feedback.py`, `essaycards.sentence_feedback` — two independent boolean
+  flags per sentence, addressed by sentence_index; known gap: feedback can misattach if a section's
+  body_markdown is edited after marking).
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys

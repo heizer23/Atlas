@@ -31,11 +31,11 @@ test('stats page renders five zones in order, forecast and observed recall clear
 
   // Wait for the loading skeleton to resolve into the zone headings.
   const zoneHeadings = page.getByRole('heading', { level: 3 });
-  await expect(zoneHeadings).toHaveCount(8, { timeout: 10000 }); // 5 zones + 3 window cards inside "Observed recall"
+  await expect(zoneHeadings).toHaveCount(6, { timeout: 10000 }); // 5 zones + the one selected-period card inside "Observed recall"
 
   const texts = await zoneHeadings.allTextContents();
   const zoneOrder = ['Study activity', 'Scheduled reviews (forecast)', 'Observed recall', 'Scheduled intervals', 'Essay learning progress'];
-  // The five zone headings appear, in this relative order (window cards sit
+  // The five zone headings appear, in this relative order (the period card sits
   // between "Observed recall" and "Scheduled intervals").
   let cursor = -1;
   for (const zone of zoneOrder) {
@@ -49,21 +49,39 @@ test('stats page renders five zones in order, forecast and observed recall clear
   await expect(page.getByText(/OBSERVED, not predicted/i)).toBeVisible();
 });
 
-test('Observed recall zone shows Day, Week, Month cards with recall rate and grade breakdown', async ({ page }) => {
+test('Observed recall selector switches the displayed period and shows four figures', async ({ page }) => {
   await page.goto('/essaycards/stats');
   await expect(page.getByRole('heading', { name: 'Observed recall', level: 3 })).toBeVisible({ timeout: 10000 });
 
-  for (const label of ['Day', 'Week', 'Month']) {
-    const card = page.getByRole('heading', { name: label, exact: true }).locator('xpath=..');
+  const group = page.getByRole('group', { name: 'Observed recall period' });
+  const card = (label: string) => page.getByRole('heading', { name: label, level: 3, exact: true });
 
-    // Recall rate: either a rounded percentage or the literal "No reviews
-    // yet" — never a bare "0%" standing in for "no data yet".
-    const recallText = await card.locator('text=/%|No reviews yet/').first().textContent();
-    expect(recallText).toBeTruthy();
+  // Default is Day; only one period's card is shown at a time.
+  await expect(group.getByRole('button', { name: 'Day' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(card('Day')).toBeVisible();
+  await expect(card('Week')).toHaveCount(0);
 
-    await expect(card.getByText('Again', { exact: true })).toBeVisible();
-    await expect(card.getByText('Hard', { exact: true })).toBeVisible();
-    await expect(card.getByText('Good', { exact: true })).toBeVisible();
-    await expect(card.getByText('Easy', { exact: true })).toBeVisible();
+  await group.getByRole('button', { name: 'Week' }).click();
+  await expect(group.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(card('Week')).toBeVisible();
+  await expect(card('Day')).toHaveCount(0);
+
+  const weekCard = card('Week').locator('xpath=..');
+  for (const label of ['Cards Seen', 'Unique Cards Seen', 'New Cards Seen', 'Recall Rate']) {
+    await expect(weekCard.getByText(label, { exact: true })).toBeVisible();
   }
+  // Recall rate: a rounded percentage or "No reviews yet" — never a bare 0% for no data.
+  const recallText = await weekCard.locator('text=/%|No reviews yet/').first().textContent();
+  expect(recallText).toBeTruthy();
+});
+
+test('Study activity chart shows stacked columns with a recall-rate label per day and a Repeat/Unique/First legend', async ({ page }) => {
+  await page.goto('/essaycards/stats');
+  const chart = page.getByTestId('daily-activity-chart');
+  await expect(chart).toBeVisible({ timeout: 10000 });
+  await expect(chart.getByTestId('activity-column')).toHaveCount(30);
+  await expect(chart.getByTestId('activity-rate')).toHaveCount(30);
+  await expect(chart).toContainText('Repeat');
+  await expect(chart).toContainText('Unique');
+  await expect(chart).toContainText('First');
 });
