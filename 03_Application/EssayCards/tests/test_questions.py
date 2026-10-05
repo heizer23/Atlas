@@ -10,6 +10,9 @@ Sprint08_QuestionLevelsAndStructure/00_draft.md.
 UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
 
 
+from tests.helpers import unlock_essay_sections
+
+
 def _mk_essay(client, slug, sections):
     """Ingest an essay from [(heading, anchor_slug, [(card_id, q, a), ...]), ...].
     Returns (essay_id, {anchor_slug: section_id}, questions_rows) — questions_rows
@@ -28,6 +31,7 @@ def _mk_essay(client, slug, sections):
     r = client.post("/api/essaycards/essays/ingest", json=payload)
     assert r.status_code == 200, r.text
     eid = r.json()["essay_id"]
+    unlock_essay_sections(eid)  # Sprint14: freshly ingested cards start locked
 
     detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
     section_ids = {s["anchor_slug"]: s["id"] for s in detail["sections"]}

@@ -10,7 +10,7 @@
  * where consolidated.
  *
  * Three existing specs (essay_action_menu, category_collapse,
- * learning_level_badge) each already cover their own narrower [UI] scenario
+ * section_progress_overview — the Sprint12 learning_level_badge spec was retired in Sprint14) each already cover their own narrower [UI] scenario
  * and only incidentally touch a subset of this inventory. This spec is the
  * first to walk the whole list — overview page-level actions, essay-header
  * actions, section-end actions, and the regrouped main nav.
@@ -100,6 +100,9 @@ test('section-end action menu and examination history remain reachable after con
   const firstRow = page.locator('div[style*="cursor: pointer"]').first();
   await firstRow.click();
   await expect(page).toHaveURL(/\/essaycards\/essays\//);
+  // Sprint14: wait for the reader to finish loading before counting (the overview/reader
+  // now make additional parallel fetches, so an immediate count() can race the skeleton).
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
   // Section-end ActionMenus come after the essay header's in document
   // order — if this essay has no sections, fall back to the first essay
@@ -108,10 +111,12 @@ test('section-end action menu and examination history remain reachable after con
   if (await primaryButtons.count() === 0) {
     await page.goto('/essaycards');
     const rows = page.locator('div[style*="cursor: pointer"]');
+    await expect(rows.first()).toBeVisible();
     const rowCount = await rows.count();
     for (let i = 1; i < rowCount && (await primaryButtons.count()) === 0; i++) {
       await rows.nth(i).click();
       await expect(page).toHaveURL(/\/essaycards\/essays\//);
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       primaryButtons = page.getByRole('button', { name: 'Review this section', exact: true });
       if (await primaryButtons.count() === 0) await page.goBack();
     }
@@ -130,6 +135,9 @@ test('section-end action menu and examination history remain reachable after con
 
   const sectionMenu = page.getByRole('menu').first();
   await expect(sectionMenu).toBeVisible();
+  // Sprint14: the section menu also offers the two section-scope oral exams.
+  await expect(sectionMenu.getByRole('menuitem', { name: 'Guided oral (section)', exact: true })).toBeVisible();
+  await expect(sectionMenu.getByRole('menuitem', { name: 'Unguided oral (section)', exact: true })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Export section|Import section →)$/ })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Insert section after|Import insertion →)$/ })).toBeVisible();
 

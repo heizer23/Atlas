@@ -1003,3 +1003,54 @@ severity: major
 recurrence_hint: "First observed — general pattern: a design that explicitly reuses an existing interaction pattern (whole-unit-tap-opens-popover) while also requiring preservation of independently-interactive content nested inside that same unit should state event-propagation precedence between the two, not just each behavior individually."
 linked_immediate_artifact: 03_Application/EssayCards/Sprint13_ReviewStatsSentenceFeedback/11_design_review.md
 ---
+
+---
+entry_id: EVD-2026-10-05-003
+date: 2026-10-05
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: EssayCards
+sprint: Sprint14_SectionProgressionAndRevalidation
+pattern_name: ui_input_model_deferred_because_server_contract_safe_either_way
+short_description: Design leaves the user-facing input control for a new protocol (revalidation grading) as an implementer choice between two models because the server semantics are safe under both, leaving the UI test scenario and the user's mental model of the mapping undefined.
+evidence: "10_architecture.json internal_flow step 16: 'Grade controls may be the standard four or a two-way Correct/Incorrect pair mapped to good/again - either way only values from VALID_GRADES are sent; server semantics are fixed (again = incorrect).' while hard/good/easy all map to 'preserved' (no FSRS change)."
+likely_root_cause: definition_quality
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint14_SectionProgressionAndRevalidation/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-10-05-004
+date: 2026-10-05
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint14_SectionProgressionAndRevalidation
+pattern_name: new_gating_rule_breaks_existing_tests_that_create_data_via_public_endpoints
+short_description: The new derived unlock rule (cards locked until a guided section oral passes) makes every card created through ingest/upsert ineligible for review, so existing tests that ingest an essay and then review it failed; the design named only fixtures.sql and test_flashcards/test_essays/test_examinations as needing edits.
+evidence: "10_architecture.json internal_flow step 18 / 10_scaffolding.json lists tests/fixtures.sql plus three test files; in practice test_questions.py::_mk_essay, test_essays.py::_mk_essay and two test_flashcards topic tests also create fresh essays then review them. Compensation: added tests/helpers.py (run_sql, unlock_essay_sections) and unlocked sections inside those helpers; updated test_stats_system_wide_partitions_all_bands counts (+17 unlocked fixture cards: due_now 19, within_1_day 13, within_7_days 4, within_30_days 7, within_90_days 2, beyond_90_days 1, total 47)."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: major
+recurrence_hint: "First observed — general pattern: a design that introduces a derived gate on pre-existing behavior should enumerate the existing tests whose setup path (ingest/upsert) now lands in the gated state."
+linked_immediate_artifact: 03_Application/EssayCards/Sprint14_SectionProgressionAndRevalidation/10_scaffolding.json
+---
+
+---
+entry_id: EVD-2026-10-05-005
+date: 2026-10-05
+source_agent: sprint_implement
+run_type: implementer_note
+component: EssayCards
+sprint: Sprint14_SectionProgressionAndRevalidation
+pattern_name: design_literal_reading_conflict_resolved_inline
+short_description: Small, unambiguous deviations from the literal scaffold taken inline, recorded for traceability.
+evidence: "(1) 10_architecture.json step 7 defines essay_next_step as 'first unmet rung' yet says an essay at Blue reports unguided_essay_oral; implemented state-based (grey->guided_essay_oral, yellow->cards_learned, green->section_unguided_orals, blue->unguided_essay_oral, violet->null) so a Blue essay never reports an earlier rung. (2) backend/progress.py gained one public constant, ESSAY_PROGRESS_SELECT, not in the scaffold's public_objects, so GET /essays and GET /essays/{id} share the lateral's select list in one place (R-CON-BP-09). (3) UI_DesignLanguage.md has no yellow/green status tokens; TRAFFIC_COLORS uses literal #E0AE1F / #3F9A52 and reuses outline/primary/tertiary tokens for grey/blue/violet; grey is a hollow ring and every dot has title+aria-label so state is never color-only. (4) The new [UI] specs stub API responses with page.route because the live-DB Playwright convention has no fixture world (no flagged cards, no locked sections). (5) tests/ui/button_nav_inventory.spec.ts section test gained explicit waits: the overview now issues two parallel fetches, which exposed a pre-existing race between an immediate locator.count() and the loading skeleton. (6) examination-package treats a non-uuid section_id as NOT_FOUND (404) rather than letting the DB raise a 500."
+likely_root_cause: none
+candidate_response: none
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/EssayCards/Sprint14_SectionProgressionAndRevalidation/10_architecture.json
+---

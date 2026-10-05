@@ -1,6 +1,6 @@
 """
-GET /essays/{essay_id}/examination-package, POST /examinations/import, and
-GET /sections/{section_id}/examinations.
+GET /essays/{essay_id}/examination-package, POST /examinations/import,
+GET /sections/{section_id}/examinations and (Sprint14) GET /essays/{essay_id}/examinations.
 
 GET /examination-package is a GET endpoint but returns a bespoke JSON blob,
 not a Dataset. It is not rendered by a Dataset-consuming UI component — the
@@ -26,13 +26,21 @@ GET /sections/{section_id}/examinations IS real UI-visible tabular data (a
 reverse-chronological history list) and returns Dataset per R-CON-BP-04.
 """
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.database import get_db
-from backend.examinations import VALID_EXAM_TYPES, build_export_package, import_results, validate_import_body
+from backend.examinations import (
+    VALID_EXAM_TYPES,
+    VALID_SCOPES,
+    build_export_package,
+    import_results,
+    summarize_cascades,
+    validate_import_body,
+)
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
 
@@ -41,7 +49,19 @@ router = APIRouter(tags=["examinations"])
 EXAMINATION_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="examined_at",       label="Examined",  type="date",   sortable=True,  filterable=False),
     ColumnSchema(key="score",             label="Score",     type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="passed",            label="Passed",    type="boolean", sortable=True, filterable=True),
     ColumnSchema(key="exam_type",         label="Type",      type="string", sortable=True,  filterable=True),
+    ColumnSchema(key="question",          label="Question",  type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="answer_transcript", label="Answer",    type="string", sortable=False, filterable=False, detail_visible=True),
+    ColumnSchema(key="feedback",          label="Feedback",  type="string", sortable=False, filterable=False, detail_visible=True),
+]
+
+ESSAY_EXAMINATION_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="id",                label="Id",        type="string", sortable=False, filterable=False),
+    ColumnSchema(key="examined_at",       label="Examined",  type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="exam_type",         label="Type",      type="string", sortable=True,  filterable=True),
+    ColumnSchema(key="score",             label="Score",     type="number", sortable=True,  filterable=False),
+    ColumnSchema(key="passed",            label="Passed",    type="boolean", sortable=True, filterable=True),
     ColumnSchema(key="question",          label="Question",  type="string", sortable=False, filterable=False, detail_visible=True),
     ColumnSchema(key="answer_transcript", label="Answer",    type="string", sortable=False, filterable=False, detail_visible=True),
     ColumnSchema(key="feedback",          label="Feedback",  type="string", sortable=False, filterable=False, detail_visible=True),
@@ -53,32 +73,53 @@ def _dataset_response(dataset: Dataset) -> JSONResponse:
 
 
 @router.get("/essays/{essay_id}/examination-package", response_model=None)
-def get_examination_package(essay_id: str, exam_type: str | None = None) -> JSONResponse:
+def get_examination_package(
+    essay_id: str,
+    exam_type: str | None = None,
+    scope: str | None = None,
+    section_id: str | None = None,
+) -> JSONResponse:
     """
     Self-contained JSON package for conducting an oral examination outside
-    the app (see module docstring re: Dataset exemption). 404 ApiError if
-    essay_id does not exist. An essay with zero sections still returns a
-    package with sections: [].
+    the app (see module docstring re: Dataset exemption).
 
-    exam_type ('guided' | 'unguided') is REQUIRED but implemented as an
-    optional (defaulted-None) FastAPI parameter, manually validated to
-    ApiError VALIDATION_ERROR when missing or invalid — never a bare required
-    FastAPI query param, which would produce FastAPI's own 422 shape instead
-    (same discipline already applied to every raw-Request-body endpoint in
-    this app).
+    Parameters (all manually validated to ApiError VALIDATION_ERROR — never
+    FastAPI's 422 — so they are defaulted-None here):
+      - exam_type 'guided' | 'unguided' (required)
+      - scope 'essay' | 'section' (required)
+      - section_id (required iff scope='section'; forbidden for scope='essay')
+    Allowed combinations: {exam_type, scope=essay}, {exam_type, scope=section,
+    section_id}. 404 if the essay does not exist or the section does not
+    belong to that essay. An essay with zero sections and scope=essay returns
+    a package with sections: [].
     """
     if exam_type not in VALID_EXAM_TYPES:
         return api_error(
             "VALIDATION_ERROR",
             f"exam_type query parameter is required and must be one of: {', '.join(VALID_EXAM_TYPES)}",
         )
+    if scope not in VALID_SCOPES:
+        return api_error(
+            "VALIDATION_ERROR",
+            f"scope query parameter is required and must be one of: {', '.join(VALID_SCOPES)}",
+        )
+    if scope == "section" and not section_id:
+        return api_error("VALIDATION_ERROR", "section_id is required when scope is 'section'")
+    if scope == "essay" and section_id:
+        return api_error("VALIDATION_ERROR", "section_id must not be provided when scope is 'essay'")
+
+    if scope == "section":
+        try:
+            uuid.UUID(section_id)
+        except ValueError:
+            return api_error("NOT_FOUND", f"Section {section_id} not found in essay {essay_id}", status=404)
 
     with get_db() as conn:
         with conn.cursor() as cur:
-            package = build_export_package(cur, essay_id, exam_type)
+            package = build_export_package(cur, essay_id, exam_type, scope, section_id)
 
     if package is None:
-        return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
+        return api_error("NOT_FOUND", f"Essay {essay_id} (or the requested section) not found", status=404)
 
     return JSONResponse(content=package)
 
@@ -112,7 +153,11 @@ async def import_examinations(request: Request) -> JSONResponse:
             conn.rollback()
             raise
 
-    return JSONResponse(content={"imported": len(inserted), "results": inserted})
+    return JSONResponse(content={
+        "imported": len(inserted),
+        "results": inserted,
+        "revalidation": summarize_cascades(inserted),
+    })
 
 
 @router.get("/sections/{section_id}/examinations", response_model=None)
@@ -133,7 +178,7 @@ def list_section_examinations(section_id: str) -> JSONResponse:
 
             cur.execute(
                 """
-                select id, examined_at, score, exam_type, question, answer_transcript, feedback, section_version_at
+                select id, examined_at, score, passed, exam_type, question, answer_transcript, feedback, section_version_at
                 from essaycards.section_examinations
                 where section_id = %s
                 order by examined_at desc
@@ -158,6 +203,49 @@ def list_section_examinations(section_id: str) -> JSONResponse:
             row_actions=[],
         ),
         **{"schema": EXAMINATION_SCHEMA},
+        rows=rows,
+    )
+    return _dataset_response(dataset)
+
+
+@router.get("/essays/{essay_id}/examinations", response_model=None)
+def list_essay_examinations(essay_id: str) -> JSONResponse:
+    """
+    Full-essay oral attempt history, most recent first (examined_at desc,
+    id asc). Never examined -> empty Dataset; unknown essay -> 404.
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select 1 from essaycards.essays where id = %s", (essay_id,))
+            if not cur.fetchone():
+                return api_error("NOT_FOUND", f"Essay {essay_id} not found", status=404)
+
+            cur.execute(
+                """
+                select id, examined_at, exam_type, score, passed, question, answer_transcript, feedback
+                from essaycards.essay_examinations
+                where essay_id = %s
+                order by examined_at desc, id asc
+                """,
+                (essay_id,),
+            )
+            rows = []
+            for r in cur.fetchall():
+                d: dict[str, Any] = dict(r)
+                d["id"] = str(d["id"])
+                d["examined_at"] = d["examined_at"].isoformat()
+                rows.append(d)
+
+    dataset = Dataset(
+        meta=DatasetMeta(
+            object_type="essay_examination",
+            label="Essay Examination History",
+            total=len(rows),
+            page=1,
+            page_size=max(len(rows), 1),
+            row_actions=[],
+        ),
+        **{"schema": ESSAY_EXAMINATION_SCHEMA},
         rows=rows,
     )
     return _dataset_response(dataset)

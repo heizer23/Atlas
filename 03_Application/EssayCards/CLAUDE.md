@@ -26,7 +26,8 @@ they must be built.
 - **status** — an essay's lifecycle position. One of **planned** or **complete**
   (more values may be added later).
 - **planned** — the essay exists as a stub; its body text *is* the planning document
-  (intended sections, narrative, scope notes).
+  (intended sections, narrative, scope notes). (Sprint14 removed the planned/complete PILL
+  from the essay overview; `status` itself and the oral-exam gating on `complete` remain.)
 - **complete** — content is finished enough to learn from.
 - **card** — a single flashcard (`essaycards.flashcards`), with one
   `flashcard_review_state` row.
@@ -82,7 +83,16 @@ they must be built.
 - **new** — a card never reviewed: `last_reviewed_at IS NULL` (interval `'0'`).
 - **learning** — reviewed at least once, interval still `< 24h`.
 - **established** — interval `>= 24h`.
-- Every scheduled card is exactly one of **new** / **learning** / **established**.
+- **learned** (Sprint14) — interval `>= 30 days`. A stricter level ABOVE established
+  (learned is a subset of established). Thresholds live once in `backend/progress.py`
+  (`ESTABLISHED_INTERVAL_SQL`, `LEARNED_INTERVAL_SQL`).
+- **locked** (Sprint14) — a card whose section has not passed its guided section oral
+  exam. Derived, never stored: unlocked iff `section_oral_state.guided_passed`. A locked
+  card stays stored and counted in `progress_total`, but is excluded from every review
+  queue, from `GET /flashcards/stats` and from `open_count`, and cannot be reviewed.
+- Every UNLOCKED scheduled card is exactly one of **new** / **learning** / **established** /
+  **learned** (learned is also established; the question overview shows the highest).
+  A locked card shows as **locked** instead.
 - **graduate** / **graduation** — a card's interval first reaching 24h, moving it from
   *learning* to *established*. Not stored; detectable only by the threshold crossing.
 
@@ -94,31 +104,49 @@ they must be built.
   overview. This is the *learning* mode.
 - **review** — the global study session, no scope, surfacing cards that are **open AND
   established**. This is the *maintenance* mode.
+- **revalidation** (Sprint14) — a third, dedicated mode: re-checking every card flagged
+  `needs_revalidation` after a failed unguided essay oral, regardless of due date. See
+  `## Section progression (Sprint14)`.
 
 ### Oral exams
 - **exam** — a historical oral-examination result for one section, stored as a
   `section_examinations` row (append-only, one row per section per occasion). "Current
   understanding" of a section is always the latest such row (highest `examined_at`).
 - **section score** — one `section_examinations` row's raw grade, `0–6`.
+- **pass rule** (Sprint14) — an oral attempt PASSES iff `score / 6 * 100 >= 70`, i.e. score
+  `>= 5` on the 0–6 scale (4 = 66.7% fails). One rule for all four oral kinds; defined once
+  in `backend/oral_state.py`; the verdict is computed at import time and stored in
+  `passed`. Supersedes Sprint12's `score >= 3`.
+- **scope** (Sprint14, oral exams) — an oral attempt is `section` scope (one section) or
+  `essay` scope (the whole essay as an integrated whole). Section attempts are stored in
+  `section_examinations`, essay attempts in `essay_examinations`.
 - **exam_type** (Sprint12) — `guided` | `unguided`, required on every
   `section_examinations` row, never silently defaulted by the application going
   forward. `guided` = calibration-aware (the examiner is shown the section's prior
   `guided`-type history to tune starting difficulty). `unguided` = genuinely cold —
   no prior history/calibration context is ever passed, regardless of what history
-  exists. See `## Learning progress`.
-- Sprint12 removes the single blended per-essay **oral score** / **exam date**
-  percentage that previously lived on the essay overview (`oral_score`/`oral_date`) —
-  superseded by the guided/unguided milestones below.
+  exists. (Sprint14: guided/unguided now also feed the section/essay traffic lights — see
+  `## Section progression (Sprint14)`.)
+- Sprint12 removed the single blended per-essay **oral score** / **exam date**
+  percentage that previously lived on the essay overview (`oral_score`/`oral_date`);
+  Sprint14 then replaced Sprint12's four-milestone `learning_level` with the traffic
+  lights below.
 
 ### Overview indicators
 - **progress** — for an essay or topic: **established** cards / total cards in scope —
   the `22 / 34` line. Established cards that are also *open* still count. Not a maturity
   score.
 - **open count** — for an essay or topic: how many cards in scope are **open** right
-  now — what a focus session would surface. The `12 open` line.
-- **learning_level** (Sprint12) — an essay's 0–4 count of completed learning
-  milestones, replacing the removed writing-maturity concept. See `## Learning
-  progress`.
+  now AND unlocked AND not awaiting revalidation (Sprint14) — what a focus session would
+  surface. The `12 open` line.
+- **section traffic light** (Sprint14) — derived per-section state `grey` (not started) /
+  `yellow` (guided oral passed, cards unlocked) / `green` (every card established) /
+  `blue` (unguided oral passed). Shown as one small dot per section.
+- **essay traffic light** (Sprint14) — derived per-essay state `grey` / `yellow` (guided
+  ESSAY oral passed) / `green` (every card learned) / `blue` (every section unguided
+  passed) / `violet` (unguided ESSAY oral passed). Shown as one large dot. Highest
+  satisfied state wins. See `## Section progression (Sprint14)`. This replaces the removed
+  Sprint12 `learning_level`.
 
 ## Sprint scope
 - Sprint 1: One-shot markdown ingestion CLI, essay/section/flashcard data model, due-queue
@@ -144,7 +172,7 @@ they must be built.
   `exam_type` split on oral exams, consolidated essay/section action menus (`ActionMenu`) with a
   persisted category collapse control, and a reworked stats page (`GET /review-stats/activity`,
   `GET /review-stats/intervals`) plus regrouped main nav (see `## FSRS scheduling (Sprint12)` and
-  `## Learning progress` below).
+  `## Learning progress` (retired by Sprint 14, see `## Section progression (Sprint14)`)).
 - Sprint 13: Review page shows a day-based five-metric row (Recalls / Unique / First from
   `GET /review-stats/today`, UTC calendar day; Due / New derived client-side from the due queue) and a
   single unlabeled interval row (the Current/Upcoming/Session UI of `## Review screen` below is
@@ -155,6 +183,11 @@ they must be built.
   `backend/routers/sentence_feedback.py`, `essaycards.sentence_feedback` — two independent boolean
   flags per sentence, addressed by sentence_index; known gap: feedback can misattach if a section's
   body_markdown is edited after marking).
+- Sprint 14: section-level learning progression — derived section/essay traffic lights replace the
+  overview's planned/complete pill, card counts and 0–4 level; flashcards locked until a passed guided
+  SECTION oral; 70% pass rule on all oral kinds; section- and essay-scope orals; Learned (>= 30d) card
+  state; failure-triggered Revalidation that preserves FSRS state unless the card is forgotten
+  (see `## Section progression (Sprint14)`). Retires Sprint12's `learning_level` and its nine fields.
 
 ## Content ingestion
 Essays can be ingested two ways — both upsert by the same stable author-assigned keys
@@ -285,7 +318,9 @@ ApiError VALIDATION_ERROR (400) instead of FastAPI's default 422 shape. See
 `Sprint01_Core/10_architecture.json` §contracts.invariants.
 
 ## Due-queue ordering
-`GET /api/essaycards/flashcards/due` — base eligibility is `next_due_at <= now()`.
+`GET /api/essaycards/flashcards/due` — base eligibility is `next_due_at <= now()`, AND
+(Sprint14) the card's section is unlocked AND the card is not `needs_revalidation` (flagged
+cards are served only by `GET /flashcards/revalidation`). The ORDER BY below is unchanged.
 **Sprint07** splits the endpoint into two session types, inferred from whether a
 scope param is present (there is no `mode` param — see `## Roadmap, focus and
 review`):
@@ -352,26 +387,26 @@ change. `GET /flashcards/stats` is unchanged.
 
 ### `GET /essays` roadmap indicators
 Every row carries, beyond `id/title/slug/category/sort_index/status`, three
-pre-existing fields plus the nine Sprint12 learning-progress fields (all
-against Postgres `now()` at query time; `list_essays` docstring is
-authoritative):
+category-level indicators (against Postgres `now()` at query time; `list_essays`
+docstring is authoritative):
 - `progress_total` (int) — every flashcard in the essay (not gated on a
-  review-state row existing).
+  review-state row existing; locked cards included).
 - `progress_established` (int) — those with `review_interval >= interval '24 hours'`
   (a `LEFT JOIN`, so a card with no review-state row counts in total, not here).
-- `open_count` (int) — those with `next_due_at <= now()` (the plain `open`
-  definition; **not** gated on established — exactly what a focus session would
-  surface).
-- The nine `## Learning progress` fields (`cards_seen_count`,
-  `cards_future_safe_count`, the four `milestone_*` booleans,
-  `guided_passed_at`/`unguided_passed_at`, `learning_level`) — replace the
-  removed `oral_score`/`oral_date` pair.
+- `open_count` (int) — those with `next_due_at <= now()` AND in an unlocked section
+  AND not `needs_revalidation` (Sprint14: exactly what a focus session would surface;
+  not gated on established).
+
+plus the Sprint14 derived essay traffic light (`essay_state`, `essay_next_step`,
+`essay_guided_passed`, `essay_unguided_passed`, the two latest scores and passed dates,
+`cards_learned_count`, `sections_total`, `sections_unguided_passed_count`,
+`revalidation_pending_count`) — see `## Section progression (Sprint14)`. The nine
+Sprint12 learning-progress fields and `learning_level` are removed.
 
 Topic-level progress / open count are **not** returned — the frontend sums the
-per-essay counts of a topic's rows. `GET /essays/{id}` (detail) carries the
-same nine learning-progress fields as the list endpoint (Sprint12 — previously
-carried none of the derived indicators), computed by the identical shared SQL
-(`backend/routers/essays.py::_learning_progress_subquery_sql`).
+per-essay counts of a topic's rows. `GET /essays/{id}` (detail) carries the same
+essay-progress fields as the list endpoint, computed by the identical shared SQL
+(`backend/progress.py::essay_progress_lateral_sql`).
 
 ## Queue stats
 `GET /api/essaycards/flashcards/stats` — review-queue forecast. Returns a Dataset of
@@ -379,12 +414,16 @@ exactly **seven** zero-filled rows partitioning every flashcard that has a revie
 row into non-overlapping horizon bands by `next_due_at` vs Postgres `now()`: `due_now`,
 `within_10_min`, `within_1_day`, `within_7_days`, `within_30_days`, `within_90_days`,
 `beyond_90_days` (bands open on the lower edge, closed on the upper; the seven counts
-sum to the total scheduled cards in scope). The 30-/90-day split feeds the review
+sum to the total UNLOCKED scheduled cards in scope — Sprint14 excludes locked cards;
+cards flagged `needs_revalidation` stay counted in their FSRS due-date bands, so `due_now`
+can exceed the focus queue and `open_count` by the number of flagged due cards). The 30-/90-day split feeds the review
 screen's UPCOMING `≤3 mo` / `>3 mo` forecast columns. Same `topic` / `essay_id` /
 `section_id` scoping rules as `GET /flashcards/due` (`section_id` without `essay_id`,
 or `topic` with `essay_id`/`section_id` → `VALIDATION_ERROR`) — but **no** interval
-filter: it always counts every scheduled card in scope, so the forecast matches the
-focus session it accompanies (`ReviewStatsPanel` passes the session's scope through).
+filter: it always counts every unlocked scheduled card in scope, so the forecast
+approximates the focus session it accompanies (`ReviewStatsPanel` passes the session's
+scope through). Review-stats endpoints (`/review-stats/*`) are unchanged: they read
+`review_events`, which a 'preserved' revalidation check never writes.
 
 ## Review screen (`src/ShellEntry.tsx` → `ReviewSessionView` / `ReviewStatsPanel`)
 Material 3 layout, no page header: one flat `surface-variant` stats card, the
@@ -646,6 +685,8 @@ see `_validate_ingest_body` defaults). Same accepted gap as ingest generally: a 
 removed from `cards` on reimport is left unchanged, not deleted.
 
 ## Oral examinations
+(Sprint14 added scope, the 70% pass rule and state transitions on top of the round trip below
+— see `## Section progression (Sprint14)`; `section_examinations` gained `passed`.)
 Sections already have a stable author-assigned id (`anchor_slug`, unique per essay) —
 that id is reused as-is for examination history; no separate section-id scheme was
 introduced. "Version" of a section is `essay_sections.updated_at`, snapshotted into
@@ -808,59 +849,74 @@ in the same idempotently-rerun file would churn forever (add — drop — add �
 drop — ...) rather than converging; see the file's own "Sprint10_DualSchedulerAB
 (retired by Sprint12)" comment block.
 
-## Learning progress (Sprint12)
-Replaces the removed writing-maturity concept with a derived **0–4
-`learning_level`** per essay — the count of four independently-gated
-milestones, computed fresh at query time (never cached/stored), with no
-fixed completion order required. "Active card" = every flashcard currently
-belonging to the essay (no archival/retirement concept exists).
+## Section progression (Sprint14)
+Replaces Sprint12's `## Learning progress` (the four-milestone `learning_level` and its nine
+fields are gone). Everything below is DERIVED at query time from stored oral state plus
+`flashcard_review_state.review_interval` — no traffic-light color is ever stored. All state
+SQL lives in `backend/progress.py`; the pass rule and oral-state transitions live in
+`backend/oral_state.py`; revalidation primitives in `backend/revalidation.py`.
 
-1. **All active cards seen** (`milestone_all_cards_seen`) —
-   `progress_total > 0` AND every card has `last_reviewed_at IS NOT NULL`.
-2. **All active cards reviewed, next due 24h+ out**
-   (`milestone_all_cards_future_safe`) — `progress_total > 0` AND every
-   card's `last_reviewed_at IS NOT NULL` AND `next_due_at > now() + interval
-   '24 hours'`.
-3. **Guided oral exam passed** (`milestone_guided_passed`) — the essay has
-   ≥ 1 section, every section has ≥ 1 `exam_type='guided'` examination, AND
-   every section's LATEST guided examination scores `>= 3`
-   (`PASS_SCORE_THRESHOLD`) — a per-section minimum gate, not an average.
-4. **Unguided oral exam passed** (`milestone_unguided_passed`) — identical to
-   (3) with `exam_type='unguided'`.
+**Pass rule.** See the Glossary: passed iff score >= 5 of 6 (70%). Computed once at import,
+stored in `section_examinations.passed` / `essay_examinations.passed`; nothing re-derives it.
+The package's `scoring` block echoes the rule so prompts and verdicts cannot drift.
 
-Milestones 1/2 are explicitly false (never vacuously true) for a zero-card
-essay — satisfying "essays without active cards must not automatically
-satisfy the card milestones." Milestones 3/4 have no card dependency and can
-be true even for a zero-card essay. `guided_passed_at`/`unguided_passed_at`
-mirror the old `oral_date`'s "oldest wins" semantics, applied per `exam_type`:
-the OLDEST `examined_at` among each section's latest examination of that
-type, present only when the corresponding milestone is true.
+**Section state** (highest satisfied wins): `blue` iff section unguided passed; else `green`
+iff guided passed AND >= 1 card AND every card seen with `review_interval >= 24h`; else
+`yellow` iff guided passed; else `grey`. A guided-passed section with zero cards is yellow,
+never green. Blue needs only the unguided pass (an unguided pass on a never-guided section is
+blue). `GET /progress/sections` returns one row per section (flat; client groups by
+`essay_id`) with `state`, `next_step`, scores, passed dates, `cards_total`/`cards_established`,
+`is_locked`.
 
-All nine fields (`cards_seen_count`, `cards_future_safe_count`, the four
-`milestone_*` booleans, `guided_passed_at`, `unguided_passed_at`,
-`learning_level`) are computed by one shared SQL fragment,
-`backend/routers/essays.py::_learning_progress_subquery_sql`, reused
-identically by both `GET /essays` (list) and `GET /essays/{id}` (detail) —
-the milestone logic exists in exactly one place.
+**Essay state** (highest satisfied wins): `violet` iff essay unguided passed; else `blue` iff
+>= 1 section and every section unguided passed; else `green` iff >= 1 card and every card
+`review_interval >= 30 days` (learned); else `yellow` iff guided ESSAY oral passed (section
+guided orals never count); else `grey`. Zero-card / zero-section essays are never vacuously
+green/blue.
 
-**exam_type.** `section_examinations.exam_type` (`guided` | `unguided`) is
-required on every row going forward — `POST /examinations/import` rejects a
-missing/invalid value with no default (same discipline as `flashcards.level`).
-Pre-Sprint12 rows are backfilled to `guided` via the column `DEFAULT` (every
-pre-sprint exam used the one pre-existing calibration-aware flow).
-`GET /essays/{id}/examination-package` gains a required `exam_type` query
-param (manually validated, same raw-param-not-FastAPI-422 discipline as every
-other endpoint in this app). `exam_type='unguided'` means the package's
-`last_examination` is ALWAYS `null` per section — "no calibration context
-passed", not merely "no unguided history exists yet."
+**Unlock.** A card is eligible for review only if its section's `section_oral_state` row has
+`guided_passed`. Cards stay stored and counted; a card added later to an already-passed
+section is unlocked automatically. `POST /flashcards/{id}/review` on a locked card is
+`VALIDATION_ERROR` (no write). `GET /essays/{id}/questions` rows carry `is_locked`,
+`card_state` (`locked|new|learning|established|learned`) and `needs_revalidation`.
+Existing sections were grandfathered once at migration (`guided_pass_source =
+'grandfathered'`: any reviewed card, or a guided exam scored >= 3).
 
-**UI.** `LearningLevelBadge` (`src/ShellEntry.tsx`) renders the compact `N/4`
-level on both the essay overview row and the `ReaderView` header, with a
-tooltip/`aria-label` naming all four milestones and their current true/false
-state. The old oral-score/date text line and the per-essay Study/Oral-exam
-buttons on the overview row are removed — Study and both oral-exam variants
-now live in `ReaderView`'s header `ActionMenu` (see `## Button and nav
-consolidation (Sprint12)`).
+**Oral import.** `POST /examinations/import` results carry a required `scope`
+(`section` | `essay`). `section` needs `section_anchor_slug` + `section_version`; `essay`
+must omit or null `section_anchor_slug` (omitted == null) and ignores `section_version` /
+`nugget_versions`. All-or-nothing in one transaction; transitions apply in server import
+order. Guided pass is sticky (a later failing guided attempt only updates the latest score).
+A failing unguided SECTION attempt only records history. The response adds per result
+`scope`, `passed`, `score_percent`, `effects`, and a top-level `revalidation` list.
+`GET /essays/{id}/examination-package` now requires `exam_type` AND `scope`
+(`section` also requires `section_id`; `essay` forbids it); `GET /essays/{id}/examinations`
+lists whole-essay attempts.
+
+**Failure cascade.** A failing unguided ESSAY attempt made while the essay was Violet, in the
+same transaction: clears essay unguided pass (`unguided_invalidated_at = now()`), clears every
+section's unguided pass, and flags every card of the essay that has been reviewed at least once
+(`needs_revalidation = true`). Untouched: guided state, all attempt history, FSRS state, due
+dates, intervals. A failing unguided essay attempt while NOT Violet is history-only.
+
+**Revalidation.** Flagged cards are served by `GET /flashcards/revalidation` (any due date) and
+excluded from `GET /flashcards/due`. The review endpoint derives the mode from the flag:
+grade `again` = incorrect, any other grade = correct. Correct: flag cleared, an audit row in
+`revalidation_events` (`preserved`), and NOTHING else changes (no FSRS call, no `review_events`
+row). Incorrect: flag cleared and the normal FSRS failure path runs, plus a `failed` audit row.
+The review UI in `?revalidate=1` mode shows exactly two buttons: Correct (sends `good`) and
+Incorrect (sends `again`). Revalidation of an essay is complete when its pending count is 0.
+
+**UI.** Overview: one large `EssayProgressDot` + one small dot per section (`SectionProgressDots`);
+dots are native buttons with title + aria-label, their click stops propagation so they never also
+open the essay row; a collapsed `ProgressLegend`; a `Revalidate (N)` control when pending > 0.
+Reader: locked sections show a lock hint and a disabled "Review this section"; section menus
+offer section-scope orals, the essay menu whole-essay orals.
+
+**Known gaps (documented, not guarded).** State transitions follow server import order, not
+`examined_at` order; editing a section after its oral pass does not invalidate the pass;
+re-importing an identical failing result double-applies at most once (a second failing result is
+history-only because the claim is already false).
 
 ## Button and nav consolidation (Sprint12)
 Essay/section button rows are replaced by a reusable `ActionMenu` component
@@ -910,7 +966,10 @@ essaycards.review_events (append-only; its Sprint10-only `scheduler` column
 was dropped in Sprint12), essaycards.pre_fsrs_migration_backup_sprint12
 (Sprint12 — one-time audit snapshot of the retired Sprint10 scheduler-
 assignment data, retained indefinitely, never read by live code — see
-`## FSRS scheduling (Sprint12)`).
+`## FSRS scheduling (Sprint12)`), and (Sprint14) essaycards.essay_examinations
+(append-only), essaycards.section_oral_state, essaycards.essay_oral_state,
+essaycards.revalidation_events (append-only), plus `section_examinations.passed` and
+`flashcard_review_state.needs_revalidation`.
 Schema initialized idempotently at startup from schema.sql.
 
 `00_architecture/schema.sql` is a design copy that `make essaycards-schema` feeds

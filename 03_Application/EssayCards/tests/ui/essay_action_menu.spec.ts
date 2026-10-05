@@ -12,7 +12,7 @@
  * Tests run against http://atlas-shell via the shared atlas-playwright
  * container, using the live production database — no test fixtures are
  * loaded — so this opens whichever essay the overview page lists first that
- * has a "complete" status (visible via its learning-level badge, present on
+ * has a "complete" status (the first essay row, present on
  * every row) and reached by clicking the row.
  */
 
@@ -22,7 +22,7 @@ test('essay header exposes a primary action plus a secondary action menu, no clu
   await page.goto('/essaycards');
   await expect(page.getByRole('heading', { name: 'Essays', level: 2 })).toBeVisible();
 
-  // Open the first essay row (title + status pill + learning-level badge;
+  // Open the first essay row (title + progress dots;
   // see EssayListView). Essay rows are click targets, not links.
   const firstRow = page.locator('div[style*="cursor: pointer"]').first();
   await firstRow.click();

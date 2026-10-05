@@ -9,8 +9,8 @@
  *   /essaycards/ingest         → IngestView (Sprint02: paste-JSON add/update essay)
  *   /essaycards/stats          → ReviewStatsView (study activity, scheduled-reviews
  *                                 forecast, observed recall, scheduled intervals,
- *                                 essay learning progress — see CLAUDE.md "FSRS
- *                                 scheduling" and "Learning progress";
+ *                                 essay progress states — see CLAUDE.md "FSRS
+ *                                 scheduling" and "Section progression";
  *                                 Sprint10_DualSchedulerAB's /essaycards/experiment
  *                                 route and its dashboard are retired)
  *
@@ -37,6 +37,32 @@ import type { ApiError, Dataset as PlatformDataset } from '@platform-ui/api/type
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type SectionState = 'grey' | 'yellow' | 'green' | 'blue';
+type EssayState = 'grey' | 'yellow' | 'green' | 'blue' | 'violet';
+type SectionNextStep = 'guided_oral' | 'flashcards_established' | 'unguided_oral';
+type EssayNextStep = 'guided_essay_oral' | 'cards_learned' | 'section_unguided_orals' | 'unguided_essay_oral';
+
+// GET /progress/sections row (Sprint14).
+interface SectionProgressRow {
+  section_id: string;
+  essay_id: string;
+  heading: string;
+  anchor_slug: string;
+  order_index: number;
+  state: SectionState;
+  next_step: SectionNextStep | null;
+  guided_passed: boolean;
+  unguided_passed: boolean;
+  guided_pass_source: 'exam' | 'grandfathered' | null;
+  guided_latest_score: number | null;
+  unguided_latest_score: number | null;
+  guided_passed_at: string | null;
+  unguided_passed_at: string | null;
+  cards_total: number;
+  cards_established: number;
+  is_locked: boolean;
+}
+
 interface EssayRow {
   id: string;
   title: string;
@@ -47,17 +73,19 @@ interface EssayRow {
   progress_total: number;
   progress_established: number;
   open_count: number;
-  // Sprint12_FSRSAndUXOverhaul — learning-progress fields (see CLAUDE.md
-  // "Learning progress"). Replace the removed oral_score/oral_date.
-  cards_seen_count: number;
-  cards_future_safe_count: number;
-  milestone_all_cards_seen: boolean;
-  milestone_all_cards_future_safe: boolean;
-  milestone_guided_passed: boolean;
-  milestone_unguided_passed: boolean;
-  guided_passed_at: string | null;
-  unguided_passed_at: string | null;
-  learning_level: number;
+  // Sprint14 — derived essay traffic light (see CLAUDE.md "Section progression").
+  essay_state: EssayState;
+  essay_next_step: EssayNextStep | null;
+  essay_guided_passed: boolean;
+  essay_unguided_passed: boolean;
+  essay_guided_latest_score: number | null;
+  essay_unguided_latest_score: number | null;
+  essay_guided_passed_at: string | null;
+  essay_unguided_passed_at: string | null;
+  cards_learned_count: number;
+  sections_total: number;
+  sections_unguided_passed_count: number;
+  revalidation_pending_count: number;
 }
 
 // {nugget_key, title} — the light pair shape every nugget-reference field
@@ -134,8 +162,10 @@ interface ActivityDayRow {
 
 interface ReviewResult {
   flashcard_id: string;
-  last_reviewed_at: string;
+  last_reviewed_at: string | null;
   next_due_at: string;
+  // Sprint14: null for a normal review.
+  revalidation_outcome: 'preserved' | 'failed' | null;
 }
 
 interface QueueStatRow {
@@ -158,6 +188,7 @@ interface ExaminationPackageSection {
   section_version: string;
   flashcards: { id: string; q: string; a: string }[];
   last_examination: LastExamination | null;
+  nuggets?: { nugget_key: string; title: string; body_markdown: string }[];
 }
 
 interface ExaminationPackage {
@@ -167,6 +198,10 @@ interface ExaminationPackage {
   // Sprint12_FSRSAndUXOverhaul — echoes the exam_type the package was
   // requested with.
   exam_type: 'guided' | 'unguided';
+  // Sprint14: section-scope or whole-essay package, plus the backend-owned pass rule.
+  scope: 'section' | 'essay';
+  scoring: { score_max: number; pass_threshold_percent: number; min_passing_score: number };
+  last_essay_examination?: LastExamination | null;
   sections: ExaminationPackageSection[];
 }
 
@@ -176,10 +211,23 @@ interface SectionExaminationRow {
   score: number;
   // Sprint12_FSRSAndUXOverhaul
   exam_type: 'guided' | 'unguided';
+  passed: boolean;
   question: string;
   answer_transcript: string;
   feedback: string | null;
   section_version_at: string;
+}
+
+// GET /essays/{id}/examinations row (Sprint14).
+interface EssayExaminationRow {
+  id: string;
+  examined_at: string;
+  exam_type: 'guided' | 'unguided';
+  score: number;
+  passed: boolean;
+  question: string;
+  answer_transcript: string;
+  feedback: string | null;
 }
 
 // ── Flashcard exploration (Sprint06) ────────────────────────────────────────
@@ -334,6 +382,10 @@ interface QuestionRow {
   // the card's current nugget assignment (nullable).
   section_nuggets: NuggetRef[];
   nugget_id: string | null;
+  // Sprint14: derived lock/maturity state.
+  is_locked: boolean;
+  card_state: 'locked' | 'new' | 'learning' | 'established' | 'learned';
+  needs_revalidation: boolean;
 }
 
 // GET /flashcards/{id}/export — essay_slug/essay_title/section_* are
@@ -496,7 +548,7 @@ function ActionMenu({
   primary,
   items,
 }: {
-  primary: { label: string; onClick: () => void; disabled?: boolean };
+  primary?: { label: string; onClick: () => void; disabled?: boolean; title?: string };
   items: ActionMenuItem[];
 }) {
   const [open, setOpen] = useState(false);
@@ -520,13 +572,16 @@ function ActionMenu({
 
   return (
     <div ref={wrapRef} style={actionMenuWrapStyle}>
-      <button
-        style={primaryBtnStyle}
-        disabled={primary.disabled}
-        onClick={primary.onClick}
-      >
-        {primary.label}
-      </button>
+      {primary && (
+        <button
+          style={primaryBtnStyle}
+          disabled={primary.disabled}
+          title={primary.title}
+          onClick={primary.onClick}
+        >
+          {primary.label}
+        </button>
+      )}
       {items.length > 0 && (
         <>
           <button
@@ -689,92 +744,100 @@ async function readClipboard(): Promise<{ text: string } | { error: string }> {
 // exam_type=unguided). Both bake their own "exam_type" into the described
 // reply shape.
 
-const EXAM_PROMPT_INTRO_GUIDED = `You are conducting an oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and its sections.
+const EXAM_PROMPT_INTRO_GUIDED = `You are conducting an oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and the section(s) to examine. Each section's "nuggets" array holds the full text of the nuggets that section references via [[nugget:key]]; treat them as part of that section's material.
 
-GOAL: test whether I actually understand the ideas in each section — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
+GOAL: test whether I actually understand the ideas — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
+
+SCOPE: the package's "scope" field is either "section" — "sections" then holds exactly ONE section and you examine only that section — or "essay" — you examine the essay as an INTEGRATED WHOLE (its overall argument, structure, and how the sections connect); every section is included only as context. Produce exactly one result for the whole examination.
+
+SCORING (0-6, for my demonstrated understanding — not the essay's quality). The package's "scoring" block states the pass rule: a score of "scoring.min_passing_score" (5) or higher PASSES (70%). Scores of 3 and 4 are recorded but do NOT advance my progress, so do not inflate a score to be kind.
+  0-2: insufficient / fragmentary — needs active study
+  3:   functional understanding, but not yet passing
+  4:   strong understanding, but not yet passing
+  5:   deep/integrated understanding (pass)
+  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently (pass)
 
 PROCESS:
-- Examine each section in "sections" one at a time (skip a section only if I ask you to).
-- If a section's "last_examination" is present, use its "score" and "examined_at" to calibrate: a recent score of 3+ means you can move faster and probe for depth beyond the original text; no last_examination, or a low score, means start from the fundamentals.
-- Ask follow-up questions until you can confidently assess my understanding, then move on — this is a conversation, not a fixed quiz.
+- If a section's "last_examination" (scope "section") or the package's "last_essay_examination" (scope "essay") is present, use its "score" and "examined_at" to calibrate: a recent passing score means you can move faster and probe for depth beyond the original text; no prior examination, or a failing score, means start from the fundamentals.
+- Ask follow-up questions until you can confidently assess my understanding — this is a conversation, not a fixed quiz.
 - I will answer by typing or by pasting a transcript of a spoken answer.
 
-SCORING (0-6, per section, for my demonstrated understanding — not the essay's quality):
-  0-2: insufficient / fragmentary — needs active study
-  3:   functional understanding — good enough for now, ready to move on
-  4:   strong understanding
-  5:   deep/integrated understanding
-  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently
-A score of 3 is a legitimate, successful stopping point — do not withhold it hoping I reach a higher score later.
-
-WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after. For scope "section":
 
 {
   "results": [
     {
+      "scope": "section",
       "essay_slug": "copy verbatim from the package's essay_slug",
       "section_anchor_slug": "copy verbatim from this section's anchor_slug",
       "section_version": "copy verbatim from this section's section_version",
-      "examined_at": "today's date/time in ISO-8601, e.g. 2026-08-28T14:30:00Z",
-      "question": "a summary of what you asked/covered for this section (can be multiple questions, written as one text block)",
-      "answer_transcript": "a summary or verbatim transcript of my answer(s) for this section",
+      "examined_at": "today's date/time in ISO-8601 WITH a UTC offset, e.g. 2026-08-28T14:30:00Z",
+      "question": "a summary of what you asked/covered (can be multiple questions, written as one text block)",
+      "answer_transcript": "a summary or verbatim transcript of my answer(s)",
       "score": 0,
       "exam_type": "guided",
-      "feedback": "one or two sentences of feedback, e.g. \\"Good enough for now — revisit in ~6 months.\\" (optional, use null to omit)"
+      "feedback": "one or two sentences of feedback (optional, use null to omit)"
     }
   ]
 }
 
-Include one object per section actually examined. Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
+For scope "essay", use the same shape but with "scope": "essay" and OMIT "section_anchor_slug" and "section_version" (they do not apply to a whole-essay result).
+
+Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
 
 Here is the examination package:
 
-`;
+`
 
-const EXAM_PROMPT_INTRO_UNGUIDED = `You are conducting an UNGUIDED oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and its sections.
+const EXAM_PROMPT_INTRO_UNGUIDED = `You are conducting an UNGUIDED oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and the section(s) to examine. Each section's "nuggets" array holds the full text of the nuggets that section references via [[nugget:key]]; treat them as part of that section's material.
 
-GOAL: test whether I actually understand the ideas in each section — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
+GOAL: test whether I actually understand the ideas — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
 
-IMPORTANT — this is a COLD-START examination: do NOT use any prior-history or calibration context, even if you happen to know it from earlier in this conversation. Start every section from the fundamentals, exactly as you would for a learner with no recorded history, regardless of how well I may have done before.
+IMPORTANT — this is a COLD-START examination: do NOT use any prior-history or calibration context, even if you happen to know it from earlier in this conversation. Start from the fundamentals, exactly as you would for a learner with no recorded history, regardless of how well I may have done before. Do not hint or prompt me through the material.
+
+SCOPE: the package's "scope" field is either "section" — "sections" then holds exactly ONE section and you examine only that section — or "essay" — you examine the essay as an INTEGRATED WHOLE (its overall argument, structure, and how the sections connect); every section is included only as context. Produce exactly one result for the whole examination.
+
+SCORING (0-6, for my demonstrated understanding — not the essay's quality). The package's "scoring" block states the pass rule: a score of "scoring.min_passing_score" (5) or higher PASSES (70%). Scores of 3 and 4 are recorded but do NOT advance my progress, so do not inflate a score to be kind.
+  0-2: insufficient / fragmentary — needs active study
+  3:   functional understanding, but not yet passing
+  4:   strong understanding, but not yet passing
+  5:   deep/integrated understanding (pass)
+  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently (pass)
 
 PROCESS:
-- Examine each section in "sections" one at a time (skip a section only if I ask you to).
-- Ask follow-up questions until you can confidently assess my understanding, then move on — this is a conversation, not a fixed quiz.
+- Ask follow-up questions until you can confidently assess my understanding — this is a conversation, not a fixed quiz.
 - I will answer by typing or by pasting a transcript of a spoken answer.
 
-SCORING (0-6, per section, for my demonstrated understanding — not the essay's quality):
-  0-2: insufficient / fragmentary — needs active study
-  3:   functional understanding — good enough for now, ready to move on
-  4:   strong understanding
-  5:   deep/integrated understanding
-  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently
-A score of 3 is a legitimate, successful stopping point — do not withhold it hoping I reach a higher score later.
-
-WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after. For scope "section":
 
 {
   "results": [
     {
+      "scope": "section",
       "essay_slug": "copy verbatim from the package's essay_slug",
       "section_anchor_slug": "copy verbatim from this section's anchor_slug",
       "section_version": "copy verbatim from this section's section_version",
-      "examined_at": "today's date/time in ISO-8601, e.g. 2026-08-28T14:30:00Z",
-      "question": "a summary of what you asked/covered for this section (can be multiple questions, written as one text block)",
-      "answer_transcript": "a summary or verbatim transcript of my answer(s) for this section",
+      "examined_at": "today's date/time in ISO-8601 WITH a UTC offset, e.g. 2026-08-28T14:30:00Z",
+      "question": "a summary of what you asked/covered (can be multiple questions, written as one text block)",
+      "answer_transcript": "a summary or verbatim transcript of my answer(s)",
       "score": 0,
       "exam_type": "unguided",
-      "feedback": "one or two sentences of feedback, e.g. \\"Good enough for now — revisit in ~6 months.\\" (optional, use null to omit)"
+      "feedback": "one or two sentences of feedback (optional, use null to omit)"
     }
   ]
 }
 
-Include one object per section actually examined. Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
+For scope "essay", use the same shape but with "scope": "essay" and OMIT "section_anchor_slug" and "section_version" (they do not apply to a whole-essay result).
+
+Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
 
 Here is the examination package:
 
-`;
+`
 
 function buildExamClipboardText(pkg: ExaminationPackage, examType: 'guided' | 'unguided'): string {
+  // pkg.scope ('section' | 'essay') travels inside the package JSON itself, and
+  // both prompt variants describe both reply shapes (see SCOPE above).
   const intro = examType === 'guided' ? EXAM_PROMPT_INTRO_GUIDED : EXAM_PROMPT_INTRO_UNGUIDED;
   return intro + JSON.stringify(pkg, null, 2);
 }
@@ -1416,71 +1479,162 @@ function saveCategoryCollapsed(category: string, collapsed: boolean): void {
 // via a native <button> with title (hover/focus tooltip) and aria-label
 // (always-available accessible explanation, not hover-only).
 
-const MILESTONE_LABELS: { key: keyof EssayRow; label: string }[] = [
-  { key: 'milestone_all_cards_seen', label: 'All active cards seen' },
-  { key: 'milestone_all_cards_future_safe', label: 'All active cards reviewed, next due in 24h+' },
-  { key: 'milestone_guided_passed', label: 'Guided oral exam passed' },
-  { key: 'milestone_unguided_passed', label: 'Unguided oral exam passed' },
-];
+// ── Progress traffic lights (Sprint14) ──────────────────────────────────────
+//
+// States are derived server-side (backend/progress.py) — the frontend only
+// maps a state key to a color and a text label. The draft's color NAMES are the
+// canonical keys. UI_DesignLanguage.md defines no yellow/green token (status
+// colors are not part of the M3 set), so yellow/green are literal status
+// colors; grey/blue/violet reuse the neutral/primary/tertiary tokens.
+// State is never conveyed by color alone: every dot is a native button with a
+// title + aria-label naming the state, grey is a hollow ring, and the legend
+// lists the names.
 
-function learningLevelExplanation(e: EssayRow): string {
-  const lines = MILESTONE_LABELS.map(
-    m => `${e[m.key] ? '✓' : '✗'} ${m.label}`,
-  );
-  const extra: string[] = [];
-  if (e.guided_passed_at) extra.push(`Guided passed: ${formatExamDate(e.guided_passed_at)}`);
-  if (e.unguided_passed_at) extra.push(`Unguided passed: ${formatExamDate(e.unguided_passed_at)}`);
-  return [`Learning level ${e.learning_level} / 4`, ...lines, ...extra].join('\n');
-}
-
-const learningLevelBadgeStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minWidth: 36,
-  height: 22,
-  padding: '0 8px',
-  borderRadius: 999,
-  border: '1px solid var(--md-sys-color-outline-variant)',
-  background: 'var(--md-sys-color-surface-variant)',
-  color: 'var(--md-sys-color-on-surface-variant)',
-  fontSize: 12,
-  fontWeight: 600,
-  cursor: 'default',
+const TRAFFIC_COLORS: Record<EssayState, string> = {
+  grey: 'var(--md-sys-color-outline)',
+  yellow: '#E0AE1F',
+  green: '#3F9A52',
+  blue: 'var(--md-sys-color-primary)',
+  violet: 'var(--md-sys-color-tertiary)',
 };
 
-function LearningLevelBadge({ essay }: { essay: EssayRow }) {
-  const explanation = learningLevelExplanation(essay);
+const SECTION_STATE_LABELS: Record<SectionState, { name: string; meaning: string }> = {
+  grey: { name: 'Not started', meaning: 'Flashcards are locked' },
+  yellow: { name: 'Guided oral passed', meaning: 'Flashcards unlocked' },
+  green: { name: 'Flashcards established', meaning: 'Every card has an interval of 24h or more' },
+  blue: { name: 'Unguided oral passed', meaning: 'Independent reconstruction of the section' },
+};
+
+const ESSAY_STATE_LABELS: Record<EssayState, { name: string; meaning: string }> = {
+  grey: { name: 'Not started', meaning: 'No essay-level progress yet' },
+  yellow: { name: 'Guided essay oral passed', meaning: 'Understands the essay as a whole, with support' },
+  green: { name: 'All cards learned', meaning: 'Every card has an interval of 30 days or more' },
+  blue: { name: 'All sections independently mastered', meaning: 'Every section passed its unguided oral' },
+  violet: { name: 'Unguided essay oral passed', meaning: 'Highest mastery: the whole essay without guidance' },
+};
+
+const NEXT_STEP_LABELS: Record<string, string> = {
+  // section ladder
+  guided_oral: 'Pass the guided oral for this section',
+  flashcards_established: 'Get every flashcard to an interval of 24h or more',
+  unguided_oral: 'Pass the unguided oral for this section',
+  // essay ladder
+  guided_essay_oral: 'Pass the guided oral for the whole essay',
+  cards_learned: 'Get every flashcard to an interval of 30 days or more',
+  section_unguided_orals: 'Pass the unguided oral for every section',
+  unguided_essay_oral: 'Pass the unguided oral for the whole essay',
+};
+
+// One dot: native button (keyboard reachable), title for hover, and a small
+// caption that opens on click/tap/focus-activate. Click never bubbles, so a dot
+// inside a clickable essay row does not also navigate.
+function ProgressDot({ color, size, label, detail }: {
+  color: string;
+  size: number;
+  label: string;
+  detail: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const hollow = color === TRAFFIC_COLORS.grey;
   return (
-    <button
-      type="button"
-      style={learningLevelBadgeStyle}
-      title={explanation}
-      aria-label={explanation}
-      onClick={e => e.stopPropagation()}
-    >
-      {essay.learning_level}/4
-    </button>
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        title={`${label}\n${detail}`}
+        aria-label={`${label}. ${detail}`}
+        aria-expanded={open}
+        onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+        onBlur={() => setOpen(false)}
+        style={{
+          width: size, height: size, padding: 0, borderRadius: '50%', cursor: 'pointer',
+          border: `2px solid ${color}`, background: hollow ? 'transparent' : color,
+        }}
+      />
+      {open && (
+        <span
+          role="status"
+          style={{
+            position: 'absolute', top: size + 6, left: 0, zIndex: 20, minWidth: 180, maxWidth: 260,
+            padding: '6px 8px', borderRadius: 6, fontSize: 12, whiteSpace: 'pre-line',
+            background: 'var(--md-sys-color-surface)', color: 'var(--md-sys-color-on-surface)',
+            border: '1px solid var(--md-sys-color-outline-variant)', boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          }}
+        >
+          {`${label}\n${detail}`}
+        </span>
+      )}
+    </span>
   );
 }
 
-function StatusPill({ status }: { status: 'planned' | 'complete' }) {
-  const planned = status === 'planned';
+function EssayProgressDot({ essay, size = 20 }: { essay: EssayRow; size?: number }) {
+  const st = ESSAY_STATE_LABELS[essay.essay_state];
+  const next = essay.essay_next_step ? `Next: ${NEXT_STEP_LABELS[essay.essay_next_step]}` : 'Highest state reached';
   return (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
-        padding: '2px 6px',
-        borderRadius: 4,
-        color: planned ? '#8a6d1f' : '#3a7a3a',
-        background: planned ? '#fdf3d8' : '#e6f4e6',
-      }}
-    >
-      {status}
+    <ProgressDot
+      color={TRAFFIC_COLORS[essay.essay_state]}
+      size={size}
+      label={`Essay: ${st.name}`}
+      detail={`${essay.title}\n${next}`}
+    />
+  );
+}
+
+function SectionProgressDots({ sections }: { sections: SectionProgressRow[] }) {
+  const ordered = [...sections].sort((a, b) => a.order_index - b.order_index);
+  return (
+    <span style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      {ordered.map(sec => {
+        const st = SECTION_STATE_LABELS[sec.state];
+        const next = sec.next_step ? `Next: ${NEXT_STEP_LABELS[sec.next_step]}` : 'Highest state reached';
+        return (
+          <ProgressDot
+            key={sec.section_id}
+            color={TRAFFIC_COLORS[sec.state]}
+            size={12}
+            label={`Section: ${st.name}`}
+            detail={`${sec.heading}\n${next}`}
+          />
+        );
+      })}
     </span>
+  );
+}
+
+function ProgressLegend() {
+  const row = (color: string, name: string, meaning: string) => (
+    <li key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+      <span
+        aria-hidden="true"
+        style={{
+          width: 12, height: 12, borderRadius: '50%', flexShrink: 0, border: `2px solid ${color}`,
+          background: color === TRAFFIC_COLORS.grey ? 'transparent' : color,
+        }}
+      />
+      <span><strong>{name}</strong> — {meaning}</span>
+    </li>
+  );
+  return (
+    <details style={{ marginBottom: 12, fontSize: 13 }}>
+      <summary style={{ cursor: 'pointer' }}>Legend</summary>
+      <div style={{ marginTop: 6 }}>
+        <div style={{ fontWeight: 600 }}>Section (small dots)</div>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {row(TRAFFIC_COLORS.grey, 'Grey', 'Not started')}
+          {row(TRAFFIC_COLORS.yellow, 'Yellow', 'Guided oral passed / flashcards unlocked')}
+          {row(TRAFFIC_COLORS.green, 'Green', 'Flashcards established')}
+          {row(TRAFFIC_COLORS.blue, 'Blue', 'Unguided oral passed')}
+        </ul>
+        <div style={{ fontWeight: 600, marginTop: 8 }}>Essay (large dot)</div>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {row(TRAFFIC_COLORS.grey, 'Grey', 'Not started')}
+          {row(TRAFFIC_COLORS.yellow, 'Yellow', 'Guided essay oral passed')}
+          {row(TRAFFIC_COLORS.green, 'Green', 'All cards learned')}
+          {row(TRAFFIC_COLORS.blue, 'Blue', 'All sections independently mastered')}
+          {row(TRAFFIC_COLORS.violet, 'Violet', 'Unguided essay oral passed')}
+        </ul>
+      </div>
+    </details>
   );
 }
 
@@ -1505,6 +1659,8 @@ function CategoryCollapseToggle({ category, collapsed, onToggle }: {
 function EssayListView() {
   const navigate = useNavigate();
   const [essays, setEssays] = useState<EssayRow[]>([]);
+  // Sprint14: section dots, grouped client-side by essay_id (flat Dataset).
+  const [sectionsByEssay, setSectionsByEssay] = useState<Record<string, SectionProgressRow[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
   // Category collapse state, keyed by category name (UNCATEGORIZED for the
@@ -1516,13 +1672,23 @@ function EssayListView() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const res = await apiFetch<Dataset<EssayRow>>('/essaycards/essays');
+      const [res, progress] = await Promise.all([
+        apiFetch<Dataset<EssayRow>>('/essaycards/essays'),
+        apiFetch<Dataset<SectionProgressRow>>('/essaycards/progress/sections'),
+      ]);
       setLoading(false);
       if (isApiError(res)) {
         setError(res);
         return;
       }
+      if (isApiError(progress)) {
+        setError(progress);
+        return;
+      }
       setEssays(res.rows);
+      const grouped: Record<string, SectionProgressRow[]> = {};
+      for (const row of progress.rows) (grouped[row.essay_id] ??= []).push(row);
+      setSectionsByEssay(grouped);
     })();
   }, []);
 
@@ -1555,6 +1721,7 @@ function EssayListView() {
         </div>
       </div>
 
+      {!loading && !error && essays.length > 0 && <ProgressLegend />}
       {loading && <Skeleton />}
       {error && <ErrorCard error={error} />}
       {!loading && !error && essays.length === 0 && (
@@ -1626,18 +1793,26 @@ function EssayListView() {
                   <span style={{ fontSize: 12, color: '#bbb', minWidth: 16, textAlign: 'right', lineHeight: '20px' }}>
                     {e.sort_index}
                   </span>
+                  <EssayProgressDot essay={e} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 600 }}>{e.title}</span>
-                      <StatusPill status={e.status} />
+                      {e.revalidation_pending_count > 0 && (
+                        <button
+                          style={{ ...studyBtnStyle, padding: '2px 8px', fontSize: 12 }}
+                          onClick={ev => {
+                            ev.stopPropagation();
+                            navigate(`/essaycards/review?revalidate=1&essay_id=${e.id}`);
+                          }}
+                        >
+                          Revalidate ({e.revalidation_pending_count})
+                        </button>
+                      )}
                     </div>
-                    <div style={{ fontSize: 12, color: '#888', marginTop: 3 }}>
-                      {e.progress_total === 0
-                        ? 'No flashcards yet'
-                        : `Progress: ${e.progress_established} / ${e.progress_total} · Open: ${e.open_count}`}
+                    <div style={{ marginTop: 6 }}>
+                      <SectionProgressDots sections={sectionsByEssay[e.id] ?? []} />
                     </div>
                   </div>
-                  <LearningLevelBadge essay={e} />
                 </div>
               ))}
             </div>
@@ -1792,16 +1967,23 @@ function ReaderView() {
   // copies the essay's examination package + the exam_type-appropriate
   // rubric prompt to the clipboard.
   const [examMsg, setExamMsg] = useState<string | null>(null);
-  const [examBusyType, setExamBusyType] = useState<'guided' | 'unguided' | null>(null);
+  // Sprint14: busy key is "<scope>:<examType>[:<sectionId>]" so one in-flight export disables the rest.
+  const [historyOpenIds, setHistoryOpenIds] = useState<Set<string>>(new Set());
+  const [examBusyKey, setExamBusyKey] = useState<string | null>(null);
 
-  const handleExportExam = async (examType: 'guided' | 'unguided') => {
+  const handleExportExam = async (
+    scope: 'essay' | 'section',
+    examType: 'guided' | 'unguided',
+    sectionId?: string,
+  ) => {
     if (!essay) return;
-    setExamBusyType(examType);
+    setExamBusyKey(`${scope}:${examType}:${sectionId ?? ''}`);
     setExamMsg(null);
+    const sectionParam = scope === 'section' ? `&section_id=${sectionId}` : '';
     const res = await apiFetch<ExaminationPackage>(
-      `/essaycards/essays/${essay.id}/examination-package?exam_type=${examType}`,
+      `/essaycards/essays/${essay.id}/examination-package?exam_type=${examType}&scope=${scope}${sectionParam}`,
     );
-    setExamBusyType(null);
+    setExamBusyKey(null);
     if (isApiError(res)) {
       setExamMsg(`Export failed: ${res.error.message}`);
       return;
@@ -1887,6 +2069,9 @@ function ReaderView() {
     });
   };
 
+  // Sprint14: per-section traffic light + lock state (GET /progress/sections?essay_id=), by section id.
+  const [sectionProgress, setSectionProgress] = useState<Record<string, SectionProgressRow>>({});
+
   // Sprint13 sentence feedback: server-computed sentences + saved flags.
   const [sentences, setSentences] = useState<SentenceRow[]>([]);
   const [feedback, setFeedback] = useState<FeedbackMap>({});
@@ -1906,10 +2091,14 @@ function ReaderView() {
     }
     // Sentence endpoints are best-effort: on failure the reader falls back to
     // rendering each section's whole body (see sentencesBySection below).
-    const [sentRes, fbRes] = await Promise.all([
+    const [sentRes, fbRes, progRes] = await Promise.all([
       apiFetch<Dataset<SentenceRow>>(`/essaycards/essays/${id}/sentences`),
       apiFetch<Dataset<SentenceFeedbackRow>>(`/essaycards/essays/${id}/sentence-feedback`),
+      apiFetch<Dataset<SectionProgressRow>>(`/essaycards/progress/sections?essay_id=${id}`),
     ]);
+    setSectionProgress(
+      isApiError(progRes) ? {} : Object.fromEntries(progRes.rows.map(r => [r.section_id, r])),
+    );
     setSentences(isApiError(sentRes) ? [] : sentRes.rows);
     setFeedback(
       isApiError(fbRes)
@@ -2005,14 +2194,14 @@ function ReaderView() {
   const secondaryItems: ActionMenuItem[] = [
     ...(hasCards ? [questionOverviewItem] : []),
     {
-      label: examBusyType === 'guided' ? 'Preparing…' : 'Guided oral exam',
-      onClick: () => handleExportExam('guided'),
-      disabled: essay.status !== 'complete' || examBusyType !== null,
+      label: examBusyKey === 'essay:guided:' ? 'Preparing…' : 'Guided oral exam',
+      onClick: () => handleExportExam('essay', 'guided'),
+      disabled: essay.status !== 'complete' || examBusyKey !== null,
     },
     {
-      label: examBusyType === 'unguided' ? 'Preparing…' : 'Unguided oral exam',
-      onClick: () => handleExportExam('unguided'),
-      disabled: essay.status !== 'complete' || examBusyType !== null,
+      label: examBusyKey === 'essay:unguided:' ? 'Preparing…' : 'Unguided oral exam',
+      onClick: () => handleExportExam('essay', 'unguided'),
+      disabled: essay.status !== 'complete' || examBusyKey !== null,
     },
     {
       label: essayExportMsg?.ok ? 'Import essay →' : 'Export essay',
@@ -2042,7 +2231,15 @@ function ReaderView() {
           }
           items={secondaryItems}
         />
-        <LearningLevelBadge essay={essay} />
+        <EssayProgressDot essay={essay} />
+        {essay.revalidation_pending_count > 0 && (
+          <button
+            style={studyBtnStyle}
+            onClick={() => navigate(`/essaycards/review?revalidate=1&essay_id=${essay.id}`)}
+          >
+            Revalidate ({essay.revalidation_pending_count})
+          </button>
+        )}
       </div>
       {essayExportMsg && (
         <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{essayExportMsg.text}</div>
@@ -2051,6 +2248,7 @@ function ReaderView() {
         <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{examMsg}</div>
       )}
       <h1 style={{ marginBottom: 12 }}>{essay.title}</h1>
+      <EssayExaminationHistory essayId={essay.id} />
 
       {essay.main_spine_markdown.trim() !== '' && (
         <div
@@ -2079,9 +2277,21 @@ function ReaderView() {
         <div style={{ color: '#888', fontSize: 14 }}>This essay has no sections yet.</div>
       )}
 
-      {essay.sections.map(section => (
+      {essay.sections.map(section => {
+        const prog = sectionProgress[section.id];
+        // Locked = the section's guided oral has not passed AND it has cards to unlock.
+        const lockedWithCards = !!prog && prog.cards_total > 0 && prog.is_locked;
+        return (
         <section key={section.id} id={section.anchor_slug} style={{ marginBottom: 32 }}>
-          <h2>{section.heading}</h2>
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {prog && <SectionProgressDots sections={[prog]} />}
+            {section.heading}
+          </h2>
+          {lockedWithCards && (
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>
+              🔒 Flashcards locked — pass the guided oral for this section to unlock them.
+            </div>
+          )}
           <div className="essaycards-section-body">
             {(() => {
               const titles = Object.fromEntries(section.nuggets.map(n => [n.nugget_key, n.title]));
@@ -2113,11 +2323,30 @@ function ReaderView() {
             })()}
           </div>
           <ActionMenu
-            primary={{
-              label: 'Review this section',
-              onClick: () => navigate(`/essaycards/review?essay_id=${essay.id}&section_id=${section.id}`),
-            }}
             items={[
+              {
+                label: examBusyKey === `section:guided:${section.id}` ? 'Preparing…' : 'Guided oral (section)',
+                onClick: () => handleExportExam('section', 'guided', section.id),
+                disabled: essay.status !== 'complete' || examBusyKey !== null,
+              },
+              {
+                label: examBusyKey === `section:unguided:${section.id}` ? 'Preparing…' : 'Unguided oral (section)',
+                onClick: () => handleExportExam('section', 'unguided', section.id),
+                disabled: essay.status !== 'complete' || examBusyKey !== null,
+              },
+              {
+                label: 'Import oral exam result →',
+                onClick: () => navigate('/essaycards/examinations/import'),
+              },
+              {
+                label: historyOpenIds.has(section.id) ? 'Hide examination history' : 'Examination history',
+                onClick: () =>
+                  setHistoryOpenIds(prev => {
+                    const next = new Set(prev);
+                    if (next.has(section.id)) next.delete(section.id); else next.add(section.id);
+                    return next;
+                  }),
+              },
               {
                 label: sectionActionReady(section.id, 'export') ? 'Import section →' : 'Export section',
                 onClick: () =>
@@ -2137,9 +2366,10 @@ function ReaderView() {
           {sectionActionMsg && sectionActionMsg.sectionId === section.id && (
             <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{sectionActionMsg.text}</div>
           )}
-          <SectionExaminationHistory sectionId={section.id} />
+          {historyOpenIds.has(section.id) && <SectionExaminationHistory sectionId={section.id} />}
         </section>
-      ))}
+        );
+      })}
 
       {openSentence && (
         <SentenceFeedbackPopover
@@ -2424,6 +2654,13 @@ function QuestionItem({ essaySlug, question, nuggets, onChanged }: {
     return (
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 14 }}>{question.question}</div>
+        {/* Sprint14: lock marker for a locked card, otherwise its maturity state; plus a revalidation marker. */}
+        <div data-testid="card-state" style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+          {question.is_locked
+            ? '🔒 Locked — pass the guided oral for this section to unlock'
+            : `State: ${question.card_state}`}
+          {question.needs_revalidation && ' · needs revalidation'}
+        </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
           <button style={{ ...btnStyle, fontSize: 12, padding: '2px 10px' }} onClick={handleStartEdit}>
             Edit
@@ -2656,30 +2893,26 @@ function QuestionImportView() {
 // trend analysis — that stays out of scope for now.
 
 function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
-  const [open, setOpen] = useState(false);
+  // Mounted only while opened from the section's "More" menu; loads on mount.
+  const open = true;
   const [loaded, setLoaded] = useState(false);
   const [rows, setRows] = useState<SectionExaminationRow[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const handleToggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !loaded) {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       const res = await apiFetch<Dataset<SectionExaminationRow>>(`/essaycards/sections/${sectionId}/examinations`);
-      if (isApiError(res)) {
-        setError(res);
-      } else {
-        setRows(res.rows);
-      }
+      if (cancelled) return;
+      if (isApiError(res)) setError(res); else setRows(res.rows);
       setLoaded(true);
-    }
-  };
+    })();
+    return () => { cancelled = true; };
+  }, [sectionId]);
 
   return (
     <div style={{ marginTop: 8 }}>
-      <button style={{ ...btnStyle, fontSize: 12 }} onClick={handleToggle}>
-        {open ? '▾' : '▸'} Examination history{loaded ? ` (${rows.length})` : ''}
-      </button>
+      <div style={{ fontSize: 12, fontWeight: 600 }}>Examination history{loaded ? ` (${rows.length})` : ''}</div>
       {open && (
         <div style={{ marginTop: 8 }}>
           {error && <ErrorCard error={error} />}
@@ -2701,6 +2934,58 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
                 {new Date(r.examined_at).toLocaleDateString()} — score {r.score}/6
                 {' · '}
                 <span style={{ textTransform: 'capitalize', fontWeight: 400, color: '#888' }}>{r.exam_type}</span>
+                {' · '}
+                <span>{r.passed ? 'Passed' : 'Not passed'}</span>
+              </div>
+              {r.feedback && <div style={{ color: '#555', marginTop: 4 }}>{r.feedback}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Sprint14: full-essay oral attempts (GET /essays/{id}/examinations), same
+// collapsible list as SectionExaminationHistory, pass/fail per attempt.
+function EssayExaminationHistory({ essayId }: { essayId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [rows, setRows] = useState<EssayExaminationRow[]>([]);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const handleToggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) {
+      const res = await apiFetch<Dataset<EssayExaminationRow>>(`/essaycards/essays/${essayId}/examinations`);
+      if (isApiError(res)) setError(res); else setRows(res.rows);
+      setLoaded(true);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <button style={{ ...btnStyle, fontSize: 12 }} onClick={handleToggle}>
+        {open ? '▾' : '▸'} Essay oral history{loaded ? ` (${rows.length})` : ''}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {error && <ErrorCard error={error} />}
+          {loaded && !error && rows.length === 0 && (
+            <div style={{ color: '#888', fontSize: 13 }}>No whole-essay oral exam yet.</div>
+          )}
+          {rows.map(r => (
+            <div
+              key={r.id}
+              style={{ padding: 8, borderRadius: 6, border: '1px solid #e0e0e0', marginBottom: 6, fontSize: 13 }}
+            >
+              <div style={{ fontWeight: 600 }}>
+                {new Date(r.examined_at).toLocaleDateString()} — score {r.score}/6
+                {' · '}
+                <span style={{ textTransform: 'capitalize', fontWeight: 400, color: '#888' }}>{r.exam_type}</span>
+                {' · '}
+                <span>{r.passed ? 'Passed' : 'Not passed'}</span>
               </div>
               {r.feedback && <div style={{ color: '#555', marginTop: 4 }}>{r.feedback}</div>}
             </div>
@@ -2886,10 +3171,15 @@ function ReviewSessionView() {
   const topic = searchParams.get('topic');
   const essayId = searchParams.get('essay_id');
   const sectionId = searchParams.get('section_id');
+  // Sprint14: ?revalidate=1 (+ optional essay_id) = Revalidation mode — the
+  // queue comes from GET /flashcards/revalidation (flagged cards, any due date).
+  const revalidate = searchParams.get('revalidate') === '1';
   // Scope present -> FOCUS session (all open cards in scope). No scope ->
   // REVIEW session (open AND established). The backend infers this from the
   // params; the caption just reflects it.
-  const scopeLabel = topic
+  const scopeLabel = revalidate
+    ? 'Revalidation'
+    : topic
     ? `Focus · ${topic}`
     : essayId
       ? 'Focus · this essay'
@@ -2923,11 +3213,15 @@ function ReviewSessionView() {
 
   const dueUrl = useCallback(() => {
     const qs = new URLSearchParams();
+    if (revalidate) {
+      if (essayId) qs.set('essay_id', essayId);
+      return `/essaycards/flashcards/revalidation${qs.toString() ? `?${qs.toString()}` : ''}`;
+    }
     if (topic) qs.set('topic', topic);
     if (essayId) qs.set('essay_id', essayId);
     if (sectionId) qs.set('section_id', sectionId);
     return `/essaycards/flashcards/due${qs.toString() ? `?${qs.toString()}` : ''}`;
-  }, [topic, essayId, sectionId]);
+  }, [topic, essayId, sectionId, revalidate]);
 
   // Load the current due queue into state. Called once on mount, after every
   // grade, and from the completion screen's "Check again" — never on a timer.
@@ -2992,8 +3286,10 @@ function ReviewSessionView() {
       return;
     }
 
-    const newIntervalSec = (Date.parse(res.next_due_at) - Date.parse(res.last_reviewed_at)) / 1000;
-    setLastNewIntervalSec(newIntervalSec);
+    // A 'preserved' revalidation check changes no schedule, so there is no new interval to report.
+    if (res.last_reviewed_at && res.revalidation_outcome !== 'preserved') {
+      setLastNewIntervalSec((Date.parse(res.next_due_at) - Date.parse(res.last_reviewed_at)) / 1000);
+    }
     setReviewedCount(n => n + 1);
     setFlipped(false);
     setExploreMsg(null);
@@ -3014,7 +3310,12 @@ function ReviewSessionView() {
   if (loading) return <div style={pageStyle}><Skeleton /></div>;
   if (error) return <div style={pageStyle}><ErrorCard error={error} /></div>;
 
-  const statsPanel = (
+  // Revalidation mode shows neither the interval forecast nor the today-metrics row.
+  const statsPanel = revalidate ? (
+    <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>
+      {queue.length} remaining
+    </div>
+  ) : (
     <ReviewStatsPanel
       topic={topic}
       essayId={essayId}
@@ -3048,8 +3349,11 @@ function ReviewSessionView() {
         {scopeCaption}
         {statsPanel}
         <div style={{ ...reviewCardStyle, textAlign: 'center', color: 'var(--md-sys-color-on-surface-variant)' }}>
-          {reviewedCount === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
+          {revalidate
+            ? 'Revalidation complete'
+            : reviewedCount === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'}
         </div>
+        {!revalidate && (
         <button
           style={flipBtnStyle}
           disabled={grading}
@@ -3064,6 +3368,7 @@ function ReviewSessionView() {
         >
           {grading ? 'Checking…' : 'Check again'}
         </button>
+        )}
         <button style={{ ...gradeBtnStyle, width: '100%', flex: 'none' }} onClick={() => navigate('/essaycards')}>
           Back to all essays
         </button>
@@ -3140,14 +3445,28 @@ function ReviewSessionView() {
         <button style={flipBtnStyle} onClick={() => setFlipped(true)}>Flip</button>
       ) : (
         <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
-          {(['again', 'hard', 'good', 'easy'] as Grade[]).map(g => (
-            <button key={g} style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade(g)}>
-              {g[0].toUpperCase() + g.slice(1)}
-            </button>
-          ))}
+          {revalidate ? (
+            // Revalidation: exactly two buttons. Correct -> grade 'good' (flag cleared, FSRS
+            // untouched); Incorrect -> grade 'again' (genuine FSRS failure).
+            <>
+              <button style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade('good')}>
+                Correct
+              </button>
+              <button style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade('again')}>
+                Incorrect
+              </button>
+            </>
+          ) : (
+            (['again', 'hard', 'good', 'easy'] as Grade[]).map(g => (
+              <button key={g} style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade(g)}>
+                {g[0].toUpperCase() + g.slice(1)}
+              </button>
+            ))
+          )}
         </div>
       )}
 
+      {!revalidate && (
       <div style={diagFrameStyle}>
         {current.is_recent && (
           <div style={{ color: 'var(--md-sys-color-primary)', fontWeight: 600 }}>
@@ -3169,6 +3488,7 @@ function ReviewSessionView() {
           </strong>
         </div>
       </div>
+      )}
 
       {nuggetPanelOpen && current.nugget_id && (
         <NuggetPanel
@@ -3517,22 +3837,62 @@ function IngestView() {
 
 // ── Import Examinations View ───────────────────────────────────────────────────
 
+interface ImportResultEffect {
+  effect: 'section_guided_unlocked' | 'section_unguided_passed' | 'essay_guided_passed'
+    | 'essay_unguided_passed' | 'essay_unguided_failed_cascade';
+  section_id?: string;
+  essay_id?: string;
+  cards_flagged?: number;
+}
+
 interface ImportSummary {
   imported: number;
-  results: { id: string; essay_id: string; section_id: string; examined_at: string; score: number }[];
+  results: {
+    id: string;
+    scope: 'section' | 'essay';
+    essay_id: string;
+    section_id: string | null;
+    examined_at: string;
+    score: number;
+    passed: boolean;
+    score_percent: number;
+    effects: ImportResultEffect[];
+  }[];
+  // One entry per unguided-essay failure cascade that fired in this import.
+  revalidation: { essay_id: string; cards_flagged: number }[];
 }
+
+const EFFECT_TEXT: Record<ImportResultEffect['effect'], string> = {
+  section_guided_unlocked: 'Section flashcards unlocked',
+  section_unguided_passed: 'Section unguided oral passed',
+  essay_guided_passed: 'Guided essay oral passed',
+  essay_unguided_passed: 'Unguided essay oral passed',
+  essay_unguided_failed_cascade: 'Essay mastery invalidated',
+};
 
 const EXAM_RESULT_PLACEHOLDER_JSON = `{
   "results": [
     {
+      "scope": "section",
       "essay_slug": "the essay's slug, from the examination package",
       "section_anchor_slug": "the section's anchor_slug, from the examination package",
       "section_version": "copied verbatim from the section's section_version in the package",
       "examined_at": "2026-08-28T14:30:00Z",
       "question": "summary of what was asked",
       "answer_transcript": "summary or transcript of the answer given",
-      "score": 3,
+      "score": 5,
+      "exam_type": "guided",
       "feedback": "optional — one or two sentences, or omit/null"
+    },
+    {
+      "scope": "essay",
+      "essay_slug": "a whole-essay result: no section_anchor_slug / section_version",
+      "examined_at": "2026-08-28T15:00:00Z",
+      "question": "summary of what was asked",
+      "answer_transcript": "summary or transcript of the answer given",
+      "score": 5,
+      "exam_type": "unguided",
+      "feedback": null
     }
   ]
 }`;
@@ -3631,6 +3991,37 @@ function ImportExaminationsView() {
           <div style={{ fontSize: 13, color: '#555' }}>
             {result.imported} examination result{result.imported === 1 ? '' : 's'} stored.
           </div>
+          <ul style={{ fontSize: 13, margin: '8px 0 0', paddingLeft: 18 }}>
+            {result.results.map(r => (
+              <li key={r.id}>
+                {r.scope === 'essay' ? 'Whole essay' : 'Section'}: score {r.score}/6 ({r.score_percent}%) —{' '}
+                <strong>{r.passed ? 'Passed' : 'Not passed'}</strong>
+                {r.effects.length > 0 && <> · {r.effects.map(e => EFFECT_TEXT[e.effect]).join(', ')}</>}
+              </li>
+            ))}
+          </ul>
+          {result.revalidation.map(rv => (
+            <div
+              key={rv.essay_id}
+              role="alert"
+              style={{
+                marginTop: 12, padding: 10, borderRadius: 6,
+                background: 'var(--md-sys-color-error-container)', color: 'var(--md-sys-color-on-surface)',
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>Mastery invalidated</div>
+              <div style={{ fontSize: 13, margin: '4px 0 8px' }}>
+                The unguided essay oral was failed: Violet and Blue were removed and every section's unguided
+                pass was cleared. {rv.cards_flagged} card{rv.cards_flagged === 1 ? '' : 's'} need revalidation.
+              </div>
+              <button
+                style={primaryBtnStyle}
+                onClick={() => navigate(`/essaycards/review?revalidate=1&essay_id=${rv.essay_id}`)}
+              >
+                Start revalidation
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -4530,9 +4921,9 @@ const statsZoneSubtextStyle: React.CSSProperties = {
   margin: '0 0 12px',
 };
 
-// Levels 0-4, in that fixed order — the x-axis of the "Essay learning
-// progress" histogram.
-const LEARNING_LEVELS = [0, 1, 2, 3, 4];
+// Essay traffic-light states, in ladder order — the x-axis of the "Essay
+// learning progress" histogram (Sprint14; replaces the 0-4 learning levels).
+const ESSAY_STATE_ORDER: EssayState[] = ['grey', 'yellow', 'green', 'blue', 'violet'];
 
 // Study activity: one stacked column per UTC day (Repeat / Unique / First),
 // total height = recalls, recall-rate percentage above each column. Local,
@@ -4627,15 +5018,15 @@ function ReviewStatsView() {
   }, []);
 
   const levelHistogramDataset: PlatformDataset = {
-    meta: { object_type: 'learning_level_bucket', label: 'Essay Learning Progress', total: LEARNING_LEVELS.length, page: 1, page_size: LEARNING_LEVELS.length, row_actions: [] },
+    meta: { object_type: 'essay_state_bucket', label: 'Essay Learning Progress', total: ESSAY_STATE_ORDER.length, page: 1, page_size: ESSAY_STATE_ORDER.length, row_actions: [] },
     schema: [
-      { key: 'level', label: 'Level', type: 'string', sortable: false, filterable: false },
+      { key: 'level', label: 'State', type: 'string', sortable: false, filterable: false },
       { key: 'count', label: 'Essays', type: 'number', sortable: false, filterable: false },
     ],
-    rows: LEARNING_LEVELS.map(level => ({
-      id: String(level),
-      level: `${level}/4`,
-      count: essays.filter(e => e.learning_level === level).length,
+    rows: ESSAY_STATE_ORDER.map(state => ({
+      id: state,
+      level: state[0].toUpperCase() + state.slice(1),
+      count: essays.filter(e => e.essay_state === state).length,
     })),
   };
 
@@ -4708,7 +5099,7 @@ function ReviewStatsView() {
             : <div style={{ color: '#888', fontSize: 13 }}>Interval data unavailable.</div>}
 
           <h3 style={statsZoneHeadingStyle}>Essay learning progress</h3>
-          <p style={statsZoneSubtextStyle}>Number of essays at each learning level, 0-4.</p>
+          <p style={statsZoneSubtextStyle}>Number of essays at each progress state: grey, yellow, green, blue, violet (see the legend on the essay list).</p>
           <BarChart dataset={levelHistogramDataset} mapping={{ x: 'level', y: 'count', aggregation: 'sum' }} />
         </>
       )}

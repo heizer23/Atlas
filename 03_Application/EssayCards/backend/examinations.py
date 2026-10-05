@@ -43,6 +43,14 @@ from typing import Any
 
 from psycopg2.extras import Json
 
+from backend.oral_state import (
+    PASS_THRESHOLD_PERCENT,
+    SCORE_MAX,
+    apply_essay_attempt,
+    apply_section_attempt,
+    is_passing_score,
+    score_percent,
+)
 from platform_errorhandling import api_error
 
 _SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -54,14 +62,27 @@ _SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 # milestones.
 VALID_EXAM_TYPES = ("guided", "unguided")
 
+# Sprint14: every oral attempt is either one section or the whole essay.
+VALID_SCOPES = ("section", "essay")
+
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
-def build_export_package(cur: Any, essay_id: str, exam_type: str) -> dict[str, Any] | None:
+def build_export_package(
+    cur: Any, essay_id: str, exam_type: str, scope: str = "essay", section_id: str | None = None
+) -> dict[str, Any] | None:
     """
-    Returns the export package dict, or None if essay_id does not exist.
-    Read-only — issues no writes. `exam_type` must be 'guided' or 'unguided'
-    (validated by the router before this is called).
+    Returns the export package dict, or None if essay_id does not exist or
+    (scope='section') section_id is not a section of that essay. Read-only —
+    issues no writes. `exam_type` must be 'guided' or 'unguided' and `scope`
+    'essay' or 'section' (section_id required iff scope='section'); the router
+    validates the combination before this is called.
+
+    Sprint14: scope='section' lists exactly that one section; scope='essay'
+    lists every section and (guided only) adds last_essay_examination. A
+    scoring echo built from backend.oral_state keeps prompts and verdicts in
+    step. exam_type='unguided' keeps every last_examination and
+    last_essay_examination null (cold start).
     """
     cur.execute(
         "select id, title, slug from essaycards.essays where id = %s",
@@ -81,6 +102,10 @@ def build_export_package(cur: Any, essay_id: str, exam_type: str) -> dict[str, A
         (essay_id,),
     )
     section_rows = cur.fetchall()
+    if scope == "section":
+        section_rows = [r for r in section_rows if str(r["id"]) == str(section_id)]
+        if not section_rows:
+            return None
 
     cur.execute(
         "select id, section_id, card_key, question, answer from essaycards.flashcards where essay_id = %s",
@@ -124,15 +149,22 @@ def build_export_package(cur: Any, essay_id: str, exam_type: str) -> dict[str, A
     # references only, computed live at export time.
     cur.execute(
         """
-        select sn.section_id, n.nugget_key, n.updated_at
+        select sn.section_id, n.nugget_key, n.title, n.body_markdown, n.updated_at
         from essaycards.section_nuggets sn
         join essaycards.nuggets n on n.id = sn.nugget_id
         where sn.section_id in (select id from essaycards.essay_sections where essay_id = %s)
+        order by n.nugget_key
         """,
         (essay_id,),
     )
     nugget_versions_by_section: dict[str, dict[str, str]] = {}
+    nuggets_by_section: dict[str, list[dict[str, str]]] = {}
     for row in cur.fetchall():
+        nuggets_by_section.setdefault(str(row["section_id"]), []).append({
+            "nugget_key": row["nugget_key"],
+            "title": row["title"],
+            "body_markdown": row["body_markdown"],
+        })
         nugget_versions_by_section.setdefault(str(row["section_id"]), {})[row["nugget_key"]] = (
             row["updated_at"].isoformat()
         )
@@ -149,15 +181,48 @@ def build_export_package(cur: Any, essay_id: str, exam_type: str) -> dict[str, A
             "flashcards": cards_by_section.get(section_id, []),
             "last_examination": last_exam_by_section.get(section_id),
             "nugget_versions": nugget_versions_by_section.get(section_id, {}),
+            # Full text of every nugget the section references, so the examiner
+            # has the material behind [[nugget:key]] references. Read-only context.
+            "nuggets": nuggets_by_section.get(section_id, []),
         })
 
-    return {
+    package: dict[str, Any] = {
         "essay_id": str(essay_row["id"]),
         "essay_slug": essay_row["slug"],
         "essay_title": essay_row["title"],
         "exam_type": exam_type,
+        "scope": scope,
+        "scoring": {
+            "score_max": SCORE_MAX,
+            "pass_threshold_percent": PASS_THRESHOLD_PERCENT,
+            "min_passing_score": min(sc for sc in range(SCORE_MAX + 1) if is_passing_score(sc)),
+        },
         "sections": sections,
     }
+
+    if scope == "essay":
+        last_essay_exam = None
+        if exam_type == "guided":
+            cur.execute(
+                """
+                select examined_at, score, feedback
+                from essaycards.essay_examinations
+                where essay_id = %s and exam_type = 'guided'
+                order by examined_at desc
+                limit 1
+                """,
+                (essay_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                last_essay_exam = {
+                    "examined_at": row["examined_at"].isoformat(),
+                    "score": row["score"],
+                    "feedback": row["feedback"],
+                }
+        package["last_essay_examination"] = last_essay_exam
+
+    return package
 
 
 # ── Import validation ────────────────────────────────────────────────────────
@@ -207,20 +272,36 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
             )
         essay_slug = essay_slug.strip()
 
-        section_anchor_slug = entry.get("section_anchor_slug")
-        if not isinstance(section_anchor_slug, str) or not section_anchor_slug.strip():
+        scope = entry.get("scope")
+        if scope not in VALID_SCOPES:
             return None, api_error(
                 "VALIDATION_ERROR",
-                f"results[{idx}].section_anchor_slug is required and must be a non-empty string",
+                f"results[{idx}].scope is required and must be one of: {', '.join(VALID_SCOPES)}",
             )
-        section_anchor_slug = section_anchor_slug.strip()
 
-        section_version_raw = entry.get("section_version")
-        section_version = _parse_timestamp(section_version_raw)
-        if section_version is None:
+        # scope='section': section_anchor_slug required, section_version required.
+        # scope='essay': section_anchor_slug must be omitted or null (omitted ==
+        # null); section_version / nugget_versions are accepted and IGNORED.
+        section_anchor_slug = entry.get("section_anchor_slug")
+        section_version = None
+        if scope == "section":
+            if not isinstance(section_anchor_slug, str) or not section_anchor_slug.strip():
+                return None, api_error(
+                    "VALIDATION_ERROR",
+                    f"results[{idx}].section_anchor_slug is required and must be a non-empty string",
+                )
+            section_anchor_slug = section_anchor_slug.strip()
+
+            section_version = _parse_timestamp(entry.get("section_version"))
+            if section_version is None:
+                return None, api_error(
+                    "VALIDATION_ERROR",
+                    f"results[{idx}].section_version is required and must be an ISO-8601 timestamp",
+                )
+        elif section_anchor_slug is not None:
             return None, api_error(
                 "VALIDATION_ERROR",
-                f"results[{idx}].section_version is required and must be an ISO-8601 timestamp",
+                f"results[{idx}].section_anchor_slug must be omitted or null for scope 'essay'",
             )
 
         examined_at_raw = entry.get("examined_at")
@@ -264,7 +345,7 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
         # (dict[nugget_key, ISO-8601 timestamp string]) — echoed verbatim into
         # section_examinations.nugget_versions_at, never recomputed at import
         # time. Absent or null -> stored SQL null ("predates this feature").
-        nugget_versions = entry.get("nugget_versions")
+        nugget_versions = entry.get("nugget_versions") if scope == "section" else None
         if nugget_versions is not None:
             if not isinstance(nugget_versions, dict):
                 return None, api_error(
@@ -278,6 +359,8 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
                     )
 
         results.append({
+            "scope": scope,
+            "passed": is_passing_score(score),
             "essay_slug": essay_slug,
             "section_anchor_slug": section_anchor_slug,
             "section_version": section_version,
@@ -297,12 +380,17 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
 
 def import_results(cur: Any, results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, Any]:
     """
-    Resolves every result's (essay_slug, section_anchor_slug) to ids first —
-    if any pair doesn't exist, the whole batch is rejected with NOT_FOUND and
-    no row is inserted. Only then inserts one row per result.
+    Resolves every result's essay_slug (and, for scope='section',
+    section_anchor_slug) to ids first — if any does not exist, the whole batch
+    is rejected with NOT_FOUND and nothing is written. Then, in ARRAY ORDER,
+    inserts each attempt (section_examinations or essay_examinations, with the
+    stored `passed` verdict) and applies the oral-state transition
+    (oral_state.apply_*). Each returned row carries scope, passed,
+    score_percent and effects.
 
     Caller owns the transaction (commit/rollback) — this function only issues
-    statements against `cur`.
+    statements against `cur`; any failure rolls back every attempt, state
+    change, cascade and flag.
     """
     resolved: list[dict[str, Any]] = []
     for idx, r in enumerate(results):
@@ -316,48 +404,87 @@ def import_results(cur: Any, results: list[dict[str, Any]]) -> tuple[list[dict[s
                 "NOT_FOUND", f"results[{idx}]: no essay found with slug '{r['essay_slug']}'", status=404
             )
 
-        cur.execute(
-            "select id from essaycards.essay_sections where essay_id = %s and anchor_slug = %s",
-            (essay_row["id"], r["section_anchor_slug"]),
-        )
-        section_row = cur.fetchone()
-        if not section_row:
-            return None, api_error(
-                "NOT_FOUND",
-                f"results[{idx}]: no section '{r['section_anchor_slug']}' found in essay '{r['essay_slug']}'",
-                status=404,
+        section_id = None
+        if r["scope"] == "section":
+            cur.execute(
+                "select id from essaycards.essay_sections where essay_id = %s and anchor_slug = %s",
+                (essay_row["id"], r["section_anchor_slug"]),
             )
+            section_row = cur.fetchone()
+            if not section_row:
+                return None, api_error(
+                    "NOT_FOUND",
+                    f"results[{idx}]: no section '{r['section_anchor_slug']}' found in essay '{r['essay_slug']}'",
+                    status=404,
+                )
+            section_id = section_row["id"]
 
-        resolved.append({**r, "essay_id": essay_row["id"], "section_id": section_row["id"]})
+        resolved.append({**r, "essay_id": essay_row["id"], "section_id": section_id})
 
     inserted: list[dict[str, Any]] = []
     for r in resolved:
-        nugget_versions = r.get("nugget_versions")
-        cur.execute(
-            """
-            insert into essaycards.section_examinations
-                (essay_id, section_id, section_version_at, examined_at, question, answer_transcript,
-                 score, feedback, exam_type, nugget_versions_at)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            returning id, essay_id, section_id, examined_at, score
-            """,
-            (
-                r["essay_id"], r["section_id"], r["section_version"], r["examined_at"],
-                r["question"], r["answer_transcript"], r["score"], r["feedback"],
-                r["exam_type"],
-                Json(nugget_versions) if nugget_versions is not None else None,
-            ),
-        )
-        row = cur.fetchone()
+        if r["scope"] == "section":
+            nugget_versions = r.get("nugget_versions")
+            cur.execute(
+                """
+                insert into essaycards.section_examinations
+                    (essay_id, section_id, section_version_at, examined_at, question, answer_transcript,
+                     score, passed, feedback, exam_type, nugget_versions_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                returning id, essay_id, section_id, examined_at, score
+                """,
+                (
+                    r["essay_id"], r["section_id"], r["section_version"], r["examined_at"],
+                    r["question"], r["answer_transcript"], r["score"], r["passed"], r["feedback"],
+                    r["exam_type"],
+                    Json(nugget_versions) if nugget_versions is not None else None,
+                ),
+            )
+            row = cur.fetchone()
+            effects = apply_section_attempt(
+                cur, row["section_id"], r["exam_type"], r["score"], r["passed"], r["examined_at"]
+            )
+        else:
+            cur.execute(
+                """
+                insert into essaycards.essay_examinations
+                    (essay_id, exam_type, examined_at, question, answer_transcript, score, passed, feedback)
+                values (%s, %s, %s, %s, %s, %s, %s, %s)
+                returning id, essay_id, examined_at, score
+                """,
+                (
+                    r["essay_id"], r["exam_type"], r["examined_at"], r["question"],
+                    r["answer_transcript"], r["score"], r["passed"], r["feedback"],
+                ),
+            )
+            row = cur.fetchone()
+            effects = apply_essay_attempt(
+                cur, row["essay_id"], r["exam_type"], r["score"], r["passed"], r["examined_at"]
+            )
+
         inserted.append({
             "id": str(row["id"]),
+            "scope": r["scope"],
             "essay_id": str(row["essay_id"]),
-            "section_id": str(row["section_id"]),
+            "section_id": str(r["section_id"]) if r["section_id"] else None,
             "examined_at": row["examined_at"].isoformat(),
             "score": row["score"],
+            "passed": r["passed"],
+            "score_percent": score_percent(row["score"]),
+            "effects": effects,
         })
 
     return inserted, None
+
+
+def summarize_cascades(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collects {essay_id, cards_flagged} for every failure cascade that fired in this import."""
+    return [
+        {"essay_id": e["essay_id"], "cards_flagged": e["cards_flagged"]}
+        for row in rows
+        for e in row["effects"]
+        if e["effect"] == "essay_unguided_failed_cascade"
+    ]
 
 
 # ── Nugget-aware freshness (Sprint09_Nuggets) ────────────────────────────────

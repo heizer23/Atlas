@@ -41,7 +41,7 @@ def _section_version(client, anchor_slug: str) -> str:
 # ── Export package ──────────────────────────────────────────────────────────────
 
 def test_export_package_shape_and_last_examination(client):
-    r = client.get(EXPORT_URL, params={"exam_type": "guided"})
+    r = client.get(EXPORT_URL, params={"exam_type": "guided", "scope": "essay"})
     assert r.status_code == 200
     body = r.json()
 
@@ -70,7 +70,7 @@ def test_export_package_shape_and_last_examination(client):
 def test_export_package_not_found(client):
     r = client.get(
         "/api/essaycards/essays/00000000-0000-0000-0000-000000000000/examination-package",
-        params={"exam_type": "guided"},
+        params={"exam_type": "guided", "scope": "essay"},
     )
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
@@ -91,7 +91,7 @@ def test_examination_package_requires_exam_type_query_param(client):
 def test_examination_package_unguided_never_includes_last_examination(client):
     """Scenario: exam_type=unguided always returns last_examination: null per
     section, even when guided history exists."""
-    r = client.get(EXPORT_URL, params={"exam_type": "unguided"})
+    r = client.get(EXPORT_URL, params={"exam_type": "unguided", "scope": "essay"})
     assert r.status_code == 200
     body = r.json()
     assert body["exam_type"] == "unguided"
@@ -106,7 +106,7 @@ def test_examination_package_guided_uses_only_guided_history_for_calibration(cli
     export must surface the guided score, not the more recent unguided one."""
     r = client.get(
         "/api/essaycards/essays/ea00000a-0000-0000-0000-00000000000a/examination-package",
-        params={"exam_type": "guided"},
+        params={"exam_type": "guided", "scope": "essay"},
     )
     assert r.status_code == 200
     section = next(s for s in r.json()["sections"] if s["anchor_slug"] == "j-section-1")
@@ -121,6 +121,7 @@ def test_import_stores_new_result_without_overwriting_history(client, db_conn):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "origins",
                 "section_version": section_version,
@@ -163,6 +164,7 @@ def test_import_multiple_sections_in_one_batch(client, db_conn):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "origins",
                 "section_version": _section_version(client, "origins"),
@@ -174,6 +176,7 @@ def test_import_multiple_sections_in_one_batch(client, db_conn):
                 "exam_type": "guided",
             },
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -222,6 +225,7 @@ def test_import_rejects_score_out_of_range_and_writes_nothing(client, db_conn):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -248,6 +252,7 @@ def test_import_rejects_non_integer_score(client):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -267,6 +272,7 @@ def test_import_rejects_invalid_timestamp(client):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -286,6 +292,7 @@ def test_import_rejects_missing_required_field(client):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -306,6 +313,7 @@ def test_import_rejects_unknown_essay_slug(client, db_conn):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": "does-not-exist",
                 "section_anchor_slug": "origins",
                 "section_version": "2026-01-01T00:00:00Z",
@@ -326,6 +334,7 @@ def test_import_rejects_unknown_section_anchor_slug(client):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "does-not-exist",
                 "section_version": "2026-01-01T00:00:00Z",
@@ -348,6 +357,7 @@ def test_import_batch_with_one_unknown_section_writes_nothing(client, db_conn):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -358,6 +368,7 @@ def test_import_batch_with_one_unknown_section_writes_nothing(client, db_conn):
                 "exam_type": "guided",
             },
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "does-not-exist",
                 "section_version": "2026-01-01T00:00:00Z",
@@ -386,6 +397,7 @@ def test_import_examinations_requires_exam_type_per_result(client):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -404,6 +416,7 @@ def test_import_examinations_rejects_invalid_exam_type_value(client):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "structure",
                 "section_version": _section_version(client, "structure"),
@@ -466,7 +479,7 @@ def _f1_section_version(client):
 
 def test_examination_package_includes_nugget_versions_per_section(client):
     """Scenario: Examination package includes nugget_versions per section."""
-    r = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/examination-package", params={"exam_type": "guided"})
+    r = client.get(f"/api/essaycards/essays/{ESSAY_F_ID}/examination-package", params={"exam_type": "guided", "scope": "essay"})
     assert r.status_code == 200
     body = r.json()
     section = next(s for s in body["sections"] if s["section_id"] == SECTION_F1_ID)
@@ -480,6 +493,7 @@ def test_examination_import_stores_nugget_versions_verbatim(client, db_conn):
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_F_SLUG,
                 "section_anchor_slug": SECTION_F1_ANCHOR,
                 "section_version": _f1_section_version(client),
@@ -508,6 +522,7 @@ def test_examination_import_without_nugget_versions_stores_null(client, db_conn)
     payload = {
         "results": [
             {
+                "scope": "section",
                 "essay_slug": ESSAY_F_SLUG,
                 "section_anchor_slug": SECTION_F1_ANCHOR,
                 "section_version": _f1_section_version(client),

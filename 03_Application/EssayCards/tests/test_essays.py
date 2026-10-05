@@ -6,15 +6,19 @@ Sprint01_Core/10_test_spec.md and Sprint12_FSRSAndUXOverhaul/10_test_spec.md.
 Fixture IDs are defined in tests/fixtures.sql.
 """
 
+from tests.helpers import unlock_essay_sections
+
 # ── Fixture IDs (stable references to fixtures.sql) ───────────────────────────
 ESSAY_A_ID = "ea000001-0000-0000-0000-000000000001"
 SECTION_A2_ID = "ec000002-0000-0000-0000-000000000002"  # essay A / "structure" — never examined in fixtures
 UNKNOWN_ID = "00000000-0000-0000-0000-000000000000"
 
 
-def _mk_essay(client, slug, n_cards, **extra):
+def _mk_essay(client, slug, n_cards, unlock=True, **extra):
     """Ingest an essay with n_cards freshly-open (new, interval 0) cards.
-    Returns its essay_id."""
+    Returns its essay_id. Sprint14: cards of a freshly ingested essay start
+    locked; unlock=True (default) marks its sections guided-passed so the
+    cards behave as before."""
     payload = {
         "title": slug, "slug": slug,
         "sections": [{
@@ -25,6 +29,8 @@ def _mk_essay(client, slug, n_cards, **extra):
     }
     r = client.post("/api/essaycards/essays/ingest", json=payload)
     assert r.status_code == 200, r.text
+    if unlock:
+        unlock_essay_sections(r.json()["essay_id"])
     return r.json()["essay_id"]
 
 
@@ -44,10 +50,11 @@ def test_list_essays_returns_dataset(client):
     for field in (
         "id", "title", "slug", "category", "sort_index", "status",
         "progress_total", "progress_established", "open_count",
-        "cards_seen_count", "cards_future_safe_count",
-        "milestone_all_cards_seen", "milestone_all_cards_future_safe",
-        "milestone_guided_passed", "milestone_unguided_passed",
-        "guided_passed_at", "unguided_passed_at", "learning_level",
+        "essay_state", "essay_next_step", "essay_guided_passed", "essay_unguided_passed",
+        "essay_guided_latest_score", "essay_unguided_latest_score",
+        "essay_guided_passed_at", "essay_unguided_passed_at",
+        "cards_learned_count", "sections_total", "sections_unguided_passed_count",
+        "revalidation_pending_count",
     ):
         assert field in row
 
@@ -157,146 +164,38 @@ def test_overview_planned_essay_with_no_cards(client):
     assert row["progress_total"] == 0
     assert row["progress_established"] == 0
     assert row["open_count"] == 0
-    assert row["milestone_all_cards_seen"] is False
-    assert row["milestone_all_cards_future_safe"] is False
-    assert row["learning_level"] == 0
+    assert row["essay_state"] == "grey"
 
 
-# ── Learning progress (Sprint12_FSRSAndUXOverhaul) ──────────────────────────
-#
-# PASS_SCORE_THRESHOLD = 3 (score >= 3 counts as "passed" for milestones 3/4).
+# ── Essay progress fields (Sprint14_SectionProgressionAndRevalidation) ──────
+# The Sprint12 learning-progress fields / learning_level are removed; the
+# derived essay traffic light and the unlock/state logic are covered in
+# tests/test_progress.py.
 
-def _review(client, flashcard_id, grade="easy"):
-    r = client.post(f"/api/essaycards/flashcards/{flashcard_id}/review", json={"grade": grade})
-    assert r.status_code == 200, r.text
-    return r.json()
-
-
-def _import_exam(client, essay_slug, section_version, section_anchor_slug, score, exam_type):
-    r = client.post("/api/essaycards/examinations/import", json={
-        "results": [{
-            "essay_slug": essay_slug,
-            "section_anchor_slug": section_anchor_slug,
-            "section_version": section_version,
-            "examined_at": "2026-08-28T14:30:00Z",
-            "question": "Q", "answer_transcript": "A",
-            "score": score, "exam_type": exam_type,
-        }],
-    })
-    assert r.status_code == 200, r.text
-
-
-def test_essay_with_zero_cards_has_card_milestones_false_and_level_bounded_by_exam_milestones(client):
-    """Scenario: an essay with no cards never satisfies milestones 1/2,
-    regardless of any exam state — fixture essay-i-zero-cards has two
-    sections, zero cards, and both sections' latest guided examination
-    scoring >= 3 (milestone_guided_passed true), but the card milestones must
-    stay false and must not contribute to learning_level."""
-    essay_id = "ea000009-0000-0000-0000-000000000009"
-    row = _overview_row(client, essay_id)
-    assert row["progress_total"] == 0
-    assert row["milestone_all_cards_seen"] is False
-    assert row["milestone_all_cards_future_safe"] is False
-    assert row["milestone_guided_passed"] is True
-    assert row["milestone_unguided_passed"] is False
-    assert row["learning_level"] == 1  # exactly one true milestone (guided)
-
-
-def test_essay_all_cards_seen_and_future_safe_satisfies_card_milestones(client):
-    """Scenario: all cards seen and future-safe satisfies both card
-    milestones — cards_seen_count/cards_future_safe_count both equal
-    progress_total."""
-    eid = _mk_essay(client, "level-cards-essay", 2)
-    due = client.get(f"/api/essaycards/flashcards/due?essay_id={eid}").json()["rows"]
-    for card in due:
-        _review(client, card["flashcard_id"], "easy")  # pushes next_due_at well past +24h
-
-    row = _overview_row(client, eid)
-    assert row["milestone_all_cards_seen"] is True
-    assert row["milestone_all_cards_future_safe"] is True
-    assert row["cards_seen_count"] == row["progress_total"] == 2
-    assert row["cards_future_safe_count"] == row["progress_total"]
-
-
-def test_essay_one_unseen_card_fails_cards_seen_milestone(client):
-    """Scenario: one unseen card among many keeps milestone_all_cards_seen
-    false and cards_seen_count one less than progress_total."""
-    eid = _mk_essay(client, "partial-seen-essay", 3)
-    due = client.get(f"/api/essaycards/flashcards/due?essay_id={eid}").json()["rows"]
-    for card in due[:2]:
-        _review(client, card["flashcard_id"], "easy")
-
-    row = _overview_row(client, eid)
-    assert row["milestone_all_cards_seen"] is False
-    assert row["cards_seen_count"] == row["progress_total"] - 1 == 2
-
-
-def test_essay_guided_passed_requires_every_section_at_or_above_threshold(client):
-    """Scenario: one section below the score-3 threshold keeps
-    guided_passed false even though most sections pass — fixture
-    essay-j-mixed-exam-types has section 1's guided exam at score 4 (pass)
-    and section 2's at score 2 (fail)."""
-    row = _overview_row(client, "ea00000a-0000-0000-0000-00000000000a")
-    assert row["milestone_guided_passed"] is False
-    assert row["guided_passed_at"] is None
-
-
-def test_essay_guided_and_unguided_milestones_are_independent(client):
-    """Scenario: guided_passed can be false while unguided_passed is true
-    for the same essay — fixture essay-j-mixed-exam-types has every section's
-    unguided exam passing (3, 5) while one section's guided exam fails."""
-    row = _overview_row(client, "ea00000a-0000-0000-0000-00000000000a")
-    assert row["milestone_guided_passed"] is False
-    assert row["milestone_unguided_passed"] is True
-    assert row["unguided_passed_at"] is not None
-
-
-def test_essay_learning_level_sums_four_independent_milestones_in_any_order(client):
-    """Scenario: learning_level equals the count of true milestones
-    regardless of which ones are true — constructs an essay hitting level 4
-    (every milestone true) via cards + both exam types, not in 1-2-3-4
-    order (cards are satisfied first, then unguided, then guided)."""
-    eid, slug = _mk_essay_returning_slug(client, "level-4-essay", 2)
-    due = client.get(f"/api/essaycards/flashcards/due?essay_id={eid}").json()["rows"]
-    for card in due:
-        _review(client, card["flashcard_id"], "easy")
-
-    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
-    section = detail["sections"][0]
-    section_version = section["updated_at"]
-
-    # Unguided passed first (out of the natural 1-2-3-4 order).
-    _import_exam(client, slug, section_version, section["anchor_slug"], 5, "unguided")
-    row = _overview_row(client, eid)
-    assert row["learning_level"] == 3  # seen + future-safe + unguided
-
-    _import_exam(client, slug, section_version, section["anchor_slug"], 4, "guided")
-    row = _overview_row(client, eid)
-    assert row["learning_level"] == 4
-    assert all(row[k] for k in (
+def test_essay_list_and_detail_drop_sprint12_fields_and_add_new_ones(client):
+    """Scenario: Essay list drops the Sprint12 fields and adds the new ones."""
+    removed = (
+        "learning_level", "cards_seen_count", "cards_future_safe_count",
         "milestone_all_cards_seen", "milestone_all_cards_future_safe",
         "milestone_guided_passed", "milestone_unguided_passed",
-    ))
-
-
-def _mk_essay_returning_slug(client, slug, n_cards):
-    eid = _mk_essay(client, slug, n_cards)
-    return eid, slug
-
-
-def test_get_essay_detail_carries_same_learning_progress_fields_as_list(client):
-    """Scenario: GET /essays/{id} returns the same nine learning-progress
-    fields, computed identically, as the corresponding GET /essays row."""
-    essay_id = "ea00000a-0000-0000-0000-00000000000a"  # essay-j-mixed-exam-types
+        "guided_passed_at", "unguided_passed_at",
+    )
+    added = (
+        "essay_state", "essay_next_step", "essay_guided_passed", "essay_unguided_passed",
+        "essay_guided_latest_score", "essay_unguided_latest_score",
+        "essay_guided_passed_at", "essay_unguided_passed_at",
+        "cards_learned_count", "sections_total", "sections_unguided_passed_count",
+        "revalidation_pending_count",
+    )
+    essay_id = "ea000012-0000-0000-0000-000000000012"  # fix-essay-violet
     list_row = _overview_row(client, essay_id)
     detail_row = client.get(f"/api/essaycards/essays/{essay_id}").json()["rows"][0]
-
-    for key in (
-        "cards_seen_count", "cards_future_safe_count",
-        "milestone_all_cards_seen", "milestone_all_cards_future_safe",
-        "milestone_guided_passed", "milestone_unguided_passed",
-        "guided_passed_at", "unguided_passed_at", "learning_level",
-    ):
+    for key in removed:
+        assert key not in list_row, key
+        assert key not in detail_row, key
+    for key in added:
+        assert key in list_row, key
+        assert key in detail_row, key
         assert detail_row[key] == list_row[key], key
 
 

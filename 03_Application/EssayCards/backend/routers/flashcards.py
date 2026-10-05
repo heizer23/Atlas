@@ -39,6 +39,12 @@ from fastapi.responses import JSONResponse
 from psycopg2.extras import Json
 
 from backend.database import get_db
+from backend.progress import UNLOCKED_SECTION_SQL
+from backend.revalidation import (
+    clear_revalidation_flag,
+    is_revalidation_correct,
+    record_revalidation_event,
+)
 from backend.scheduling import VALID_GRADES, FSRSScheduler
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 from platform_errorhandling import api_error
@@ -169,6 +175,9 @@ def list_due_flashcards(
     section_id}. {section_id} alone, or {topic} together with essay_id or
     section_id, are rejected with VALIDATION_ERROR.
 
+    Sprint14: locked cards (section guided oral not passed) and cards with
+    needs_revalidation are never eligible here. ORDER BY is unchanged.
+
     Eligibility: next_due_at <= now(), evaluated by Postgres at query time
     (R-CON-AL-06 — single server-clock authority; the client never sends a
     time). Empty result is valid.
@@ -221,7 +230,14 @@ def list_due_flashcards(
 
     scoped = bool(topic or essay_id)  # section_id implies essay_id
 
-    conditions: list[str] = ["frs.next_due_at <= now()"]
+    # Sprint14: eligibility also requires the card's section to be unlocked
+    # (guided section oral passed) and the card not awaiting revalidation
+    # (flagged cards are served only by GET /flashcards/revalidation).
+    conditions: list[str] = [
+        "frs.next_due_at <= now()",
+        UNLOCKED_SECTION_SQL,
+        "frs.needs_revalidation = false",
+    ]
     params: list[Any] = []
     extra_join = ""
     if not scoped:
@@ -326,7 +342,10 @@ def flashcard_queue_stats(
             "VALIDATION_ERROR", "topic cannot be combined with essay_id or section_id"
         )
 
-    conditions: list[str] = []
+    # Sprint14: locked cards are excluded. needs_revalidation cards stay
+    # counted in their FSRS due-date bands (their due dates are untouched), so
+    # due_now can exceed the focus queue by the number of flagged due cards.
+    conditions: list[str] = [UNLOCKED_SECTION_SQL]
     params: list[Any] = []
     extra_join = ""
     if topic:
@@ -339,7 +358,7 @@ def flashcard_queue_stats(
     if section_id:
         conditions.append("f.section_id = %s")
         params.append(section_id)
-    where = ("where " + " and ".join(conditions)) if conditions else ""
+    where = "where " + " and ".join(conditions)
 
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -391,6 +410,57 @@ def flashcard_queue_stats(
         rows=rows,
     )
     return _dataset_response(dataset)
+
+
+@router.get("/revalidation", response_model=None)
+def list_revalidation_cards(essay_id: str | None = None) -> JSONResponse:
+    """
+    The Revalidation queue (Sprint14): every card flagged needs_revalidation,
+    available immediately regardless of next_due_at. Same row shape as
+    GET /flashcards/due (DUE_SCHEMA); is_new is always false.
+
+    Parameters (R-CON-AL-01): optional essay_id; allowed combinations {} and
+    {essay_id}. No time predicate (flagged == eligible). Ordering,
+    deterministic: essay display order (category asc nulls last, sort_index
+    asc, created_at asc), section order_index asc, flashcards.level asc,
+    flashcards.created_at asc, flashcards.id asc — the FSRS due date is
+    deliberately ignored. Empty result (or unknown essay_id) -> empty Dataset;
+    that is the "revalidation complete" signal.
+    """
+    rows: list[dict[str, Any]] = []
+    if essay_id is None or _is_uuid(essay_id):
+        conditions = ["frs.needs_revalidation"]
+        params: list[Any] = []
+        if essay_id:
+            conditions.append("f.essay_id = %s")
+            params.append(essay_id)
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    select f.id as flashcard_id, f.question, f.answer, f.essay_id, f.section_id,
+                           f.nugget_id, s.anchor_slug, frs.next_due_at,
+                           false as is_new,
+                           coalesce(frs.last_reviewed_at >= now() - interval '24 hours', false)
+                               as is_recent,
+                           extract(epoch from frs.review_interval)::bigint
+                               as scheduled_interval_seconds
+                    from essaycards.flashcards f
+                    join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
+                    join essaycards.essay_sections s on s.id = f.section_id
+                    join essaycards.essays e on e.id = f.essay_id
+                    where {" and ".join(conditions)}
+                    order by e.category asc nulls last, e.sort_index asc, e.created_at asc,
+                             s.order_index asc, f.level asc, f.created_at asc, f.id asc
+                    """,
+                    params,
+                )
+                for r in cur.fetchall():
+                    d = dict(r)
+                    d["id"] = d["flashcard_id"]
+                    rows.append(_due_row_to_dict(d))
+
+    return _dataset_response(_due_dataset(rows))
 
 
 # ── Single-question maintenance (Sprint08_QuestionLevelsAndStructure) ───────
@@ -811,6 +881,11 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
     always inserts one review_events row — a review can never persist its new
     due date while failing to persist its FSRS state or its review-event
     record.
+
+    Sprint14: rejects a card in a locked section (VALIDATION_ERROR, no write)
+    and branches on the card's server-side needs_revalidation flag — see
+    backend/revalidation.py. Response gains revalidation_outcome
+    (null | 'preserved' | 'failed').
     """
     grade, error = await _parse_review_grade(request)
     if error is not None:
@@ -822,13 +897,44 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
             now = cur.fetchone()["now"]
 
             cur.execute(
-                "select last_reviewed_at, next_due_at, review_interval "
-                "from essaycards.flashcard_review_state where flashcard_id = %s",
+                f"""
+                select frs.last_reviewed_at, frs.next_due_at, frs.review_interval,
+                       frs.needs_revalidation, f.essay_id,
+                       {UNLOCKED_SECTION_SQL} as is_unlocked
+                from essaycards.flashcard_review_state frs
+                join essaycards.flashcards f on f.id = frs.flashcard_id
+                where frs.flashcard_id = %s
+                """,
                 (flashcard_id,),
             )
             state_row = cur.fetchone()
             if not state_row:
                 return api_error("NOT_FOUND", f"Flashcard {flashcard_id} not found", status=404)
+
+            # Locked-card write guard (stale clients): a card whose section has
+            # not passed its guided oral cannot be reviewed. No write happens.
+            if not state_row["is_unlocked"]:
+                return api_error(
+                    "VALIDATION_ERROR",
+                    "This card is locked: pass the guided oral exam for its section to unlock it",
+                )
+
+            # Revalidation is server-derived from the flag; the client sends no mode.
+            is_revalidation = bool(state_row["needs_revalidation"])
+
+            if is_revalidation and is_revalidation_correct(grade):
+                # CORRECT: clear the flag and audit it — NOTHING else changes
+                # (no FSRS call, no review_events row, no timestamp/interval write).
+                clear_revalidation_flag(cur, flashcard_id)
+                record_revalidation_event(cur, flashcard_id, str(state_row["essay_id"]), grade, "preserved")
+                conn.commit()
+                last_reviewed = state_row["last_reviewed_at"]
+                return JSONResponse(content={
+                    "flashcard_id": flashcard_id,
+                    "last_reviewed_at": last_reviewed.isoformat() if last_reviewed else None,
+                    "next_due_at": state_row["next_due_at"].isoformat(),
+                    "revalidation_outcome": "preserved",
+                })
 
             existing_state = _load_fsrs_existing_state(cur, flashcard_id)
 
@@ -852,10 +958,17 @@ async def review_flashcard(flashcard_id: str, request: Request) -> JSONResponse:
                 cur, flashcard_id, grade, now, was_due,
                 prior_review_interval, result.review_interval,
             )
+
+            # INCORRECT revalidation: a genuine FSRS failure (path above), plus
+            # flag clear and audit row in the same transaction.
+            if is_revalidation:
+                clear_revalidation_flag(cur, flashcard_id)
+                record_revalidation_event(cur, flashcard_id, str(state_row["essay_id"]), grade, "failed")
         conn.commit()
 
     return JSONResponse(content={
         "flashcard_id": flashcard_id,
         "last_reviewed_at": now.isoformat(),
         "next_due_at": result.next_due_at.isoformat(),
+        "revalidation_outcome": "failed" if is_revalidation else None,
     })

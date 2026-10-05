@@ -8,6 +8,8 @@ Sprint01_Core/10_test_spec.md. Fixture IDs are defined in tests/fixtures.sql.
 
 from datetime import datetime
 
+from tests.helpers import unlock_essay_sections
+
 # ── Fixture IDs (stable references to fixtures.sql) ───────────────────────────
 ESSAY_A = "ea000001-0000-0000-0000-000000000001"
 ESSAY_B = "ea000002-0000-0000-0000-000000000002"
@@ -143,13 +145,15 @@ def test_due_topic_scope_is_focus_across_the_topics_essays(client):
     """?topic=<category> is a FOCUS session over every essay in that topic:
     all open cards, no interval filter."""
     for slug in ("ftopic-a", "ftopic-b"):
-        assert client.post("/api/essaycards/essays/ingest", json={
+        r_ing = client.post("/api/essaycards/essays/ingest", json={
             "title": slug, "slug": slug, "category": "FocusTopic",
             "sections": [{
                 "heading": "S", "anchor_slug": f"{slug}-s", "body_markdown": "b",
                 "cards": [{"id": f"{slug}-c1", "q": f"{slug} q", "a": "a"}],
             }],
-        }).status_code == 200
+        })
+        assert r_ing.status_code == 200
+        unlock_essay_sections(r_ing.json()["essay_id"])  # Sprint14: new cards start locked
 
     r = client.get("/api/essaycards/flashcards/due?topic=FocusTopic")
     assert r.status_code == 200
@@ -644,7 +648,8 @@ def test_fsrs_review_due_date_flows_through_existing_fields(client, db_conn):
     r = client.post(f"/api/essaycards/flashcards/{FC_FSRS_FRESH}/review", json={"grade": "good"})
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) == {"flashcard_id", "last_reviewed_at", "next_due_at"}
+    assert set(body.keys()) == {"flashcard_id", "last_reviewed_at", "next_due_at", "revalidation_outcome"}
+    assert body["revalidation_outcome"] is None
 
     with db_conn.cursor() as cur:
         cur.execute(
@@ -737,13 +742,16 @@ def test_stats_system_wide_partitions_all_bands(client):
         # Essay H's cards may be both due AND established, to preserve this
         # system-wide count) + 1 Sprint12_FSRSAndUXOverhaul migration-backfill
         # fixture card (fix-legacy-no-fsrs-state, next_due_at = now() + 2h).
-        "within_1_day": 6,
-        "within_7_days": 1,
-        "within_30_days": 1,
-        "within_90_days": 1,   # fc-stats-60day
+        # Sprint14 progression fixtures (unlocked cards only; the two locked
+        # fix-essay-locked cards are excluded from stats): +7 within_1_day,
+        # +3 within_7_days, +6 within_30_days, +1 within_90_days.
+        "within_1_day": 13,
+        "within_7_days": 4,
+        "within_30_days": 7,
+        "within_90_days": 2,   # fc-stats-60day + fix-learned-45d
         "beyond_90_days": 1,   # fc-stats-120day
     }
-    assert sum(counts.values()) == 30  # every scheduled card lands in exactly one band
+    assert sum(counts.values()) == 47  # every unlocked scheduled card lands in exactly one band
 
 
 def test_stats_scoped_to_essay(client):
@@ -783,13 +791,15 @@ def test_stats_scoped_to_topic(client):
     """Queue stats accepts topic= (matching GET /flashcards/due) so the review
     screen's forecast is scoped to a topic focus session."""
     for slug in ("stopic-a", "stopic-b"):
-        assert client.post("/api/essaycards/essays/ingest", json={
+        r_ing = client.post("/api/essaycards/essays/ingest", json={
             "title": slug, "slug": slug, "category": "StatTopic",
             "sections": [{
                 "heading": "S", "anchor_slug": f"{slug}-s", "body_markdown": "b",
                 "cards": [{"id": f"{slug}-c1", "q": "q", "a": "a"}],
             }],
-        }).status_code == 200
+        })
+        assert r_ing.status_code == 200
+        unlock_essay_sections(r_ing.json()["essay_id"])  # Sprint14: new cards start locked
 
     counts = _stats_counts(client.get("/api/essaycards/flashcards/stats?topic=StatTopic").json()["rows"])
     assert counts["due_now"] == 2               # both essays' new cards, due at ingest

@@ -85,3 +85,16 @@ test('Study activity chart shows stacked columns with a recall-rate label per da
   await expect(chart).toContainText('Unique');
   await expect(chart).toContainText('First');
 });
+
+test('[UI] essay progress zone shows traffic-light buckets', async ({ page }) => {
+  await page.goto('/essaycards/stats');
+  await expect(page.getByRole('heading', { name: 'Essay learning progress', level: 3 })).toBeVisible({ timeout: 10000 });
+
+  // The zone's chart is labelled by essay state (Sprint14), never the 0/4..4/4 learning levels.
+  const zone = page.locator('xpath=//h3[normalize-space()="Essay learning progress"]/following-sibling::*[position() <= 2]');
+  const text = (await zone.allTextContents()).join(' ');
+  for (const state of ['Grey', 'Yellow', 'Green', 'Blue', 'Violet']) {
+    expect(text, `bucket ${state}`).toContain(state);
+  }
+  expect(text).not.toMatch(/\b[0-4]\/4\b/);
+});

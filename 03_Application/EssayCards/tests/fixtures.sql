@@ -135,13 +135,13 @@ WHERE last_reviewed_at IS NOT NULL;
 -- section "structure" has zero examinations on purpose, to exercise the
 -- never-examined / empty-history / null last_examination paths.
 INSERT INTO essaycards.section_examinations
-  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, feedback) VALUES
+  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, passed, feedback) VALUES
   ('5e000001-0000-0000-0000-000000000001', 'ea000001-0000-0000-0000-000000000001', 'ec000001-0000-0000-0000-000000000001',
     (select updated_at from essaycards.essay_sections where id = 'ec000001-0000-0000-0000-000000000001'),
-    now() - interval '30 days', 'Explain the origins of the format.', 'It emerged gradually from earlier forms.', 3, 'Good enough for now.'),
+    now() - interval '30 days', 'Explain the origins of the format.', 'It emerged gradually from earlier forms.', 3, false, 'Good enough for now.'),
   ('5e000002-0000-0000-0000-000000000002', 'ea000001-0000-0000-0000-000000000001', 'ec000001-0000-0000-0000-000000000001',
     (select updated_at from essaycards.essay_sections where id = 'ec000001-0000-0000-0000-000000000001'),
-    now() - interval '2 days', 'Explain the origins again, in more depth.', 'A more developed account connecting it to related material.', 4, 'Clear improvement since last time.');
+    now() - interval '2 days', 'Explain the origins again, in more depth.', 'A more developed account connecting it to related material.', 4, false, 'Clear improvement since last time.');
 
 -- ── Images (Sprint03_Images) ─────────────────────────────────────────────────
 -- fix-img-alpha: the OLDER row. No matching file is placed in the (tmp) images
@@ -363,13 +363,13 @@ INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, ancho
   ('ec000011-0000-0000-0000-000000000011', 'ea000009-0000-0000-0000-000000000009', 1, 'I Section 2', 'i-section-2', 'Essay I section 2 content.');
 
 INSERT INTO essaycards.section_examinations
-  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, exam_type) VALUES
+  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, passed, exam_type) VALUES
   ('5e000003-0000-0000-0000-000000000003', 'ea000009-0000-0000-0000-000000000009', 'ec000010-0000-0000-0000-000000000010',
     (select updated_at from essaycards.essay_sections where id = 'ec000010-0000-0000-0000-000000000010'),
-    now() - interval '5 days', 'Explain I.1', 'Good account.', 5, 'guided'),
+    now() - interval '5 days', 'Explain I.1', 'Good account.', 5, true, 'guided'),
   ('5e000004-0000-0000-0000-000000000004', 'ea000009-0000-0000-0000-000000000009', 'ec000011-0000-0000-0000-000000000011',
     (select updated_at from essaycards.essay_sections where id = 'ec000011-0000-0000-0000-000000000011'),
-    now() - interval '4 days', 'Explain I.2', 'Good account.', 4, 'guided');
+    now() - interval '4 days', 'Explain I.2', 'Good account.', 4, false, 'guided');
 
 -- Essay J: two sections, each with a GUIDED and an UNGUIDED examination on
 -- record — one section's guided exam scores below the pass threshold while
@@ -388,21 +388,21 @@ INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, ancho
   ('ec00000b-0000-0000-0000-00000000000b', 'ea00000a-0000-0000-0000-00000000000a', 1, 'J Section 2', 'j-section-2', 'Essay J section 2 content.');
 
 INSERT INTO essaycards.section_examinations
-  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, exam_type) VALUES
+  (id, essay_id, section_id, section_version_at, examined_at, question, answer_transcript, score, passed, exam_type) VALUES
   -- section 1: guided passes (score 4), unguided passes (score 3)
   ('5e000005-0000-0000-0000-000000000005', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000a-0000-0000-0000-00000000000a',
     (select updated_at from essaycards.essay_sections where id = 'ec00000a-0000-0000-0000-00000000000a'),
-    now() - interval '5 days', 'Explain J.1 guided', 'Good account.', 4, 'guided'),
+    now() - interval '5 days', 'Explain J.1 guided', 'Good account.', 4, false, 'guided'),
   ('5e000006-0000-0000-0000-000000000006', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000a-0000-0000-0000-00000000000a',
     (select updated_at from essaycards.essay_sections where id = 'ec00000a-0000-0000-0000-00000000000a'),
-    now() - interval '3 days', 'Explain J.1 unguided', 'Good account.', 3, 'unguided'),
+    now() - interval '3 days', 'Explain J.1 unguided', 'Good account.', 3, false, 'unguided'),
   -- section 2: guided FAILS (score 2, below threshold), unguided passes (score 5)
   ('5e000007-0000-0000-0000-000000000007', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000b-0000-0000-0000-00000000000b',
     (select updated_at from essaycards.essay_sections where id = 'ec00000b-0000-0000-0000-00000000000b'),
-    now() - interval '5 days', 'Explain J.2 guided', 'Weak account.', 2, 'guided'),
+    now() - interval '5 days', 'Explain J.2 guided', 'Weak account.', 2, false, 'guided'),
   ('5e000008-0000-0000-0000-000000000008', 'ea00000a-0000-0000-0000-00000000000a', 'ec00000b-0000-0000-0000-00000000000b',
     (select updated_at from essaycards.essay_sections where id = 'ec00000b-0000-0000-0000-00000000000b'),
-    now() - interval '2 days', 'Explain J.2 unguided', 'Good account.', 5, 'unguided');
+    now() - interval '2 days', 'Explain J.2 unguided', 'Good account.', 5, true, 'unguided');
 
 -- Essay-K-level-4 and Essay-L-level-1 scenarios (every card seen/future-safe;
 -- one card seen but not future-safe) are deliberately NOT static SQL fixture
@@ -505,3 +505,160 @@ INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, ancho
 INSERT INTO essaycards.sentence_feedback (section_id, sentence_index, sentence_text, is_difficult, is_thumbs_up) VALUES
   ('ec000016-0000-0000-0000-000000000016', 0, 'Alpha is first.',  true,  false),
   ('ec000016-0000-0000-0000-000000000016', 1, 'Beta is second.',  false, true);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Sprint14_SectionProgressionAndRevalidation
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- (a) Every EXISTING fixture section (ec000001..ec000016) is grandfathered as
+--     guided_passed (source 'grandfathered'), so every prior sprint's cards stay
+--     eligible for queues and review exactly as before.
+INSERT INTO essaycards.section_oral_state (section_id, guided_passed, guided_pass_source) VALUES
+  ('ec000001-0000-0000-0000-000000000001', true, 'grandfathered'),
+  ('ec000002-0000-0000-0000-000000000002', true, 'grandfathered'),
+  ('ec000003-0000-0000-0000-000000000003', true, 'grandfathered'),
+  ('ec000004-0000-0000-0000-000000000004', true, 'grandfathered'),
+  ('ec000005-0000-0000-0000-000000000005', true, 'grandfathered'),
+  ('ec000006-0000-0000-0000-000000000006', true, 'grandfathered'),
+  ('ec000007-0000-0000-0000-000000000007', true, 'grandfathered'),
+  ('ec000008-0000-0000-0000-000000000008', true, 'grandfathered'),
+  ('ec000009-0000-0000-0000-000000000009', true, 'grandfathered'),
+  ('ec000010-0000-0000-0000-000000000010', true, 'grandfathered'),
+  ('ec000011-0000-0000-0000-000000000011', true, 'grandfathered'),
+  ('ec00000a-0000-0000-0000-00000000000a', true, 'grandfathered'),
+  ('ec00000b-0000-0000-0000-00000000000b', true, 'grandfathered'),
+  ('ec000012-0000-0000-0000-000000000012', true, 'grandfathered'),
+  ('ec000013-0000-0000-0000-000000000013', true, 'grandfathered'),
+  ('ec000014-0000-0000-0000-000000000014', true, 'grandfathered'),
+  ('ec000015-0000-0000-0000-000000000015', true, 'grandfathered'),
+  ('ec000016-0000-0000-0000-000000000016', true, 'grandfathered');
+
+-- (b) Progression worlds. Name -> id traceability:
+--   fix-essay-locked   ea00000c  section ec000017 'fix-locked-1'   cards fc000031/32
+--   fix-essay-yellow   ea00000d  sections ec000018 'fix-yellow-1' (2 cards, one learning),
+--                                         ec000019 'fix-yellow-2' (guided passed, ZERO cards);
+--                                essay guided oral passed, 2 essay attempts
+--   fix-essay-green    ea00000e  section ec00001a 'fix-green-1' (every card established)
+--   fix-essay-learned  ea00000f  section ec00001b 'fix-learned-1' (cards at 29d and 45d)
+--   fix-essay-maturity ea000010  section ec00001c 'fix-maturity-1' (23h59m, 24h, 29d, 30d, new)
+--   fix-essay-blue     ea000011  sections ec00001d/1e (guided + unguided passed), essay NOT violet
+--   fix-essay-violet   ea000012  sections ec00001f (all cards established -> falls back to green),
+--                                         ec000020 (learning + never-reviewed card -> yellow);
+--                                essay guided + unguided passed (Violet)
+-- No fixture card is due now except the two LOCKED fix-essay-locked cards (excluded
+-- from queues and stats by the unlock rule), so the unscoped /due and the
+-- system-wide /stats band counts of earlier sprints only grow in future bands.
+INSERT INTO essaycards.essays (id, title, slug, created_at, updated_at) VALUES
+  ('ea00000c-0000-0000-0000-00000000000c', 'Locked essay',   'fix-essay-locked',   now() - interval '20 hours', now() - interval '20 hours'),
+  ('ea00000d-0000-0000-0000-00000000000d', 'Yellow essay',   'fix-essay-yellow',   now() - interval '19 hours', now() - interval '19 hours'),
+  ('ea00000e-0000-0000-0000-00000000000e', 'Green essay',    'fix-essay-green',    now() - interval '18 hours', now() - interval '18 hours'),
+  ('ea00000f-0000-0000-0000-00000000000f', 'Learned essay',  'fix-essay-learned',  now() - interval '17 hours', now() - interval '17 hours'),
+  ('ea000010-0000-0000-0000-000000000010', 'Maturity essay', 'fix-essay-maturity', now() - interval '16 hours', now() - interval '16 hours'),
+  ('ea000011-0000-0000-0000-000000000011', 'Blue essay',     'fix-essay-blue',     now() - interval '15 hours', now() - interval '15 hours'),
+  ('ea000012-0000-0000-0000-000000000012', 'Violet essay',   'fix-essay-violet',   now() - interval '14 hours', now() - interval '14 hours');
+
+INSERT INTO essaycards.essay_sections (id, essay_id, order_index, heading, anchor_slug, body_markdown) VALUES
+  ('ec000017-0000-0000-0000-000000000017', 'ea00000c-0000-0000-0000-00000000000c', 0, 'Locked 1',   'fix-locked-1',   'Locked section body.'),
+  ('ec000018-0000-0000-0000-000000000018', 'ea00000d-0000-0000-0000-00000000000d', 0, 'Yellow 1',   'fix-yellow-1',   'Yellow section 1 body.'),
+  ('ec000019-0000-0000-0000-000000000019', 'ea00000d-0000-0000-0000-00000000000d', 1, 'Yellow 2',   'fix-yellow-2',   'Yellow section 2 body (no cards).'),
+  ('ec00001a-0000-0000-0000-00000000001a', 'ea00000e-0000-0000-0000-00000000000e', 0, 'Green 1',    'fix-green-1',    'Green section body.'),
+  ('ec00001b-0000-0000-0000-00000000001b', 'ea00000f-0000-0000-0000-00000000000f', 0, 'Learned 1',  'fix-learned-1',  'Learned section body.'),
+  ('ec00001c-0000-0000-0000-00000000001c', 'ea000010-0000-0000-0000-000000000010', 0, 'Maturity 1', 'fix-maturity-1', 'Maturity section body.'),
+  ('ec00001d-0000-0000-0000-00000000001d', 'ea000011-0000-0000-0000-000000000011', 0, 'Blue 1',     'fix-blue-1',     'Blue section 1 body.'),
+  ('ec00001e-0000-0000-0000-00000000001e', 'ea000011-0000-0000-0000-000000000011', 1, 'Blue 2',     'fix-blue-2',     'Blue section 2 body.'),
+  ('ec00001f-0000-0000-0000-00000000001f', 'ea000012-0000-0000-0000-000000000012', 0, 'Violet 1',   'fix-violet-1',   'Violet section 1 body.'),
+  ('ec000020-0000-0000-0000-000000000020', 'ea000012-0000-0000-0000-000000000012', 1, 'Violet 2',   'fix-violet-2',   'Violet section 2 body.');
+
+INSERT INTO essaycards.flashcards (id, essay_id, section_id, card_key, question, answer, level) VALUES
+  -- locked essay: never reviewed, due by date, but locked
+  ('fc000031-0000-0000-0000-000000000031', 'ea00000c-0000-0000-0000-00000000000c', 'ec000017-0000-0000-0000-000000000017', 'fix-locked-c1',   'Locked q1', 'Locked a1', 1),
+  ('fc000032-0000-0000-0000-000000000032', 'ea00000c-0000-0000-0000-00000000000c', 'ec000017-0000-0000-0000-000000000017', 'fix-locked-c2',   'Locked q2', 'Locked a2', 2),
+  -- yellow
+  ('fc000033-0000-0000-0000-000000000033', 'ea00000d-0000-0000-0000-00000000000d', 'ec000018-0000-0000-0000-000000000018', 'fix-yellow-est',   'Yellow q1 (established)', 'Yellow a1', 1),
+  ('fc000034-0000-0000-0000-000000000034', 'ea00000d-0000-0000-0000-00000000000d', 'ec000018-0000-0000-0000-000000000018', 'fix-yellow-learn', 'Yellow q2 (learning)',    'Yellow a2', 2),
+  -- green
+  ('fc000035-0000-0000-0000-000000000035', 'ea00000e-0000-0000-0000-00000000000e', 'ec00001a-0000-0000-0000-00000000001a', 'fix-green-c1',     'Green q1', 'Green a1', 1),
+  ('fc000036-0000-0000-0000-000000000036', 'ea00000e-0000-0000-0000-00000000000e', 'ec00001a-0000-0000-0000-00000000001a', 'fix-green-c2',     'Green q2', 'Green a2', 2),
+  -- learned
+  ('fc000037-0000-0000-0000-000000000037', 'ea00000f-0000-0000-0000-00000000000f', 'ec00001b-0000-0000-0000-00000000001b', 'fix-learned-29d',  'Learned q1 (29d)', 'Learned a1', 1),
+  ('fc000038-0000-0000-0000-000000000038', 'ea00000f-0000-0000-0000-00000000000f', 'ec00001b-0000-0000-0000-00000000001b', 'fix-learned-45d',  'Learned q2 (45d)', 'Learned a2', 2),
+  -- maturity
+  ('fc000039-0000-0000-0000-000000000039', 'ea000010-0000-0000-0000-000000000010', 'ec00001c-0000-0000-0000-00000000001c', 'fix-mat-23h59m',   'Maturity q1', 'Maturity a1', 1),
+  ('fc000040-0000-0000-0000-000000000040', 'ea000010-0000-0000-0000-000000000010', 'ec00001c-0000-0000-0000-00000000001c', 'fix-mat-24h',      'Maturity q2', 'Maturity a2', 1),
+  ('fc000041-0000-0000-0000-000000000041', 'ea000010-0000-0000-0000-000000000010', 'ec00001c-0000-0000-0000-00000000001c', 'fix-mat-29d',      'Maturity q3', 'Maturity a3', 1),
+  ('fc000042-0000-0000-0000-000000000042', 'ea000010-0000-0000-0000-000000000010', 'ec00001c-0000-0000-0000-00000000001c', 'fix-mat-30d',      'Maturity q4', 'Maturity a4', 1),
+  ('fc000043-0000-0000-0000-000000000043', 'ea000010-0000-0000-0000-000000000010', 'ec00001c-0000-0000-0000-00000000001c', 'fix-mat-new',      'Maturity q5', 'Maturity a5', 1),
+  -- blue
+  ('fc000044-0000-0000-0000-000000000044', 'ea000011-0000-0000-0000-000000000011', 'ec00001d-0000-0000-0000-00000000001d', 'fix-blue-c1',      'Blue q1', 'Blue a1', 1),
+  ('fc000045-0000-0000-0000-000000000045', 'ea000011-0000-0000-0000-000000000011', 'ec00001e-0000-0000-0000-00000000001e', 'fix-blue-c2',      'Blue q2', 'Blue a2', 1),
+  -- violet: section 1 (two established/learned cards), section 2 (one learning + one never-reviewed)
+  ('fc000046-0000-0000-0000-000000000046', 'ea000012-0000-0000-0000-000000000012', 'ec00001f-0000-0000-0000-00000000001f', 'fix-violet-c1',    'Violet q1', 'Violet a1', 1),
+  ('fc000047-0000-0000-0000-000000000047', 'ea000012-0000-0000-0000-000000000012', 'ec00001f-0000-0000-0000-00000000001f', 'fix-violet-c2',    'Violet q2', 'Violet a2', 2),
+  ('fc000048-0000-0000-0000-000000000048', 'ea000012-0000-0000-0000-000000000012', 'ec000020-0000-0000-0000-000000000020', 'fix-violet-c3',    'Violet q3 (learning)', 'Violet a3', 1),
+  ('fc000049-0000-0000-0000-000000000049', 'ea000012-0000-0000-0000-000000000012', 'ec000020-0000-0000-0000-000000000020', 'fix-violet-new',   'Violet q4 (never reviewed)', 'Violet a4', 2);
+
+-- review_interval is written explicitly (= next_due_at - last_reviewed_at).
+INSERT INTO essaycards.flashcard_review_state (flashcard_id, last_reviewed_at, next_due_at, review_interval) VALUES
+  ('fc000031-0000-0000-0000-000000000031', null, now() - interval '10 minutes', interval '0'),
+  ('fc000032-0000-0000-0000-000000000032', null, now() - interval '5 minutes',  interval '0'),
+  -- yellow
+  ('fc000033-0000-0000-0000-000000000033', now() - interval '1 day',   now() + interval '2 days',  interval '3 days'),
+  ('fc000034-0000-0000-0000-000000000034', now() - interval '1 hour',  now() + interval '1 hour',  interval '2 hours'),
+  -- green
+  ('fc000035-0000-0000-0000-000000000035', now() - interval '1 day',   now() + interval '20 hours', interval '44 hours'),
+  ('fc000036-0000-0000-0000-000000000036', now() - interval '2 days',  now() + interval '8 days',   interval '10 days'),
+  -- learned
+  ('fc000037-0000-0000-0000-000000000037', now() - interval '10 days', now() + interval '19 days',  interval '29 days'),
+  ('fc000038-0000-0000-0000-000000000038', now() - interval '5 days',  now() + interval '40 days',  interval '45 days'),
+  -- maturity (23h59m / 24h / 29d / 30d / never reviewed but unlocked)
+  ('fc000039-0000-0000-0000-000000000039', now() - interval '10 hours', now() - interval '10 hours' + interval '23 hours 59 minutes', interval '23 hours 59 minutes'),
+  ('fc000040-0000-0000-0000-000000000040', now() - interval '10 hours', now() - interval '10 hours' + interval '24 hours',             interval '24 hours'),
+  ('fc000041-0000-0000-0000-000000000041', now() - interval '5 days',   now() + interval '24 days',   interval '29 days'),
+  ('fc000042-0000-0000-0000-000000000042', now() - interval '5 days',   now() + interval '25 days',   interval '30 days'),
+  ('fc000043-0000-0000-0000-000000000043', null,                         now() + interval '3 hours',   interval '0'),
+  -- blue
+  ('fc000044-0000-0000-0000-000000000044', now() - interval '2 days',  now() + interval '3 days',  interval '5 days'),
+  ('fc000045-0000-0000-0000-000000000045', now() - interval '2 days',  now() + interval '3 days',  interval '5 days'),
+  -- violet
+  ('fc000046-0000-0000-0000-000000000046', now() - interval '15 days', now() + interval '25 days',  interval '40 days'),
+  ('fc000047-0000-0000-0000-000000000047', now() - interval '10 days', now() + interval '25 days',  interval '35 days'),
+  ('fc000048-0000-0000-0000-000000000048', now() - interval '1 hour',  now() + interval '4 hours',  interval '5 hours'),
+  ('fc000049-0000-0000-0000-000000000049', null,                        now() + interval '6 hours',  interval '0');
+
+-- Known FSRS memory state for one violet card (revalidation 'preserved' test
+-- compares this row before/after a correct revalidation).
+INSERT INTO essaycards.fsrs_card_state
+    (flashcard_id, stability, difficulty, fsrs_state, step, last_review_at, raw_state) VALUES
+  ('fc000046-0000-0000-0000-000000000046', 40.0, 5.0, 2, null, now() - interval '15 days',
+   jsonb_build_object(
+     'card_id', 1, 'state', 2, 'step', null, 'stability', 40.0, 'difficulty', 5.0,
+     'due', now() + interval '25 days', 'last_review', now() - interval '15 days'
+   ));
+
+-- Oral state. Absent row == not started (locked / grey): fix-essay-locked has none.
+INSERT INTO essaycards.section_oral_state
+    (section_id, guided_passed, guided_pass_source, guided_passed_at, guided_latest_score,
+     unguided_passed, unguided_passed_at, unguided_latest_score) VALUES
+  ('ec000018-0000-0000-0000-000000000018', true, 'exam', now() - interval '9 days', 5, false, null, null),
+  ('ec000019-0000-0000-0000-000000000019', true, 'exam', now() - interval '9 days', 6, false, null, null),
+  ('ec00001a-0000-0000-0000-00000000001a', true, 'exam', now() - interval '9 days', 5, false, null, null),
+  ('ec00001b-0000-0000-0000-00000000001b', true, 'exam', now() - interval '9 days', 5, false, null, null),
+  ('ec00001c-0000-0000-0000-00000000001c', true, 'exam', now() - interval '9 days', 5, false, null, null),
+  ('ec00001d-0000-0000-0000-00000000001d', true, 'exam', now() - interval '9 days', 5, true, now() - interval '5 days', 5),
+  ('ec00001e-0000-0000-0000-00000000001e', true, 'exam', now() - interval '9 days', 5, true, now() - interval '5 days', 6),
+  ('ec00001f-0000-0000-0000-00000000001f', true, 'exam', now() - interval '20 days', 5, true, now() - interval '10 days', 5),
+  ('ec000020-0000-0000-0000-000000000020', true, 'exam', now() - interval '20 days', 6, true, now() - interval '10 days', 5);
+
+INSERT INTO essaycards.essay_oral_state
+    (essay_id, guided_passed, guided_passed_at, guided_latest_score,
+     unguided_passed, unguided_passed_at, unguided_latest_score) VALUES
+  ('ea00000d-0000-0000-0000-00000000000d', true, now() - interval '10 days', 5, false, null, 3),
+  ('ea000011-0000-0000-0000-000000000011', true, now() - interval '8 days',  5, false, null, null),
+  ('ea000012-0000-0000-0000-000000000012', true, now() - interval '20 days', 6, true, now() - interval '10 days', 5);
+
+INSERT INTO essaycards.essay_examinations
+    (id, essay_id, exam_type, examined_at, question, answer_transcript, score, passed, feedback) VALUES
+  ('e5000001-0000-0000-0000-000000000001', 'ea00000d-0000-0000-0000-00000000000d', 'guided',   now() - interval '10 days', 'Explain the essay (guided).',   'A solid account.', 5, true,  'Good.'),
+  ('e5000002-0000-0000-0000-000000000002', 'ea00000d-0000-0000-0000-00000000000d', 'unguided', now() - interval '2 days',  'Explain the essay (unguided).', 'A partial account.', 3, false, 'Not yet.'),
+  ('e5000003-0000-0000-0000-000000000003', 'ea000012-0000-0000-0000-000000000012', 'guided',   now() - interval '20 days', 'Explain the essay (guided).',   'A strong account.', 6, true,  'Excellent.'),
+  ('e5000004-0000-0000-0000-000000000004', 'ea000012-0000-0000-0000-000000000012', 'unguided', now() - interval '10 days', 'Explain the essay (unguided).', 'A strong account.', 5, true,  'Good.');
