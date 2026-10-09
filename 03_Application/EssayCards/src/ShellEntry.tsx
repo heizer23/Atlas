@@ -150,6 +150,9 @@ interface ReviewStatsSummaryRow {
   failures: number;
   recall_rate: number | null;
   new_count: number;
+  orals_count: number;
+  guided_orals_count: number;
+  unguided_orals_count: number;
 }
 
 interface ActivityDayRow {
@@ -326,6 +329,15 @@ interface SectionExportPackage {
   main_spine_markdown: string;
   main_spine_nuggets: NuggetRef[];
   focus_section_nuggets: { nugget_key: string; title: string; body_markdown: string }[];
+  // Only present when exported with ?include_examinations=true ("Improve section").
+  focus_section_examinations?: {
+    examined_at: string;
+    score: number;
+    passed: boolean;
+    question: string;
+    answer_transcript: string;
+    feedback: string | null;
+  }[];
   sections: {
     section_id: string;
     heading: string;
@@ -950,6 +962,32 @@ Here is the section package:
 
 function buildSectionExportClipboardText(pkg: SectionExportPackage): string {
   return SECTION_EXPORT_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
+
+const SECTION_IMPROVE_PROMPT_INTRO = `You are helping IMPROVE one section of an essay for an app called EssayCards, using evidence of how well I actually understood it. Below this prompt is a JSON payload containing EVERY section of the essay, in order, wrapped in the essay-level fields required to save it back. "focus_section_id" names the ONE section to improve — find it in "sections" by matching its "section_id". "focus_section_nuggets" holds the full text of the nuggets that section references via [[nugget:key]]. "focus_section_examinations" is the history of my GUIDED oral exams on that section, oldest first: each has a score (0-6; 5 or higher passes), the examiner's feedback, and a near-verbatim transcript of the exchange (the examiner's hints and corrections are marked).
+
+YOUR TASK: read the transcripts and feedback to find where my understanding was weak — misconceptions, ideas I could only express after a hint, distinctions I confused, reasoning steps I skipped — and judge whether the section or its flashcards CAUSED or failed to prevent them (unclear wording, a missing step, an unexplained distinction, a missing example, cards that test recall of terms instead of understanding). First tell me what you found and what you propose to change, and let me react. Do not change what was already understood securely. Prefer small targeted improvements over a full rewrite unless I ask for one. Keep the section's scope and the essay's voice, and read the neighboring sections so you do not repeat or contradict them.
+
+Revise ONLY that section: its "body_markdown" and its "cards" (rewrite, add or remove entries). Leave every OTHER entry in "sections" completely untouched, in the same order — the array order is what saves each section's position.
+
+RULES (breaking these makes the reply unusable):
+- Return exactly the same sections, in the same order — do not add, remove, or reorder any of them. Only the focus section's content changes.
+- Do NOT change "slug" (the essay's id) or any section's "anchor_slug" — renaming one breaks links back to that section.
+- Do NOT change "title", "category", "sort_index", or "status" unless I explicitly ask you to.
+- Keep every [[nugget:key]] reference the section currently has unless I ask you to remove it; the nugget texts are provided as context and are not changed by this reply.
+- Each card has a short "id". Keep the "id" of any card you are editing unchanged, so it updates in place instead of creating a duplicate. Only invent a new "id" (letters, digits, "_"/"-" only, unique across the whole essay) for a genuinely new card.
+- Removing a card from a section's "cards" does NOT delete it from the app on reimport — it is simply left unchanged. There is no way to delete a card through this mechanism.
+- "body_markdown" is the actual essay prose the reader sees — write real text, not a summary.
+- OMIT "focus_section_examinations" from your reply (it is read-only context and is not saved).
+
+WHEN I EXPLICITLY ASK YOU TO FINALIZE, reply with ONLY the complete JSON object — no markdown code fences, no commentary before or after — the same shape as below with your revisions applied. Every string must be valid JSON — escape any double quote inside a value as \\".
+
+Here is the section package:
+
+`;
+
+function buildSectionImproveClipboardText(pkg: SectionExportPackage): string {
+  return SECTION_IMPROVE_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
 }
 
 const SECTION_INSERT_PROMPT_INTRO = `You are helping write a NEW section for an essay in an app called EssayCards, to be inserted at a specific position. Below this prompt is a JSON payload containing EVERY section of the essay, in order, wrapped in the essay-level fields required to save it back. A placeholder entry has been spliced into "sections" at the position where the new section goes — it is the entry whose "heading" is "NEW SECTION — replace this whole entry"; every field on that entry is an instruction for what to write, not real content.
@@ -1965,10 +2003,10 @@ function ReaderView() {
   // flight at a time. `ok` drives the button's copied -> "Import" toggle;
   // `text` also carries failure messages, which must NOT toggle the button.
   const [sectionActionMsg, setSectionActionMsg] = useState<
-    { sectionId: string; kind: 'export' | 'insert'; ok: boolean; text: string } | null
+    { sectionId: string; kind: 'export' | 'insert' | 'improve'; ok: boolean; text: string } | null
   >(null);
 
-  const sectionActionReady = (sectionId: string, kind: 'export' | 'insert') =>
+  const sectionActionReady = (sectionId: string, kind: 'export' | 'insert' | 'improve') =>
     sectionActionMsg?.sectionId === sectionId && sectionActionMsg.kind === kind && sectionActionMsg.ok;
 
   // "Export essay" — same toggle-to-Import pattern as the per-section
@@ -2057,6 +2095,40 @@ function ReaderView() {
         err ??
         'Copied. Paste into ChatGPT (or similar), have it revise the section, then paste its JSON ' +
           'reply into "Add / Update Essay" to save it.',
+    });
+  };
+
+  // "Improve section": same package + same reimport path as Export section,
+  // plus this section's guided oral history (?include_examinations=true) and
+  // an improvement-oriented prompt. Reply is pasted into "Add / Update Essay".
+  const handleImproveSection = async (sectionId: string) => {
+    if (!essay) return;
+    setSectionActionMsg(null);
+    const res = await apiFetch<SectionExportPackage>(
+      `/essaycards/essays/${essay.id}/sections/${sectionId}/export?include_examinations=true`
+    );
+    if (isApiError(res)) {
+      setSectionActionMsg({ sectionId, kind: 'improve', ok: false, text: `Export failed: ${res.error.message}` });
+      return;
+    }
+    // Same nugget drop-detection stash as handleExportSection.
+    try {
+      sessionStorage.setItem(
+        `essaycards:sectionExport:${sectionId}`,
+        JSON.stringify(res.focus_section_nuggets.map(n => n.nugget_key)),
+      );
+    } catch { /* sessionStorage unavailable — drop-detection degrades gracefully to no-op */ }
+
+    const n = res.focus_section_examinations?.length ?? 0;
+    const err = await writeClipboard(buildSectionImproveClipboardText(res));
+    setSectionActionMsg({
+      sectionId,
+      kind: 'improve',
+      ok: !err,
+      text:
+        err ??
+        `Copied (${n} guided oral${n === 1 ? '' : 's'} included${n === 0 ? ' — nothing to learn from yet' : ''}). ` +
+          'Paste into ChatGPT (or similar), discuss the improvements, then paste its JSON reply into "Add / Update Essay" to save it.',
     });
   };
 
@@ -2366,6 +2438,13 @@ function ReaderView() {
                   sectionActionReady(section.id, 'export')
                     ? navigate('/essaycards/ingest')
                     : handleExportSection(section.id),
+              },
+              {
+                label: sectionActionReady(section.id, 'improve') ? 'Import improved section →' : 'Improve section',
+                onClick: () =>
+                  sectionActionReady(section.id, 'improve')
+                    ? navigate('/essaycards/ingest')
+                    : handleImproveSection(section.id),
               },
               {
                 label: sectionActionReady(section.id, 'insert') ? 'Import insertion →' : 'Insert section after',
@@ -4899,6 +4978,9 @@ function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
       {figure('Unique Cards Seen', String(row.unique_cards))}
       {figure('New Cards Seen', String(row.new_count))}
       {figure('Recall Rate', row.recall_rate == null ? 'No reviews yet' : `${Math.round(row.recall_rate * 100)}%`)}
+      {figure('Orals Taken', String(row.orals_count))}
+      {figure('Guided Orals Taken', String(row.guided_orals_count))}
+      {figure('Unguided Orals Taken', String(row.unguided_orals_count))}
       <table style={{ width: '100%', marginTop: 12, borderCollapse: 'collapse' }}>
         <tbody>
           <tr>
@@ -4945,18 +5027,23 @@ const ESSAY_STATE_ORDER: EssayState[] = ['grey', 'yellow', 'green', 'blue', 'vio
 // repeat = recalls - unique; unique = unique - first; first = first.
 const ACTIVITY_COLORS = {
   repeat: 'var(--md-sys-color-outline)',
-  unique: 'var(--md-sys-color-secondary, #6b7a8f)',
+  unique: 'var(--md-sys-color-tertiary, #b5651d)',
   first: 'var(--md-sys-color-primary)',
 };
 
 function DailyActivityChart({ rows }: { rows: ActivityDayRow[] }) {
+  // 30 columns overflow narrow screens; open scrolled to the newest day (rows are oldest-first).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+  }, [rows]);
   const maxRecalls = Math.max(1, ...rows.map(r => r.recalls));
   const barArea = 120;
   const seg = (n: number, color: string, label: string) =>
     n > 0 ? <div title={`${label}: ${n}`} style={{ height: (n / maxRecalls) * barArea, background: color }} /> : null;
   return (
     <div data-testid="daily-activity-chart">
-      <div style={{ overflowX: 'auto' }}>
+      <div ref={scrollRef} style={{ overflowX: 'auto' }}>
         <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', minWidth: rows.length * 30 }}>
           {rows.map(r => (
             <div

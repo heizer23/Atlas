@@ -457,3 +457,59 @@ def test_essay_export_and_section_export_carry_main_spine_nuggets(client):
         f"/api/essaycards/essays/{ESSAY_F_ID}/sections/{SECTION_F1_ID}/export"
     ).json()
     assert {"nugget_key": "fix-nugget-adequacy", "title": "Adequacy"} in section_export["main_spine_nuggets"]
+
+
+# ── Sprint15: GET .../export?include_examinations=true ("Improve section") ──
+
+def _insert_section_exam(db_conn, essay_id, section_id, exam_type, score, examined_at_sql, transcript):
+    with db_conn.cursor() as cur:
+        cur.execute(
+            f"""
+            insert into essaycards.section_examinations
+              (essay_id, section_id, section_version_at, examined_at, question, answer_transcript,
+               score, passed, feedback, exam_type)
+            values (%s, %s, now(), {examined_at_sql}, 'q', %s, %s, %s, 'fb', %s)
+            """,
+            (essay_id, section_id, transcript, score, score >= 5, exam_type),
+        )
+
+
+def test_export_section_default_has_no_examinations_key(client):
+    eid, sids = _mk_essay_sections(client, "imp-default", ["A"])
+    pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{sids[0]}/export").json()
+    assert "focus_section_examinations" not in pkg
+
+
+def test_export_section_include_examinations_returns_guided_only_oldest_first(client, db_conn):
+    eid, sids = _mk_essay_sections(client, "imp-exams", ["A", "B"])
+    _insert_section_exam(db_conn, eid, sids[0], "guided", 3, "now() - interval '2 days'", "Examiner: one")
+    _insert_section_exam(db_conn, eid, sids[0], "guided", 5, "now() - interval '1 day'", "Examiner: two")
+    _insert_section_exam(db_conn, eid, sids[0], "unguided", 6, "now()", "Examiner: cold")
+    _insert_section_exam(db_conn, eid, sids[1], "guided", 4, "now()", "Examiner: other section")
+
+    r = client.get(f"/api/essaycards/essays/{eid}/sections/{sids[0]}/export?include_examinations=true")
+    assert r.status_code == 200
+    exams = r.json()["focus_section_examinations"]
+    assert [e["answer_transcript"] for e in exams] == ["Examiner: one", "Examiner: two"]
+    assert [e["score"] for e in exams] == [3, 5]
+    assert [e["passed"] for e in exams] == [False, True]
+    assert set(exams[0]) == {"examined_at", "score", "passed", "question", "answer_transcript", "feedback"}
+
+
+def test_export_section_include_examinations_empty_list_when_never_examined(client):
+    eid, sids = _mk_essay_sections(client, "imp-none", ["A"])
+    pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{sids[0]}/export?include_examinations=true").json()
+    assert pkg["focus_section_examinations"] == []
+
+
+def test_improved_package_reimports_through_ingest_ignoring_examinations(client, db_conn):
+    """The reply path is plain POST /essays/ingest; a package that still carries
+    focus_section_examinations must not break it, and an edited body is saved."""
+    eid, sids = _mk_essay_sections(client, "imp-roundtrip", ["A"])
+    _insert_section_exam(db_conn, eid, sids[0], "guided", 4, "now()", "Examiner: x")
+    pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{sids[0]}/export?include_examinations=true").json()
+    pkg["sections"][0]["body_markdown"] = "improved body"
+    r = client.post("/api/essaycards/essays/ingest", json=pkg)
+    assert r.status_code == 200, r.text
+    detail = client.get(f"/api/essaycards/essays/{eid}").json()["rows"][0]
+    assert detail["sections"][0]["body_markdown"] == "improved body"

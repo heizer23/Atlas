@@ -490,7 +490,7 @@ def export_essay(essay_id: str) -> JSONResponse:
 
 
 @router.get("/{essay_id}/sections/{section_id}/export", response_model=None)
-def export_section(essay_id: str, section_id: str) -> JSONResponse:
+def export_section(essay_id: str, section_id: str, include_examinations: bool = False) -> JSONResponse:
     """
     Self-contained JSON export of the essay's FULL current section list (not
     just section_id), shaped as a valid POST /ingest payload —
@@ -527,6 +527,14 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
     POST /essays/ingest reads none of them (or `focus_section_id`, or
     `export_version`), so they round-trip harmlessly through an unedited
     reply.
+
+    Optional `include_examinations` (bool, default false — the package is then
+    byte-identical to before): when true the package gains
+    `focus_section_examinations`, EVERY guided section oral of the focus section
+    (exam_type='guided'; unguided never included), oldest first by examined_at,
+    each {examined_at, score, passed, question, answer_transcript, feedback}
+    verbatim as stored; [] when the section has none. Backs "Improve section".
+    Read-only context — POST /essays/ingest ignores it like the other extras.
 
     404 ApiError if essay_id does not exist, or if section_id does not exist
     under this essay.
@@ -569,6 +577,29 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
                 for r in cur.fetchall()
             ]
 
+            focus_section_examinations = None
+            if include_examinations:
+                cur.execute(
+                    """
+                    select examined_at, score, passed, question, answer_transcript, feedback
+                    from essaycards.section_examinations
+                    where section_id = %s and exam_type = 'guided'
+                    order by examined_at asc
+                    """,
+                    (section_id,),
+                )
+                focus_section_examinations = [
+                    {
+                        "examined_at": r["examined_at"].isoformat(),
+                        "score": r["score"],
+                        "passed": r["passed"],
+                        "question": r["question"],
+                        "answer_transcript": r["answer_transcript"],
+                        "feedback": r["feedback"],
+                    }
+                    for r in cur.fetchall()
+                ]
+
     package = {
         "export_version": 2,
         "focus_section_id": section_id,
@@ -582,6 +613,8 @@ def export_section(essay_id: str, section_id: str) -> JSONResponse:
         "focus_section_nuggets": focus_section_nuggets,
         "sections": sections,
     }
+    if focus_section_examinations is not None:
+        package["focus_section_examinations"] = focus_section_examinations
     return JSONResponse(content=package)
 
 

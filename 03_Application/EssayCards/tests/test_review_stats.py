@@ -145,6 +145,7 @@ def test_review_stats_aggregation_is_scheduler_agnostic(client, db_conn):
         assert set(row.keys()) == {
             "period", "reviews", "unique_cards", "again_count", "hard_count",
             "good_count", "easy_count", "failures", "recall_rate", "new_count",
+            "orals_count", "guided_orals_count", "unguided_orals_count",  # Sprint15
         }
 
     with db_conn.cursor() as cur:
@@ -390,3 +391,37 @@ def test_intervals_returns_six_zero_filled_buckets_summing_to_total_scheduled(cl
 
     assert sum(row["count"] for row in rows) == total
     assert total > 0
+
+
+# ── Sprint15: oral counts in the summary rows ───────────────────────────────
+
+def _expected_orals(db_conn, interval_literal: str) -> dict:
+    """Ground truth straight from the DB: section + essay scope combined."""
+    with db_conn.cursor() as cur:
+        cur.execute(
+            f"""
+            select count(*) as total,
+                   count(*) filter (where exam_type = 'guided') as guided,
+                   count(*) filter (where exam_type = 'unguided') as unguided
+            from (
+                select examined_at, exam_type from essaycards.section_examinations
+                union all
+                select examined_at, exam_type from essaycards.essay_examinations
+            ) x
+            where examined_at >= now() - interval '{interval_literal}'
+            """
+        )
+        return dict(cur.fetchone())
+
+
+def test_summary_rows_carry_oral_counts_per_window(client, db_conn):
+    """Scenario: each row has orals_count / guided_orals_count / unguided_orals_count
+    equal to the section+essay exam rows inside that window; guided + unguided = total."""
+    rows = _rows_by_period(client.get(URL).json())
+    for period, interval_literal in (("day", "24 hours"), ("week", "7 days"), ("month", "30 days")):
+        exp = _expected_orals(db_conn, interval_literal)
+        assert rows[period]["orals_count"] == exp["total"]
+        assert rows[period]["guided_orals_count"] == exp["guided"]
+        assert rows[period]["unguided_orals_count"] == exp["unguided"]
+        assert rows[period]["guided_orals_count"] + rows[period]["unguided_orals_count"] == rows[period]["orals_count"]
+    assert rows["day"]["orals_count"] <= rows["week"]["orals_count"] <= rows["month"]["orals_count"]

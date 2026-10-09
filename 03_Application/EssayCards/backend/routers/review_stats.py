@@ -50,6 +50,9 @@ REVIEW_STATS_SUMMARY_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="failures", label="Failures", type="number", sortable=False, filterable=False),
     ColumnSchema(key="recall_rate", label="Recall rate", type="number", sortable=False, filterable=False),
     ColumnSchema(key="new_count", label="New cards seen", type="number", sortable=False, filterable=False),
+    ColumnSchema(key="orals_count", label="Orals taken", type="number", sortable=False, filterable=False),
+    ColumnSchema(key="guided_orals_count", label="Guided orals taken", type="number", sortable=False, filterable=False),
+    ColumnSchema(key="unguided_orals_count", label="Unguided orals taken", type="number", sortable=False, filterable=False),
 ]
 
 # FIRST-EVER REVIEW (Sprint13, single canonical definition): a review_events
@@ -104,6 +107,32 @@ def _review_stats_aggregate(cur: Any) -> dict[str, Any]:
         "where e.reviewed_at >= now() - interval '30 days'"
     )
     cur.execute(query)
+    aggregate = dict(cur.fetchone())
+    aggregate.update(_orals_aggregate(cur))
+    return aggregate
+
+
+def _orals_aggregate(cur: Any) -> dict[str, Any]:
+    """Oral exams taken per rolling window, section and essay scope combined
+    (section_examinations UNION ALL essay_examinations). Time basis is the
+    stored examined_at (persisted domain time, supplied at import) against the
+    server's now(), same rolling windows as the review aggregates. Counts every
+    attempt, passed or not."""
+    select_parts: list[str] = []
+    for period, interval_literal in _WINDOWS:
+        in_window = f"examined_at >= now() - interval '{interval_literal}'"
+        select_parts.append(f"count(*) filter (where {in_window}) as {period}_orals")
+        for exam_type in ("guided", "unguided"):
+            select_parts.append(
+                f"count(*) filter (where {in_window} and exam_type = '{exam_type}') "
+                f"as {period}_{exam_type}_orals"
+            )
+    cur.execute(
+        "select " + ", ".join(select_parts) + " from ("
+        "select examined_at, exam_type from essaycards.section_examinations "
+        "union all select examined_at, exam_type from essaycards.essay_examinations"
+        ") x where examined_at >= now() - interval '30 days'"
+    )
     return dict(cur.fetchone())
 
 
@@ -130,6 +159,9 @@ def _build_summary_rows(aggregate: dict[str, Any]) -> list[dict[str, Any]]:
             "failures": failures,
             "recall_rate": recall_rate,
             "new_count": int(aggregate.get(f"{period}_new_count") or 0),
+            "orals_count": int(aggregate.get(f"{period}_orals") or 0),
+            "guided_orals_count": int(aggregate.get(f"{period}_guided_orals") or 0),
+            "unguided_orals_count": int(aggregate.get(f"{period}_unguided_orals") or 0),
         })
     return rows
 
