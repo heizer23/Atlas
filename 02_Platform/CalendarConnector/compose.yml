@@ -6,7 +6,7 @@ services:
     container_name: atlas-calendar-connector
     restart: unless-stopped
     ports:
-      - "${CALENDAR_CONNECTOR_PORT:-8021}:8000"
+      - "127.0.0.1:${CALENDAR_CONNECTOR_PORT:-8021}:8000"
     environment:
       ATLAS_PG_DB:       ${ATLAS_PG_DB}
       ATLAS_PG_USER:     ${ATLAS_PG_USER}
