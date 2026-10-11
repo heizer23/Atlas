@@ -33,8 +33,8 @@ test('essay header exposes a primary action plus a secondary action menu, no clu
   const backButton = page.getByRole('button', { name: '← All essays' });
   await expect(backButton).toBeVisible();
 
-  // Each section also gets its own ActionMenu ("Review this section" +
-  // "More actions") — the essay header's is the FIRST one in document
+  // Each section also gets its own ActionMenu (a "More actions" trigger only,
+  // no primary button) — the essay header's is the FIRST one in document
   // order, appearing before any section content.
   const moreTrigger = page.getByRole('button', { name: 'More actions' }).first();
   await expect(moreTrigger).toBeVisible();
