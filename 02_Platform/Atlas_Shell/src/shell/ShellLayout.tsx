@@ -17,23 +17,26 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ShellContext } from './ShellContext';
 import { AppRegistry } from '../registry/AppRegistry';
 import { Sidebar } from '../navigation/Sidebar';
+import { LineBullet } from '../launcher/LineBullet';
+import { markOpened } from './recency';
 import { BottomNav } from '../navigation/BottomNav';
 import './shell.css';
 
-function MobileHeader({ label }: { label: string }): JSX.Element {
+function MobileHeader({ appId, label }: { appId: string; label: string }): JSX.Element {
   const navigate = useNavigate();
   return (
-    <div className="shell-mobile-header">
-      <button
-        type="button"
-        className="shell-mobile-header__back-btn"
-        onClick={() => navigate('/')}
-        aria-label="Back to launcher"
-      >
-        ← Atlas
-      </button>
+    <button
+      type="button"
+      className="shell-mobile-header"
+      onClick={() => navigate('/')}
+      aria-label={`${label} — back to launcher`}
+    >
+      <svg className="shell-mobile-header__chevron" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M12.5 4 6.5 10l6 6" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <LineBullet appId={appId} label={label} />
       <span className="shell-mobile-header__title">{label}</span>
-    </div>
+    </button>
   );
 }
 
@@ -67,6 +70,11 @@ export function ShellLayout({ children }: ShellLayoutProps): JSX.Element {
     [location.pathname, allApps.length], // re-derive when registry changes
   );
 
+  // Record the open for launcher ordering (per-device, best effort).
+  useEffect(() => {
+    if (activeApp) markOpened(activeApp.appId);
+  }, [activeApp?.appId]);
+
   const contextValue = useMemo(
     () => ({ activeApp, allApps }),
     [activeApp, allApps],
@@ -76,7 +84,7 @@ export function ShellLayout({ children }: ShellLayoutProps): JSX.Element {
     <ShellContext.Provider value={contextValue}>
       <div className="shell-root">
         {!isMobile && <Sidebar />}
-        {isMobile && activeApp && <MobileHeader label={activeApp.label} />}
+        {isMobile && activeApp && <MobileHeader appId={activeApp.appId} label={activeApp.label} />}
         <main className="shell-content">
           {children}
         </main>

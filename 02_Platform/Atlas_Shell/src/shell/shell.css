@@ -22,6 +22,28 @@
 
 @import '@platform-ui/index.css';
 
+/* ─── Wayfinding tokens ──────────────────────────────────────────────────────── */
+:root {
+  --line: var(--md-sys-color-primary);
+  --shell-ink: #14161A;
+  --shell-sign-rule: 3px;
+}
+
+.shell-bullet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+.shell-bullet--md { width: 32px; height: 32px; font-size: 17px; }
+.shell-bullet--lg { width: 44px; height: 44px; font-size: 24px; }
+
 /* ─── Shell layout grid ──────────────────────────────────────────────────────── */
 
 .shell-root {
@@ -44,8 +66,8 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--md-sys-color-surface);
-  box-shadow: var(--elevation-1);
+  background: #FFFFFF;
+  border-right: 1px solid var(--md-sys-color-outline-variant);
   overflow-y: auto;
   transition: transform var(--motion-enter), width var(--motion-enter);
   z-index: 100;
@@ -97,9 +119,9 @@
   top: var(--space-sm);
   left: var(--space-sm);
   z-index: 110;
-  background: var(--md-sys-color-surface);
-  border: none;
-  border-radius: var(--radius-button);
+  background: #FFFFFF;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 50%;
   padding: var(--space-sm);
   cursor: pointer;
   color: var(--md-sys-color-on-surface);
@@ -145,18 +167,31 @@
 .shell-sidebar__launcher-btn {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-md);
-  color: var(--md-sys-color-on-surface);
-  font-size: 14px;
-  font-weight: 500;
+  padding: var(--space-md);
+  color: var(--shell-ink);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   border: none;
   background: none;
   cursor: pointer;
   width: 100%;
   text-align: left;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
   transition: background var(--motion-state);
+}
+
+.shell-sidebar__sign {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  border-bottom: var(--shell-sign-rule) solid var(--line);
+}
+
+.shell-sidebar__sign-label {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--shell-ink);
 }
 
 .shell-sidebar__launcher-btn:hover {
@@ -166,7 +201,7 @@
 .shell-sidebar__nav {
   display: flex;
   flex-direction: column;
-  padding: var(--space-sm) 0;
+  padding: var(--space-xs) 0;
   flex: 1;
 }
 
@@ -174,11 +209,14 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  min-height: 44px;
   padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-button);
-  margin: 2px var(--space-sm);
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
@@ -186,22 +224,19 @@
 }
 
 .shell-sidebar-nav-item:hover {
-  background: var(--md-sys-color-surface-variant);
+  background: color-mix(in srgb, var(--md-sys-color-surface-variant) 55%, #FFFFFF);
   color: var(--md-sys-color-on-surface);
 }
 
 /* Selected state — Blueprint DesignLanguage §8 */
-.shell-sidebar-nav-item--active {
-  background: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
-}
-
+.shell-sidebar-nav-item--active,
 .shell-sidebar-nav-item--active:hover {
-  background: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background: color-mix(in srgb, var(--line) 12%, #FFFFFF);
+  color: var(--shell-ink);
+  font-weight: 700;
 }
 
-/* ─── Mobile header ──────────────────────────────────────────────────────────── */
+/* ─── Mobile header (station sign) ───────────────────────────────────────────── */
 
 .shell-mobile-header {
   display: none;
@@ -211,40 +246,35 @@
   .shell-mobile-header {
     display: flex;
     align-items: center;
-    height: 56px;
+    width: 100%;
+    height: 60px;
     flex-shrink: 0;
-    background: var(--md-sys-color-surface);
-    box-shadow: var(--elevation-1);
-    border-bottom: 1px solid var(--md-sys-color-outline-variant);
-    padding: 0 var(--space-md);
     gap: var(--space-sm);
+    background: #FFFFFF;
+    border: none;
+    border-bottom: var(--shell-sign-rule) solid var(--line);
+    padding: 0 var(--space-md) 0 var(--space-sm);
+    color: var(--shell-ink);
+    text-align: left;
+    cursor: pointer;
     order: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .shell-mobile-header:active {
+    background: color-mix(in srgb, var(--line) 8%, #FFFFFF);
   }
 }
 
-.shell-mobile-header__back-btn {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--md-sys-color-primary);
-  font-size: 14px;
-  font-weight: 500;
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-button);
-  transition: background var(--motion-state);
-}
-
-.shell-mobile-header__back-btn:hover {
-  background: var(--md-sys-color-surface-variant);
+.shell-mobile-header__chevron {
+  flex-shrink: 0;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .shell-mobile-header__title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--md-sys-color-on-surface);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 /* ─── Bottom nav (mobile) ─────────────────────────────────────────────────────── */
@@ -265,9 +295,9 @@
     align-items: stretch;
     height: 56px;
     flex-shrink: 0;
-    background: var(--md-sys-color-surface);
-    box-shadow: var(--elevation-1);
+    background: #FFFFFF;
     border-top: 1px solid var(--md-sys-color-outline-variant);
+    padding-bottom: env(safe-area-inset-bottom);
     order: 2;
   }
 
@@ -283,7 +313,7 @@
   justify-content: center;
   flex: 1;
   position: relative;
-  padding: var(--space-sm) var(--space-xs) calc(var(--space-sm) + 3px);
+  padding: var(--space-sm) var(--space-xs);
   border: none;
   background: none;
   cursor: pointer;
@@ -298,23 +328,22 @@
 /* Flat indicator bar at the bottom of the active tab */
 .shell-bottom-nav-item__indicator {
   position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 32px;
-  height: 3px;
-  border-radius: 3px 3px 0 0;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 4px;
   background: transparent;
   transition: background var(--motion-state);
 }
 
-/* Selected state — flat underline on active item */
+/* Selected state — line-colour rule above the active item */
 .shell-bottom-nav-item--active .shell-bottom-nav-item__indicator {
-  background: var(--md-sys-color-primary);
+  background: var(--line);
 }
 
 .shell-bottom-nav-item--active {
-  color: var(--md-sys-color-primary);
+  color: var(--shell-ink);
+  font-weight: 700;
 }
 
 .shell-bottom-nav-item:hover {
@@ -341,14 +370,15 @@
 
 .shell-more-menu {
   position: fixed;
-  bottom: 56px; /* above bottom nav */
+  bottom: calc(56px + env(safe-area-inset-bottom)); /* above bottom nav */
   left: var(--space-md);
   right: var(--space-md);
   z-index: 201;
-  background: var(--md-sys-color-surface);
-  border-radius: var(--radius-dialog);
+  background: #FFFFFF;
+  border-radius: var(--radius-card);
+  border-top: var(--shell-sign-rule) solid var(--line);
   box-shadow: var(--elevation-2);
-  padding: var(--space-sm) 0;
+  padding: var(--space-xs) 0;
   transform: translateY(16px);
   opacity: 0;
   pointer-events: none;
@@ -365,10 +395,11 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-md);
-  color: var(--md-sys-color-on-surface);
-  font-size: 14px;
-  font-weight: 500;
+  min-height: 52px;
+  padding: var(--space-md);
+  color: var(--shell-ink);
+  font-size: 17px;
+  font-weight: 700;
   text-decoration: none;
   cursor: pointer;
   border: none;
@@ -385,59 +416,59 @@
 /* ─── AppLauncher ────────────────────────────────────────────────────────────── */
 
 .shell-launcher {
-  padding: var(--space-xl) var(--space-lg);
+  padding: var(--space-lg) var(--space-md) var(--space-xl);
+  max-width: 960px;
+  margin: 0 auto;
 }
 
 .shell-launcher__heading {
-  font-size: 22px;
-  font-weight: 400;
-  color: var(--md-sys-color-on-surface);
-  margin-bottom: var(--space-lg);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--shell-ink);
+  padding-bottom: var(--space-md);
+  border-bottom: 4px solid var(--shell-ink);
 }
 
 .shell-launcher__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--space-md);
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  column-gap: var(--space-lg);
 }
 
 .shell-launcher__empty {
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 14px;
+  font-size: 15px;
   padding: var(--space-xl) 0;
 }
 
 .shell-app-entry {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: var(--space-lg);
-  background: var(--md-sys-color-surface);
-  border-radius: var(--radius-card);
-  box-shadow: var(--elevation-1);
-  cursor: pointer;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: 68px;
+  padding: var(--space-sm) var(--space-xs);
+  background: none;
   border: none;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  cursor: pointer;
   width: 100%;
   text-align: left;
-  transition: background var(--motion-state), box-shadow var(--motion-state);
-  color: var(--md-sys-color-on-surface);
+  color: var(--shell-ink);
+  transition: background var(--motion-state);
+  -webkit-tap-highlight-color: transparent;
 }
 
-.shell-app-entry:hover {
-  background: var(--md-sys-color-surface-variant);
-  box-shadow: var(--elevation-2);
+.shell-app-entry:hover,
+.shell-app-entry:active {
+  background: color-mix(in srgb, var(--md-sys-color-surface-variant) 45%, #FFFFFF);
 }
 
 .shell-app-entry__label {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--md-sys-color-on-surface);
-}
-
-.shell-app-entry__path {
-  font-size: 12px;
-  color: var(--md-sys-color-on-surface-variant);
-  margin-top: var(--space-xs);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 /* ─── ShellNotFound ──────────────────────────────────────────────────────────── */
@@ -486,4 +517,26 @@
   height: 100%;
   color: var(--md-sys-color-on-surface-variant);
   font-size: 14px;
+}
+
+/* ─── Browser surfaces ───────────────────────────────────────────────────────── */
+
+.shell-root ::selection {
+  background: color-mix(in srgb, var(--line) 25%, #FFFFFF);
+  color: var(--shell-ink);
+}
+
+.shell-app-entry:focus-visible,
+.shell-mobile-header:focus-visible,
+.shell-bottom-nav-item:focus-visible,
+.shell-sidebar-nav-item:focus-visible,
+.shell-sidebar__launcher-btn:focus-visible,
+.shell-more-menu__item:focus-visible,
+.shell-hamburger:focus-visible {
+  outline: 3px solid var(--shell-ink);
+  outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-sidebar, .shell-more-menu { transition: none; }
 }

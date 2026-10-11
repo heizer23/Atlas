@@ -12,6 +12,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppRegistry } from '../registry/AppRegistry';
 import type { AppConfig } from '../types';
+import { LineBullet } from './LineBullet';
+import { sortByRecency } from '../shell/recency';
 
 interface AppEntryProps {
   config: AppConfig;
@@ -26,18 +28,18 @@ function AppEntry({ config }: AppEntryProps): JSX.Element {
       className="shell-app-entry"
       onClick={() => navigate(config.basePath)}
     >
+      <LineBullet appId={config.appId} label={config.label} size="lg" />
       <span className="shell-app-entry__label">{config.label}</span>
-      <span className="shell-app-entry__path">{config.basePath}</span>
     </button>
   );
 }
 
 export function AppLauncher(): JSX.Element {
-  const apps = AppRegistry.getAll();
+  const apps = sortByRecency(AppRegistry.getAll());
 
   return (
     <div className="shell-launcher">
-      <h1 className="shell-launcher__heading type-headline">Atlas</h1>
+      <h1 className="shell-launcher__heading">Atlas</h1>
 
       {apps.length === 0 ? (
         // SHELL_NO_APPS_REGISTERED — explicit empty state

@@ -16,6 +16,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useShell } from '../hooks/useShell';
 import type { NavItem } from '../types';
+import { LineBullet } from '../launcher/LineBullet';
 
 /** True when the viewport is in the tablet range (768–1023px). */
 function useIsTablet(): boolean {
@@ -113,8 +114,15 @@ export function Sidebar(): JSX.Element {
           aria-label={isOpen ? 'Close navigation' : 'Open navigation'}
           aria-expanded={isOpen}
         >
-          {/* Simple hamburger icon using text characters; no icon library dependency */}
-          <span aria-hidden="true">{isOpen ? '✕' : '☰'}</span>
+          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              d={isOpen ? 'M4 4l12 12M16 4 4 16' : 'M3 5h14M3 10h14M3 15h14'}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
       )}
 
@@ -139,6 +147,13 @@ export function Sidebar(): JSX.Element {
         >
           Atlas
         </button>
+
+        {activeApp && (
+          <div className="shell-sidebar__sign">
+            <LineBullet appId={activeApp.appId} label={activeApp.label} />
+            <span className="shell-sidebar__sign-label">{activeApp.label}</span>
+          </div>
+        )}
 
         <div className="shell-sidebar__nav">
           {navItems.map((item) => (
