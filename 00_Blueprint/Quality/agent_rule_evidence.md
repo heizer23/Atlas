@@ -1054,3 +1054,37 @@ severity: major
 recurrence_hint: "First observed"
 linked_immediate_artifact: 03_Application/EssayCards/Sprint14_SectionProgressionAndRevalidation/10_architecture.json
 ---
+
+---
+entry_id: EVD-2026-10-11-001
+date: 2026-10-11
+source_agent: atlas_code_reviewer
+run_type: audit
+component: EssayCards
+sprint: Sprint13_ReviewStatsSentenceFeedback, Sprint15_StatsOralsAndImproveSection
+pattern_name: mutation_error_shape_bypass_on_malformed_body
+short_description: FastAPI RequestValidationError still escapes as a bespoke 422 {"detail":[...]} on a Pydantic-bodied PATCH and a typed bool query param, because the platform exception handler never maps it to ApiError; per-endpoint raw-Request parsing has not contained the pattern.
+evidence: "Live: PATCH /api/essaycards/sections/abc/sentence-feedback with {} -> 422 {\"detail\":[{\"type\":\"missing\",...}]}; GET .../sections/x/export?include_examinations=maybe -> 422 {\"detail\":[{\"type\":\"bool_parsing\",...}]}. backend/routers/sentence_feedback.py:121 (body: SentenceFeedbackUpdate), backend/routers/essays.py:492 (include_examinations: bool). 02_Platform/packages/platform_errorhandling/logFastapi.py:14 registers only @app.exception_handler(Exception). R-CON-BP-04: 'Never return a bespoke error shape.'"
+likely_root_cause: rule_gap
+candidate_response: rule
+severity: major
+recurrence_hint: "Also seen in EVD-2026-08-27-001 (Sprint01 POST .../review, caught at design time and worked around with raw Request). Now 3 endpoints across 3 sprints; a single platform-level RequestValidationError -> ApiError handler (and R-CON-BP-04 naming it as platform-owned) would retire the per-endpoint workaround."
+linked_immediate_artifact: 00_Blueprint/Quality/EssayCards/Code_Review_2026-10-11.md
+---
+
+---
+entry_id: EVD-2026-10-11-002
+date: 2026-10-11
+source_agent: atlas_code_reviewer
+run_type: audit
+component: EssayCards
+sprint: Sprint15_StatsOralsAndImproveSection
+pattern_name: fast_path_test_spec_requirement_unenforced
+short_description: R-PRO-BP-01 §11 says 10_test_spec.md remains required on the fast path, but every fast-path sprint omits it (the plan's Tests section stands in) and the 2026-10-11 rule audit rated them compliant — rule text and practice/enforcement disagree.
+evidence: "R-PRO-BP-01 §11: '`10_test_spec.md` remains required under the same condition as §1' (§1: 'required if component exposes an API'). EssayCards/Sprint15, StoryReader/Sprint02_TapToSelect, StoryReader/Sprint03_ScrollAndResume each contain only 00_draft.md, 05_fast_path_plan.md, 99_sprint_log.md. Rule_Audit_2026-10-11.md:9: 'All 3 post-§11 fast-path sprints are compliant'. Sprint15 05_fast_path_plan.md '## Tests' already enumerates each scenario, implemented in tests/test_essays.py and tests/test_review_stats.py."
+likely_root_cause: definition_quality
+candidate_response: rule
+severity: major
+recurrence_hint: "First logged; 3/3 fast-path sprints exhibit it. Suggested resolution: §11 states that a '## Tests' section in 05_fast_path_plan.md satisfies the test-spec requirement (cost of a separate file is pure duplication for <=5-file changes)."
+linked_immediate_artifact: 00_Blueprint/Quality/EssayCards/Code_Review_2026-10-11.md
+---

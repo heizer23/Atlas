@@ -1,6 +1,8 @@
 import logging
 import uuid
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, HTMLResponse
 
 log = logging.getLogger("atlas")
@@ -10,6 +12,21 @@ def install_exception_handlers(app):
     async def attach_request_id(request: Request, call_next):
         request.state.request_id = str(uuid.uuid4())
         return await call_next(request)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        rid = getattr(request.state, "request_id", "n/a")
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code":       "VALIDATION_ERROR",
+                    "message":    "Request validation failed.",
+                    "request_id": rid,
+                    "detail":     jsonable_encoder(exc.errors()),
+                },
+            },
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
