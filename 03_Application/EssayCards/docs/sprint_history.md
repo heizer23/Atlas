@@ -42,3 +42,9 @@ Split out of `CLAUDE.md` (reference detail; load when working on this area).
   SECTION oral; 70% pass rule on all oral kinds; section- and essay-scope orals; Learned (>= 30d) card
   state; failure-triggered Revalidation that preserves FSRS state unless the card is forgotten
   (see `## Section progression (Sprint14)`). Retires Sprint12's `learning_level` and its nine fields.
+- Sprint 15 (fast path): `GET /review-stats/summary` rows gain `orals_count` / `guided_orals_count` /
+  `unguided_orals_count` (every `section_examinations` + `essay_examinations` attempt, passed or not, with
+  `examined_at` inside the row's rolling 24h / 7d / 30d window); section export gains optional
+  `include_examinations` (see `export_insert.md` "Improve section"); Stats `DailyActivityChart` opens
+  scrolled to the newest day with the Unique segment on the tertiary colour. Design record:
+  `Sprint15_StatsOralsAndImproveSection/05_fast_path_plan.md`.

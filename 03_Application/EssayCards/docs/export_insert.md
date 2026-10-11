@@ -48,3 +48,19 @@ silently dropped — PROVIDED the essay-level fields round-trip unedited (the ex
 intentionally echoes the essay's current `category`/`sort_index`/`status` for this reason —
 see `_validate_ingest_body` defaults). Same accepted gap as ingest generally: a card
 removed from `cards` on reimport is left unchanged, not deleted.
+
+## Improve section (Sprint15)
+Third reader action, alongside Export / Insert: **Improve section** revises a section using
+its oral-exam history. It calls the same section export with `?include_examinations=true`.
+- `include_examinations` is an optional bool, default `false`; with the default the package
+  is byte-identical to the plain export. `POST /essays/ingest` ignores the field.
+- When true the package adds `focus_section_examinations`: every `exam_type='guided'` row of
+  the focus section, ordered `examined_at` ascending, each
+  `{examined_at, score, passed, question, answer_transcript, feedback}` verbatim; `[]` if none.
+  Unguided exams are never included. Read-only.
+- The button copies `SECTION_IMPROVE_PROMPT_INTRO` (`src/ShellEntry.tsx`) + the package, then
+  becomes **Import improved section →** (navigates to `IngestView`). Same nugget-drop-detection
+  sessionStorage stash as Export section. The reply is an ordinary ingest payload (edit in place
+  by card id; the examinations field is omitted) — no new import path.
+- Invalid `include_examinations` values return a 422 `VALIDATION_ERROR` ApiError; a malformed
+  essay/section id returns 404 `NOT_FOUND` (app-level check in `backend/main.py`).
