@@ -63,7 +63,7 @@ You must preserve alignment with the sprint definition. You must apply the revie
 ## What You May Change
 
 You may change only:
-1. Items listed in the review's **Minimal Change Set**
+1. Items in the review's **Blocking Issues** (`Required Change` column) and, for `APPROVED_WITH_CHANGES`, the changes listed in the **Approval Condition**. (Legacy reviews: the **Minimal Change Set**.)
 2. Changes required to resolve **Critical** or **Major** confirmed problems
 3. Direct consistency updates required so artifacts do not contradict each other after those fixes
 
@@ -74,7 +74,7 @@ You may apply a **Minor** item only if the review explicitly states it is requir
 - Do not introduce new files unless the review explicitly requires them
 - Do not add new abstractions, layers, or components
 - Do not rename stable interfaces unless the review explicitly requires it
-- Do not apply Recommended Improvements unless they are in the Minimal Change Set or explicitly marked required
+- Do not apply Non-Blocking Issues (or legacy Recommended Improvements) unless they are in the required change list or explicitly marked required
 - Do not modify unaffected sections for cleanliness or consistency beyond what the fixes demand
 - Do not reinterpret the feature scope
 - Do not implement the component
@@ -85,22 +85,22 @@ You may apply a **Minor** item only if the review explicitly states it is requir
 
 Extract and record:
 - **Verdict** (e.g., Rejected, Approved with Required Changes, Approved)
-- **Confirmed Problems** with their severity (Critical, Major, Minor)
+- **Blocking Issues** (or legacy Confirmed Problems) with their severity
 - **Hard Rule Violations** if any
-- **Minimal Change Set** — the exact list of required corrections
+- **Required changes** — the Blocking Issues' `Required Change` entries plus the Approval Condition (legacy: **Minimal Change Set**)
 - **Approval Condition** — what must be true for the artifacts to be considered approved
 
-If the review artifact does not contain a Minimal Change Set or Approval Condition, stop and request clarification before proceeding.
+If the review artifact does not contain a required-change list (or legacy Minimal Change Set) or an Approval Condition, stop and request clarification before proceeding.
 
 ### Step 2: Determine Required Edits
 
-For each item in the Minimal Change Set:
+For each required change:
 - Identify the exact section(s) in each artifact that must change
 - Note what the current state is
 - Note what the corrected state must be
 - Confirm the change is consistent with the sprint definition
 
-If any Minimal Change Set item conflicts with the sprint definition, stop and surface the conflict explicitly before proceeding.
+If any required change conflicts with the sprint definition, stop and surface the conflict explicitly before proceeding.
 
 ### Step 3: Apply the Smallest Possible Correction
 
@@ -144,8 +144,10 @@ Use this format exactly:
 - <brief statement confirming that all unaffected sections were preserved verbatim>
 
 ## Review Alignment Check
-- Minimal Change Set Applied: Yes | No
+- Required Changes Applied: Yes | No
 - Approval Condition Satisfied: Yes | No
+- Review Verdict: APPROVED_WITH_CHANGES | CHANGES_REQUIRED (copied from the review)
+- Every listed item confirmed applied: Yes | No  (required for APPROVED_WITH_CHANGES; the sprint then goes to DESIGN_APPROVED without re-review, R-PRO-BP-01 §5)
 - Notes: <brief note if anything requires human attention>
 ```
 
@@ -153,7 +155,7 @@ Use this format exactly:
 
 - If a review item conflicts with the sprint definition: **stop and surface the conflict explicitly**. Do not resolve it unilaterally.
 - If the review is ambiguous about what to change: make the smallest defensible change and note the ambiguity in the redesign summary under Notes.
-- If the review verdict is Rejected with no Minimal Change Set: stop and request guidance. Do not infer a change set.
+- If the review verdict is Rejected with no required-change list: stop and request guidance. Do not infer a change set.
 - If scope creep is implied by a review item: flag it and apply only the narrowest interpretation.
 
 ## Success Criterion

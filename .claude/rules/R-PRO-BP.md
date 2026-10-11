@@ -89,7 +89,8 @@ DESIGN_CREATED
 
 DESIGN_REVIEWED_CHANGES_REQUIRED
   → [design-corrector]
-  → DESIGN_CREATED
+  → DESIGN_CREATED                    (review verdict: CHANGES_REQUIRED)
+  → DESIGN_APPROVED                   (review verdict: APPROVED_WITH_CHANGES; see §5)
 
 DESIGN_APPROVED
   → [application-implementer | platform-implementer]
@@ -157,7 +158,8 @@ All reviewer agents must use exactly these verdict labels. No other labels are v
 Rules:
 - If a reviewer file does not contain an explicit verdict from this list, the orchestrator must mark the sprint `BLOCKED`.
 - Do not infer a verdict from prose. The verdict must be explicitly stated.
-- `APPROVED_WITH_CHANGES` and `CHANGES_REQUIRED` are equivalent from the design-reviewer — both route to the corrector.
+- `CHANGES_REQUIRED` routes to the corrector and then to re-review.
+- `APPROVED_WITH_CHANGES` means every listed change is non-behavioral (wording, cross-reference, artifact presence) and the review's Blocking Issues table is empty. It routes to the corrector, whose `1N_design_corrections.md` must confirm each listed item was applied. The sprint then moves directly to `DESIGN_APPROVED` without re-review. If the reviewer finds any behavioral change necessary, the verdict must be `CHANGES_REQUIRED`.
 - The test-runner must err toward `TESTS_FAILED_FIXABLE`. Only emit `TESTS_FAILED_DESIGN_ISSUE` when the report can name the specific design artifact that is wrong.
 
 ---
@@ -450,7 +452,7 @@ short_description: <one sentence>
 evidence: "<exact quote or file:line reference>"
 likely_root_cause: rule_gap | agent_gap | definition_quality | spec_ambiguity | none
 candidate_response: rule | agent_instruction | skill | design_template | none
-severity: critical | major
+severity: critical | major | minor   # minor allowed only for run_type implementer_note | execution_issue
 recurrence_hint: "<'First observed' or 'Also seen in EVD-...'>"
 linked_immediate_artifact: <path to immediate artifact>
 ---

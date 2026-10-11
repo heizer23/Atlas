@@ -206,6 +206,8 @@ Specifically:
 
 If contradictions exist across artifacts, the design is invalid.
 
+A contradiction is blocking when two readings of the artifacts would lead an implementer to different code, schema, or persisted state. Contradictions confined to descriptive prose (risks, notes, rationale), where the authoritative field (schema, signature, row_shape, internal_flow) is unambiguous, are non-blocking and are corrected without re-review.
+
 ---
 
 ## R-CON-BP-10 — Input Sufficiency

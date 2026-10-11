@@ -15,7 +15,7 @@ Entries are observational and do not block current runs. Promotion into rules, a
 entry_id: EVD-YYYY-MM-DD-NNN
 date: YYYY-MM-DD
 source_agent: <agent name>
-run_type: design_review | implementation_review | audit | implementer_note
+run_type: design_review | audit | implementer_note | execution_issue
 component: <component name>
 sprint: <sprint name or "n/a">
 pattern_name: <short label — reuse across entries for the same pattern>
@@ -23,7 +23,7 @@ short_description: <one sentence>
 evidence: "<exact quote or file:line reference>"
 likely_root_cause: rule_gap | agent_gap | definition_quality | spec_ambiguity | none
 candidate_response: rule | agent_instruction | skill | design_template | none
-severity: critical | major | minor | informational
+severity: critical | major | minor   # minor only for run_type implementer_note | execution_issue
 recurrence_hint: "<'First observed' or 'Also seen in EVD-...'>"
 linked_immediate_artifact: <path to immediate artifact>
 ---

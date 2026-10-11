@@ -92,7 +92,12 @@ DESIGN_CREATED
 
 DESIGN_REVIEWED_CHANGES_REQUIRED
   → launch sprint_design_corrector
-  → DESIGN_CREATED  (loop back to reviewer)
+  → if the latest review verdict is CHANGES_REQUIRED:
+      → DESIGN_CREATED  (loop back to reviewer)
+  → if the latest review verdict is APPROVED_WITH_CHANGES (Blocking Issues empty):
+      → verify the latest corrections file confirms every listed item applied
+      → DESIGN_APPROVED  (no re-review; R-PRO-BP-01 §5)
+      → if the review lists any blocking issue, treat the verdict as CHANGES_REQUIRED
 
 DESIGN_APPROVED
   → launch sprint_implement

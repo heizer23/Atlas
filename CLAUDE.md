@@ -34,7 +34,7 @@ See R-OPS-BP-02 (`.claude/rules/R-OPS-BP.md`).
 
 ## Repository references
 - Rule system: `00_Blueprint/Rule_System.md`
-- Error handling: `02_Platform/03_ErrorHandling/`
+- Error handling: `02_Platform/packages/platform_errorhandling/`
 
 ## Agent delegation
 Use specialized agents when appropriate.

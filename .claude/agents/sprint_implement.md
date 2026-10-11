@@ -68,10 +68,10 @@ Atlas/.claude/rules
 
 Especially:
 
-- `contracts_and_boundaries.md`
-- `dependency_direction.md`
-- `surface_violations.md`
-- `UI_Data_Contract.md`
+- `R-CON-BP.md` (contracts, durable state, UI data contract, cross-artifact consistency)
+- `R-CON-AL.md` (application layer) or `R-CON-PL.md` (platform layer)
+- `R-OPS-BP.md` (surface violations, least privilege)
+- `02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md`
 
 Do not proceed if required design artifacts are missing.
 

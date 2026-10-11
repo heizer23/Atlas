@@ -32,13 +32,10 @@ Before designing, confirm you have access to:
    Sprint folder naming convention: `Sprint<N>_<Title>/` (e.g. `Sprint01_Core_Shell_Navigation/`).
    If multiple sprint folders exist, identify which one(s) are in scope for this design pass.
 2. Relevant rules from `Atlas\.claude\rules`:
-   - `architecture_as_ai_interface.md`
-   - `platform_boundary.md`
-   - `contracts_and_boundaries.md`
-   - `no_hidden_state.md`
-   - `dependency_direction.md`
-   - `surface_violations.md`
-   - `UI_Data_Contract.md`
+   - `.claude/rules/R-CON-BP.md` (contracts, durable state, UI data contract, cross-artifact consistency)
+   - `.claude/rules/R-CON-PL.md` (platform boundary, dependency direction)
+   - `.claude/rules/R-OPS-BP.md` (surface violations, least privilege)
+   - `02_Platform/Atlas_Shell/platform-ui/api/UI_Data_Contract.md`
 3. `.claude/supportDocs/atlas_dev_ref.md` — the canonical developer reference. Read this to understand all running services, their host ports, endpoints, and caller contracts before designing.
 
 If any required input is missing, explicitly surface the gap and request it from the user. Do not proceed with design until the input is available.
@@ -65,14 +62,20 @@ Read `.claude/supportDocs/atlas_dev_ref.md` and scan for:
 
 Surface any conflicts between the definition and the developer reference explicitly before proceeding.
 
+### Declare-once and usage rules
+
+- **Declare once (R-CON-BP-09).** State each function signature, enum value set, and row shape in exactly one authoritative place: `10_scaffolding.json` `public_objects` for signatures and enums, `exposed_surfaces.row_shape` for Dataset rows. Everywhere else (architecture prose, notes, risks, test spec) refer to it by name; do not restate it.
+- **List all usages.** For every symbol you remove, rename, change the signature of, or reuse, run a search (grep) across the repository and list every usage found in the architecture. Do not rely on memory.
+- **No scratchpad-only content.** Deferrals and instructions to later agents may reference only artifacts inside the sprint folder or the repo. Investigation notes that a later agent needs must be written into the sprint folder (e.g. in `00_draft.md` notes or the architecture), never left in `/tmp` or the scratchpad.
+
 ### Step 3: Apply Rule Constraints
 For each applicable rule file, verify your design complies:
-- **platform_boundary.md**: No business logic, no domain coupling
-- **contracts_and_boundaries.md**: All interfaces explicitly defined, no implicit coupling
-- **no_hidden_state.md**: All state is visible and declared
-- **dependency_direction.md**: Dependencies flow in the correct direction; no upward or circular dependencies
-- **architecture_as_ai_interface.md**: Architecture artifacts are the interface for downstream agents
-- **surface_violations.md**: Any rule violations are explicitly surfaced, not silently worked around
+- **R-CON-PL-01 (platform boundary)**: No business logic, no domain coupling
+- **R-CON-BP-01/02/06/07/08**: All interfaces explicitly defined, no implicit coupling; one canonical path per artifact; contracts self-contained
+- **R-CON-BP-03**: All state is visible, owned, and declared
+- **R-CON-BP-09/10/11**: Artifacts agree with each other; every step has its inputs; every interface case maps to an internal_flow branch
+- **R-CON-PL-02 (dependency direction)**: Dependencies flow in the correct direction; no upward or circular dependencies
+- **R-OPS-BP-01/02**: Any rule violations are explicitly surfaced, not silently worked around
 
 ### Step 4: Produce Artifacts
 

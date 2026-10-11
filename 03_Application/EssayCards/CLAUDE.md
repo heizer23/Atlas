@@ -976,3 +976,13 @@ Schema initialized idempotently at startup from schema.sql.
 to psql; it is already one sprint stale (missing `essaycards.images`). The
 canonical runtime schema is `03_Application/EssayCards/schema.sql` (per
 architecture.json), applied by `init_schema()` at startup and by conftest.
+
+## Test convention: no system-wide literal counts
+
+Tests must not assert exact system-wide aggregate counts that depend on the whole
+fixture world (e.g. `total == 47`, per-band totals across all essays). Assert
+deltas (count before/after the action under test) or counts scoped to the fixture
+rows the test itself created. Rationale: every sprint that gated or added fixture
+data (Sprint10, Sprint12, Sprint14) broke unrelated global-count tests; see
+`00_Blueprint/Quality/Rule_Audit_2026-10-11.md` T9. Adopted 2026-10-11; existing
+literal-count tests are migrated opportunistically, not in a sweep.
