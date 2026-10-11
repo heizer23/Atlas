@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-10-11 17:31 UTC
+> Last updated: 2026-10-11 18:14 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
@@ -266,7 +266,7 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 ### EssayCards
 
-**Summary:** Reworks EssayCards' Review and Stats pages around day-based (not session-based) aggregation and adds independently-toggleable per-sentence 'difficult'/'thumbs up' feedback to the essay reader.
+**Summary:** Turns EssayCards' essay overview into a section-level learning progression (guided oral -> flashcards -> unguided oral -> essay mastery) with flashcard unlocking, pass/fail oral grading, mastery decay and revalidation.
 
 | | |
 |---|---|
@@ -277,13 +277,16 @@ DELETE /api/cal/events/{event_id} deletes a CalendarEvent, returns empty Dataset
 
 **Endpoints:**
 ```
-GET /api/essaycards/review-stats/today — NEW. Day-based Recalls/Unique/First for the Review page's five-metric summary, same topic/essay_id/section_id scoping family as GET /flashcards/due
-GET /api/essaycards/review-stats/summary — CHANGED. Gains new_count (first-ever-review count) per window
-GET /api/essaycards/review-stats/activity — CHANGED (reshaped, breaking). Row shape becomes {date, recalls, unique_cards_seen, first_cards_seen, recall_rate}, replacing the Sprint12 {date, reviews} shape; sole consumer is ReviewStatsView, reworked in the same sprint (R-CON-BP-09)
-GET /api/essaycards/review-stats/intervals — UNCHANGED, not touched by this sprint
-GET /api/essaycards/essays/{essay_id}/sentences — NEW. Flat, server-computed sentence list across every section of an essay
-GET /api/essaycards/essays/{essay_id}/sentence-feedback — NEW. Flat, sparse (only sentences carrying at least one flag) Dataset of saved feedback across every section of an essay
-PATCH /api/essaycards/sections/{section_id}/sentence-feedback — NEW. Sets one of the two independent flags on one sentence to an explicit value; mutation endpoint, R-CON-BP-04 Dataset-exempt
+GET /api/essaycards/essays and GET /api/essaycards/essays/{id} - CHANGED (breaking, sole consumer reworked in-sprint): the nine Sprint12 learning-progress fields and learning_level are REMOVED; replaced by essay_state and its supporting fields
+GET /api/essaycards/progress/sections - NEW flat Dataset: one traffic-light row per section
+GET /api/essaycards/essays/{essay_id}/examination-package - CHANGED: scope + section_id params, scoring echo
+POST /api/essaycards/examinations/import - CHANGED: per-result scope, pass/fail verdict, state transitions, cascade
+GET /api/essaycards/essays/{essay_id}/examinations - NEW Dataset of full-essay oral attempts
+GET /api/essaycards/sections/{section_id}/examinations - CHANGED additive: passed column
+GET /api/essaycards/flashcards/due and /flashcards/stats - CHANGED eligibility: locked cards excluded (due also excludes needs_revalidation cards)
+GET /api/essaycards/flashcards/revalidation - NEW Dataset (same row shape as /due): the Revalidation queue
+POST /api/essaycards/flashcards/{id}/review - CHANGED: server-derived revalidation branch, additive revalidation_outcome response field, locked-card rejection
+GET /api/essaycards/essays/{essay_id}/questions - CHANGED additive: is_locked, card_state, needs_revalidation per row
 ```
 
 ### FamilyAtlas ⚠️

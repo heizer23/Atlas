@@ -2,62 +2,72 @@
   "component_name": "essaycards",
   "layer": "03_Application",
   "source_definition": "00_draft.md",
-  "summary": "Reworks EssayCards' Review and Stats pages around day-based (not session-based) aggregation and adds independently-toggleable per-sentence 'difficult'/'thumbs up' feedback to the essay reader.",
+  "summary": "Turns EssayCards' essay overview into a section-level learning progression (guided oral -> flashcards -> unguided oral -> essay mastery) with flashcard unlocking, pass/fail oral grading, mastery decay and revalidation.",
   "classification": {
-    "why_application": "Which card-review facts count as 'today's activity' for THIS app's own due-queue/session model (CLAUDE.md glossary: new/learning/established, focus/review), how a sentence of THIS app's own essay content is addressed and marked, and which numbers this app's Stats/Review pages show are all EssayCards-specific interpretations of its own domain vocabulary and content model — none of it generalizes to another Atlas application.",
+    "why_application": "What counts as 'guided oral passed', which cards are locked, what Established/Learned mean for a section or essay, and when mastery decays are EssayCards-specific interpretations of its own essay/section/flashcard/oral-exam vocabulary (03_Application/EssayCards/CLAUDE.md glossary). Nothing here generalizes to another Atlas application.",
     "non_goals": [
-      "Any change to due-queue selection, filtering, or ordering (GET /flashcards/due's WHERE/ORDER BY is untouched — only what the Review page DISPLAYS changes)",
-      "Any change to FSRS scheduling, review grading, or the flashcard_review_state/fsrs_card_state schema",
-      "A Shell (02_Platform/Atlas_Shell) change to add a real per-route breadcrumb segment — the draft's 'Atlas  EssayCards  Review' example assumes a capability ShellLayout/MobileHeader does not have today (see open_questions); this sprint only removes the redundant in-page 'Review' label",
-      "Sentence feedback on essays.main_spine_markdown, a nugget's own body_markdown, or flashcard question/answer text — Sprint13 §4 scopes this to essay SECTION body_markdown only, read in ReaderView",
-      "Any staleness detection/repair for sentence_feedback rows after a section's body_markdown is edited post-ingest (see 10_schema.sql's KNOWN GAP note and risks below)",
-      "Preserving block-level markdown structure (lists, blockquotes spanning multiple sentences) in the sentence-level reader rendering — each sentence is independently re-parsed by ReactMarkdown; a multi-sentence list item loses its shared <ul> wrapper (see risks)",
-      "Per-user timezone-aware day boundaries anywhere in this sprint (UTC calendar day throughout, same deferred decision already carried from Sprint12)",
-      "Any export/import or ChatGPT round-trip surface for sentence feedback"
+      "Removing the category-level flashcard statistics (progress_total / progress_established / the 'N / M established . K open' topic line) - kept per draft section 2",
+      "Removing essays.status or the planned/complete ingest vocabulary from the data model - only the overview PILL is removed; oral-exam buttons remain gated on status === 'complete' exactly as before",
+      "A configuration UI or env var for the 70% pass threshold or the 30-day Learned threshold - both are single backend constants this sprint (draft: 'configurable later')",
+      "Per-flashcard manual lock/unlock controls - locking is derived from section state only",
+      "Any change to FSRS parameters, grading vocabulary (again/hard/good/easy), review_events semantics or the due-queue ORDER BY (only eligibility filters are added)",
+      "Any change to review-stats endpoints (review_events is not written by a 'preserved' revalidation check, so they are unaffected by construction)",
+      "Automated in-app oral examination: scores still arrive via the existing ChatGPT export -> paste -> import round trip",
+      "Re-invalidating guided state: Section Yellow, Essay Yellow and guided oral history are never revoked by any rule in this sprint",
+      "Staleness handling when a section is edited after its oral pass (existing section_version_at is stored but not acted on)"
     ],
-    "not_platform": "Day-based recall/unique/first-seen aggregation of this app's own review_events, the meaning of 'a sentence' inside this app's own essay content model, and the specific five/three/four-metric vocabularies on the Review and Stats pages are all narrow rollups and interactions meaningful only within EssayCards' own domain model — not reusable technical capability. The one platform-adjacent question this sprint surfaces (whether platform-ui's BarChart should eventually support per-bar labels) is deliberately NOT resolved here by extending platform-ui; see dependencies.forbidden and open_questions."
+    "not_platform": "Pass/fail meaning of an oral score, section/essay mastery ladders, card unlocking and the revalidation protocol are domain rules of this one app. The Dataset contract (platform_contracts) and platform-ui are consumed unchanged; no reusable capability is introduced."
   },
   "contracts": {
     "consumes": [
-      "essaycards.review_events (append-only, Sprint10/11/12) — read-only; reused by all three new/changed review-stats endpoints",
-      "essaycards.flashcard_review_state — read-only; unchanged, still the source of 'Due' (next_due_at <= now()) and 'New' (is_new) via the existing GET /flashcards/due response",
-      "essaycards.essay_sections.body_markdown — read-only source text for sentence splitting",
-      "Postgres now() — sole time authority (R-CON-AL-06) for every 'today'/window computation in this sprint; no client-supplied time input anywhere",
-      "platform_contracts — Dataset, DatasetMeta, ColumnSchema",
-      "platform_errorhandling — api_error helper, exception handlers, request timing",
-      "backend/database.py::get_db() — unchanged connection/pool mechanism",
-      "StoryReader's passage-reaction interaction pattern (03_Application/StoryReader/src/ShellEntry.tsx ReactionPopover + backend/routers/stories.py's create_or_update_annotation/delete_annotation shape) — read for the INTERACTION pattern (tap a unit of text -> a small fixed-position popover appears below it with toggle buttons; a toggle upserts-or-deletes server state) per 00_draft.md §4's explicit instruction to reuse it; NOT reused verbatim, because StoryReader addresses an arbitrary user-selected (paragraph_index, char_start, char_end) span over PLAIN TEXT (markdown already stripped at render time) with a single-select 4-way reaction enum, whereas EssayCards needs a fixed, algorithm-computed sentence unit over RICH markdown (nugget refs, links, images, bold) with two INDEPENDENT boolean flags — see internal_flow steps 5-8 for the adaptation"
+      "essaycards.section_examinations (append-only, Sprint12 exam_type) - gains passed",
+      "essaycards.flashcard_review_state (review_interval is the write-time cache of next_due_at - last_reviewed_at; sole basis of Established / Learned)",
+      "essaycards.fsrs_card_state, backend.scheduling.FSRSScheduler - consumed unchanged by the failed-revalidation path",
+      "essaycards.essays, essay_sections, flashcards - unchanged",
+      "Postgres now() - sole time authority for every server-evaluated condition (R-CON-AL-06)",
+      "platform_contracts (Dataset, DatasetMeta, ColumnSchema), platform_errorhandling (api_error) - unchanged",
+      "backend/database.py::get_db() / init_schema() - unchanged"
     ],
     "provides": [
-      "GET /api/essaycards/review-stats/today — NEW. Day-based Recalls/Unique/First for the Review page's five-metric summary, same topic/essay_id/section_id scoping family as GET /flashcards/due",
-      "GET /api/essaycards/review-stats/summary — CHANGED. Gains new_count (first-ever-review count) per window",
-      "GET /api/essaycards/review-stats/activity — CHANGED (reshaped, breaking). Row shape becomes {date, recalls, unique_cards_seen, first_cards_seen, recall_rate}, replacing the Sprint12 {date, reviews} shape; sole consumer is ReviewStatsView, reworked in the same sprint (R-CON-BP-09)",
-      "GET /api/essaycards/review-stats/intervals — UNCHANGED, not touched by this sprint",
-      "GET /api/essaycards/essays/{essay_id}/sentences — NEW. Flat, server-computed sentence list across every section of an essay",
-      "GET /api/essaycards/essays/{essay_id}/sentence-feedback — NEW. Flat, sparse (only sentences carrying at least one flag) Dataset of saved feedback across every section of an essay",
-      "PATCH /api/essaycards/sections/{section_id}/sentence-feedback — NEW. Sets one of the two independent flags on one sentence to an explicit value; mutation endpoint, R-CON-BP-04 Dataset-exempt"
+      "GET /api/essaycards/essays and GET /api/essaycards/essays/{id} - CHANGED (breaking, sole consumer reworked in-sprint): the nine Sprint12 learning-progress fields and learning_level are REMOVED; replaced by essay_state and its supporting fields",
+      "GET /api/essaycards/progress/sections - NEW flat Dataset: one traffic-light row per section",
+      "GET /api/essaycards/essays/{essay_id}/examination-package - CHANGED: scope + section_id params, scoring echo",
+      "POST /api/essaycards/examinations/import - CHANGED: per-result scope, pass/fail verdict, state transitions, cascade",
+      "GET /api/essaycards/essays/{essay_id}/examinations - NEW Dataset of full-essay oral attempts",
+      "GET /api/essaycards/sections/{section_id}/examinations - CHANGED additive: passed column",
+      "GET /api/essaycards/flashcards/due and /flashcards/stats - CHANGED eligibility: locked cards excluded (due also excludes needs_revalidation cards)",
+      "GET /api/essaycards/flashcards/revalidation - NEW Dataset (same row shape as /due): the Revalidation queue",
+      "POST /api/essaycards/flashcards/{id}/review - CHANGED: server-derived revalidation branch, additive revalidation_outcome response field, locked-card rejection",
+      "GET /api/essaycards/essays/{essay_id}/questions - CHANGED additive: is_locked, card_state, needs_revalidation per row"
     ],
     "invariants": [
-      "TIME BASIS (R-CON-AL-06, binding): GET /review-stats/today and the reshaped GET /review-stats/activity both use the UTC CALENDAR DAY boundary already established by Sprint12's GET /review-stats/activity (date_trunc('day', now() at time zone 'utc'), [start, start + interval '1 day') ) — 'today' means 'since UTC midnight', NOT the rolling 24-hour window GET /review-stats/summary's 'day' row already uses. These are two deliberately different 'day' semantics coexisting in the same app (summary's pre-existing rolling day vs. today's/activity's calendar day) — named explicitly here and in each endpoint's own query_behavior block (R-CON-BP-08 self-containment) so neither is read as a bug or silently unified.",
-      "FIRST-EVER REVIEW (single canonical definition, reused verbatim by GET /review-stats/today, the reshaped GET /review-stats/activity, and GET /review-stats/summary's new new_count column): a review_events row is a card's 'first ever' review iff its reviewed_at equals MIN(reviewed_at) for that flashcard_id over the ENTIRE (unscoped, unwindowed) essaycards.review_events table. Because every flashcard belongs to exactly one essay/section for its whole lifetime, scoping a query to a topic/essay/section never changes which of that card's own reviews is its first — the three endpoints differ only in which WINDOW they count a qualifying first-ever review as falling inside, never in how 'first-ever' itself is computed. Implemented identically in all three places via the same (flashcard_id, min(reviewed_at)) subquery/CTE shape — see deferrals.application_implementer. Edge case (not guarded): two review_events rows for the same flashcard_id with an exactly identical reviewed_at timestamp would make both match the MIN — accepted as practically unreachable (timestamptz resolution), same discipline StoryReader/EssayCards already apply to similarly narrow edge cases elsewhere.",
-      "CLOSURE (R-CON-AL-02) for GET /review-stats/today's scope parameters: the allowed combinations are the identical closed set GET /flashcards/due and GET /flashcards/stats already define — {}, {topic}, {essay_id}, {essay_id, section_id}; {section_id} alone or {topic} combined with essay_id/section_id are VALIDATION_ERROR. For every one of these four combinations the three counts (recalls, unique_cards_seen, first_cards_seen) are constructible and default to 0 (never null, never omitted) when the scope has zero qualifying flashcards or zero reviews today.",
-      "OWNERSHIP OF THE REVIEW PAGE'S FIVE METRICS (R-CON-AL-01, explicit per-field ownership, since the row is assembled from two different sources): Recalls/Unique/First are BACKEND-OWNED, read once per session-scope change from GET /review-stats/today. Due/New are FRONTEND-DERIVED, UNCHANGED from the pre-existing client-side computation already driving the old 'Backlog'/'New' CURRENT metrics (queue.length and queue.filter(c => c.is_new).length against the already-scoped GET /flashcards/due response ReviewSessionView already fetches) — no new backend field backs these two; they are renamed/repositioned on the frontend only (Due = formerly 'Backlog', New = unchanged label).",
-      "DAILY ACTIVITY SEGMENT FORMULAS (R-CON-AL-03 realizability; ownership: backend computes the three raw counts, frontend derives the three stacked-bar segments — stated once here per R-CON-AL-01, not re-derived by the implementer): for each day row returned by GET /review-stats/activity, repeat = recalls - unique_cards_seen; unique_segment = unique_cards_seen - first_cards_seen; first = first_cards_seen. By construction (first_cards_seen is a subset of that day's distinct flashcards, which is a subset of that day's total review events) 0 <= first_cards_seen <= unique_cards_seen <= recalls always holds, so repeat >= 0 and unique_segment >= 0 are guaranteed for every day row — no negative-segment case is possible and none needs to be handled defensively.",
-      "ZERO-FILL (R-CON-AL-01): GET /review-stats/activity always returns exactly 30 rows (unchanged from Sprint12), oldest first, one per UTC calendar day in the trailing 30-day window ending today (UTC); a day with zero reviews still appears with recalls=unique_cards_seen=first_cards_seen=0 and recall_rate=null (not 0 — 'no data' and '0% recall' remain distinct, same convention as GET /review-stats/summary).",
-      "GET /review-stats/summary's new new_count column: count(distinct flashcard_id) whose first-ever review (per the FIRST-EVER REVIEW definition above) falls inside that row's existing rolling window (day=24h, week=7d, month=30d off now()) — same rolling-window time basis the row's other columns already use; this is the ONLY field on this endpoint using the rolling-day definition rather than the UTC-calendar-day definition (see TIME BASIS above).",
-      "SENTENCE ADDRESSING (binding, read backend/sentences.py's module docstring before implementing): a sentence is the 0-based ordinal position in the list produced by split_sentences(body_markdown) — see internal_flow step 5 for the exact algorithm. This is NOT a user-selected arbitrary span (contrast StoryReader's (paragraph_index, char_start, char_end)); the frontend never computes sentence boundaries itself — it renders strictly from the backend-computed GET /essays/{essay_id}/sentences response, so there is exactly one implementation of the splitting algorithm in the whole system (R-CON-AL-01 ownership: backend-owned, no frontend duplication).",
-      "SENTENCE FEEDBACK IS TWO INDEPENDENT BOOLEANS, NOT A SINGLE-SELECT ENUM: unlike StoryReader's annotations.reaction (exactly one of four values, same-tap-removes/different-tap-overwrites), essaycards.sentence_feedback.is_difficult and is_thumbs_up are set independently via two separate PATCH calls (one per flag) — 'neither / difficult only / thumbs-up only / both' are all valid, orthogonal states (00_draft.md §4 Behaviour). A row exists iff at least one flag is true (ck_sentence_feedback_any_flag); PATCH setting the last true flag to false DELETEs the row rather than leaving an all-false row (internal_flow step 7).",
-      "SENTENCE FEEDBACK WRITE-TIME VALIDATION: PATCH .../sentence-feedback recomputes split_sentences(section.body_markdown) fresh on every call (never trusts a client-cached sentence list) and rejects with VALIDATION_ERROR if sentence_index is out of range for the CURRENT split, or if the request's sentence_text does not exactly match the live sentence at that index — same discipline as StoryReader's create_or_update_annotation selected_text check. This guards against writing feedback against stale client state from before a concurrent re-ingest; it does NOT guard against drift that happens AFTER a successful write (see 10_schema.sql's KNOWN GAP and risks).",
-      "GET /essays/{essay_id}/sentence-feedback does NOT re-validate stored rows against the section's current content at read time — it returns exactly what is in essaycards.sentence_feedback, joined/ordered by the section's current (order_index, sentence_index). A row whose sentence_index has gone out of range for the section's current split simply will not be matched to any rendered sentence span on the frontend (which iterates the live /sentences response and looks up feedback by (section_id, sentence_index)) — this is a side effect of the join shape, not an explicit filter, and does NOT catch the narrower in-range-but-wrong-sentence drift case (see risks). Deliberately simple — no live staleness-filtering pass is added this sprint (see classification.non_goals).",
-      "Every read endpoint returning UI-visible tabular data continues to return Dataset per R-CON-BP-04 (review-stats/today, the reshaped activity, the unchanged summary/intervals, essays/{id}/sentences, essays/{id}/sentence-feedback). PATCH .../sentence-feedback is a mutation endpoint (R-CON-BP-04 exempt) returning a small typed JSON record, not a Dataset — same precedent as StoryReader's POST /annotations."
+      "PASS RULE (single definition, backend/oral_state.py): score_percent = score / SCORE_MAX * 100 with SCORE_MAX = 6; passed iff score_percent >= PASS_THRESHOLD_PERCENT (70). On the existing 0-6 integer scale this is passed iff score >= 5 (4 = 66.7% fails). The same rule applies to all four oral kinds (guided/unguided x section/essay). The verdict is computed once at import time and stored in passed; nothing re-derives it later. This SUPERSEDES Sprint12's score >= 3 PASS_SCORE_THRESHOLD, which is deleted.",
+      "SECTION STATE (derived at query time, never stored; highest satisfied wins): blue iff section_oral_state.unguided_passed; else green iff guided_passed AND the section has >= 1 card AND every card has last_reviewed_at not null AND review_interval >= 24 hours; else yellow iff guided_passed; else grey. Because blue needs only the unguided pass, a section whose unguided pass is later invalidated falls back to green/yellow/grey from the SAME underlying evidence - no stored color to repair.",
+      "ESSAY STATE (derived, highest satisfied wins): violet iff essay_oral_state.unguided_passed; else blue iff the essay has >= 1 section AND every section has unguided_passed; else green iff the essay has >= 1 card AND every card has review_interval >= 30 days; else yellow iff essay_oral_state.guided_passed; else grey. Section guided orals never contribute to essay yellow. A zero-card or zero-section essay is never vacuously green/blue.",
+      "ESTABLISHED / LEARNED: established = review_interval >= 24 hours (unchanged); learned = review_interval >= 30 days (new). Learned is a SUBSET of established. Both thresholds are defined once in backend/progress.py and used by every query (card_state, section green, essay green, progress_established). Card display state is the highest of locked / new / learning / established / learned ('locked' only while the card's section is not guided_passed).",
+      "UNLOCK (derived, no stored per-card lock): a card is eligible for any review queue only if its section's section_oral_state row exists with guided_passed = true. Cards remain stored, remain counted in progress_total, and are visibly 'locked' in the question overview. A card ingested later into an already guided-passed section is unlocked automatically.",
+      "GUIDED PASS IS STICKY: a failing guided attempt (section or essay) is stored in history and updates guided_latest_score but never clears guided_passed or relocks cards.",
+      "UNGUIDED PASS SEMANTICS: a passing unguided section attempt sets that section's unguided_passed; a failing unguided SECTION attempt only records history (it does NOT clear unguided_passed). A passing unguided ESSAY attempt sets essay unguided_passed (Violet) and the date; a failing unguided ESSAY attempt made while essay unguided_passed was true triggers the FAILURE CASCADE below; a failing unguided essay attempt made while it was NOT true only records history (no cascade, no revalidation).",
+      "FAILURE CASCADE (one transaction, same one as the attempt INSERT; backend/oral_state.py): (1) essay_oral_state.unguided_passed = false, unguided_invalidated_at = now(); (2) every section_oral_state row of that essay with unguided_passed = true -> unguided_passed = false, unguided_invalidated_at = now(); (3) revalidation flagging: every flashcard of that essay whose flashcard_review_state.last_reviewed_at IS NOT NULL gets needs_revalidation = true. NOT touched: guided_* columns, section_examinations/essay_examinations rows, fsrs_card_state, next_due_at, review_interval, last_reviewed_at, review_events. Never-reviewed cards are not flagged (there is nothing to revalidate).",
+      "REVALIDATION CARD HANDLING (server-derived in POST /flashcards/{id}/review; the client sends no mode field): if the card's needs_revalidation is true, the request is a revalidation check. Grade 'again' = incorrect, any other grade = correct (single constant REVALIDATION_FAIL_GRADES in backend/revalidation.py). CORRECT: flag cleared, a revalidation_events row (outcome 'preserved') inserted, and NOTHING else changes - no FSRS call, no review_events row, flashcard_review_state timestamps/interval and fsrs_card_state byte-identical. INCORRECT: flag cleared, the normal FSRS review path runs exactly as for any card (state, review_interval, next_due_at, fsrs_card_state, review_events written), plus a revalidation_events row (outcome 'failed'). All of it in one transaction.",
+      "REVALIDATION QUEUE VS NORMAL QUEUE: cards with needs_revalidation = true are excluded from GET /flashcards/due (focus and review alike) and served only by GET /flashcards/revalidation regardless of next_due_at. This is an explicit exception to the draft's 'normal review scheduling unchanged' acceptance line: a flagged card is not part of normal scheduling until its check is done; FSRS due dates are never overwritten. Revalidation is complete for an essay when its pending count (flagged cards) reaches 0.",
+      "LOCKED-CARD WRITE GUARD: POST /flashcards/{id}/review on a card whose section is not guided_passed is rejected VALIDATION_ERROR with no write (defends against stale clients; a locked card cannot appear in /due or /revalidation).",
+      "TIME AUTHORITY (R-CON-AL-06): *_passed_at = the attempt's examined_at (external time supplied by the examiner reply, ISO-8601 with explicit UTC offset required - existing _parse_timestamp discipline); unguided_invalidated_at and revalidation_events.checked_at = server now(). State transitions apply in SERVER IMPORT ORDER (array order within a batch), not examined_at order: an older-dated result imported later is applied as if it were the newest. Unlock/lock and all colors are evaluated at query time against stored state and review_interval - no client time input exists anywhere in this sprint.",
+      "ORAL ATTEMPT IMPORT IS ALL-OR-NOTHING: validate everything, resolve every slug, then insert + apply state for each result in array order inside one transaction; any failure rolls back every attempt, state change, cascade and flag.",
+      "EXPLICIT NULL VS OMIT (R-CON-AL-04/05): this sprint adds NO PATCH or partial-update endpoint, and no user-editable field with a clear-to-null round trip. The only optional/nullable inputs it touches are on the append-only import: feedback (omitted == null == stored SQL null; unchanged), nugget_versions (omitted == null; unchanged; section scope only), and the NEW section_anchor_slug (required non-empty string for scope 'section'; for scope 'essay' it must be omitted or null - a non-null value is VALIDATION_ERROR; omitted and null are equivalent). There is no 'update an existing attempt' path, so no persisted-state clearing semantics are needed. needs_revalidation and all oral-state columns are written only by server logic, never from a client payload.",
+      "SCOPE-MODE CLOSURE (R-CON-AL-02): examination-package accepts exactly {exam_type, scope=essay} and {exam_type, scope=section, section_id}; any other combination is VALIDATION_ERROR. /flashcards/revalidation accepts exactly {} and {essay_id}. /progress/sections accepts exactly {} and {essay_id}. Every allowed combination yields a constructible, possibly empty, Dataset.",
+      "CATEGORY STATS: progress_total and progress_established keep their definitions (every card / review_interval >= 24h) and are unchanged. open_count (next_due_at <= now()) is the one category figure that must change: it now ALSO requires the card to be unlocked and not needs_revalidation, because its documented meaning is 'what a focus session would surface' (see open_questions).",
+      "All read endpoints return Dataset | ApiError (R-CON-BP-04). POST import and POST review are mutation endpoints (exempt): typed JSON record on success, ApiError on failure. GET examination-package stays the existing bespoke-JSON R-CON-BP-04 exemption (clipboard artifact for an external LLM)."
     ],
     "failure_modes": [
-      "VALIDATION_ERROR — GET /review-stats/today with section_id but no essay_id, or topic combined with essay_id/section_id — 400 ApiError, same wording convention as GET /flashcards/due",
-      "VALIDATION_ERROR — PATCH .../sentence-feedback with flag outside {'difficult','thumbs_up'} — 400 ApiError",
-      "VALIDATION_ERROR — PATCH .../sentence-feedback with sentence_index out of range for the section's CURRENT split_sentences(body_markdown) output — 400 ApiError (the essay may have been edited since the client last fetched /sentences)",
-      "VALIDATION_ERROR — PATCH .../sentence-feedback with sentence_text not matching the live sentence at sentence_index — 400 ApiError, same 'edited since you loaded this page, reload and try again' framing as StoryReader's equivalent check",
-      "NOT_FOUND — PATCH .../sentence-feedback or GET /essays/{essay_id}/sentences|sentence-feedback against an unknown section_id/essay_id — 404 ApiError",
-      "Silent misattachment (documented, not a thrown error) — sentence_feedback rows can point at the wrong sentence after a section edit that keeps sentence_index in range but changes what text sits there; see 10_schema.sql KNOWN GAP and risks below"
+      "VALIDATION_ERROR - examination-package missing/invalid exam_type or scope, scope=section without section_id, scope=essay with section_id (400)",
+      "NOT_FOUND - examination-package unknown essay_id, or section_id that does not belong to that essay (404)",
+      "VALIDATION_ERROR - import result missing/invalid scope; scope=section without section_anchor_slug; scope=essay with a non-null section_anchor_slug; plus every pre-existing structural rule (score 0-6 integer, exam_type, timestamps with offset) (400, whole batch rejected)",
+      "NOT_FOUND - import essay_slug / section_anchor_slug pair does not resolve (404, whole batch rejected, nothing written)",
+      "VALIDATION_ERROR - POST review on a card in a locked section (400)",
+      "NOT_FOUND - POST review unknown flashcard (404, unchanged)",
+      "Stale revalidation session (documented, not an error): a card cleared in another tab is simply absent from the next /revalidation refetch; a card flagged mid-session by a cascade is handled as a revalidation on its next grade",
+      "Re-import of an identical examiner reply double-applies (new attempt rows; a duplicate failing Violet unguided result cascades once, the second is history-only because the claim is already false) - accepted, same append-only discipline as Sprint12"
     ]
   },
   "shared_views": {
@@ -70,278 +80,458 @@
   },
   "interfaces": {
     "consumes": [
-      "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor, unchanged",
-      "platform_contracts, platform_errorhandling — unchanged",
-      "GET /flashcards/due (unchanged, reused as-is) — ReviewSessionView's existing scoped fetch now also feeds the Review page's Due/New metrics directly, with no new backend field"
+      "psycopg2 pool via get_db() with RealDictCursor - unchanged",
+      "backend.scheduling.FSRSScheduler.review - called unchanged by the failed-revalidation path",
+      "platform_contracts, platform_errorhandling - unchanged"
     ],
     "provides": [
-      "HTTP API mounted at /api/essaycards (FastAPI, uvicorn) — unchanged mount/CORS; backend.routers.sentence_feedback added to main.py's router set",
-      "backend.sentences.split_sentences(body_markdown: str) -> list[str] — new pure function, no I/O, mirrors StoryReader's backend/paragraphs.py module-docstring-as-spec convention"
+      "HTTP API at /api/essaycards - new router backend.routers.progress added to main.py's router set",
+      "backend.oral_state: SCORE_MAX, PASS_THRESHOLD_PERCENT, is_passing_score, apply_section_attempt, apply_essay_attempt",
+      "backend.revalidation: REVALIDATION_FAIL_GRADES, is_revalidation_correct, flag_essay_cards_for_revalidation, record_revalidation_event, clear_revalidation_flag",
+      "backend.progress: ESTABLISHED_INTERVAL_SQL, LEARNED_INTERVAL_SQL, UNLOCKED_SECTION_SQL, CARD_STATE_SQL, section_progress_sql, essay_progress_lateral_sql"
     ],
     "exposed_surfaces": [
       {
         "type": "http_endpoint",
-        "name": "GET /api/essaycards/review-stats/today",
-        "purpose": "Day-based Recalls/Unique/First for the Review page's five-metric summary.",
+        "name": "GET /api/essaycards/progress/sections",
+        "purpose": "One derived traffic-light row per section, in essay display order then section order, feeding the overview's small dots and the reader's section markers.",
         "ui_contract": "Dataset | ApiError",
         "query_behavior": {
-          "supported_parameters": "topic, essay_id, section_id — identical family/semantics to GET /flashcards/due",
-          "defaults": "no scope -> every flashcard in the app",
-          "allowed_combinations": "{}, {topic}, {essay_id}, {essay_id, section_id} — section_id without essay_id, or topic with essay_id/section_id, is VALIDATION_ERROR",
-          "ordering": "n/a — always exactly one row",
-          "grouping": "none — one aggregate row for the whole scope",
-          "time_basis": "UTC calendar day (today, server clock) — see contracts.invariants TIME BASIS; distinct from GET /review-stats/summary's rolling 24h 'day'",
-          "boundary_construction": "[date_trunc('day', now() at time zone 'utc'), date_trunc('day', now() at time zone 'utc') + interval '1 day')",
-          "empty_result_behavior": "always exactly one row; zero qualifying flashcards or zero reviews today yields recalls=unique_cards_seen=first_cards_seen=0, never an empty Dataset",
-          "zero_fill_behavior": "n/a — single aggregate row, zero-valued fields rather than zero-filled buckets",
-          "row_shape": "recalls (number), unique_cards_seen (number), first_cards_seen (number)"
+          "supported_parameters": "essay_id (optional)",
+          "defaults": "no essay_id -> every section of every essay",
+          "allowed_combinations": "{}, {essay_id}",
+          "ordering": "essays.category asc nulls last, essays.sort_index asc, essays.created_at asc, essay_sections.order_index asc (same essay order as GET /essays)",
+          "grouping": "none - flat rows; client groups by essay_id (same idiom as /essays/{id}/questions)",
+          "time_basis": "Postgres now() evaluated at query time; the state itself depends only on stored oral state and review_interval, not on the clock",
+          "boundary_construction": "state rules in contracts.invariants SECTION STATE; established boundary review_interval >= interval '24 hours'",
+          "empty_result_behavior": "no sections (or unknown essay_id) -> empty Dataset rows: [], not an error",
+          "zero_fill_behavior": "n/a - every section appears exactly once; a section with no oral-state row reports guided_passed=false, unguided_passed=false, scores null, state 'grey'",
+          "row_shape": "section_id, essay_id, heading, anchor_slug, order_index (string/number); state ('grey'|'yellow'|'green'|'blue'); next_step ('guided_oral'|'flashcards_established'|'unguided_oral'|null); guided_passed, unguided_passed (boolean); guided_pass_source ('exam'|'grandfathered'|null); guided_latest_score, unguided_latest_score (number|null, 0-6); guided_passed_at, unguided_passed_at (date|null); cards_total, cards_established (number); is_locked (boolean, true iff not guided_passed)"
         }
       },
       {
         "type": "http_endpoint",
-        "name": "GET /api/essaycards/review-stats/summary",
-        "purpose": "Unchanged day/week/month observed-recall rollup; gains new_count (first-ever reviews in each rolling window) for the Stats page's Observed Recall 'New Cards Seen' field.",
+        "name": "GET /api/essaycards/essays",
+        "purpose": "Essay overview rows. Keeps category-level counts; replaces the Sprint12 learning-progress fields with the derived essay traffic light.",
         "ui_contract": "Dataset | ApiError",
         "query_behavior": {
           "supported_parameters": "none, unchanged",
           "defaults": "n/a",
           "allowed_combinations": "n/a",
-          "ordering": "unchanged — day, week, month, fixed order",
-          "grouping": "one row per window",
-          "time_basis": "rolling windows off Postgres now() (24h/7d/30d), UNCHANGED from Sprint11 — see TIME BASIS invariant for why this differs from /today and /activity",
-          "boundary_construction": "unchanged",
-          "empty_result_behavior": "unchanged — always exactly 3 rows",
-          "zero_fill_behavior": "unchanged, now additionally applies to new_count",
-          "row_shape": "existing REVIEW_STATS_SUMMARY_SCHEMA columns plus new_count (number)"
+          "ordering": "unchanged - category asc nulls last, sort_index asc, created_at asc",
+          "grouping": "one row per essay",
+          "time_basis": "Postgres now() for open_count only; essay_state is clock-independent",
+          "boundary_construction": "contracts.invariants ESSAY STATE; learned boundary review_interval >= interval '30 days'",
+          "empty_result_behavior": "unchanged - no essays -> empty Dataset",
+          "zero_fill_behavior": "counts default 0, essay_state 'grey' for an essay with no oral state; never null for the new count/boolean fields",
+          "row_shape": "UNCHANGED: id, title, slug, category, sort_index, status, progress_total, progress_established, created_at, updated_at. CHANGED: open_count (now excludes locked and needs_revalidation cards). REMOVED: cards_seen_count, cards_future_safe_count, milestone_all_cards_seen, milestone_all_cards_future_safe, milestone_guided_passed, milestone_unguided_passed, guided_passed_at, unguided_passed_at, learning_level. NEW: essay_state ('grey'|'yellow'|'green'|'blue'|'violet'); essay_next_step ('guided_essay_oral'|'cards_learned'|'section_unguided_orals'|'unguided_essay_oral'|null); essay_guided_passed, essay_unguided_passed (boolean); essay_guided_latest_score, essay_unguided_latest_score (number|null); essay_guided_passed_at, essay_unguided_passed_at (date|null); cards_learned_count, sections_total, sections_unguided_passed_count, revalidation_pending_count (number)"
         }
       },
       {
         "type": "http_endpoint",
-        "name": "GET /api/essaycards/review-stats/activity",
-        "purpose": "Day-based study activity feeding the Stats page's stacked Repeat/Unique/First bar chart and its daily recall-rate label.",
+        "name": "GET /api/essaycards/essays/{essay_id}",
+        "purpose": "Essay detail; carries exactly the same progress fields as the list row, produced by the same shared SQL (backend/progress.py).",
         "ui_contract": "Dataset | ApiError",
         "query_behavior": {
-          "supported_parameters": "none",
-          "defaults": "n/a — fixed 30-day trailing window, unchanged from Sprint12",
-          "allowed_combinations": "n/a",
-          "ordering": "date ascending, oldest first",
-          "grouping": "one row per UTC calendar day",
-          "time_basis": "UTC calendar days, unchanged boundary mechanism from Sprint12 — date_trunc('day', now() at time zone 'utc')",
-          "boundary_construction": "each row is one UTC calendar day [00:00, 24:00); 30 most recent UTC calendar days ending today (UTC)",
-          "empty_result_behavior": "always exactly 30 rows, zero-filled for days with no reviews",
-          "zero_fill_behavior": "every day appears; recalls/unique_cards_seen/first_cards_seen default to 0, recall_rate to null (not 0) when recalls=0",
-          "row_shape": "date (ISO-8601 date string), recalls (number), unique_cards_seen (number), first_cards_seen (number), recall_rate (number | null) — BREAKING reshape from Sprint12's {date, reviews}; sole consumer (ReviewStatsView) reworked in this same sprint, R-CON-BP-09"
-        }
-      },
-      {
-        "type": "http_endpoint",
-        "name": "GET /api/essaycards/essays/{essay_id}/sentences",
-        "purpose": "Server-computed, flat sentence list across every section of an essay — the sole source of sentence boundaries; the reader renders strictly from this, never re-splitting client-side.",
-        "ui_contract": "Dataset | ApiError",
-        "query_behavior": {
-          "supported_parameters": "none (essay_id is a path param)",
+          "supported_parameters": "essay_id (path)",
           "defaults": "n/a",
           "allowed_combinations": "n/a",
-          "ordering": "(section order_index asc, sentence_index asc) — same ordering convention as GET /essays/{essay_id}/questions",
-          "grouping": "none — flat rows, client groups by section_id (same established idiom as question-overview rows)",
-          "time_basis": "n/a — no time-filtered data, computed live from current body_markdown",
+          "ordering": "sections ordered by order_index (unchanged)",
+          "grouping": "one row with embedded sections (unchanged)",
+          "time_basis": "unchanged",
+          "boundary_construction": "same as GET /essays",
+          "empty_result_behavior": "unchanged - 404 NOT_FOUND for unknown id; zero sections valid",
+          "zero_fill_behavior": "same as GET /essays",
+          "row_shape": "unchanged detail row with the Sprint12 nine fields REMOVED and the NEW essay-progress fields of GET /essays added (not open_count/progress_* which the detail never carried)"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/examination-package",
+        "purpose": "Self-contained oral-exam package copied to the clipboard for an external examiner; now addressable at section scope or whole-essay scope.",
+        "ui_contract": "none - bespoke JSON clipboard artifact (existing R-CON-BP-04 exemption, unchanged rationale)",
+        "query_behavior": {
+          "supported_parameters": "exam_type ('guided'|'unguided', required), scope ('essay'|'section', required), section_id (required iff scope=section)",
+          "defaults": "none - every parameter explicit; missing/invalid -> VALIDATION_ERROR (manually validated, never FastAPI 422, same as existing exam_type handling)",
+          "allowed_combinations": "{exam_type, scope=essay}, {exam_type, scope=section, section_id}; scope=essay with section_id, or scope=section without it -> VALIDATION_ERROR",
+          "ordering": "sections by order_index asc",
+          "grouping": "scope=section: sections has exactly one entry; scope=essay: every section (as context for the integrated exam)",
+          "time_basis": "n/a - section_version snapshots as before",
           "boundary_construction": "n/a",
-          "empty_result_behavior": "an essay with no sections, or a section with no sentence-worthy text, contributes zero rows for that section — valid, not an error",
+          "empty_result_behavior": "unknown essay -> 404; section not in essay -> 404; essay with zero sections and scope=essay -> valid package with sections: []",
           "zero_fill_behavior": "n/a",
-          "row_shape": "section_id (string), sentence_index (number), text (string)"
+          "row_shape": "UNCHANGED fields plus: scope (echo); scoring {score_max: 6, pass_threshold_percent: 70, min_passing_score: 5} (backend-owned echo so prompts and verdicts cannot drift); for exam_type=guided per-section last_examination as before (guided history only) and, for scope=essay, a top-level last_essay_examination (latest guided essay attempt {examined_at, score, feedback} or null); for exam_type=unguided every last_examination and last_essay_examination is ALWAYS null (cold start, unchanged discipline)"
         }
       },
       {
         "type": "http_endpoint",
-        "name": "GET /api/essaycards/essays/{essay_id}/sentence-feedback",
-        "purpose": "Saved difficult/thumbs-up feedback across every section of an essay, sparse (only marked sentences).",
+        "name": "POST /api/essaycards/examinations/import",
+        "purpose": "Stores oral attempts (section or whole-essay), records the pass/fail verdict, and applies the section/essay state transitions including the unguided-essay failure cascade.",
+        "ui_contract": "none - mutation endpoint per R-CON-BP-04; returns a typed record or ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/examinations",
+        "purpose": "Full-essay oral attempt history, most recent first (display counterpart of the existing per-section history).",
         "ui_contract": "Dataset | ApiError",
         "query_behavior": {
-          "supported_parameters": "none (essay_id is a path param)",
+          "supported_parameters": "essay_id (path)",
           "defaults": "n/a",
           "allowed_combinations": "n/a",
-          "ordering": "(section order_index asc, sentence_index asc)",
-          "grouping": "none — flat rows, client groups by section_id",
-          "time_basis": "n/a",
+          "ordering": "examined_at desc, id asc",
+          "grouping": "none",
+          "time_basis": "n/a - stored examined_at",
           "boundary_construction": "n/a",
-          "empty_result_behavior": "no feedback recorded anywhere in the essay yields an empty Dataset (rows: []) — valid, not an error",
-          "zero_fill_behavior": "none — sparse by design, absence of a row means 'neither flag set', not zero-filled",
-          "row_shape": "section_id (string), sentence_index (number), sentence_text (string), is_difficult (boolean), is_thumbs_up (boolean), created_at (date), updated_at (date)"
+          "empty_result_behavior": "never examined -> empty Dataset; unknown essay -> 404 NOT_FOUND",
+          "zero_fill_behavior": "n/a",
+          "row_shape": "id, examined_at, exam_type, score, passed, question, answer_transcript, feedback"
         }
       },
       {
         "type": "http_endpoint",
-        "name": "PATCH /api/essaycards/sections/{section_id}/sentence-feedback",
-        "purpose": "Set one of the two independent flags (difficult / thumbs_up) on one sentence to an explicit value.",
-        "ui_contract": "none — mutation endpoint per R-CON-BP-04; returns a typed record, not a Dataset"
+        "name": "GET /api/essaycards/sections/{section_id}/examinations",
+        "purpose": "Existing per-section attempt history; gains the stored pass verdict.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "section_id (path)",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a",
+          "ordering": "unchanged - examined_at desc",
+          "grouping": "unchanged",
+          "time_basis": "unchanged",
+          "boundary_construction": "n/a",
+          "empty_result_behavior": "unchanged",
+          "zero_fill_behavior": "n/a",
+          "row_shape": "unchanged plus passed (boolean)"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/due",
+        "purpose": "Existing review/focus queue; eligibility now also requires the card to be unlocked and not awaiting revalidation.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "topic, essay_id, section_id - unchanged",
+          "defaults": "unchanged",
+          "allowed_combinations": "unchanged",
+          "ordering": "UNCHANGED (RECENT before BACKLOG etc. - the ORDER BY clause is not touched)",
+          "grouping": "none",
+          "time_basis": "unchanged - Postgres now()",
+          "boundary_construction": "unchanged WHERE plus: AND section guided_passed AND needs_revalidation = false",
+          "empty_result_behavior": "unchanged - empty queue valid; a fully locked scope yields an empty queue, not an error",
+          "zero_fill_behavior": "n/a",
+          "row_shape": "unchanged"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/stats",
+        "purpose": "Existing queue forecast; locked cards are excluded, needs_revalidation cards are still counted in their FSRS due-date bands (so the due_now band can exceed the focus queue and open_count by the number of flagged due cards).",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "topic, essay_id, section_id - unchanged",
+          "defaults": "unchanged",
+          "allowed_combinations": "unchanged",
+          "ordering": "unchanged - fixed seven bands",
+          "grouping": "unchanged",
+          "time_basis": "unchanged",
+          "boundary_construction": "unchanged band edges; added predicate: section guided_passed (needs_revalidation cards remain counted - their FSRS due dates are untouched)",
+          "empty_result_behavior": "unchanged - always seven zero-filled rows",
+          "zero_fill_behavior": "unchanged",
+          "row_shape": "unchanged"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/flashcards/revalidation",
+        "purpose": "The Revalidation queue: every flagged card, immediately available regardless of next_due_at.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "essay_id (optional)",
+          "defaults": "no essay_id -> flagged cards across every essay",
+          "allowed_combinations": "{}, {essay_id}; any other parameter is ignored by FastAPI (no topic/section scoping this sprint)",
+          "ordering": "essay display order (category asc nulls last, sort_index, created_at), section order_index asc, flashcards.level asc, flashcards.created_at asc, flashcards.id asc - deterministic; FSRS due date deliberately ignored",
+          "grouping": "none",
+          "time_basis": "none - no time predicate (flagged == eligible)",
+          "boundary_construction": "WHERE flashcard_review_state.needs_revalidation (partial-index backed)",
+          "empty_result_behavior": "no flagged cards (or unknown essay_id) -> empty Dataset; this is the 'revalidation complete' signal",
+          "zero_fill_behavior": "n/a",
+          "row_shape": "identical to GET /flashcards/due rows (DUE_SCHEMA) so the review view renders them unchanged; is_new is always false"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/essaycards/flashcards/{flashcard_id}/review",
+        "purpose": "Grade a card. Request body unchanged ({grade}). Server derives revalidation from needs_revalidation (invariant REVALIDATION CARD HANDLING) and rejects locked cards.",
+        "ui_contract": "none - mutation endpoint per R-CON-BP-04; returns a typed record"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/essaycards/essays/{essay_id}/questions",
+        "purpose": "Question-overview rows; gain per-card lock/state so a section's cards are visibly locked.",
+        "ui_contract": "Dataset | ApiError",
+        "query_behavior": {
+          "supported_parameters": "essay_id (path)",
+          "defaults": "n/a",
+          "allowed_combinations": "n/a",
+          "ordering": "unchanged - section order_index asc, level asc, created_at asc",
+          "grouping": "unchanged",
+          "time_basis": "n/a",
+          "boundary_construction": "card_state per invariant ESTABLISHED / LEARNED",
+          "empty_result_behavior": "unchanged",
+          "zero_fill_behavior": "n/a",
+          "row_shape": "unchanged plus is_locked (boolean), card_state ('locked'|'new'|'learning'|'established'|'learned'), needs_revalidation (boolean)"
+        }
       }
     ]
   },
   "internal_flow": [
     {
       "step": 1,
-      "name": "remove_review_page_redundant_label",
-      "description": "ReviewSessionView's scopeCaption (the small uppercase caption rendered above ReviewStatsPanel) is rendered ONLY when scopeLabel is 'Focus · <topic>' or 'Focus · this essay' (useful, distinguishing information). When scopeLabel would be the bare 'Review' (the plain, no-scope session — the element 00_draft.md §1 calls the 'large body header: Review'), scopeCaption is omitted entirely. No Atlas_Shell change (see open_questions) — the Shell's existing MobileHeader ('← Atlas' + 'EssayCards') is the only top-of-page wayfinding this sprint provides for the plain review session.",
+      "name": "schema_additions",
+      "description": "10_schema.sql: section_examinations.passed (one-time backfill), essay_examinations, essay_oral_state, section_oral_state (+ one-time grandfathering backfill guarded by the table's own absence), flashcard_review_state.needs_revalidation, revalidation_events. Folded into schema.sql after the Sprint13 block, inside schema.sql's single existing begin/commit (10_schema.sql carries no transaction statements of its own).",
       "inputs": [
-        "scopeLabel (existing, unchanged derivation)"
+        "10_schema.sql"
       ],
       "outputs": [
-        "scopeCaption conditionally omitted"
+        "new tables/columns"
       ]
     },
     {
       "step": 2,
-      "name": "review_today_summary_endpoint",
-      "description": "backend/routers/review_stats.py gains get_review_today (GET /review-stats/today). Scope validation (section_id requires essay_id; topic excludes essay_id/section_id) is copied verbatim from flashcard_queue_stats' existing inline blocks (same duplication style already established between list_due_flashcards and flashcard_queue_stats — not newly factored out). SQL: a scoped_flashcards CTE (same essay_id/section_id/topic-via-essays.category join shape as flashcard_queue_stats), joined to review_events filtered to [today_start, today_start + interval '1 day') per the TIME BASIS invariant, joined to a first_ever CTE (per the FIRST-EVER REVIEW invariant) to flag which of today's reviews are a card's first ever. Returns one row: recalls=count(*), unique_cards_seen=count(distinct flashcard_id), first_cards_seen=count(distinct flashcard_id) filter (where is_first_ever).",
+      "name": "pass_rule_module",
+      "description": "backend/oral_state.py defines SCORE_MAX=6, PASS_THRESHOLD_PERCENT=70 and is_passing_score(score) (integer arithmetic: score*100 >= PASS_THRESHOLD_PERCENT*SCORE_MAX). Every verdict - import validation echo, package scoring echo, stored passed - flows from this one function. Sprint12's PASS_SCORE_THRESHOLD and its SQL literal '< 3' are deleted with the nine old progress fields.",
       "inputs": [
-        "topic/essay_id/section_id (validated)",
-        "essaycards.flashcards",
-        "essaycards.review_events"
+        "score"
       ],
       "outputs": [
-        "one-row Dataset: recalls, unique_cards_seen, first_cards_seen"
+        "passed boolean"
       ]
     },
     {
       "step": 3,
-      "name": "review_page_five_metric_row",
-      "description": "ReviewStatsPanel's CURRENT block (Session/Backlog/New metric trio) is replaced by a five-metric row: Recalls/Unique/First from the new GET /review-stats/today(scope) fetch (same topic/essayId/sectionId props the panel already receives and already uses for its existing GET /flashcards/stats fetch), Due = queue.length (renamed from the old 'Backlog' label, same underlying value, passed down from ReviewSessionView exactly as 'backlog' was before), New = newRemaining (unchanged value/derivation — queue.filter(c => c.is_new).length). The 'Current'/'Upcoming' vertical gutter labels are removed (00_draft.md §2 Remove list).",
+      "name": "examination_package_scope",
+      "description": "build_export_package gains scope/section_id. scope=section restricts sections to the one section (404 if it is not in the essay). scope=essay keeps every section and, for exam_type=guided, adds last_essay_examination from essay_examinations. exam_type=unguided still emits null calibration everywhere. The scoring echo is built from backend.oral_state constants. The router validates the parameter combination manually (VALIDATION_ERROR) before touching the DB.",
       "inputs": [
-        "GET /review-stats/today response",
-        "queue.length",
-        "queue.filter(is_new).length"
+        "essay_id",
+        "exam_type",
+        "scope",
+        "section_id"
       ],
       "outputs": [
-        "five-metric row: Recalls, Unique, First, Due, New"
+        "package dict"
       ]
     },
     {
       "step": 4,
-      "name": "review_page_forecast_trim",
-      "description": "ReviewStatsPanel's forecast grid drops its 'Session' row entirely and drops the 'All' row label (passes ForecastGrid a single row with an empty label, reusing ForecastGrid unchanged — see 10_scaffolding.json for the exact prop change). The underlying data source is UNCHANGED (the existing scoped GET /flashcards/stats fetch, the same 'All' values previously shown). sessionForecast state, setSessionForecast, the setSessionForecast call inside handleGrade, forecastKeyForInterval, emptyForecast, and the Forecast type become dead code and are removed (their sole consumer was the now-deleted Session row); lastNewIntervalSec and the diagnostics-frame 'new interval' display are UNCHANGED (unrelated state, not derived from sessionForecast). ReviewSessionView's reviewedCount state (src/ShellEntry.tsx:2705) is a SEPARATE, dual-purpose variable and is explicitly NOT part of this dead-code family: today it feeds both (a) the `reviewed` prop passed into ReviewStatsPanel (:2830, backing the old Session metric this sprint removes) and (b) the completion-screen message (:2858, `reviewedCount === 0 ? 'Nothing due right now.' : 'Session complete — nothing left in the queue.'`), which this sprint does not touch. Only consumer (a) — the `reviewed` prop wiring/the ReviewStatsPanel prop itself — is removed, because the Session metric it fed no longer exists after step 3's five-metric replacement. `reviewedCount` state, its setter (`setReviewedCount`, including the call inside handleGrade at :2804 and the reset at :2751), and its use in the completion-screen message at :2858 MUST be retained verbatim. Same grep-before-deleting discipline as the sessionForecast family: confirm `reviewedCount`/`setReviewedCount` has exactly these two consumers before touching anything, then remove only the `reviewed` prop from ReviewStatsPanel's signature and its one call-site pass-through — never the state itself.",
+      "name": "import_validation",
+      "description": "validate_import_body gains per-result scope (required, 'section'|'essay'). scope=section: unchanged requirements (section_anchor_slug, section_version, nugget_versions). scope=essay: section_anchor_slug must be absent/null; section_version and nugget_versions are accepted and IGNORED (examiners may echo them; they are not stored for essay scope); essay_slug, examined_at, question, answer_transcript, score, exam_type, feedback validated identically to section results. Each validated result gains passed = is_passing_score(score).",
       "inputs": [
-        "existing scoped GET /flashcards/stats response (unchanged)"
+        "request body"
       ],
       "outputs": [
-        "single unlabeled interval-forecast row"
+        "validated result dicts with scope and passed"
       ]
     },
     {
       "step": 5,
-      "name": "sentence_splitting_module",
-      "description": "New backend/sentences.py::split_sentences(body_markdown: str) -> list[str], pure function, no I/O, module-docstring-as-spec (same convention as StoryReader's backend/paragraphs.py): (1) normalize line endings to \\n, strip leading/trailing whitespace of the whole text; (2) drop fenced-code delimiter lines (^```.*$) and their content lines entirely — code is not sentence-feedback-addressable, same fence-handling convention as StoryReader's split_paragraphs; (3) join all remaining lines with a single space (markdown line breaks do not affect sentence boundaries); (4) split on the regex (?<=[.!?])\\s+(?=[A-Z0-9\"'(\\[]) — a sentence-ending punctuation mark followed by whitespace and an uppercase letter, digit, quote, or open-bracket/paren. This avoids splitting mid-abbreviation and never splits inside markdown link/image/nugget-ref syntax ([text](url), ![alt](url), [[nugget:key]]), none of which contain actual whitespace between a '.'/'!'/'?' and the next character; (5) strip each resulting sentence of leading/trailing whitespace, drop empty strings. sentence_index is the 0-based position in this final list. Markdown formatting is preserved VERBATIM inside each sentence fragment — NOT stripped (unlike StoryReader's paragraph renderer) — because each sentence is independently re-rendered through ReactMarkdown client-side (step 8) to keep full nugget-ref/link/image/bold fidelity. Documented as best-effort/English-only, same Out-of-Scope precedent as StoryReader's own word/sentence boundary disclaimer (Sprint02_TapToSelect/00_draft.md).",
+      "name": "import_apply_attempts",
+      "description": "import_results resolves every (essay_slug[, section_anchor_slug]) first (NOT_FOUND rejects the whole batch), then, in array order inside the caller's transaction: INSERT the attempt (section_examinations incl. passed, or essay_examinations), then call apply_section_attempt / apply_essay_attempt. Each returns an effects list. The response record gains per result: scope, passed, score_percent (one decimal), effects; and top-level revalidation: {essay_id, cards_flagged} entries for every cascade that fired.",
       "inputs": [
-        "essay_sections.body_markdown"
+        "validated results"
       ],
       "outputs": [
-        "ordered list[str] of sentence fragments"
+        "inserted attempts",
+        "state rows",
+        "effects"
       ]
     },
     {
       "step": 6,
-      "name": "sentence_feedback_schema",
-      "description": "10_schema.sql adds essaycards.sentence_feedback (section_id, sentence_index, sentence_text, is_difficult, is_thumbs_up) — see that file for full column/constraint documentation. A row exists only while at least one flag is true (ck_sentence_feedback_any_flag).",
-      "inputs": [],
+      "name": "apply_state_transitions",
+      "description": "apply_section_attempt(cur, section_id, exam_type, score, passed, examined_at): upsert section_oral_state (create row on first attempt); always set the matching *_latest_score; guided + passed -> guided_passed=true, guided_pass_source='exam', guided_passed_at=examined_at; unguided + passed -> unguided_passed=true, unguided_passed_at=examined_at, unguided_invalidated_at=null; failures change only latest_score. Returns effects like 'section_guided_unlocked' (only when guided_passed flips false->true) / 'section_unguided_passed'. apply_essay_attempt mirrors this on essay_oral_state; an unguided essay failure while unguided_passed was true runs the FAILURE CASCADE (invariants) and returns effect 'essay_unguided_failed_cascade' with cards_flagged. The prior-state read and the cascade use insert-if-absent (INSERT ... ON CONFLICT DO NOTHING) of the essay_oral_state row followed by SELECT ... FOR UPDATE on it, so two concurrent failing imports cascade once.",
+      "inputs": [
+        "attempt facts"
+      ],
       "outputs": [
-        "essaycards.sentence_feedback table"
+        "state mutations",
+        "effects"
       ]
     },
     {
       "step": 7,
-      "name": "sentence_feedback_endpoints",
-      "description": "New backend/routers/sentence_feedback.py, mounted at /api/essaycards. GET /essays/{essay_id}/sentences: for every section of the essay (ordered by order_index), calls split_sentences(section.body_markdown) and emits one row per resulting sentence. GET /essays/{essay_id}/sentence-feedback: selects every essaycards.sentence_feedback row whose section_id belongs to the essay, joined to essay_sections for ordering, no re-validation against current content (see contracts.invariants). PATCH /sections/{section_id}/sentence-feedback (body: {sentence_index: int, sentence_text: str, flag: 'difficult'|'thumbs_up', value: bool}): loads the section (404 if missing), recomputes split_sentences(section.body_markdown) fresh, validates sentence_index in range and sentence_text matches the live sentence exactly (VALIDATION_ERROR otherwise), reads the current sentence_feedback row if one exists, computes the new is_difficult/is_thumbs_up pair (the flag named in the request takes the request's value; the other flag's value is unchanged, false if no row existed), then either upserts (sentence_text, is_difficult, is_thumbs_up, updated_at=now()) if at least one flag is now true, or DELETEs the row if both are now false. Returns {section_id, sentence_index, is_difficult, is_thumbs_up}, status 200, always (whether the row was created, updated, or deleted).",
+      "name": "derived_progress_sql",
+      "description": "backend/progress.py is the single home of the Established/Learned thresholds and of every progress derivation. section_progress_sql() returns the per-section state query (LEFT JOIN section_oral_state, aggregate over flashcards x flashcard_review_state). essay_progress_lateral_sql() is the LATERAL fragment (essay alias e) computing essay_state and its supporting counts, itself reusing the section query for 'every section unguided'. CARD_STATE_SQL is the per-card CASE expression. UNLOCKED_SECTION_SQL is the reusable predicate fragment (EXISTS section_oral_state ... guided_passed) used by /due, /stats, open_count and card_state. next_step is the first unmet rung in the ladder (section: guided_oral -> flashcards_established -> unguided_oral; essay: guided_essay_oral -> cards_learned -> section_unguided_orals -> unguided_essay_oral), null only at the top rung of the respective ladder: section next_step is null when the section state is blue; essay_next_step is null when the essay state is violet (an essay at Blue reports unguided_essay_oral).",
       "inputs": [
-        "essay_id or section_id (path)",
-        "PATCH body"
+        "section_oral_state",
+        "essay_oral_state",
+        "flashcards",
+        "flashcard_review_state"
       ],
       "outputs": [
-        "sentences Dataset",
-        "sentence-feedback Dataset",
-        "mutation typed record"
+        "SQL fragments / constants"
       ]
     },
     {
       "step": 8,
-      "name": "reader_sentence_rendering",
-      "description": "ReaderView fetches GET /essays/{essay_id}/sentences and GET /essays/{essay_id}/sentence-feedback alongside the existing essay-detail fetch, building sentencesBySection and feedbackBySection (keyed by section_id -> sentence_index). Each section's rendering block (currently one <ReactMarkdown remarkPlugins=[[remarkNuggetRefs,...]] urlTransform={nuggetAwareUrlTransform} components={{a: NuggetLink...}}>{section.body_markdown}</ReactMarkdown>) is replaced by a new SectionSentences component that, for each sentence in sentencesBySection[section.id], renders a tappable <span data-sentence-index> wrapping an independent <ReactMarkdown> instance with the IDENTICAL remarkPlugins/urlTransform/components props the section-level render used (preserving nugget-ref clicks, links, images, bold per sentence fragment), followed by small trailing indicator icons when feedbackBySection has an entry for that sentence (⚠ for is_difficult, 👍 for is_thumbs_up — both can show together). Tapping a sentence opens SentenceFeedbackPopover (new, fixed-position below the tapped sentence's bounding rect — same positioning convention as StoryReader's ReactionPopover, i.e. 00_draft.md §4's 'reuse the Story app interaction pattern'), showing two independent toggle buttons (Difficult / Thumbs up) whose pressed state reflects the sentence's current feedback; each tap PATCHes .../sentence-feedback with the OTHER flag's current value implied server-side (step 7) and optimistically updates feedbackBySection. The popover closes on tap-elsewhere or re-tap of the same sentence — it does NOT auto-close on a flag toggle (both flags are reachable from one open popover, unlike StoryReader's single-reaction auto-close-on-select). CLICK PRECEDENCE (binding): a sentence's tappable <span data-sentence-index> may contain nested interactive elements rendered by its ReactMarkdown instance — a resolved `[[nugget:key]]` link (`NuggetLink`, opens `NuggetPanel`), an external/markdown link, or any other anchor from `components={{a: ...}}`. These nested elements always take precedence over the sentence-tap handler: their click handler calls `event.stopPropagation()` before any navigation/overlay-open logic runs, so the bubbling click never reaches the sentence span's own tap listener. Concretely, the sentence span's onClick fires only when the click target is the span itself or a non-interactive descendant (plain text, bold, image) — never when the target is, or is nested inside, an `<a>` rendered by that sentence's ReactMarkdown. A tap on a link or nugget-ref inside a sentence therefore always opens `NuggetPanel`/navigates and never also opens `SentenceFeedbackPopover`.",
+      "name": "essays_endpoints_field_swap",
+      "description": "backend/routers/essays.py: _learning_progress_subquery_sql, its nine fields, learning_level, PASS_SCORE_THRESHOLD and the guided/unguided_latest CTEs are REMOVED; ESSAY_OVERVIEW_SCHEMA loses the nine ColumnSchema entries and gains the new essay fields; _OVERVIEW_QUERY and get_essay use progress.essay_progress_lateral_sql(); open_count adds the unlocked/not-flagged predicates; _row_to_dict date-key list updated. list_essay_questions joins review state + unlock predicate to emit is_locked, card_state, needs_revalidation.",
       "inputs": [
-        "GET /essays/{essay_id}/sentences response",
-        "GET /essays/{essay_id}/sentence-feedback response",
-        "existing essay-detail fetch (section.nuggets, section.id, section.anchor_slug unchanged)"
+        "progress.py fragments"
       ],
       "outputs": [
-        "per-sentence tappable rendering with inline feedback indicators and a toggle popover"
+        "new row shapes"
       ]
     },
     {
       "step": 9,
-      "name": "activity_endpoint_reshape",
-      "description": "backend/routers/review_stats.py::_activity_rows is rewritten per the ACTIVITY query_behavior block: the existing days CTE (unchanged generate_series spine) is joined to a first_ever CTE (FIRST-EVER REVIEW invariant) and a day_events/day_agg aggregation computing recalls, unique_cards_seen, first_cards_seen, and again_count per UTC day, then recall_rate = (recalls - again_count)/recalls (null when recalls=0) — same null-vs-zero convention as /summary. ACTIVITY_SCHEMA gains unique_cards_seen/first_cards_seen/recall_rate columns and renames reviews -> recalls.",
+      "name": "progress_sections_endpoint",
+      "description": "backend/routers/progress.py::list_section_progress runs section_progress_sql(), optionally filtered by essay_id, ordered per query_behavior, returned as a flat Dataset.",
       "inputs": [
-        "essaycards.review_events"
+        "essay_id?"
       ],
       "outputs": [
-        "30 reshaped day rows"
+        "section progress Dataset"
       ]
     },
     {
       "step": 10,
-      "name": "summary_endpoint_new_count",
-      "description": "backend/routers/review_stats.py::_review_stats_aggregate's per-window SELECT list gains a count(distinct flashcard_id) filter (where reviewed_at >= now() - interval '<window>' and is_first_ever) expression per window, sourced from a first_ever CTE joined into the existing query (same FIRST-EVER REVIEW definition as steps 2 and 9). _build_summary_rows and REVIEW_STATS_SUMMARY_SCHEMA both gain new_count.",
+      "name": "queue_eligibility_filters",
+      "description": "flashcards.py::list_due_flashcards appends the UNLOCKED_SECTION_SQL predicate and frs.needs_revalidation = false to its conditions list; flashcard_queue_stats appends only the unlock predicate. No ORDER BY, scope-validation or select-list change.",
       "inputs": [
-        "essaycards.review_events"
+        "existing conditions"
       ],
       "outputs": [
-        "existing 3-row Dataset, each row gaining new_count"
+        "filtered queues"
       ]
     },
     {
       "step": 11,
-      "name": "stats_page_daily_activity_chart",
-      "description": "ReviewStatsView's 'Study activity' zone drops platform-ui LineChart in favor of a new, EssayCards-local DailyActivityChart component (plain div/flexbox, same CSS-composition technique ForecastGrid already uses for its own grid — zero new npm dependency), because platform-ui's BarChart has no per-bar label slot and 00_draft.md §7 requires a daily recall-rate percentage rendered directly above each day's bar (see classification.not_platform and open_questions — this is a deliberate, surfaced deviation from reusing platform-ui's chart component for this one visualization, not a silent workaround). For each of the 30 rows from the reshaped GET /review-stats/activity, DailyActivityChart renders one column: three stacked colored segments sized by repeat/unique_segment/first (per the DAILY ACTIVITY SEGMENT FORMULAS invariant, computed client-side from recalls/unique_cards_seen/first_cards_seen), a recall-rate percentage label (or 'β€”' when null) positioned directly above the column, and a legend reading 'Repeat Β· Unique Β· First' (00_draft.md §6).",
+      "name": "revalidation_queue_endpoint",
+      "description": "flashcards.py::list_revalidation_cards (GET /flashcards/revalidation, declared before the /{flashcard_id}/... routes) selects the DUE_SCHEMA row shape for every flagged card (optionally one essay) in the deterministic order from query_behavior and returns _due_dataset(rows).",
       "inputs": [
-        "GET /review-stats/activity response (reshaped)"
+        "essay_id?"
       ],
       "outputs": [
-        "30-column stacked bar chart with per-day recall-rate labels"
+        "revalidation Dataset"
       ]
     },
     {
       "step": 12,
-      "name": "stats_page_observed_recall_selector",
-      "description": "ReviewStatsView's 'Observed recall' zone replaces its always-all-three-cards grid with a day/week/month segmented selector (new local state, default 'day') plus a SINGLE ReviewStatsCard for the selected period's row from the unchanged GET /review-stats/summary fetch (which still returns all three rows — only which one is DISPLAYED changes, no new fetch needed). ReviewStatsCard is extended to show, using the 00_draft.md §9 'Detailed statistics' long labels: Cards Seen (renamed from 'Reviews', same row.reviews value), Unique Cards Seen (row.unique_cards, not previously rendered by this component), New Cards Seen (row.new_count, new field from step 10), Recall Rate (unchanged row.recall_rate). The existing Again/Hard/Good/Easy breakdown table is retained, unchanged, below these four.",
+      "name": "review_endpoint_revalidation_branch",
+      "description": "review_flashcard, after loading the review-state row (now also selecting needs_revalidation) and the section unlock state: (a) locked -> VALIDATION_ERROR. (b) needs_revalidation false -> existing path byte-for-byte unchanged, response revalidation_outcome null. (c) needs_revalidation true and is_revalidation_correct(grade) -> clear flag, record_revalidation_event(outcome 'preserved'), commit; response echoes the card's EXISTING last_reviewed_at/next_due_at, revalidation_outcome 'preserved'. (d) needs_revalidation true and not correct -> run the existing FSRS path, clear flag in the same UPDATE/transaction, record_revalidation_event(outcome 'failed'); response as normal plus revalidation_outcome 'failed'. All branches in one transaction.",
       "inputs": [
-        "existing GET /review-stats/summary response (gains new_count)"
+        "flashcard_id",
+        "grade"
       ],
       "outputs": [
-        "single selected-period stat card with four primary figures"
+        "ReviewResult + revalidation_outcome"
+      ]
+    },
+    {
+      "step": 13,
+      "name": "overview_ui",
+      "description": "EssayListView: each essay row drops StatusPill, the 'Progress: x / y . Open: z' line, the sort-index-adjacent LearningLevelBadge; it renders EssayProgressDot (large) + SectionProgressDots (small, one per section in order) built from GET /essays + GET /progress/sections (two parallel fetches; sections grouped client-side by essay_id). Dot tooltip/tap reveals section/essay title, current state name, next requirement (from next_step). A legend disclosure (ProgressLegend) lists both ladders. Category headings and their established/open/Study controls are untouched. An essay with revalidation_pending_count > 0 shows a 'Revalidate (N)' control navigating to /essaycards/review?revalidate=1&essay_id=<id>. Dots must carry an accessible text label (state name), never color alone.",
+      "inputs": [
+        "GET /essays",
+        "GET /progress/sections"
+      ],
+      "outputs": [
+        "simplified essay cards"
+      ]
+    },
+    {
+      "step": 14,
+      "name": "reader_and_oral_launch_ui",
+      "description": "ReaderView header: LearningLevelBadge replaced by EssayProgressDot; essay ActionMenu 'Guided oral exam' / 'Unguided oral exam' now fetch the package with scope=essay (whole-essay integrated oral, single result expected). Each section's ActionMenu gains 'Guided oral (section)' / 'Unguided oral (section)' fetching scope=section&section_id=<id>. A section marker (small dot from GET /progress/sections?essay_id=) sits by each section heading; a locked section (cards_total > 0 and is_locked) shows a lock hint and its 'Review this section' action is disabled with a tooltip pointing at the guided oral. SectionExaminationHistory shows pass/fail per attempt; a new EssayExaminationHistory (from GET /essays/{id}/examinations) sits under the header. handleExportExam takes (scope, examType, sectionId?).",
+      "inputs": [
+        "progress rows",
+        "examination-package"
+      ],
+      "outputs": [
+        "scoped exports"
+      ]
+    },
+    {
+      "step": 15,
+      "name": "exam_prompts_and_import_view",
+      "description": "The exam prompts become scope-aware (section vs essay reply shape with the new required scope field) and MUST state the pass rule from the package's scoring block: 70% = score 5+ passes, 3-4 are recorded but do not advance progression. The Sprint12 sentence 'A score of 3 is a legitimate, successful stopping point' is deleted from every prompt variant (it contradicts the pass rule). EXAM_RESULT_PLACEHOLDER_JSON gains scope and an essay-scope example. ImportExaminationsView renders the typed response: per-result pass/fail + percent, unlock/pass effects in plain words, and - when a cascade fired - a prominent notice with a 'Start revalidation' button to /essaycards/review?revalidate=1&essay_id=<id>.",
+      "inputs": [
+        "import response"
+      ],
+      "outputs": [
+        "prompts, import feedback"
+      ]
+    },
+    {
+      "step": 16,
+      "name": "revalidation_session_ui",
+      "description": "ReviewSessionView reads revalidate=1: dueUrl() targets /flashcards/revalidation (with essay_id), scopeLabel is 'Revalidation', the forecast ReviewStatsPanel and the today-metrics row are not rendered, a 'N remaining' count (queue.length) is shown, and grading sends the unchanged {grade} body. Because answered cards leave the queue (flag cleared), refetch-on-grade empties it; the completion screen reads 'Revalidation complete' and links back to the overview. The revalidation grade control is exactly TWO buttons, 'Correct' and 'Incorrect' (the standard four again/hard/good/easy buttons are NOT shown in revalidation mode, so there is no 'Hard' button and no ambiguous 'Hard' outcome). Mapping: 'Correct' sends {grade: 'good'} = correct (outcome 'preserved', no FSRS change); 'Incorrect' sends {grade: 'again'} = incorrect (outcome 'failed', normal FSRS again path). Only these two values from VALID_GRADES are sent by the UI; the server still treats hard/easy as correct for stale or non-UI clients (REVALIDATION CARD HANDLING is unchanged).",
+      "inputs": [
+        "GET /flashcards/revalidation",
+        "review response revalidation_outcome"
+      ],
+      "outputs": [
+        "revalidation mode"
+      ]
+    },
+    {
+      "step": 17,
+      "name": "stats_zone_and_question_overview_ui",
+      "description": "ReviewStatsView's 'Essay learning progress' zone (formerly 0/4..4/4 histogram from learning_level) becomes a five-bucket histogram of essay_state (grey/yellow/green/blue/violet) from GET /essays; LEARNING_LEVELS is removed. QuestionOverviewView renders is_locked/card_state (lock marker on locked cards, state label for others, a 'needs revalidation' marker when flagged).",
+      "inputs": [
+        "GET /essays",
+        "questions rows"
+      ],
+      "outputs": [
+        "updated zone and badges"
+      ]
+    },
+    {
+      "step": 18,
+      "name": "fixtures_and_docs",
+      "description": "tests/fixtures.sql: every EXISTING INSERT into section_examinations (three, at lines ~137, ~365, ~390) must be updated to supply the now NOT NULL passed column explicitly (passed = score >= 5; the column deliberately has no default); every EXISTING fixture section receives a guided_passed section_oral_state row (source 'grandfathered') so prior tests' cards stay eligible; new fixtures add locked/yellow/green/blue sections, essay oral state, flagged cards. CLAUDE.md: glossary gains Learned, Revalidation, locked, traffic lights; 'Learning progress (Sprint12)' is rewritten as 'Section progression (Sprint14)'; the 'exactly one of new/learning/established' sentence gains learned; Sprint scope line added.",
+      "inputs": [],
+      "outputs": [
+        "updated fixtures and docs"
       ]
     }
   ],
   "dependencies": {
     "internal_required": [
       {
+        "component": "03_Application/EssayCards/backend/scheduling.py",
+        "role": "FSRSScheduler - called unchanged for the failed-revalidation path and normal reviews"
+      },
+      {
         "component": "03_Application/EssayCards/backend/database.py",
-        "role": "get_db()/init_schema() — unchanged connection/schema-bootstrap mechanism this sprint's schema.sql addition relies on"
+        "role": "get_db()/init_schema() - applies the new schema.sql block"
       },
       {
-        "component": "03_Application/EssayCards/backend/routers/flashcards.py",
-        "role": "GET /flashcards/due/stats — unchanged, reused by the Review page for Due/New and the interval-forecast row"
+        "component": "03_Application/EssayCards/backend/examinations.py",
+        "role": "import/export core being extended"
       },
       {
-        "component": "02_Platform/Atlas_Shell/platform-ui/components/BarChart.tsx",
-        "role": "Unchanged — still used by the Stats page's 'Scheduled intervals' and 'Essay learning progress' zones, NOT reused for the new Study Activity chart (see internal_flow step 11)"
+        "component": "02_Platform/packages/platform_contracts/contracts.py",
+        "role": "Dataset, DatasetMeta, ColumnSchema for new read endpoints"
+      },
+      {
+        "component": "02_Platform/packages/platform_errorhandling",
+        "role": "api_error for VALIDATION_ERROR / NOT_FOUND"
       }
     ],
     "internal_optional": [],
     "external_required": [],
     "external_optional": [],
     "forbidden": [
-      "Any new charting/visualization npm dependency — DailyActivityChart is plain CSS/div composition, zero new package, same discipline as Sprint12's platform-ui-only charting rule",
-      "A frontend-side reimplementation of backend/sentences.py::split_sentences — the frontend renders strictly from GET /essays/{essay_id}/sentences, never recomputes sentence boundaries itself",
-      "Treating essaycards.sentence_feedback as a shared/cross-application contract or exposing it as a shared database view — it is private EssayCards application state",
-      "Any change to GET /flashcards/due's or GET /flashcards/stats' WHERE/ORDER BY clauses, or to FSRS scheduling/grading",
-      "Adding a per-route breadcrumb/group concept to Atlas_Shell's ShellLayout/MobileHeader/AppConfig/NavItem contract — out of this Application-layer sprint's scope (see open_questions)"
+      "Storing a traffic-light color (or any derived state such as 'section is green') in any table - derive at query time only",
+      "A per-card lock column or any stored 'unlocked' flag - lock state is derived from section_oral_state.guided_passed",
+      "Overwriting or recomputing next_due_at / review_interval / fsrs_card_state / last_reviewed_at in the cascade or in a 'preserved' revalidation check",
+      "Writing review_events for a 'preserved' revalidation check (would corrupt Sprint11/13 recall statistics)",
+      "Hard-coding the 70 / 30-day / 24-hour thresholds anywhere except backend/oral_state.py and backend/progress.py (the 420 in the one-time migration backfill is a documented frozen historical literal)",
+      "Re-deriving a pass verdict from score anywhere other than at import time via is_passing_score (stored passed is authoritative)",
+      "Any new npm or Python dependency",
+      "Exposing section_oral_state / essay_oral_state / essay_examinations / revalidation_events as shared views - private EssayCards state"
     ]
   },
   "persistence": {
@@ -352,79 +542,98 @@
   },
   "deferrals": {
     "application_implementer": [
-      "Implement backend/sentences.py::split_sentences exactly per internal_flow step 5 — this is the one place the regex/fence-handling algorithm is defined; do not re-derive it differently in the sentences endpoint vs. the feedback-validation endpoint.",
-      "Implement the FIRST-EVER REVIEW CTE once as a reusable SQL fragment (e.g. a module-level string constant in backend/routers/review_stats.py) and compose it identically into get_review_today, _activity_rows, and _review_stats_aggregate — do not hand-write three slightly different versions of 'min(reviewed_at) per flashcard_id' (R-CON-BP-09).",
-      "Copy the topic/essay_id/section_id scope-validation block for GET /review-stats/today verbatim from flashcard_queue_stats (same duplication style already present between list_due_flashcards and flashcard_queue_stats — do not introduce a third, differently-worded copy).",
-      "backend/routers/sentence_feedback.py: implement GET /essays/{essay_id}/sentences, GET /essays/{essay_id}/sentence-feedback, and PATCH /sections/{section_id}/sentence-feedback per internal_flow steps 7; register the router in backend/main.py's app.include_router(...) set.",
-      "Frontend: ReaderView fetches /sentences and /sentence-feedback per internal_flow step 8; build SectionSentences and SentenceFeedbackPopover as new components; delete the per-section whole-body <ReactMarkdown> render it replaces, preserving the exact remarkPlugins/urlTransform/components props on each per-sentence ReactMarkdown instance. Implement the CLICK PRECEDENCE rule from step 8: the anchor renderer passed via `components={{a: ...}}` must call `event.stopPropagation()` in its onClick before its own navigation/overlay-open logic, so a link/nugget-ref tap inside a sentence never also triggers the sentence span's tap-to-open-popover handler.",
-      "Frontend: ReviewStatsPanel changes per internal_flow steps 3-4 — remove the gutter Current/Upcoming labels, add the five-metric row, trim the forecast grid to one unlabeled row, remove sessionForecast/setSessionForecast/forecastKeyForInterval/emptyForecast/Forecast and their one call site in handleGrade (confirm via grep that nothing else in ShellEntry.tsx references them before deleting). Separately, remove ONLY the `reviewed` prop from ReviewStatsPanel's signature and its `reviewed={reviewedCount}` call-site pass-through (:2830) — `reviewedCount` state, `setReviewedCount`, and the completion-screen message that reads `reviewedCount` (:2858) are NOT dead code and must be retained verbatim; confirm via grep that these are `reviewedCount`'s only two consumers before touching anything (same discipline as the sessionForecast family, per step 4).",
-      "Frontend: ReviewSessionView's scopeCaption conditional per internal_flow step 1.",
-      "Frontend: build DailyActivityChart (new, local, CSS-only) per internal_flow step 11; wire into ReviewStatsView replacing the LineChart 'Study activity' zone.",
-      "Frontend: add the day/week/month selector and extend ReviewStatsCard per internal_flow step 12.",
-      "Backend: implement GET /review-stats/today, reshape _activity_rows/ACTIVITY_SCHEMA, extend _review_stats_aggregate/_build_summary_rows/REVIEW_STATS_SUMMARY_SCHEMA with new_count — all in backend/routers/review_stats.py."
+      "Fold 10_schema.sql into 03_Application/EssayCards/schema.sql after the Sprint13 block, preserving the information_schema-guarded DO block so the section_oral_state backfill runs exactly once. Confirm tests/conftest.py's 'truncate essays ... cascade' already clears all four new tables via their FKs (it should; verify, do not assume).",
+      "Create backend/oral_state.py (constants, is_passing_score, apply_section_attempt, apply_essay_attempt incl. the failure cascade and its concurrency guard) and backend/revalidation.py exactly as scaffolded; oral_state.py imports flag_essay_cards_for_revalidation from revalidation.py (one-directional; revalidation.py must not import oral_state).",
+      "Create backend/progress.py and move ALL threshold/state SQL there; delete essays.py::_learning_progress_subquery_sql and every Sprint12 learning field/constant listed in internal_flow step 8; grep the repo for PASS_SCORE_THRESHOLD, learning_level, milestone_ before declaring done.",
+      "Extend backend/examinations.py (build_export_package scope/section_id/scoring/last_essay_examination; validate_import_body scope handling; import_results essay branch, passed, apply_* calls, effects, cascade summary) and backend/routers/examinations.py (manual validation of exam_type+scope+section_id combos, GET /essays/{id}/examinations, passed column on the section history).",
+      "Modify flashcards.py: unlock + needs_revalidation predicates on /due, unlock predicate on /stats, new GET /flashcards/revalidation (register before parameterized /{flashcard_id}/... routes), review_flashcard branches per internal_flow step 12 (locked guard, preserved path with NO FSRS call and NO review_events row, failed path through the existing FSRS code, single transaction, response revalidation_outcome).",
+      "Create backend/routers/progress.py and register it in backend/main.py.",
+      "Frontend (src/ShellEntry.tsx) per internal_flow steps 13-17: remove StatusPill usage on the overview row, LearningLevelBadge/learningLevelExplanation/MILESTONE_LABELS/LEARNING_LEVELS and the EssayRow/EssayDetailRow Sprint12 fields; add EssayProgressDot, SectionProgressDots, ProgressLegend, EssayExaminationHistory, scope-aware exam prompts/export, revalidation mode in ReviewSessionView, import-result rendering, locked/state markers in the question overview, essay_state stats histogram.",
+      "Rewrite fixtures and docs per internal_flow step 18; update tests/test_essays.py (the Sprint12 milestone/learning_level tests are replaced), tests/test_examinations.py (threshold now 5; scope), tests/test_flashcards.py (unlock/exclusion/revalidation).",
+      "Draft color mapping: use the draft's color NAMES (grey/yellow/green/blue/violet) as the canonical keys; pick concrete tokens from 02_Platform/Atlas_Shell/UI_DesignLanguage.md - do not invent a palette."
     ],
     "ui_implementer": [
-      "SentenceFeedbackPopover: two independently-toggleable icon buttons (⚠ Difficult, 👍 Thumbs up), pressed/active state must be visually distinct from unpressed; must not auto-close on toggle (both flags reachable from one open popover) — close only on tap-elsewhere or re-tap of the already-open sentence.",
-      "Per-sentence trailing indicator icons (⚠/👍) must stay visually lightweight — small, inline, not interrupting reading flow (00_draft.md §4 'very lightweight... should not interrupt reading').",
-      "DailyActivityChart: 30 columns must remain legibly tappable/scannable on mobile width (horizontal scroll acceptable, same precedent as the existing UPCOMING forecast grid's horizontal-scroll-on-narrow-widths treatment); the recall-rate label above each bar must not visually collide with adjacent bars' labels at small widths.",
-      "Day/week/month selector on the Stats page: must clearly indicate which period is currently selected (not just a hover state) — touch/keyboard accessible, same discipline already required of the category-collapse toggle (Sprint12)."
+      "Overview essay card: one larger essay dot + a row of smaller section dots in section order; no PLANNED/COMPLETE, no 1/4 level, no 'x / y' card progress, no 'Open: n' on the essay card. Category heading line ('N / M established . K open', Study) remains.",
+      "Dot tooltip (hover and tap/focus, keyboard reachable, not hover-only): section name or essay title, state name, next requirement text mapped from next_step. Every dot needs an aria-label with the state name.",
+      "Legend disclosure with both ladders exactly as worded in 00_draft.md section 19; collapsed by default, not repeated on every card.",
+      "Locked cards in the question overview and a locked section in the reader must look visibly locked and explain how to unlock (pass the guided section oral).",
+      "'Revalidate (N)' entry on essays with pending cards; revalidation session shows remaining count and a clear completion state.",
+      "Respect UI_DesignLanguage.md for sizes/colors; state must not be conveyed by color alone."
     ],
     "test_writer": [
-      "GET /review-stats/today: no-scope global case; topic-scoped; essay-scoped; essay+section-scoped; section_id-without-essay_id rejected VALIDATION_ERROR; topic-with-essay_id rejected VALIDATION_ERROR; a card reviewed multiple times today counts once in unique_cards_seen but multiple times in recalls; a card whose first-ever review is TODAY counts in first_cards_seen; a card whose first-ever review was yesterday but is reviewed again today does NOT count in first_cards_seen today.",
-      "GET /review-stats/activity: the reshaped row shape (recalls/unique_cards_seen/first_cards_seen/recall_rate) on a day with mixed new+repeat reviews; verify repeat/unique_segment/first client-side-computed values sum to recalls for a known fixture day (00_draft.md §6 worked example: 20 recalls, 12 unique, 2 first -> repeat=8, unique_segment=10, first=2).",
-      "GET /review-stats/summary: new_count reflects first-ever reviews within each rolling window; a card first reviewed 10 days ago does not count in new_count for the day window but does for the month window.",
-      "GET /essays/{essay_id}/sentences: a section with multiple sentences splits correctly; a section containing a markdown link/nugget-ref/bold span mid-sentence is not split on it; a section with a fenced code block excludes the code's lines from any sentence.",
-      "GET /essays/{essay_id}/sentence-feedback: empty when nothing marked; returns only sentences with >=1 flag true; a never-written sentence is absent, not zero-filled.",
-      "PATCH /sections/{section_id}/sentence-feedback: setting difficult=true then thumbs_up=true on the SAME sentence yields both flags true in one row (not two rows); setting a flag back to false when it was the only true flag deletes the row (confirm via a follow-up GET showing it absent); setting a flag false when the OTHER flag is still true leaves the row present with only the other flag true; sentence_index out of range -> VALIDATION_ERROR; sentence_text mismatch against the live split -> VALIDATION_ERROR; unknown section_id -> NOT_FOUND; invalid flag value -> VALIDATION_ERROR.",
-      "[UI] Review page: the plain (no-scope) review session shows no 'Review' page-level caption; a focus session (topic or essay-scoped) still shows its 'Focus · ...' caption; the five metrics (Recalls/Unique/First/Due/New) render with correct labels; the interval-forecast row shows one unlabeled row of six numbers. EssayCards already has tests/ui/*.spec.ts run against atlas-shell via the shared atlas-playwright container (see tests/ui/review_stats.spec.ts, category_collapse.spec.ts, etc. from Sprint12) — follow that existing convention, not a manual scenario.",
-      "[UI] Essay reader: tapping a sentence opens a popover with two toggle buttons below it; tapping Difficult then reopening the same sentence shows Difficult pre-highlighted; tapping Thumbs up on the same sentence without closing the popover sets both flags; a marked sentence shows its trailing indicator icon(s) after the popover is closed and the page is reloaded (persistence across reload). New tests/ui/sentence_feedback.spec.ts, same Playwright convention as the existing tests/ui files.",
-      "[UI] Stats page: the Study Activity chart renders 30 stacked columns with a recall-rate percentage above each; the Observed Recall selector switches between day/week/month and updates all four displayed figures. Extend or add alongside tests/ui/review_stats.spec.ts."
+      "See 10_test_spec.md - every scenario name is the traceability link. Extend tests/fixtures.sql with fix-prefixed fixtures covering locked/yellow/green/blue sections, an essay at Violet with reviewed and never-reviewed cards, flagged cards, and legacy-grandfathered state.",
+      "Backfill migration test: run the schema DO-block logic against a pre-seeded section_examinations/flashcard_review_state set and assert grandfathering outcomes and that a second schema load does not re-grandfather."
     ],
     "reviewer": [
-      "Confirm GET /flashcards/due's and GET /flashcards/stats' SQL is byte-for-byte untouched by this sprint (the Review page only changes what it DISPLAYS from them, per classification.non_goals).",
-      "Confirm the FIRST-EVER REVIEW definition is implemented identically (same CTE shape/semantics) in all three consuming endpoints — not three independently-drifted versions.",
-      "Confirm PATCH .../sentence-feedback never leaves an all-false row in essaycards.sentence_feedback (ck_sentence_feedback_any_flag should never fire in normal operation — a thrown constraint violation here would indicate the delete-on-both-false logic is wrong, not that the constraint is doing its job).",
-      "Confirm sentence_feedback is never exposed as, or treated as, a cross-application shared view (shared_views.provides stays empty).",
-      "Confirm no new npm charting dependency was introduced for DailyActivityChart.",
-      "Confirm scopeCaption removal is conditional (Focus-mode captions still render) — not a blanket removal of all scope context."
+      "Confirm the due-queue ORDER BY, scope validation and select list are byte-identical to before; only WHERE predicates were added.",
+      "Confirm the 'preserved' revalidation path writes no review_events row and does not touch fsrs_card_state / flashcard_review_state timestamps or interval.",
+      "Confirm no stored traffic-light color exists and that section green/blue and essay green/blue/violet are computed in exactly one place (backend/progress.py).",
+      "Confirm every threshold literal lives only in oral_state.py / progress.py (the migration's 420 excepted and commented).",
+      "Confirm the cascade leaves guided state, attempt history and FSRS state untouched and flags only cards with last_reviewed_at not null.",
+      "Confirm the exam prompts no longer say a score of 3 is a successful stopping point and state the 70% / 5-of-6 rule consistently with the package scoring echo (R-CON-BP-09).",
+      "Confirm no PATCH endpoint was introduced and import scope=essay handling of omitted vs null section_anchor_slug matches contracts.invariants."
     ]
   },
   "deferred_decisions": [
-    "Whether Atlas_Shell's ShellLayout/MobileHeader should eventually gain a real per-route breadcrumb slot so 'Atlas  EssayCards  Review' can be literally realized (Platform-layer change, out of this sprint's scope — see open_questions)",
-    "Whether platform-ui's BarChart should eventually gain a generic per-bar value-label capability, which would let a future sprint migrate DailyActivityChart onto the shared component instead of a local CSS-only one",
-    "Whether sentence_feedback rows should eventually get an active staleness check (compare stored sentence_text against a live recompute) or a re-ingest-time re-indexing pass, the way nugget_versions_at does for examination freshness — not built this sprint (classification.non_goals)",
-    "Per-user timezone-aware day boundaries for /review-stats/today and /review-stats/activity (both UTC-fixed this sprint, same deferred decision already carried from Sprint12)",
-    "Whether a future sprint should special-case block-level markdown constructs (lists, blockquotes) in sentence splitting/rendering so they retain their shared wrapper instead of rendering as independent per-sentence fragments"
+    "Configurable pass threshold and Learned threshold (env var or settings table) - constants this sprint",
+    "Whether a failed unguided SECTION oral should also revoke Section Blue",
+    "Whether editing a section after its oral pass should invalidate that pass (section_version_at is stored but unused)",
+    "Pruning/retention of revalidation_events and the essay_examinations log",
+    "A global 'Revalidation' entry on the main Review page (this sprint exposes it from the overview, reader and import result only)"
   ],
   "risks": [
     {
-      "risk": "Sentence feedback can become silently misattached to the wrong sentence if a section's body_markdown is edited (via re-ingest) after feedback was recorded, as long as the edit keeps sentence_index in range for the new text (see 10_schema.sql KNOWN GAP).",
-      "impact": "A user could see a ⚠/👍 mark that now sits on a different sentence than the one they originally marked. No data loss (the row persists), but display can mislead until the user notices and re-marks. Accepted per classification.non_goals, consistent with this app's broader no-delete/no-reindex-on-re-ingest culture (nugget ownership gap, non-atomic flashcard generation gap)."
+      "risk": "Migration lock-out: the new unlock rule would lock every existing card.",
+      "impact": "Mitigated by the one-time grandfathering backfill (any section with a reviewed card or a guided exam >= 3 becomes guided_passed with source 'grandfathered'). A section that has neither (never started) correctly starts locked. If the backfill logic is wrong, a user's whole queue disappears - hence the dedicated migration test."
     },
     {
-      "risk": "Rendering each sentence as an independently re-parsed ReactMarkdown fragment loses block-level grouping for markdown constructs that span multiple sentences (a multi-sentence bulleted list item, a multi-sentence blockquote) — each sentence becomes its own small fragment rather than sharing one <ul>/<blockquote> wrapper.",
-      "impact": "Sections that are dense prose (the common case per CLAUDE.md's ingestion-prompt guidance — 'body_markdown is the actual essay prose the reader sees') render unaffected; sections with heavy list/quote content may show minor visual regressions (an extra bullet glyph per sentence, lost blockquote indent continuity). Not solved this sprint; see deferred_decisions."
+      "risk": "The 70% rule on a 0-6 scale makes the pass bar 5/6, stricter than the Sprint12 bar of 3/6; historical attempts scoring 3-4 stop counting as passes.",
+      "impact": "Previously 'passed' orals no longer advance new progression (grandfathering protects existing unlocks only). See open_questions for the alternative of changing the examiner scale."
     },
     {
-      "risk": "Two different 'day' time semantics now coexist on the same Stats/Review surface area: GET /review-stats/summary's pre-existing rolling 24-hour 'day' window, and GET /review-stats/today's/activity's UTC calendar day.",
-      "impact": "A reviewer comparing the Review page's 'Recalls today' (calendar day) against the Stats page's 'Day' observed-recall card (rolling 24h) could see different numbers for what looks like the same concept. Named explicitly in both endpoints' query_behavior blocks and in contracts.invariants so this is not mistaken for a bug during review or later debugging."
+      "risk": "Essay Green requires every card of the essay to be Learned, and a card in a locked section can never be reviewed.",
+      "impact": "An essay can only reach Green after every section has passed its guided oral; this is a consequence of the draft, intended, but may surprise."
     },
     {
-      "risk": "DailyActivityChart is a new, EssayCards-local, non-platform-ui visualization component built specifically because platform-ui's BarChart has no per-bar label slot.",
-      "impact": "A small amount of chart-rendering logic now exists outside 02_Platform's shared components, duplicating (in spirit, via plain CSS rather than recharts) a capability BarChart almost provides. Explicitly surfaced rather than silently worked around (R-OPS-BP-01) — see open_questions for the platform-layer alternative."
+      "risk": "State is applied in import order, not examined_at order.",
+      "impact": "Importing an old result after a newer one can flip state against chronological truth. Accepted and documented; same append-only trust model as Sprint12."
+    },
+    {
+      "risk": "Removing the nine Sprint12 fields from GET /essays and GET /essays/{id} is a breaking Dataset change.",
+      "impact": "Only the EssayCards frontend consumes them (verified by grep: ShellEntry.tsx, tests); it is reworked in the same sprint (R-CON-BP-09). Any stale cached frontend bundle would render NaN/undefined levels until redeployed."
+    },
+    {
+      "risk": "Excluding flagged cards from /due while they await revalidation can leave a user with an empty normal queue and pending revalidation.",
+      "impact": "Intentional; mitigated by surfacing the Revalidate (N) control on the overview, reader and import result."
     }
   ],
   "open_questions": [
     {
-      "question": "Should Atlas_Shell's ShellLayout/MobileHeader gain a real per-route breadcrumb capability (so an application page can contribute a third segment like 'Atlas  EssayCards  Review') in a future Platform-layer sprint? This sprint only removes the redundant in-page 'Review' label and relies on the Shell's existing static app-level header.",
+      "question": "Pass threshold on the existing 0-6 integer scale: 70% means score >= 5 (4/6 = 66.7% fails), versus Sprint12's >= 3. Is that intended, or should examiners score on a 0-100 scale (which would need a score column/constraint change and a prompt change)? This design implements 70% of 6 and parameterizes only the constant.",
       "owner": "product"
     },
     {
-      "question": "Should platform-ui's BarChart eventually support a generic per-bar value-label slot, so the Study Activity chart (and any future similar need) can use the shared component instead of a local CSS-only one?",
+      "question": "Draft section 13 says 'when an unguided full-essay oral is failed, initiate Revalidation' while section 12 scopes the consequences to an essay currently at Violet. This design runs the cascade and revalidation only when essay unguided_passed was true at the time of the failing attempt; a first-ever failing unguided essay oral is history-only. Confirm.",
       "owner": "product"
     },
     {
-      "question": "Is silent sentence-feedback misattachment after a section edit an acceptable permanent gap, or should a future sprint add a lightweight staleness indicator (not full re-indexing)?",
+      "question": "Draft says revalidation covers 'all active flashcards'. This design flags only cards that have been reviewed at least once (a never-reviewed card has no memory state to validate). Confirm.",
+      "owner": "product"
+    },
+    {
+      "question": "Grandfathering of existing sections (any reviewed card or guided exam >= 3 -> guided_passed, source 'grandfathered'). Confirm this one-time rule, or specify that existing sections should start locked.",
+      "owner": "product"
+    },
+    {
+      "question": "Open count wording: 'category-level flashcard statistics unchanged' vs open_count's definition 'what a focus session surfaces'. This design keeps progress_total/progress_established unchanged but makes open_count exclude locked and revalidation-pending cards. Confirm, or accept the overstated open count (and Study buttons that open an empty session) for fully locked essays.",
+      "owner": "product"
+    },
+    {
+      "question": "Should a failed unguided SECTION oral revoke that section's Blue (draft only specifies the essay-level failure cascade)? Design: no.",
+      "owner": "product"
+    },
+    {
+      "question": "Oral-exam buttons remain disabled unless essay.status === 'complete', although the draft says planned/complete is 'no longer needed' on the card. Keep that gating?",
       "owner": "product"
     }
   ]

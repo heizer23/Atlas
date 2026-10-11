@@ -207,7 +207,7 @@ essaycards.revalidation_events (append-only), plus `section_examinations.passed`
 Schema initialized idempotently at startup from schema.sql.
 
 `make essaycards-schema` feeds the runtime `schema.sql` (idempotent) to psql. `00_architecture/schema.sql`
-is a stale design snapshot (Sprint13 change file) and is NOT used for rebuilds. The
+is a snapshot copy of it (refresh on sprint close; the Makefile does not use it). The
 canonical runtime schema is `03_Application/EssayCards/schema.sql` (per
 architecture.json), applied by `init_schema()` at startup and by conftest.
 

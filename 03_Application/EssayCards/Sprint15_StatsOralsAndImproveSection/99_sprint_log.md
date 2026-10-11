@@ -24,3 +24,4 @@
   read: 05_fast_path_plan.md, 00_Blueprint/Quality/EssayCards/Code_Review_2026-10-11.md
   wrote: 99_sprint_log.md
 - 2026-10-11 `TESTS_PASSING` → `SPRINT_COMPLETE` [/sprint-close]
+- 2026-10-11 snapshot reconciled [/sprint-close follow-up] — fast path has no design artifacts; 00_architecture/ (regenerated from Sprint14) needs no Sprint15 change: architecture.json does not cover /review-stats/summary or the section export (documented in docs/). 

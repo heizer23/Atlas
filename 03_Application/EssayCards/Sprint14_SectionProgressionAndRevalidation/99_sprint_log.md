@@ -6,8 +6,8 @@
   "component_name": "EssayCards",
   "layer": "03_Application",
   "log_format": "v2",
-  "current_state": "TESTS_PASSING",
-  "last_agent": "sprint_test_runner",
+  "current_state": "SPRINT_COMPLETE",
+  "last_agent": "/sprint-close",
   "next_agent": null,
   "blocking": false,
   "block_reason": null,
@@ -35,3 +35,4 @@
 - 2026-10-05T00:00:00Z `IMPLEMENTATION_IN_PROGRESS` → `TESTS_PASSING` [sprint_test_runner@2026-04-15] (unreported)s — 339 backend + 25 Playwright passed; fix_iterations 0
   read: 10_test_spec.md, 99_sprint_log.md
   wrote: 50_test_report.md
+- 2026-10-11 `TESTS_PASSING` → `SPRINT_COMPLETE` [/sprint-close, run late together with Sprint15] — 00_architecture/ architecture.json + scaffolding.json regenerated from Sprint14 (strip_sprint_markers); 00_architecture/schema.sql = full runtime schema.sql (NOT Sprint14's 10_schema.sql change file — deviation from the skill, see Architecture_Audit_2026-10-11 H1); service already running current code; atlas_dev_ref regenerated
