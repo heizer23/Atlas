@@ -164,6 +164,7 @@ Cross-references written as `## Heading` elsewhere in these files resolve via th
 | `docs/ingestion.md` | Markdown CLI + JSON ingest paths, essay overview metadata (`category`, `sort_index`, `status`). Headings: `Content ingestion` |
 | `docs/images.md` | Image import (staging + browser upload), idempotency, backup caveats. Headings: `Images` |
 | `docs/scheduling.md` | Due-queue ordering, roadmap/focus/review, queue stats, FSRS scheduling. Headings: `Due-queue ordering`; `Roadmap, focus and review`; `Queue stats`; `FSRS scheduling (Sprint12)` |
+| `docs/llm_protocols.md` | Table of all external-AI export → import flows (endpoints, prompts, import views). Headings: `External-AI flows` |
 | `docs/review_ui.md` | `ReviewSessionView` / `ReviewStatsPanel`, button and nav consolidation. Headings: `Review screen`; `Button and nav consolidation (Sprint12)` |
 | `docs/question_levels.md` | Card `level`, question-overview screen, single-question maintenance. Headings: `Question levels and overview` |
 | `docs/nuggets.md` | Nugget model, `[[nugget:key]]` references, nugget endpoints/UI. Headings: `Nuggets (Sprint09)` |
