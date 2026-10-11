@@ -41,3 +41,4 @@ dist/
 *.tsbuildinfo
 .claude/settings.local.json
 
+.claude/.frontend_dirty*
