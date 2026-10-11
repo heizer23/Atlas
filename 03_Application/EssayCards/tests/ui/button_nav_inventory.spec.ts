@@ -106,25 +106,23 @@ test('section-end action menu and examination history remain reachable after con
   // Section-end ActionMenus come after the essay header's in document
   // order — if this essay has no sections, fall back to the first essay
   // that does (walking the overview list) so the scenario is still exercised.
-  let primaryButtons = page.getByRole('button', { name: 'Review this section', exact: true });
-  if (await primaryButtons.count() === 0) {
+  // The section ActionMenu has no primary button any more (the old "Review this
+  // section" button was removed); it is just a "More actions" trigger. An essay
+  // with sections therefore shows >= 2 triggers (header + first section).
+  const moreTriggers = page.getByRole('button', { name: 'More actions' });
+  if (await moreTriggers.count() < 2) {
     await page.goto('/essaycards');
     const rows = page.locator('div[style*="cursor: pointer"]');
     await expect(rows.first()).toBeVisible();
     const rowCount = await rows.count();
-    for (let i = 1; i < rowCount && (await primaryButtons.count()) === 0; i++) {
+    for (let i = 1; i < rowCount && (await moreTriggers.count()) < 2; i++) {
       await rows.nth(i).click();
       await expect(page).toHaveURL(/\/essaycards\/essays\//);
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-      primaryButtons = page.getByRole('button', { name: 'Review this section', exact: true });
-      if (await primaryButtons.count() === 0) await page.goBack();
+      if (await moreTriggers.count() < 2) await page.goBack();
     }
   }
-  expect(await primaryButtons.count()).toBeGreaterThan(0);
-
-  // Primary action: "Review this section" — now the section ActionMenu's
-  // primary button (moved from the old end-of-section button row).
-  await expect(primaryButtons.first()).toBeVisible();
+  expect(await moreTriggers.count()).toBeGreaterThanOrEqual(2);
 
   // The first section's "More actions" trigger is the SECOND one in
   // document order (index 1) — the essay header's is index 0.
@@ -140,13 +138,12 @@ test('section-end action menu and examination history remain reachable after con
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Export section|Import section →)$/ })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Insert section after|Import insertion →)$/ })).toBeVisible();
 
-  await page.keyboard.press('Escape');
-  await expect(sectionMenu).toBeHidden();
-
-  // SectionExaminationHistory — unaffected by consolidation, still below
-  // the section's ActionMenu.
-  const examHistoryButton = page.getByRole('button', { name: /Examination history/ }).first();
-  await expect(examHistoryButton).toBeVisible();
+  await expect(sectionMenu.getByRole('menuitem', { name: /^(Improve section|Import improved section →)$/ })).toBeVisible();
+  // Examination history is a section-menu item (toggle) — it opens the history panel below the section.
+  const historyItem = sectionMenu.getByRole('menuitem', { name: 'Examination history', exact: true });
+  await expect(historyItem).toBeVisible();
+  await historyItem.click();
+  await expect(page.getByText(/^Examination history/).first()).toBeVisible();
 });
 
 test('desktop nav reflects the Sprint12 regrouping — Experiment removed, Add / Update Essay retained', async ({ page }) => {

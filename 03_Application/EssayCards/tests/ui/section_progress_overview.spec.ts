@@ -165,9 +165,6 @@ test('[UI] locked section is visibly locked in the reader', async ({ page }) => 
   await expect(page.getByRole('heading', { name: /Locked 1/ })).toBeVisible();
 
   await expect(page.getByText(/Flashcards locked — pass the guided oral for this section/)).toBeVisible();
-  const review = page.getByRole('button', { name: 'Review this section', exact: true });
-  await expect(review).toBeDisabled();
-  await expect(review).toHaveAttribute('title', /guided oral/);
 
   // A guided-oral action is offered for that section.
   await page.getByRole('button', { name: 'More actions' }).nth(1).click();

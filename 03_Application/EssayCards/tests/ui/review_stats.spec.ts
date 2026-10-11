@@ -45,8 +45,8 @@ test('stats page renders five zones in order, forecast and observed recall clear
   }
 
   // Forecast vs observed wording is explicit, not left implicit.
-  await expect(page.getByText(/schedule FORECAST, not an observed fact/i)).toBeVisible();
-  await expect(page.getByText(/OBSERVED, not predicted/i)).toBeVisible();
+  await expect(page.getByText(/predicted to come due next/i)).toBeVisible();
+  await expect(page.getByText(/What actually happened over the last day, week or month/i)).toBeVisible();
 });
 
 test('Observed recall selector switches the displayed period and shows four figures', async ({ page }) => {
