@@ -31,6 +31,15 @@ def is_passing_score(score: int) -> bool:
     return score * 100 >= PASS_THRESHOLD_PERCENT * SCORE_MAX
 
 
+def scoring_echo() -> dict:
+    """The pass rule as echoed into export packages, so prompts never hard-code it."""
+    return {
+        "score_max": SCORE_MAX,
+        "pass_threshold_percent": PASS_THRESHOLD_PERCENT,
+        "min_passing_score": min(sc for sc in range(SCORE_MAX + 1) if is_passing_score(sc)),
+    }
+
+
 def score_percent(score: int) -> float:
     """Response echo only — never used for the verdict."""
     return round(score / SCORE_MAX * 100, 1)

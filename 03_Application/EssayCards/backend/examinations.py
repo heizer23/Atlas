@@ -44,12 +44,11 @@ from typing import Any
 from psycopg2.extras import Json
 
 from backend.oral_state import (
-    PASS_THRESHOLD_PERCENT,
-    SCORE_MAX,
     apply_essay_attempt,
     apply_section_attempt,
     is_passing_score,
     score_percent,
+    scoring_echo,
 )
 from platform_errorhandling import api_error
 
@@ -192,11 +191,7 @@ def build_export_package(
         "essay_title": essay_row["title"],
         "exam_type": exam_type,
         "scope": scope,
-        "scoring": {
-            "score_max": SCORE_MAX,
-            "pass_threshold_percent": PASS_THRESHOLD_PERCENT,
-            "min_passing_score": min(sc for sc in range(SCORE_MAX + 1) if is_passing_score(sc)),
-        },
+        "scoring": scoring_echo(),
         "sections": sections,
     }
 

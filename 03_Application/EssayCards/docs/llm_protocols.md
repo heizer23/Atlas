@@ -37,9 +37,9 @@ Detail per flow: 1–2 `oral_progression.md`; 3 `exploration.md`; 4–7 `export_
 
 ## Rules that must not be duplicated into prompts
 - **Oral pass rule** lives only in `backend/oral_state.py` (`PASS_THRESHOLD_PERCENT`). Exam
-  packages echo it in a `scoring` block and the exam prompts read it from there. Known
-  exception: `SECTION_IMPROVE_PROMPT_INTRO` hard-codes "0-6; 5 or higher passes" — update it if
-  the rule changes (tracked from the 2026-10-11 architecture audit, H3).
+  packages echo it (`oral_state.scoring_echo()`) — as `scoring` in exam packages and as
+  `focus_section_scoring` in the Improve-section export — and the prompts read it from there.
+  No prompt hard-codes the threshold.
 - **Card `level`, essay `status`/`category`** semantics are described in the prompts for the
   model's benefit; the authoritative validation is in the backend.
 

@@ -40,6 +40,7 @@ from backend.ingest import (
     extract_nugget_keys,
     upsert_document,
 )
+from backend.oral_state import scoring_echo
 from backend.progress import (
     CARD_STATE_SQL,
     ESSAY_PROGRESS_SELECT,
@@ -616,6 +617,7 @@ def export_section(essay_id: str, section_id: str, include_examinations: bool = 
     }
     if focus_section_examinations is not None:
         package["focus_section_examinations"] = focus_section_examinations
+        package["focus_section_scoring"] = scoring_echo()
     return JSONResponse(content=package)
 
 

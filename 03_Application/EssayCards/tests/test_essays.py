@@ -496,6 +496,16 @@ def test_export_section_include_examinations_returns_guided_only_oldest_first(cl
     assert set(exams[0]) == {"examined_at", "score", "passed", "question", "answer_transcript", "feedback"}
 
 
+def test_export_section_include_examinations_carries_scoring_block(client):
+    eid, sids = _mk_essay_sections(client, "scoring-block", ["A"])
+    base = f"/api/essaycards/essays/{eid}/sections/{sids[0]}/export"
+    assert "focus_section_scoring" not in client.get(base).json()
+    from backend.oral_state import PASS_THRESHOLD_PERCENT, SCORE_MAX
+    sc = client.get(base + "?include_examinations=true").json()["focus_section_scoring"]
+    assert sc["score_max"] == SCORE_MAX and sc["pass_threshold_percent"] == PASS_THRESHOLD_PERCENT
+    assert sc["min_passing_score"] == 5  # 70% of 0-6
+
+
 def test_export_section_include_examinations_empty_list_when_never_examined(client):
     eid, sids = _mk_essay_sections(client, "imp-none", ["A"])
     pkg = client.get(f"/api/essaycards/essays/{eid}/sections/{sids[0]}/export?include_examinations=true").json()

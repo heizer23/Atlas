@@ -303,6 +303,8 @@ export interface SectionExportPackage {
     answer_transcript: string;
     feedback: string | null;
   }[];
+  // Present with focus_section_examinations: the oral pass rule, from backend/oral_state.py.
+  focus_section_scoring?: { score_max: number; pass_threshold_percent: number; min_passing_score: number };
   sections: {
     section_id: string;
     heading: string;

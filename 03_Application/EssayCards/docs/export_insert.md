@@ -57,7 +57,9 @@ its oral-exam history. It calls the same section export with `?include_examinati
 - When true the package adds `focus_section_examinations`: every `exam_type='guided'` row of
   the focus section, ordered `examined_at` ascending, each
   `{examined_at, score, passed, question, answer_transcript, feedback}` verbatim; `[]` if none.
-  Unguided exams are never included. Read-only.
+  Unguided exams are never included. Read-only. With it comes `focus_section_scoring`
+  (`{score_max, pass_threshold_percent, min_passing_score}`, from `oral_state.scoring_echo()`),
+  which the Improve prompt points to instead of hard-coding the pass rule.
 - The button copies `SECTION_IMPROVE_PROMPT_INTRO` (`src/prompts.ts`) + the package, then
   becomes **Import improved section →** (navigates to `IngestView`). Same nugget-drop-detection
   sessionStorage stash as Export section. The reply is an ordinary ingest payload (edit in place
