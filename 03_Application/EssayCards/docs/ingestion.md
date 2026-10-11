@@ -14,7 +14,7 @@ markdown CLI, top-level JSON keys for the API:
 - `category` — free text, no fixed set, no lookup table (an essay has at most one). It is
   the group the essay appears under on the overview page. The known groups (`Art`,
   `History`, `Philosophy`) and their display order live only in the frontend
-  (`CATEGORY_ORDER` in `src/ShellEntry.tsx`); any other value renders in its own group
+  (`CATEGORY_ORDER` in `src/views/EssayListView.tsx`); any other value renders in its own group
   after those, and `null` renders last under "Uncategorized". Adding a category is a
   content change, not a schema change.
 - `sort_index` — integer, default `0`, the essay's position **within its category**,
@@ -59,7 +59,7 @@ reference its slug as ordinary Markdown — `![](/api/essaycards/images/<slug>)`
 `body_markdown` / `q` / `a`. Neither ingestion path parses or validates image references;
 a reference to a slug that was never imported just renders as a broken image.
 
-The JSON-ingestion helper prompt (`STUB_PROMPT` in `src/ShellEntry.tsx`, shown in the
+The JSON-ingestion helper prompt (`STUB_PROMPT` in `src/views/IngestView.tsx`, shown in the
 "Add / Update Essay" view) has an **Images rule** plus an **"Available images"** list the
 author fills in by hand from the imported slugs. The generating model only emits
 `![](...)` references for slugs on that list; if the list is left empty it emits none.

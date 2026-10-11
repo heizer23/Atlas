@@ -2,7 +2,7 @@
 
 Split out of `CLAUDE.md` (reference detail; load when working on this area).
 
-## Review screen (`src/ShellEntry.tsx` → `ReviewSessionView` / `ReviewStatsPanel`)
+## Review screen (`src/views/ReviewSessionView.tsx` / `src/components/ReviewStatsPanel.tsx`)
 Material 3 layout, no page header: one flat `surface-variant` stats card, the
 question card (`surface` + `elevation-1`, the dominant element), a full-width
 primary **Flip** button (grade buttons replace it after flip), then a small
@@ -16,7 +16,7 @@ diagnostics frame. The stats card has two sections, their names (`CURRENT` /
   forward bands, `due_now` omitted). `Session` = client-side tally: each review
   response gives `next_due_at − last_reviewed_at`, bucketed by the same band
   edges and counted per session (reset when the session starts, not on the
-  per-grade refetch). No backend state; `FORECAST_COLUMNS` in `ShellEntry.tsx`
+  per-grade refetch). No backend state; `FORECAST_COLUMNS` in `src/format.ts`
   mirrors the `/stats` band edges.
 
 **Recency-selected bold frame.** The question card gets a **2 px primary
@@ -46,7 +46,7 @@ for exactly that case.
 
 ## Button and nav consolidation (Sprint12)
 Essay/section button rows are replaced by a reusable `ActionMenu` component
-(`src/ShellEntry.tsx`) — a primary button plus an accessible dropdown
+(`src/components/ActionMenu.tsx`) — a primary button plus an accessible dropdown
 (`role=menu`/`menuitem`, Escape + click-outside to close, keyboard-operable).
 Used at two sites:
 - **Essay header** (`ReaderView`) — primary = Study (focus session on the

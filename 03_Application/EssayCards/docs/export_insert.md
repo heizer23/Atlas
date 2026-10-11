@@ -31,7 +31,7 @@ Two buttons at the end of each section in `ReaderView`, both toggling to **Impor
 (navigating to the existing `IngestView`, `/essaycards/ingest`) once something is copied —
 same mechanism, different prompt:
 - **Export section** — copies the package + `SECTION_EXPORT_PROMPT_INTRO`
-  (`src/ShellEntry.tsx`) unmodified; the model is told to revise only the section named by
+  (`src/prompts.ts`) unmodified; the model is told to revise only the section named by
   `focus_section_id` and return every other entry byte-for-byte identical.
 - **Insert section after** — `buildSectionInsertClipboardText` splices a blank
   instructional placeholder section (its field *values* are the fill-in instructions, same
@@ -58,7 +58,7 @@ its oral-exam history. It calls the same section export with `?include_examinati
   the focus section, ordered `examined_at` ascending, each
   `{examined_at, score, passed, question, answer_transcript, feedback}` verbatim; `[]` if none.
   Unguided exams are never included. Read-only.
-- The button copies `SECTION_IMPROVE_PROMPT_INTRO` (`src/ShellEntry.tsx`) + the package, then
+- The button copies `SECTION_IMPROVE_PROMPT_INTRO` (`src/prompts.ts`) + the package, then
   becomes **Import improved section →** (navigates to `IngestView`). Same nugget-drop-detection
   sessionStorage stash as Export section. The reply is an ordinary ingest payload (edit in place
   by card id; the examinations field is omitted) — no new import path.

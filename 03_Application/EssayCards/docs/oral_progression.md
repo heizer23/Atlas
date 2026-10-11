@@ -16,7 +16,7 @@ Round trip: `GET /api/essaycards/essays/{id}/examination-package` builds a
 self-contained JSON package (essay + sections + flashcards + each section's derived
 last examination) for pasting into ChatGPT — copied to the clipboard by the "Export
 for examination" button in ReaderView, together with the scoring-rubric prompt in
-`EXAM_PROMPT_INTRO` (src/ShellEntry.tsx). ChatGPT's JSON reply is pasted into
+`EXAM_PROMPT_INTRO_*` (src/prompts.ts). ChatGPT's JSON reply is pasted into
 `ImportExaminationsView` (`/essaycards/examinations/import`) and posted to
 `POST /api/essaycards/examinations/import`, which resolves each result's
 `essay_slug`/`section_anchor_slug` and inserts a new row — never updates or deletes

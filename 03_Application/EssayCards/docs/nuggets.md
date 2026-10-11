@@ -50,7 +50,7 @@ gain `section_nuggets`/`nugget_id`; `POST /flashcards/upsert` gains `nugget_id`
 (omit/null/value tri-state, R-CON-AL-04); `GET /flashcards/due` and single-question
 export gain `nugget_id`.
 
-**Frontend rendering.** `remarkNuggetRefs` (a remark plugin, `src/ShellEntry.tsx`)
+**Frontend rendering.** `remarkNuggetRefs` (a remark plugin, `src/nuggets.tsx`)
 visits mdast `text` nodes and turns a resolved `[[nugget:key]]` into an in-app link
 (`NuggetLink`, `href="nugget:<key>"`) or a non-clickable broken-link span for an
 unresolved one (`href="nugget-missing:<key>"`) — fenced/inline code is already a

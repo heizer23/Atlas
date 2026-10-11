@@ -148,6 +148,12 @@ they must be built.
   satisfied state wins. See `## Section progression (Sprint14)`. This replaces the removed
   Sprint12 `learning_level`.
 
+## Frontend layout (`src/`)
+`ShellEntry.tsx` is only the route table. `types.ts` (API row types), `styles.ts`, `format.ts`,
+`prompts.ts` (all clipboard helpers + AI prompt text), `nuggets.tsx` (nugget rendering/panel),
+`components/` (ActionMenu, Progress dots, ReviewStatsPanel/ForecastGrid, ExaminationHistory),
+`views/` (one file per routed view). New view -> `views/<Name>View.tsx` + a `<Route>` in `ShellEntry.tsx`.
+
 ## Reference docs (`docs/`)
 Detailed per-area behavior was split out of this file. Read the matching doc before changing that area.
 Cross-references written as `## Heading` elsewhere in these files resolve via this map.

@@ -32,7 +32,7 @@ created_at asc)`. Client-side grouping into section -> level, same pattern as
 `EssayListView` already grouping essays by `category` from a flat row list — Datasets
 are flat by contract (R-CON-BP-04); there is no nested JSON shape.
 
-**Question overview** (`src/ShellEntry.tsx` → `QuestionOverviewView`,
+**Question overview** (`src/views/QuestionOverviewView.tsx`,
 `/essaycards/essays/:id/questions`, reached via a **Question overview** button in
 `ReaderView`) — editorial, not review. For each section (essay order), each of Level 1 /
 2 / 3 (always rendered, even empty, as "No questions at this level yet." — a gap is
@@ -63,7 +63,7 @@ Never touches `essaycards.essays` or `essaycards.essay_sections`.
 
 **Single-question AI export/import** — "Export" on a question (`QuestionItem` in
 `QuestionOverviewView`) fetches `GET /flashcards/{flashcard_id}/export` and copies it,
-plus `QUESTION_EXPORT_PROMPT_INTRO` (`src/ShellEntry.tsx`), to the clipboard, then
+plus `QUESTION_EXPORT_PROMPT_INTRO` (`src/prompts.ts`), to the clipboard, then
 toggles to **Import →** (same pattern as `## Single-section export / insert`) routing to
 `QuestionImportView` (`/essaycards/questions/import`). The export carries
 `essay_slug`/`essay_title`/`section_id`/`section_anchor_slug`/`section_heading`/

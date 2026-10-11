@@ -19,7 +19,7 @@ emerges from the conversation).
   `context.nugget_key`/`context.nugget_title` — a replacement, not an addition; see
   `## Nuggets`). Same R-CON-BP-04 exemption rationale as `examination-package`. The
   **Explore** button on the revealed answer in `ReviewSessionView` fetches it and
-  copies it + `EXPLORE_PROMPT_INTRO` (src/ShellEntry.tsx) to the clipboard
+  copies it + `EXPLORE_PROMPT_INTRO` (src/prompts.ts) to the clipboard
   ("Copied for ChatGPT"). Read-only — never touches review/scheduling state. It
   sits next to the existing "Jump to passage" control, same `jumpBtnStyle` weight,
   and after a successful copy becomes an **Import result →** button routing to
