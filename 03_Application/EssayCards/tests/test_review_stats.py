@@ -425,3 +425,45 @@ def test_summary_rows_carry_oral_counts_per_window(client, db_conn):
         assert rows[period]["unguided_orals_count"] == exp["unguided"]
         assert rows[period]["guided_orals_count"] + rows[period]["unguided_orals_count"] == rows[period]["orals_count"]
     assert rows["day"]["orals_count"] <= rows["week"]["orals_count"] <= rows["month"]["orals_count"]
+
+
+def test_summary_oral_counts_match_hand_computed_literals(client, db_conn):
+    """Independent of the endpoint's SQL: wipe all exams, seed a known set at
+    known ages, assert hand-counted literals.
+
+    Section scope (essay I, section 1):  guided 1h (pass), unguided 23h (fail),
+                                         guided 25h, unguided 6d, guided 8d
+    Essay scope (essay I):               guided 2h (fail), unguided 29d, guided 31d
+    Windows: day=24h, week=7d, month=30d. Every attempt counts, passed or not.
+      day   : sec g1h, sec u23h, ess g2h             -> total 3, guided 2, unguided 1
+      week  : day + sec g25h, sec u6d                -> total 5, guided 3, unguided 2
+      month : week + sec g8d, ess u29d               -> total 7, guided 4, unguided 3
+    (ess g31d falls outside every window.)
+    """
+    essay, section = "ea000009-0000-0000-0000-000000000009", "ec000010-0000-0000-0000-000000000010"
+    with db_conn.cursor() as cur:
+        cur.execute("delete from essaycards.section_examinations")
+        cur.execute("delete from essaycards.essay_examinations")
+        for age, kind, passed in (("1 hour", "guided", True), ("23 hours", "unguided", False),
+                                  ("25 hours", "guided", True), ("6 days", "unguided", True),
+                                  ("8 days", "guided", False)):
+            cur.execute(
+                """insert into essaycards.section_examinations
+                   (essay_id, section_id, section_version_at, examined_at, question,
+                    answer_transcript, score, passed, exam_type)
+                   values (%s, %s, now(), now() - %s::interval, 'q', 'a', 4, %s, %s)""",
+                (essay, section, age, passed, kind),
+            )
+        for age, kind, passed in (("2 hours", "guided", False), ("29 days", "unguided", True),
+                                  ("31 days", "guided", True)):
+            cur.execute(
+                """insert into essaycards.essay_examinations
+                   (essay_id, exam_type, examined_at, question, answer_transcript, score, passed)
+                   values (%s, %s, now() - %s::interval, 'q', 'a', 4, %s)""",
+                (essay, kind, age, passed),
+            )
+
+    rows = _rows_by_period(client.get(URL).json())
+    got = {p: (rows[p]["orals_count"], rows[p]["guided_orals_count"], rows[p]["unguided_orals_count"])
+           for p in ("day", "week", "month")}
+    assert got == {"day": (3, 2, 1), "week": (5, 3, 2), "month": (7, 4, 3)}
