@@ -1,7 +1,7 @@
 # Atlas Developer Reference
 
 > **Generated** — do not edit manually.
-> Last updated: 2026-10-05 12:30 UTC
+> Last updated: 2026-10-11 17:31 UTC
 > Source: `00_architecture/architecture.json` + `compose.yml` per component.
 > Regenerated automatically by `/sprint-close`.
 
