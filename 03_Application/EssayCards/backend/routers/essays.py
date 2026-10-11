@@ -43,6 +43,7 @@ from backend.ingest import (
 from backend.progress import (
     CARD_STATE_SQL,
     ESSAY_PROGRESS_SELECT,
+    ESTABLISHED_INTERVAL_SQL,
     UNLOCKED_SECTION_SQL,
     essay_progress_lateral_sql,
 )
@@ -198,7 +199,7 @@ select
   (select count(*)
      from essaycards.flashcards f
      join essaycards.flashcard_review_state frs on frs.flashcard_id = f.id
-     where f.essay_id = e.id and frs.review_interval >= interval '24 hours')
+     where f.essay_id = e.id and frs.review_interval >= {ESTABLISHED_INTERVAL_SQL})
       as progress_established,
   -- open_count = what a focus session would surface: due AND unlocked AND not
   -- awaiting revalidation (Sprint14).

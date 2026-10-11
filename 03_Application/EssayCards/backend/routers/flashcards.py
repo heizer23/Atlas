@@ -39,7 +39,7 @@ from fastapi.responses import JSONResponse
 from psycopg2.extras import Json
 
 from backend.database import get_db
-from backend.progress import UNLOCKED_SECTION_SQL
+from backend.progress import ESTABLISHED_INTERVAL_SQL, UNLOCKED_SECTION_SQL
 from backend.revalidation import (
     clear_revalidation_flag,
     is_revalidation_correct,
@@ -242,7 +242,7 @@ def list_due_flashcards(
     extra_join = ""
     if not scoped:
         # REVIEW / maintenance: only established cards that are also due.
-        conditions.append("frs.review_interval >= interval '24 hours'")
+        conditions.append(f"frs.review_interval >= {ESTABLISHED_INTERVAL_SQL}")
     if topic:
         extra_join = "join essaycards.essays e on e.id = f.essay_id"
         conditions.append("e.category = %s")

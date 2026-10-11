@@ -17,6 +17,7 @@ from platform_errorhandling.performance import install_request_timing
 setup_logging(app_name="essaycards", log_dir=Path(__file__).resolve().parents[1] / "logs")
 log = logging.getLogger("essaycards")
 
+_ID_QUERY_PARAMS = ("essay_id", "section_id", "nugget_id")
 _ID_PARAMS = ("id", "essay_id", "section_id", "flashcard_id", "nugget_id")
 
 
@@ -30,6 +31,15 @@ def _require_uuid_path_ids(request: Request) -> None:
     for name in _ID_PARAMS:
         value = request.path_params.get(name)
         if value is None:
+            continue
+        try:
+            uuid.UUID(value)
+        except ValueError:
+            raise MalformedId(value)
+    # Id-valued query params (empty = "not given", as the routes treat it).
+    for name in _ID_QUERY_PARAMS:
+        value = request.query_params.get(name)
+        if not value:
             continue
         try:
             uuid.UUID(value)

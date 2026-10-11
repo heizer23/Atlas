@@ -199,8 +199,8 @@ essaycards.revalidation_events (append-only), plus `section_examinations.passed`
 `flashcard_review_state.needs_revalidation`.
 Schema initialized idempotently at startup from schema.sql.
 
-`00_architecture/schema.sql` is a design copy that `make essaycards-schema` feeds
-to psql; it is already one sprint stale (missing `essaycards.images`). The
+`make essaycards-schema` feeds the runtime `schema.sql` (idempotent) to psql. `00_architecture/schema.sql`
+is a stale design snapshot (Sprint13 change file) and is NOT used for rebuilds. The
 canonical runtime schema is `03_Application/EssayCards/schema.sql` (per
 architecture.json), applied by `init_schema()` at startup and by conftest.
 

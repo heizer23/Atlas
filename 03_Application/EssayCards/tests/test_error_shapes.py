@@ -33,3 +33,19 @@ def test_validation_error_uses_api_error_shape_query(client):
     r = client.get(f"{P}/essays/{ZERO}/sections/{ZERO}/export?include_examinations=maybe")
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize("path", [
+    "/flashcards/due?essay_id=not-a-uuid",
+    "/flashcards/due?section_id=not-a-uuid",
+    "/flashcards/stats?essay_id=not-a-uuid",
+    "/nuggets/authoring-package?essay_id=not-a-uuid&section_id=not-a-uuid",
+])
+def test_malformed_id_in_query_returns_404_api_error(client, path):
+    r = client.get(P + path)
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_empty_id_query_param_means_not_given(client):
+    assert client.get(P + "/flashcards/due?essay_id=").status_code == 200
