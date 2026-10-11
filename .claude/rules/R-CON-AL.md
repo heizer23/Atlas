@@ -1,3 +1,8 @@
+---
+paths:
+  - "03_Application/**"
+---
+
 # R-CON-AL — Constitutional Application Layer Rules
 
 TYPE: CONSTITUTIONAL

@@ -1,3 +1,9 @@
+---
+paths:
+  - "**/Sprint*/**"
+  - "00_Blueprint/**"
+---
+
 # R-PRO-BP — Process Blueprint Rules
 
 TYPE: PROCESS

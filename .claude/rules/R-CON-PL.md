@@ -1,3 +1,8 @@
+---
+paths:
+  - "02_Platform/**"
+---
+
 # R-CON-PL — Constitutional Platform Layer Rules
 
 TYPE: CONSTITUTIONAL

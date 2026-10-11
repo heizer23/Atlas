@@ -1,3 +1,10 @@
+---
+paths:
+  - "00_Blueprint/**"
+  - "02_Platform/**"
+  - "03_Application/**"
+---
+
 # R-CON-BP — Constitutional Blueprint Rules
 
 TYPE: CONSTITUTIONAL
