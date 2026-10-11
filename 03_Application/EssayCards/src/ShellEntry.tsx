@@ -491,18 +491,22 @@ type Grade = 'again' | 'hard' | 'good' | 'easy';
 const pageStyle: React.CSSProperties = { padding: 16, maxWidth: 720, margin: '0 auto' };
 
 const btnStyle: React.CSSProperties = {
-  padding: '6px 14px',
-  borderRadius: 6,
-  border: '1px solid #ccc',
+  padding: '0 16px',
+  minHeight: 40,
+  borderRadius: 'var(--radius-button, 20px)',
+  border: '1px solid var(--md-sys-color-outline)',
   background: 'transparent',
+  color: 'var(--md-sys-color-on-surface)',
   cursor: 'pointer',
-  fontSize: 13,
+  fontFamily: 'inherit',
+  fontSize: 14,
+  fontWeight: 500,
 };
 
 const primaryBtnStyle: React.CSSProperties = {
   ...btnStyle,
   background: 'var(--md-sys-color-primary)',
-  color: '#fff',
+  color: 'var(--md-sys-color-on-primary)',
   borderColor: 'transparent',
 };
 
@@ -547,11 +551,13 @@ const actionMenuItemStyle: React.CSSProperties = {
   display: 'block',
   width: '100%',
   textAlign: 'left',
-  padding: '8px 10px',
+  padding: '0 12px',
+  minHeight: 44,
   border: 'none',
   background: 'transparent',
   cursor: 'pointer',
-  fontSize: 13,
+  fontFamily: 'inherit',
+  fontSize: 14,
   borderRadius: 6,
   color: 'var(--md-sys-color-on-surface)',
 };
@@ -559,9 +565,11 @@ const actionMenuItemStyle: React.CSSProperties = {
 function ActionMenu({
   primary,
   items,
+  align = 'left',
 }: {
   primary?: { label: string; onClick: () => void; disabled?: boolean; title?: string };
   items: ActionMenuItem[];
+  align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -606,7 +614,7 @@ function ActionMenu({
             More ▾
           </button>
           {open && (
-            <div role="menu" style={actionMenuDropdownStyle}>
+            <div role="menu" style={align === 'right' ? { ...actionMenuDropdownStyle, left: 'auto', right: 0 } : actionMenuDropdownStyle}>
               {items.map((item, i) => (
                 <button
                   key={i}
@@ -650,6 +658,7 @@ const flipBtnStyle: React.CSSProperties = {
   border: 'none',
   background: 'var(--md-sys-color-primary)',
   color: 'var(--md-sys-color-on-primary)',
+  fontFamily: 'inherit',
   fontSize: 15,
   fontWeight: 600,
   cursor: 'pointer',
@@ -658,24 +667,43 @@ const flipBtnStyle: React.CSSProperties = {
 
 const gradeBtnStyle: React.CSSProperties = {
   flex: 1,
-  height: 48,
+  height: 52,
   borderRadius: 'var(--radius-button, 20px)',
   border: '1px solid var(--md-sys-color-outline)',
   background: 'var(--md-sys-color-surface)',
   color: 'var(--md-sys-color-on-surface)',
-  fontSize: 14,
-  fontWeight: 500,
+  fontFamily: 'inherit',
+  fontSize: 15,
+  fontWeight: 600,
   cursor: 'pointer',
 };
 
+// Grade emphasis: Again reads as a failure (error tone), Good as the
+// expected answer (primary tone), Hard/Easy stay neutral.
+const gradeBtnAgainStyle: React.CSSProperties = {
+  ...gradeBtnStyle,
+  borderColor: 'var(--md-sys-color-error)',
+  color: 'var(--md-sys-color-error)',
+};
+const gradeBtnGoodStyle: React.CSSProperties = {
+  ...gradeBtnStyle,
+  border: '1px solid transparent',
+  background: 'var(--md-sys-color-primary)',
+  color: 'var(--md-sys-color-on-primary)',
+};
+function gradeStyleFor(g: Grade): React.CSSProperties {
+  return g === 'again' ? gradeBtnAgainStyle : g === 'good' ? gradeBtnGoodStyle : gradeBtnStyle;
+}
+
 const jumpBtnStyle: React.CSSProperties = {
   ...btnStyle,
-  marginTop: 16,
+  marginTop: 8,
   border: 'none',
   background: 'transparent',
   color: 'var(--md-sys-color-primary)',
-  padding: '4px 0',
-  fontSize: 13,
+  padding: '0 4px',
+  minHeight: 44,
+  fontSize: 14,
 };
 
 // Interval forecast columns. Keys/edges mirror the backend /stats forward
@@ -708,7 +736,11 @@ function formatInterval(seconds: number | null): string {
 // reading column / review card from overflowing. CSS-only per
 // Sprint03_Images/10_architecture.json — no custom img component.
 const ESSAYCARDS_IMG_CSS =
-  '.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto; }';
+  '.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto; }' +
+  // Reading column: 16px body, relaxed leading, ~68ch measure.
+  ' .essaycards-section-body { font-size: 16px; line-height: 1.65; }' +
+  ' .essaycards-section-body p { max-width: 68ch; margin: 0 0 1em; }' +
+  ' .essaycards-section-body :is(a, span)[role="button"], .essaycards-section-body a { text-underline-offset: 3px; }';
 
 // ── Clipboard helpers ────────────────────────────────────────────────────────
 //
@@ -1238,7 +1270,13 @@ function NuggetLink({ href, children, onOpenNugget }: {
       <a
         href="#"
         onClick={e => { e.preventDefault(); e.stopPropagation(); onOpenNugget(key); }}
-        style={{ color: 'var(--md-sys-color-primary)', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}
+        style={{
+          color: 'var(--md-sys-color-primary)',
+          textDecoration: 'underline',
+          textDecorationThickness: 1,
+          textUnderlineOffset: 3,
+          cursor: 'pointer',
+        }}
       >
         {children}
       </a>
@@ -1386,7 +1424,7 @@ function NuggetPanel({ initialNuggetId, essayId, sectionId, onClose }: {
             <div style={{ marginTop: 16 }}>
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Flashcards</div>
               {flashcards.length === 0 ? (
-                <div style={{ color: '#888', fontSize: 13 }}>No flashcards yet for this nugget.</div>
+                <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>No flashcards yet for this nugget.</div>
               ) : (
                 flashcards.map(fc => (
                   <div key={fc.id} style={{ fontSize: 13, marginBottom: 6 }}>
@@ -1420,7 +1458,7 @@ function NuggetPanel({ initialNuggetId, essayId, sectionId, onClose }: {
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Referenced by</div>
                 {sections.length === 0 ? (
-                  <div style={{ color: '#888', fontSize: 13 }}>Not referenced by any section yet.</div>
+                  <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>Not referenced by any section yet.</div>
                 ) : (
                   sections.map(s => (
                     <div
@@ -1489,8 +1527,8 @@ function formatExamDate(iso: string): string {
 
 const studyBtnStyle: React.CSSProperties = {
   ...btnStyle,
-  padding: '4px 12px',
-  fontSize: 12,
+  padding: '0 14px',
+  fontSize: 14,
   flexShrink: 0,
   whiteSpace: 'nowrap',
 };
@@ -1697,12 +1735,24 @@ function CategoryCollapseToggle({ category, collapsed, onToggle }: {
   return (
     <button
       type="button"
-      style={{ ...btnStyle, padding: '2px 8px', fontSize: 12 }}
+      style={{
+        ...btnStyle,
+        border: 'none',
+        padding: 0,
+        width: 40,
+        justifyContent: 'center',
+        display: 'inline-flex',
+        alignItems: 'center',
+        color: 'var(--md-sys-color-on-surface-variant)',
+      }}
       aria-expanded={!collapsed}
       aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${category}`}
       onClick={onToggle}
     >
-      {collapsed ? '▸' : '▾'}
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"
+        style={{ transform: collapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 150ms ease' }}>
+        <path d="M3.5 6 8 10.5 12.5 6" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </button>
   );
 }
@@ -1754,29 +1804,23 @@ function EssayListView() {
 
   return (
     <div style={pageStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>Essays</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={btnStyle} onClick={() => navigate('/essaycards/images')}>
-            Images
-          </button>
-          <button style={btnStyle} onClick={() => navigate('/essaycards/examinations/import')}>
-            Import exam results
-          </button>
-          <button style={btnStyle} onClick={() => navigate('/essaycards/explore/import')}>
-            Import exploration
-          </button>
-          <button style={primaryBtnStyle} onClick={() => navigate('/essaycards/review')}>
-            Due for review
-          </button>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <h2 className="type-headline" style={{ margin: 0 }}>Essays</h2>
+        <ActionMenu
+          align="right"
+          items={[
+            { label: 'Images', onClick: () => navigate('/essaycards/images') },
+            { label: 'Import exam results', onClick: () => navigate('/essaycards/examinations/import') },
+            { label: 'Import exploration', onClick: () => navigate('/essaycards/explore/import') },
+          ]}
+        />
       </div>
 
       {!loading && !error && essays.length > 0 && <ProgressLegend />}
       {loading && <Skeleton />}
       {error && <ErrorCard error={error} />}
       {!loading && !error && essays.length === 0 && (
-        <div style={{ color: '#888', fontSize: 14 }}>
+        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 14 }}>
           No essays yet. Ingest one with the backend CLI:
           <br />
           <code>docker exec atlas-essaycards python -m backend.ingest /app/content/&lt;file&gt;.md</code>
@@ -1794,7 +1838,7 @@ function EssayListView() {
           return (
             <div key={category} style={{ marginBottom: 24 }}>
               {showHeadings && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 8px', padding: '0 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px', padding: '0 4px 0 0' }}>
                   <CategoryCollapseToggle
                     category={category}
                     collapsed={categoryCollapsed}
@@ -1802,18 +1846,16 @@ function EssayListView() {
                   />
                   <div
                     style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      letterSpacing: 0.6,
-                      textTransform: 'uppercase',
-                      color: '#666',
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: 'var(--md-sys-color-on-surface)',
                     }}
                   >
                     {category}
                   </div>
                   {isTopic && tot > 0 && (
                     <>
-                      <div style={{ fontSize: 12, color: '#999' }}>
+                      <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', flex: '1 1 0', minWidth: 0 }}>
                         {est} / {tot} established · {open} open
                       </div>
                       <button
@@ -1831,9 +1873,10 @@ function EssayListView() {
                   key={e.id}
                   onClick={() => navigate(`/essaycards/essays/${e.id}`)}
                   style={{
-                    padding: 12,
-                    borderRadius: 8,
-                    border: '1px solid #e0e0e0',
+                    padding: 16,
+                    borderRadius: 'var(--radius-card, 12px)',
+                    border: '1px solid var(--md-sys-color-outline-variant)',
+                    background: 'var(--md-sys-color-surface)',
                     marginBottom: 8,
                     cursor: 'pointer',
                     display: 'flex',
@@ -1841,13 +1884,13 @@ function EssayListView() {
                     gap: 10,
                   }}
                 >
-                  <span style={{ fontSize: 12, color: '#bbb', minWidth: 16, textAlign: 'right', lineHeight: '20px' }}>
+                  <span style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', minWidth: 16, textAlign: 'right', lineHeight: '20px' }}>
                     {e.sort_index}
                   </span>
                   <EssayProgressDot essay={e} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 600 }}>{e.title}</span>
+                      <span style={{ fontWeight: 600, fontSize: 16 }}>{e.title}</span>
                       {e.revalidation_pending_count > 0 && (
                         <button
                           style={{ ...studyBtnStyle, padding: '2px 8px', fontSize: 12 }}
@@ -2327,10 +2370,10 @@ function ReaderView() {
         )}
       </div>
       {essayExportMsg && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{essayExportMsg.text}</div>
+        <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 12 }}>{essayExportMsg.text}</div>
       )}
       {examMsg && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>{examMsg}</div>
+        <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 12 }}>{examMsg}</div>
       )}
       <h1 style={{ marginBottom: 12 }}>{essay.title}</h1>
       <EssayExaminationHistory essayId={essay.id} />
@@ -2340,14 +2383,11 @@ function ReaderView() {
           className="essaycards-section-body"
           style={{
             marginBottom: 24,
-            padding: '12px 16px',
-            borderLeft: '3px solid var(--md-sys-color-primary)',
+            padding: '16px',
+            borderRadius: 'var(--radius-card, 12px)',
             background: 'var(--md-sys-color-surface-variant, transparent)',
           }}
         >
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: '#888', marginBottom: 4 }}>
-            Main spine
-          </div>
           <ReactMarkdown
             remarkPlugins={[[remarkNuggetRefs, mainSpineTitleMap(essay)]]}
             urlTransform={nuggetAwareUrlTransform}
@@ -2359,7 +2399,7 @@ function ReaderView() {
       )}
 
       {essay.sections.length === 0 && (
-        <div style={{ color: '#888', fontSize: 14 }}>This essay has no sections yet.</div>
+        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 14 }}>This essay has no sections yet.</div>
       )}
 
       {essay.sections.map(section => {
@@ -2373,7 +2413,7 @@ function ReaderView() {
             {section.heading}
           </h2>
           {lockedWithCards && (
-            <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 6 }}>
               🔒 Flashcards locked — pass the guided oral for this section to unlock them.
             </div>
           )}
@@ -2456,7 +2496,7 @@ function ReaderView() {
             ]}
           />
           {sectionActionMsg && sectionActionMsg.sectionId === section.id && (
-            <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{sectionActionMsg.text}</div>
+            <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>{sectionActionMsg.text}</div>
           )}
           {historyOpenIds.has(section.id) && <SectionExaminationHistory sectionId={section.id} />}
         </section>
@@ -2529,7 +2569,7 @@ const questionFieldStyle: React.CSSProperties = {
   fontSize: 13,
   padding: 6,
   boxSizing: 'border-box',
-  border: '1px solid #ccc',
+  border: '1px solid var(--md-sys-color-outline)',
   borderRadius: 6,
   marginBottom: 6,
 };
@@ -2613,10 +2653,10 @@ function QuestionOverviewView() {
         </button>
       </div>
       <h1 style={{ marginBottom: 4 }}>{essay.title}</h1>
-      <div style={{ fontSize: 13, color: '#888', marginBottom: 24 }}>Question overview</div>
+      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 24 }}>Question overview</div>
 
       {groups.length === 0 && (
-        <div style={{ color: '#888', fontSize: 14 }}>This essay has no sections yet.</div>
+        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 14 }}>This essay has no sections yet.</div>
       )}
 
       {groups.map(group => (
@@ -2650,7 +2690,7 @@ function SectionQuestionGroupView({ essaySlug, group, nuggets, onChanged }: {
         >
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{levelLabel(level)}</div>
           {questions.length === 0 ? (
-            <div style={{ color: '#aaa', fontSize: 13, marginBottom: 6 }}>No questions at this level yet.</div>
+            <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 6 }}>No questions at this level yet.</div>
           ) : (
             questions.map(q => (
               <QuestionItem key={q.id} essaySlug={essaySlug} question={q} nuggets={nuggets} onChanged={onChanged} />
@@ -2747,7 +2787,7 @@ function QuestionItem({ essaySlug, question, nuggets, onChanged }: {
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 14 }}>{question.question}</div>
         {/* Sprint14: lock marker for a locked card, otherwise its maturity state; plus a revalidation marker. */}
-        <div data-testid="card-state" style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+        <div data-testid="card-state" style={{ fontSize: 11, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>
           {question.is_locked
             ? '🔒 Locked — pass the guided oral for this section to unlock'
             : `State: ${question.card_state}`}
@@ -2767,7 +2807,7 @@ function QuestionItem({ essaySlug, question, nuggets, onChanged }: {
           </button>
         </div>
         {exportMsg && (
-          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{exportMsg.text}</div>
+          <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>{exportMsg.text}</div>
         )}
       </div>
     );
@@ -2784,7 +2824,7 @@ function QuestionItem({ essaySlug, question, nuggets, onChanged }: {
           min={1}
           value={level}
           onChange={e => setLevel(Math.max(1, parseInt(e.target.value, 10) || 1))}
-          style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6 }}
+          style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid var(--md-sys-color-outline)', borderRadius: 6 }}
         />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -2792,7 +2832,7 @@ function QuestionItem({ essaySlug, question, nuggets, onChanged }: {
         <select
           value={nuggetId}
           onChange={e => setNuggetId(e.target.value)}
-          style={{ fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6, flex: 1 }}
+          style={{ fontSize: 13, padding: 4, border: '1px solid var(--md-sys-color-outline)', borderRadius: 6, flex: 1 }}
         >
           <option value="">No nugget</option>
           {nuggets.map(n => (
@@ -2850,7 +2890,7 @@ function AddQuestionForm({ essaySlug, sectionId, defaultLevel, onDone }: {
           min={1}
           value={level}
           onChange={e => setLevel(Math.max(1, parseInt(e.target.value, 10) || 1))}
-          style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid #ccc', borderRadius: 6 }}
+          style={{ width: 60, fontSize: 13, padding: 4, border: '1px solid var(--md-sys-color-outline)', borderRadius: 6 }}
         />
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
@@ -2920,7 +2960,7 @@ function QuestionImportView() {
   return (
     <div style={pageStyle}>
       <h2 style={{ marginTop: 0 }}>Import Question</h2>
-      <div style={{ fontSize: 13, color: '#888', marginBottom: 12 }}>
+      <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 12 }}>
         Paste ChatGPT's JSON reply from a single-question export (started with "Export" on a question
         in that essay's question overview). Only the named card is created or updated — everything else
         in the essay is left untouched.
@@ -2930,7 +2970,7 @@ function QuestionImportView() {
         <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
       </div>
       {clipboardMsg && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+        <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>{clipboardMsg}</div>
       )}
 
       <textarea
@@ -2943,7 +2983,7 @@ function QuestionImportView() {
           fontSize: 13,
           padding: 8,
           boxSizing: 'border-box',
-          border: '1px solid #ccc',
+          border: '1px solid var(--md-sys-color-outline)',
           borderRadius: 6,
         }}
         placeholder={QUESTION_IMPORT_PLACEHOLDER_JSON}
@@ -2962,7 +3002,7 @@ function QuestionImportView() {
       )}
 
       {result && (
-        <div style={{ marginTop: 16, padding: 12, border: '1px solid #ccc', borderRadius: 8 }}>
+        <div style={{ marginTop: 16, padding: 12, border: '1px solid var(--md-sys-color-outline)', borderRadius: 8 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>
             {result.created ? 'Question created' : 'Question updated'}
           </div>
@@ -3009,7 +3049,7 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
         <div style={{ marginTop: 8 }}>
           {error && <ErrorCard error={error} />}
           {loaded && !error && rows.length === 0 && (
-            <div style={{ color: '#888', fontSize: 13 }}>Not examined yet.</div>
+            <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>Not examined yet.</div>
           )}
           {rows.map(r => (
             <div
@@ -3017,7 +3057,7 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
               style={{
                 padding: 8,
                 borderRadius: 6,
-                border: '1px solid #e0e0e0',
+                border: '1px solid var(--md-sys-color-outline-variant)',
                 marginBottom: 6,
                 fontSize: 13,
               }}
@@ -3025,11 +3065,11 @@ function SectionExaminationHistory({ sectionId }: { sectionId: string }) {
               <div style={{ fontWeight: 600 }}>
                 {new Date(r.examined_at).toLocaleDateString()} — score {r.score}/6
                 {' · '}
-                <span style={{ textTransform: 'capitalize', fontWeight: 400, color: '#888' }}>{r.exam_type}</span>
+                <span style={{ textTransform: 'capitalize', fontWeight: 400, color: 'var(--md-sys-color-on-surface-variant)' }}>{r.exam_type}</span>
                 {' · '}
                 <span>{r.passed ? 'Passed' : 'Not passed'}</span>
               </div>
-              {r.feedback && <div style={{ color: '#555', marginTop: 4 }}>{r.feedback}</div>}
+              {r.feedback && <div style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>{r.feedback}</div>}
             </div>
           ))}
         </div>
@@ -3065,21 +3105,21 @@ function EssayExaminationHistory({ essayId }: { essayId: string }) {
         <div style={{ marginTop: 8 }}>
           {error && <ErrorCard error={error} />}
           {loaded && !error && rows.length === 0 && (
-            <div style={{ color: '#888', fontSize: 13 }}>No whole-essay oral exam yet.</div>
+            <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>No whole-essay oral exam yet.</div>
           )}
           {rows.map(r => (
             <div
               key={r.id}
-              style={{ padding: 8, borderRadius: 6, border: '1px solid #e0e0e0', marginBottom: 6, fontSize: 13 }}
+              style={{ padding: 8, borderRadius: 6, border: '1px solid var(--md-sys-color-outline-variant)', marginBottom: 6, fontSize: 13 }}
             >
               <div style={{ fontWeight: 600 }}>
                 {new Date(r.examined_at).toLocaleDateString()} — score {r.score}/6
                 {' · '}
-                <span style={{ textTransform: 'capitalize', fontWeight: 400, color: '#888' }}>{r.exam_type}</span>
+                <span style={{ textTransform: 'capitalize', fontWeight: 400, color: 'var(--md-sys-color-on-surface-variant)' }}>{r.exam_type}</span>
                 {' · '}
                 <span>{r.passed ? 'Passed' : 'Not passed'}</span>
               </div>
-              {r.feedback && <div style={{ color: '#555', marginTop: 4 }}>{r.feedback}</div>}
+              {r.feedback && <div style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>{r.feedback}</div>}
             </div>
           ))}
         </div>
@@ -3100,9 +3140,7 @@ function EssayExaminationHistory({ essayId }: { essayId: string }) {
 // /stats failure only blanks the `All` row — the session numbers still render.
 
 const statMetricLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  letterSpacing: 0.4,
-  textTransform: 'uppercase',
+  fontSize: 12,
   color: 'var(--md-sys-color-on-surface-variant)',
 };
 
@@ -3117,7 +3155,7 @@ function ForecastRow({ label, values }: { label: string; values: (number | null)
         <span
           key={i}
           style={{
-            fontSize: 13,
+            fontSize: 14,
             textAlign: 'right',
             fontVariantNumeric: 'tabular-nums',
             color: v ? 'var(--md-sys-color-on-surface)' : 'var(--md-sys-color-outline)',
@@ -3154,7 +3192,7 @@ function ForecastGrid({ rows }: { rows: { label: string; values: (number | null)
         {FORECAST_COLUMNS.map(c => (
           <span
             key={c.key}
-            style={{ fontSize: 11, textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}
+            style={{ fontSize: 12, textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}
           >
             {c.label}
           </span>
@@ -3228,7 +3266,7 @@ function ReviewStatsPanel({
       <div data-testid="review-daily-metrics" style={{ display: 'flex', gap: 8 }}>
         {metrics.map(([value, label]) => (
           <div key={label} style={{ flex: 1, textAlign: 'center' }}>
-            <div style={{ fontSize: 22, fontWeight: 500, lineHeight: 1.1, color: 'var(--md-sys-color-on-surface)' }}>
+            <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.1, color: 'var(--md-sys-color-on-surface)' }}>
               {value}
             </div>
             <div style={{ ...statMetricLabelStyle, marginTop: 2 }}>{label}</div>
@@ -3423,11 +3461,9 @@ function ReviewSessionView() {
   const scopeCaption = scopeLabel === 'Review' ? null : (
     <div
       style={{
-        fontSize: 12,
-        fontWeight: 700,
-        letterSpacing: 0.6,
-        textTransform: 'uppercase',
-        color: '#888',
+        fontSize: 14,
+        fontWeight: 600,
+        color: 'var(--md-sys-color-on-surface-variant)',
         marginBottom: 8,
       }}
     >
@@ -3510,14 +3546,14 @@ function ReviewSessionView() {
             )}
             {exported ? (
               <button
-                style={{ ...jumpBtnStyle, marginLeft: 20 }}
+                style={{ ...jumpBtnStyle, marginLeft: 12 }}
                 onClick={() => navigate('/essaycards/explore/import')}
               >
                 Import result →
               </button>
             ) : (
               <button
-                style={{ ...jumpBtnStyle, marginLeft: 20 }}
+                style={{ ...jumpBtnStyle, marginLeft: 12 }}
                 disabled={exploring}
                 onClick={handleExplore}
               >
@@ -3541,16 +3577,16 @@ function ReviewSessionView() {
             // Revalidation: exactly two buttons. Correct -> grade 'good' (flag cleared, FSRS
             // untouched); Incorrect -> grade 'again' (genuine FSRS failure).
             <>
-              <button style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade('good')}>
+              <button style={gradeBtnGoodStyle} disabled={grading} onClick={() => handleGrade('good')}>
                 Correct
               </button>
-              <button style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade('again')}>
+              <button style={gradeBtnAgainStyle} disabled={grading} onClick={() => handleGrade('again')}>
                 Incorrect
               </button>
             </>
           ) : (
             (['again', 'hard', 'good', 'easy'] as Grade[]).map(g => (
-              <button key={g} style={gradeBtnStyle} disabled={grading} onClick={() => handleGrade(g)}>
+              <button key={g} style={gradeStyleFor(g)} disabled={grading} onClick={() => handleGrade(g)}>
                 {g[0].toUpperCase() + g.slice(1)}
               </button>
             ))
@@ -3842,7 +3878,7 @@ function IngestView() {
   return (
     <div style={pageStyle}>
       <h2 style={{ marginTop: 0 }}>Add / Update Essay</h2>
-      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+      <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
         Paste one JSON payload with the whole essay: its main spine, any new
         nuggets it needs, its sections, and their flashcards — one submit
         creates or updates all of it together. Each flashcard lives inside
@@ -3861,7 +3897,7 @@ function IngestView() {
         <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
       </div>
       {clipboardMsg && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+        <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>{clipboardMsg}</div>
       )}
 
       <textarea
@@ -3878,7 +3914,7 @@ function IngestView() {
           fontSize: 13,
           padding: 8,
           boxSizing: 'border-box',
-          border: '1px solid #ccc',
+          border: '1px solid var(--md-sys-color-outline)',
           borderRadius: 6,
         }}
         placeholder={PLACEHOLDER_JSON}
@@ -3905,10 +3941,10 @@ function IngestView() {
           marginTop: 16,
           padding: 12,
           borderRadius: 8,
-          border: '1px solid #e0e0e0',
+          border: '1px solid var(--md-sys-color-outline-variant)',
         }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Ingest succeeded</div>
-          <div style={{ fontSize: 13, color: '#555' }}>
+          <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>
             Nuggets: +{result.nuggets_created} created, ~{result.nuggets_updated} updated
             <br />
             Sections: +{result.sections_created} created, ~{result.sections_updated} updated
@@ -4031,7 +4067,7 @@ function ImportExaminationsView() {
         ← All essays
       </button>
       <h2 style={{ marginTop: 0 }}>Import Exam Results</h2>
-      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+      <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
         Paste ChatGPT's JSON reply from an oral examination (started with "Export for examination" on an
         essay's page). Each result is stored as a new historical record — importing never overwrites a
         previous examination, so re-examining a section months later just adds another entry.
@@ -4041,7 +4077,7 @@ function ImportExaminationsView() {
         <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
       </div>
       {clipboardMsg && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+        <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>{clipboardMsg}</div>
       )}
 
       <textarea
@@ -4054,7 +4090,7 @@ function ImportExaminationsView() {
           fontSize: 13,
           padding: 8,
           boxSizing: 'border-box',
-          border: '1px solid #ccc',
+          border: '1px solid var(--md-sys-color-outline)',
           borderRadius: 6,
         }}
         placeholder={EXAM_RESULT_PLACEHOLDER_JSON}
@@ -4077,10 +4113,10 @@ function ImportExaminationsView() {
           marginTop: 16,
           padding: 12,
           borderRadius: 8,
-          border: '1px solid #e0e0e0',
+          border: '1px solid var(--md-sys-color-outline-variant)',
         }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Import succeeded</div>
-          <div style={{ fontSize: 13, color: '#555' }}>
+          <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>
             {result.imported} examination result{result.imported === 1 ? '' : 's'} stored.
           </div>
           <ul style={{ fontSize: 13, margin: '8px 0 0', paddingLeft: 18 }}>
@@ -4224,7 +4260,7 @@ function ExploreImportView() {
         ← All essays
       </button>
       <h2 style={{ marginTop: 0 }}>Import Exploration Result</h2>
-      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+      <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
         Paste ChatGPT's JSON reply from a flashcard exploration (started with
         <strong> Explore </strong> on a revealed answer during review). You'll see
         a preview of exactly what will change; nothing is written until you
@@ -4236,7 +4272,7 @@ function ExploreImportView() {
         <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
       </div>
       {clipboardMsg && (
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>
+        <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>{clipboardMsg}</div>
       )}
 
       <textarea
@@ -4249,7 +4285,7 @@ function ExploreImportView() {
           fontSize: 13,
           padding: 8,
           boxSizing: 'border-box',
-          border: '1px solid #ccc',
+          border: '1px solid var(--md-sys-color-outline)',
           borderRadius: 6,
         }}
         placeholder={EXPLORE_RESULT_PLACEHOLDER_JSON}
@@ -4276,15 +4312,15 @@ function ExploreImportView() {
       )}
 
       {preview && !applied && (
-        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 13 }}>
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid var(--md-sys-color-outline-variant)', fontSize: 13 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>This import will:</div>
 
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontWeight: 600 }}>• Save a discussion</div>
-            <div style={{ color: '#555' }}>
+            <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
               Card <code>{preview.save_discussion.card_key}</code> — “{preview.save_discussion.exploration_question}”
             </div>
-            <div style={{ color: '#888', marginTop: 2 }}>
+            <div style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>
               Snapshots the card's current question &amp; answer.
               {preview.save_discussion.knowledge_gap
                 ? ` Knowledge gap: “${preview.save_discussion.knowledge_gap}”.`
@@ -4298,16 +4334,16 @@ function ExploreImportView() {
                 • Update card <code>{u.card_key}</code> ({u.changed_fields.join(', ')})
               </div>
               {u.changed_fields.includes('question') && (
-                <div style={{ color: '#555' }}>
+                <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
                   Question: <s>{u.old.question}</s> → <strong>{u.new.question}</strong>
                 </div>
               )}
               {u.changed_fields.includes('answer') && (
-                <div style={{ color: '#555' }}>
+                <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
                   Answer: <s>{u.old.answer}</s> → <strong>{u.new.answer}</strong>
                 </div>
               )}
-              <div style={{ color: '#888', marginTop: 2 }}>
+              <div style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>
                 Reason (kept in history): “{u.reason}”. The previous version is preserved.
               </div>
             </div>
@@ -4318,22 +4354,22 @@ function ExploreImportView() {
               <div style={{ fontWeight: 600 }}>
                 • Create a new card in section <code>{c.section_anchor_slug}</code>
               </div>
-              <div style={{ color: '#555' }}>Q: {c.question}</div>
-              <div style={{ color: '#555' }}>A: {c.answer}</div>
-              <div style={{ color: '#888', marginTop: 2 }}>New card key <code>{c.card_key}</code>.</div>
+              <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>Q: {c.question}</div>
+              <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>A: {c.answer}</div>
+              <div style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>New card key <code>{c.card_key}</code>.</div>
             </div>
           ))}
 
           {preview.update_card.length === 0 && preview.create_card.length === 0 && (
-            <div style={{ color: '#888' }}>No card changes — the discussion is saved as-is.</div>
+            <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>No card changes — the discussion is saved as-is.</div>
           )}
         </div>
       )}
 
       {applied && (
-        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid #e0e0e0', fontSize: 13 }}>
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid var(--md-sys-color-outline-variant)', fontSize: 13 }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Import applied</div>
-          <div style={{ color: '#555' }}>
+          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
             Discussion saved{applied.revisions && applied.revisions.length > 0
               ? `, ${applied.revisions.length} card revision${applied.revisions.length === 1 ? '' : 's'} recorded`
               : ''}{applied.created_cards && applied.created_cards.length > 0
@@ -4513,7 +4549,7 @@ function ImagesView() {
         ← All essays
       </button>
       <h2 style={{ marginTop: 0 }}>Images</h2>
-      <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+      <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
         Add an image by pasting (Ctrl/Cmd-V), dropping a file below, or picking one —
         or drop files into the server staging folder
         (<code>{'${DATA_ROOT}'}/essaycards/staging</code>) and scan. Reference an
@@ -4533,7 +4569,7 @@ function ImagesView() {
           borderRadius: 8,
           padding: 20,
           textAlign: 'center',
-          color: '#666',
+          color: 'var(--md-sys-color-on-surface-variant)',
           fontSize: 13,
           marginBottom: 12,
         }}
@@ -4568,13 +4604,13 @@ function ImagesView() {
           marginTop: 16,
           padding: 12,
           borderRadius: 8,
-          border: '1px solid #e0e0e0',
+          border: '1px solid var(--md-sys-color-outline-variant)',
           fontSize: 13,
         }}>
           <div style={{ fontWeight: 600, marginBottom: 8 }}>Import complete</div>
           <div>Imported: {report.imported.length}</div>
           {report.imported.map(i => (
-            <div key={i.slug} style={{ color: '#555' }}>+ {i.source_filename} → {i.slug}</div>
+            <div key={i.slug} style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>+ {i.source_filename} → {i.slug}</div>
           ))}
           <div style={{ marginTop: 4 }}>Unchanged: {report.unchanged}</div>
           {report.skipped.length > 0 && (
@@ -4591,7 +4627,7 @@ function ImagesView() {
       <h3 style={{ marginTop: 24 }}>Imported images</h3>
       {loading && <Skeleton />}
       {!loading && images.length === 0 && (
-        <div style={{ color: '#888', fontSize: 14 }}>No images imported yet.</div>
+        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 14 }}>No images imported yet.</div>
       )}
       {!loading && images.map(img => (
         <div
@@ -4600,7 +4636,7 @@ function ImagesView() {
             display: 'flex',
             gap: 12,
             padding: 12,
-            border: '1px solid #e0e0e0',
+            border: '1px solid var(--md-sys-color-outline-variant)',
             borderRadius: 8,
             marginBottom: 8,
             alignItems: 'center',
@@ -4613,7 +4649,7 @@ function ImagesView() {
           />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600, wordBreak: 'break-all' }}>{img.source_filename}</div>
-            <div style={{ fontSize: 12, color: '#888' }}>
+            <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>
               {img.width ?? '?'}×{img.height ?? '?'} · {(img.byte_size / 1024).toFixed(0)} KB · {img.slug}
             </div>
           </div>
@@ -4717,7 +4753,7 @@ function NuggetAuthoringImportView() {
 
       {pkg && (
         <>
-          <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+          <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
             {pkg.nugget
               ? `Revising "${pkg.nugget.title}" (${pkg.nugget.nugget_key}).`
               : 'Drafting a brand-new nugget, in the context of this essay/section.'}
@@ -4727,7 +4763,7 @@ function NuggetAuthoringImportView() {
             <button style={btnStyle} onClick={handleCopyPrompt}>Copy prompt</button>
             <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
           </div>
-          {clipboardMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>}
+          {clipboardMsg && <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>{clipboardMsg}</div>}
 
           <textarea
             value={text}
@@ -4735,7 +4771,7 @@ function NuggetAuthoringImportView() {
             rows={12}
             style={{
               width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 8,
-              boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: 6,
+              boxSizing: 'border-box', border: '1px solid var(--md-sys-color-outline)', borderRadius: 6,
             }}
             placeholder={NUGGET_JSON_PLACEHOLDER}
           />
@@ -4749,11 +4785,11 @@ function NuggetAuthoringImportView() {
           {submitError && <div style={{ marginTop: 16 }}><ErrorCard error={submitError} /></div>}
 
           {result && (
-            <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid #e0e0e0' }}>
+            <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: '1px solid var(--md-sys-color-outline-variant)' }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>
                 {result.created ? 'Nugget created' : 'Nugget updated'}
               </div>
-              <div style={{ fontSize: 13, color: '#555' }}>
+              <div style={{ fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)' }}>
                 {result.title} ({result.nugget_key})
               </div>
               <button
@@ -4889,14 +4925,14 @@ function GenerateFlashcardsImportView() {
 
       {pkg && (
         <>
-          <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>
+          <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
             Generating cards for "{pkg.nugget.title}" ({pkg.nugget.nugget_key}) — {pkg.existing_flashcards.length} existing card(s).
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <button style={btnStyle} onClick={handleCopyPrompt}>Copy prompt</button>
             <button style={btnStyle} onClick={handlePasteFromClipboard}>Paste from clipboard</button>
           </div>
-          {clipboardMsg && <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{clipboardMsg}</div>}
+          {clipboardMsg && <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 8 }}>{clipboardMsg}</div>}
 
           <textarea
             value={text}
@@ -4904,7 +4940,7 @@ function GenerateFlashcardsImportView() {
             rows={12}
             style={{
               width: '100%', fontFamily: 'monospace', fontSize: 13, padding: 8,
-              boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: 6,
+              boxSizing: 'border-box', border: '1px solid var(--md-sys-color-outline)', borderRadius: 6,
             }}
             placeholder={GENERATE_FLASHCARDS_JSON_PLACEHOLDER}
           />
@@ -4984,7 +5020,7 @@ function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
       <table style={{ width: '100%', marginTop: 12, borderCollapse: 'collapse' }}>
         <tbody>
           <tr>
-            <td style={{ padding: '2px 4px', fontSize: 13 }}>Again</td>
+            <td style={{ padding: '2px 4px', fontSize: 14 }}>Again</td>
             <td style={{ padding: '2px 4px', fontSize: 13, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{row.again_count}</td>
           </tr>
           <tr>
@@ -5006,13 +5042,14 @@ function ReviewStatsCard({ row }: { row: ReviewStatsSummaryRow }) {
 }
 
 const statsZoneHeadingStyle: React.CSSProperties = {
-  margin: '28px 0 4px',
-  fontSize: 15,
+  margin: '32px 0 4px',
+  fontSize: 16,
+  fontWeight: 600,
 };
 
 const statsZoneSubtextStyle: React.CSSProperties = {
   color: 'var(--md-sys-color-on-surface-variant)',
-  fontSize: 12,
+  fontSize: 14,
   margin: '0 0 12px',
 };
 
@@ -5132,8 +5169,7 @@ function ReviewStatsView() {
 
   return (
     <div style={pageStyle}>
-      <button style={jumpBtnStyle} onClick={() => navigate('/essaycards')}>← Back to all essays</button>
-      <h2 style={{ marginTop: 16 }}>Stats</h2>
+      <h2 className="type-headline" style={{ margin: 0 }}>Stats</h2>
 
       {loading && <Skeleton />}
       {error && <ErrorCard error={error} />}
@@ -5142,16 +5178,15 @@ function ReviewStatsView() {
         <>
           <h3 style={statsZoneHeadingStyle}>Study activity</h3>
           <p style={statsZoneSubtextStyle}>
-            Recalls per UTC day, trailing 30 days; recall rate shown above each day.
+            Recalls per day over the last 30 days, with the recall rate above each day.
           </p>
           {activityRows
             ? <DailyActivityChart rows={activityRows} />
-            : <div style={{ color: '#888', fontSize: 13 }}>Activity data unavailable.</div>}
+            : <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>Activity data unavailable.</div>}
 
           <h3 style={statsZoneHeadingStyle}>Scheduled reviews (forecast)</h3>
           <p style={statsZoneSubtextStyle}>
-            A schedule FORECAST, not an observed fact — when currently-scheduled cards will next come due,
-            predicted by FSRS. Distinct from "Observed recall" below.
+            When your scheduled cards are predicted to come due next.
           </p>
           <div
             style={{
@@ -5165,8 +5200,7 @@ function ReviewStatsView() {
 
           <h3 style={statsZoneHeadingStyle}>Observed recall</h3>
           <p style={statsZoneSubtextStyle}>
-            What actually happened over the trailing day/week/month — OBSERVED, not predicted. Sample size is
-            Cards Seen.
+            What actually happened over the last day, week or month.
           </p>
           <div role="group" aria-label="Observed recall period" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             {(['day', 'week', 'month'] as const).map(p => (
@@ -5175,14 +5209,7 @@ function ReviewStatsView() {
                 type="button"
                 aria-pressed={period === p}
                 onClick={() => setPeriod(p)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 16,
-                  cursor: 'pointer',
-                  border: '1px solid var(--md-sys-color-outline)',
-                  background: period === p ? 'var(--md-sys-color-primary)' : 'transparent',
-                  color: period === p ? 'var(--md-sys-color-on-primary, #fff)' : 'var(--md-sys-color-on-surface)',
-                }}
+                style={period === p ? primaryBtnStyle : btnStyle}
               >
                 {REVIEW_STATS_WINDOW_LABELS[p]}
               </button>
@@ -5193,13 +5220,13 @@ function ReviewStatsView() {
           )}
 
           <h3 style={statsZoneHeadingStyle}>Scheduled intervals</h3>
-          <p style={statsZoneSubtextStyle}>How mature the deck is — current review_interval distribution across every scheduled card.</p>
+          <p style={statsZoneSubtextStyle}>How long your cards are currently scheduled for.</p>
           {intervalsDataset
             ? <BarChart dataset={intervalsDataset} mapping={{ x: 'label', y: 'count', aggregation: 'sum' }} />
-            : <div style={{ color: '#888', fontSize: 13 }}>Interval data unavailable.</div>}
+            : <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>Interval data unavailable.</div>}
 
           <h3 style={statsZoneHeadingStyle}>Essay learning progress</h3>
-          <p style={statsZoneSubtextStyle}>Number of essays at each progress state: grey, yellow, green, blue, violet (see the legend on the essay list).</p>
+          <p style={statsZoneSubtextStyle}>Essays at each progress state (colours as in the essay list legend).</p>
           <BarChart dataset={levelHistogramDataset} mapping={{ x: 'level', y: 'count', aggregation: 'sum' }} />
         </>
       )}

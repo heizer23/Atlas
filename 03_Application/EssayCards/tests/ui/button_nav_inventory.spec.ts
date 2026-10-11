@@ -26,15 +26,14 @@ test('overview page exposes every pre-existing page-level and category-level act
   await page.goto('/essaycards');
   await expect(page.getByRole('heading', { name: 'Essays', level: 2 })).toBeVisible();
 
-  // Page-level button row (EssayListView header) — all four unchanged.
-  // Scoped to the main content area: "Due for review" (and, on some
-  // viewports, other labels) also appears in the Shell's own sidebar nav,
-  // which would otherwise make these locators ambiguous (strict mode).
+  // Page-level actions: Images / Import exam results / Import exploration live
+  // in the header's "More" menu (the "Due for review" button was removed —
+  // it is a primary item of the Shell nav on every viewport).
   const main = page.getByRole('main');
-  await expect(main.getByRole('button', { name: 'Images', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Import exam results', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Import exploration', exact: true })).toBeVisible();
-  await expect(main.getByRole('button', { name: 'Due for review', exact: true })).toBeVisible();
+  await main.getByRole('button', { name: 'More actions' }).click();
+  await expect(main.getByRole('menuitem', { name: 'Images', exact: true })).toBeVisible();
+  await expect(main.getByRole('menuitem', { name: 'Import exam results', exact: true })).toBeVisible();
+  await expect(main.getByRole('menuitem', { name: 'Import exploration', exact: true })).toBeVisible();
 
   // Per-category Study button — only rendered for a named topic category
   // with at least one essay carrying progress (tot > 0). Assert it exists
