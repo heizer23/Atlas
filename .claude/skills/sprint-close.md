@@ -41,11 +41,13 @@ python3 /home/linse/Prod/Atlas/.claude/tools/strip_sprint_markers.py \
   <component_root>/00_architecture/scaffolding.json
 ```
 
-**For `10_schema.sql`:** copy directly (no markers in SQL files):
+**Fast-path sprints** (`"fast_path": true`, no `10_*` files): skip the `architecture.json` / `scaffolding.json` / schema copies below. Check whether the change touches anything `00_architecture/` documents; if not, note "snapshot unchanged" in the Step 6 log line.
 
-| Source (sprint folder) | Destination |
-|---|---|
-| `10_schema.sql` | `<component_root>/00_architecture/schema.sql` _(only if present)_ |
+**Schema snapshot (`00_architecture/schema.sql`) must always be the FULL current schema, never a sprint change file.** `10_schema.sql` is usually a per-sprint delta (only new/changed objects); copying it over the snapshot leaves a partial schema, and any Make target that feeds the snapshot to psql then fails on a fresh database. Pick the source in this order:
+
+1. `<component_root>/schema.sql` exists (the runtime schema applied at startup) → copy it to `<component_root>/00_architecture/schema.sql`.
+2. Otherwise, no snapshot exists yet and `10_schema.sql` is present (new component, so the file is the whole schema) → copy it.
+3. Otherwise (snapshot exists, only a delta `10_schema.sql`, no runtime schema) → do NOT overwrite. Tell the human the snapshot cannot be refreshed mechanically and why.
 
 This folder is the canonical current-architecture snapshot. Both `architecture.json` and `scaffolding.json` are always clean — no sprint markers, no removed entries, no `sprint_note` field.
 
@@ -55,7 +57,7 @@ This folder is the canonical current-architecture snapshot. Both `architecture.j
 
 Check the Makefile at `01_System/Makefile` for an existing entry referencing `component_root`.
 
-**If an entry already exists and no entries to it a required:** no Makefile changes needed — skip to Step 3.
+**If an entry already exists and no changes to it are required:** no Makefile changes needed — skip to Step 3.
 
 **If this is a new component or some changes require changes in the make file:** add a region block following the established pattern. Derive the Make target prefix as follows:
 - Take `component_name`, lowercase it, strip `Tracker`/`Engine`/`Connector`/`Series`/`Gateway` suffixes, use the result as the prefix (e.g. `LabelEngine` → `label`, `TaskTracker` → `task`, `CalendarConnector` → `calendar`).
@@ -88,13 +90,13 @@ Add this block at the appropriate layer position (Platform before Application):
 	$(<PREFIX>_COMPOSE) up -d
 ```
 
-If the component owns persistent state (`10_schema.sql` exists), also add:
+If the component owns persistent state (a full schema exists: `<component_root>/schema.sql`, or for a new component `10_schema.sql`), also add the target below. It must read the FULL schema: `<component_root>/schema.sql` when that file exists, otherwise `00_architecture/schema.sql` (which Step 1 made a full copy). Never point it at a sprint change file.
 
 ```makefile
 <prefix>-schema:
 	@test -n "$(ATLAS_PG_USER)" || (echo "ATLAS_PG_USER missing" && exit 1)
 	@test -n "$(ATLAS_PG_DB)"   || (echo "ATLAS_PG_DB missing" && exit 1)
-	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(<PREFIX>_DIR)/00_architecture/schema.sql
+	$(PG_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(ATLAS_PG_USER) -d $(ATLAS_PG_DB) < $(<PREFIX>_DIR)/schema.sql
 
 # endregion
 ```
@@ -156,7 +158,7 @@ Update `<sprint_folder>/99_sprint_log.md`:
 - Set `current_state` to `SPRINT_COMPLETE`
 - Set `last_agent` to `/sprint-close`
 - Set `next_agent` to `null`
-- Append one line to the log: `- <YYYY-MM-DD> \`IMPLEMENTATION_IN_PROGRESS\` → \`SPRINT_COMPLETE\` [/sprint-close]`
+- Append one line to the log, using the state you actually found in Step 0 as the "from" state: `- <YYYY-MM-DD> \`<previous current_state>\` → \`SPRINT_COMPLETE\` [/sprint-close]`
 
 ---
 
