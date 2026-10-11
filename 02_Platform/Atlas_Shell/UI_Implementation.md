@@ -48,12 +48,14 @@ The Atlas Shell is the UI host. Platform UI primitives live under `platform-ui/`
       ShellLayout.tsx   ← Sidebar + BottomNav + content area
       ShellContext.ts   ← Active app context
       shell.css         ← Shell layout styles (design tokens + shell chrome)
+      recency.ts        ← Per-device launcher ordering (localStorage, ephemeral)
     navigation/
       Sidebar.tsx
       BottomNav.tsx
       MoreMenu.tsx
     launcher/
       AppLauncher.tsx
+      LineBullet.tsx    ← App bullet (see UI_DesignLanguage §11)
     registry/
       AppRegistry.ts
     hooks/
