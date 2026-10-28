@@ -28,8 +28,13 @@ deploy)
   fi
   [ -f "$FLAG" ] || exit 0
   stop_active="$(printf '%s' "$IN" | jq -r '.stop_hook_active // false')"
-  out="$(cd "$SHELL_DIR" && npx vite build 2>&1 && docker cp dist/. atlas-shell:/usr/share/nginx/html/ 2>&1)"
-  if [ $? -eq 0 ]; then
+  # Node 24 segfaults in ~1 of 10 vite builds (0/40 on Node 22), so retry the build up to 3 times.
+  for attempt in 1 2 3; do
+    out="$(cd "$SHELL_DIR" && npx vite build 2>&1 && docker cp dist/. atlas-shell:/usr/share/nginx/html/ 2>&1)"
+    rc=$?
+    [ $rc -eq 0 ] && break
+  done
+  if [ $rc -eq 0 ]; then
     rm -f "$FLAG"
     exit 0
   fi
