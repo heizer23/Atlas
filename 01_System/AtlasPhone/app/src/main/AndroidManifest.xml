@@ -45,6 +45,20 @@
                 android:resource="@color/atlas_bar" />
         </activity>
 
+        <!-- Required by androidbrowserhelper's LauncherActivity (site-settings shortcut);
+             the library does not declare it itself. -->
+        <activity
+            android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity"
+            android:exported="true">
+            <meta-data
+                android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL"
+                android:value="https://workout.linspad.net/" />
+            <intent-filter>
+                <action android:name="android.support.customtabs.action.ACTION_MANAGE_TRUSTED_WEB_ACTIVITY_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- Receives FCM data-only messages in all app states (foreground and background) -->
         <service
             android:name=".AtlasMessagingService"
