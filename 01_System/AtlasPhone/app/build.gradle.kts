@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "net.linspad.atlasphone"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "net.linspad.atlasphone"
