@@ -4,6 +4,7 @@
  */
 
 import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,11 +32,15 @@ export interface ExerciseRow extends HistoryRow {
   delta: number | null;
 }
 
-export function setsOf(r: HistoryRow): SetReps {
+export function setsOf(
+  r: Pick<HistoryRow, "set1_reps" | "set2_reps" | "set3_reps" | "set4_reps" | "set5_reps">,
+): SetReps {
   return [r.set1_reps, r.set2_reps, r.set3_reps, r.set4_reps, r.set5_reps];
 }
 
-export function totalOf(r: HistoryRow): number {
+export function totalOf(
+  r: Pick<HistoryRow, "set1_reps" | "set2_reps" | "set3_reps" | "set4_reps" | "set5_reps">,
+): number {
   return setsOf(r).reduce<number>((a, v) => a + (v ?? 0), 0);
 }
 
@@ -51,6 +56,106 @@ export function fmtShortDate(iso: string): string {
 export function fmtLongDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+}
+
+export function fmtDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** "4 × 10" when every recorded set has the same reps, else the real per-set reps ("12/11/10/9"). */
+export function repsSummary(sets: SetReps): string {
+  const v = sets.filter((x): x is number => x != null);
+  if (v.length === 0) return "—";
+  if (v.every((x) => x === v[0])) return `${v.length} × ${v[0]}`;
+  return v.join("/");
+}
+
+export function historyPath(name: string): string {
+  return `/workout/log/exercise?name=${encodeURIComponent(name)}`;
+}
+
+/** Back to where the user came from; falls back to `fallback` for deep links. */
+export function useGoBack(fallback: string): () => void {
+  const navigate = useNavigate();
+  return () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate(fallback);
+  };
+}
+
+// ── Weight labels (shared by the mini charts and the history chart) ───────────
+// A run is a stretch of consecutive occurrences with the same weight. Labels are anchored at the
+// run start, clamped inside the chart, placed newest-first; one that would collide with a newer
+// label is dropped (the run bracket stays). A missing weight is never labelled.
+
+export interface WeightRun {
+  x0: number;
+  x1: number;
+  weight: number | null;
+}
+
+export function placeWeightLabels(runs: WeightRun[], width: number, fontPx: number): { x: number; text: string }[] {
+  const textW = (t: string) => t.length * fontPx * 0.56 + 1;
+  let limit = width + 4;
+  const labels: { x: number; text: string }[] = [];
+  for (let k = runs.length - 1; k >= 0; k--) {
+    const run = runs[k];
+    if (run.weight == null) continue;
+    const text = textW(`${run.weight} kg`) <= run.x1 - run.x0 ? `${run.weight} kg` : `${run.weight}`;
+    const x = Math.min(run.x0, width - textW(text) + 4);
+    if (x + textW(text) <= limit + 0.5) {
+      labels.push({ x, text });
+      limit = x - 2;
+    }
+  }
+  return labels;
+}
+
+/** Group consecutive equal weights: [{start, end(exclusive), weight}] */
+export function weightRuns(rows: { weight_kg: number | null }[]): { start: number; end: number; weight: number | null }[] {
+  const runs: { start: number; end: number; weight: number | null }[] = [];
+  rows.forEach((r, i) => {
+    if (i === 0 || (r.weight_kg ?? null) !== (rows[i - 1].weight_kg ?? null)) {
+      runs.push({ start: i, end: i + 1, weight: r.weight_kg ?? null });
+    } else {
+      runs[runs.length - 1].end = i + 1;
+    }
+  });
+  return runs;
+}
+
+/** Reps per set as equal blocks, set 1 darkest → later sets lighter. Only recorded sets are shown. */
+export function SetBlocks({ sets }: { sets: SetReps }) {
+  const shown = sets.map((v, i) => ({ v, i })).filter((x) => x.v != null);
+  return (
+    <div
+      role="group"
+      aria-label={`Reps per set: ${shown.map((x) => x.v).join(", ")}`}
+      style={{ display: "flex", gap: 2, height: 28, borderRadius: 6, overflow: "hidden" }}
+    >
+      {shown.map(({ v, i }) => (
+        <div
+          key={i}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 13,
+            fontWeight: 600,
+            fontVariantNumeric: "tabular-nums",
+            background: SET_SHADES[i],
+            color: i < 3 ? "#fff" : "var(--md-sys-color-on-surface)",
+          }}
+        >
+          {v}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ── RepsChart ─────────────────────────────────────────────────────────────────
@@ -139,28 +244,14 @@ export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
     r.span = (k + 1 < runs.length ? runs[k + 1].idx : visible.length) - r.idx;
   });
 
-  // Label placement in px: anchored at the run start, clamped inside the chart. Labels are
-  // placed newest-first and a label that would collide with a newer one is dropped (the run
-  // bracket stays); exact weights are always available in the exercise history.
   const fontPx = variant === "mini" ? 10 : 11;
   const colW = (width - gap * (slots - 1)) / slots;
   const xOf = (i: number) => (offset + i) * (colW + gap);
-  const textW = (t: string) => t.length * fontPx * 0.56 + 1;
-  let limit = width + 4;
-  const labels: { x: number; text: string }[] = [];
-  for (let k = runs.length - 1; k >= 0; k--) {
-    const run = runs[k];
-    const w = visible[run.idx].weight_kg;
-    const runPx = run.span * (colW + gap) - gap;
-    const base = w == null ? "" : `${w}`;
-    const text = w != null && textW(`${w} kg`) <= runPx ? `${w} kg` : base;
-    if (!text) continue; // no recorded weight: bracket only, nothing asserted
-    const x = Math.min(xOf(run.idx), width - textW(text) + 4);
-    if (x + textW(text) <= limit + 0.5) {
-      labels.push({ x, text });
-      limit = x - 2;
-    }
-  }
+  const labels = placeWeightLabels(
+    runs.map((r) => ({ x0: xOf(r.idx), x1: xOf(r.idx + r.span) - gap, weight: visible[r.idx].weight_kg })),
+    width,
+    fontPx,
+  );
 
   const newest = visible[visible.length - 1];
   const summary = `${visible.length} most recent sessions, newest ${fmtShortDate(newest.workout_date)}: ${fmtWeight(

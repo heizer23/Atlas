@@ -141,11 +141,15 @@ def list_sessions(
     page_size: int = 25,
     split: str | None = None,
     include_active: bool = False,
+    include_exercises: bool = False,
 ) -> JSONResponse:
     """Finished sessions, newest first (workout_date DESC, created_at DESC).
 
     split:          optional, case-insensitive exact match on the archetype name.
     include_active: default false; the active session is reached via the Session tab.
+    include_exercises: default false; when true each row carries `exercises`, the session's
+                    performed exercises in entry order (id, exercise, weight_kg, set1..5_reps,
+                    delta) so the Log renders without one request per session. Read-only.
     Legacy sessions (no workout_session row) count as finished.
     Empty result: Dataset with zero rows. exercise_count counts performed exercises only.
     """
@@ -188,6 +192,28 @@ def list_sessions(
                 (*args, page_size, offset),
             )
             rows = [dict(r) for r in cur.fetchall()]
+
+            if include_exercises and rows:
+                cur.execute(
+                    """
+                    SELECT l.workout_id::text AS sid, l.workout_log_id::text AS id, l.exercise,
+                           l.weight_kg, l.set1_reps, l.set2_reps, l.set3_reps, l.set4_reps,
+                           l.set5_reps, h.delta
+                    FROM workout.workout_log l
+                    LEFT JOIN workout.exercise_session_history h ON h.id = l.workout_log_id::text
+                    WHERE l.workout_id = ANY(%s::uuid[]) AND l.status = 'done'
+                    ORDER BY l.created_at ASC, l.workout_log_id ASC
+                    """,
+                    ([r["id"] for r in rows],),
+                )
+                grouped: dict[str, list[dict[str, Any]]] = {}
+                for e in cur.fetchall():
+                    d = dict(e)
+                    sid = d.pop("sid")
+                    d["weight_kg"] = float(d["weight_kg"]) if d["weight_kg"] is not None else None
+                    grouped.setdefault(sid, []).append(d)
+                for r in rows:
+                    r["exercises"] = grouped.get(r["id"], [])
 
     return dataset_response(Dataset(
         meta=DatasetMeta(
@@ -606,6 +632,7 @@ def exercise_history(name: str) -> JSONResponse:
                 """
                 SELECT
                     workout_log_id::text AS id,
+                    workout_id::text     AS session_id,
                     workout_date::text   AS workout_date,
                     set1_reps, set2_reps, set3_reps, set4_reps, set5_reps,
                     weight_kg, comment, split

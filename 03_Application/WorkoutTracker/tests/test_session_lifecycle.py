@@ -197,3 +197,29 @@ def test_planned_exercise_only_into_active_session(client, seed):
 def test_split_filter_trims_whitespace(client, seed):
     seed(A, "2026-05-01", "Ganzkörper ", [("Squat", 40, [10], None)])
     assert [s["id"] for s in rows(client.get("/api/workout/sessions?split=ganzkörper"))] == [A]
+
+
+def test_sessions_list_include_exercises_is_opt_in_and_read_only(client, seed, db_conn):
+    seed(A, "2026-05-01", "Push", [("Bench", 50, [10, 10], "c1"), ("Dips", None, [8, 8, 7], None)])
+    seed(B, "2026-05-08", "Push", [("Bench", 50, [10, 12], None)])
+    plain = rows(client.get("/api/workout/sessions"))
+    assert all("exercises" not in r for r in plain)
+    full = rows(client.get("/api/workout/sessions?include_exercises=true"))
+    assert [r["id"] for r in full] == [B, A]  # newest first
+    newest = full[0]["exercises"][0]
+    assert newest["exercise"] == "Bench" and newest["delta"] == 2 and newest["set2_reps"] == 12
+    assert [e["exercise"] for e in full[1]["exercises"]] == ["Bench", "Dips"]  # entry order
+    with db_conn.cursor() as cur:  # reading never creates sessions
+        cur.execute("select count(*) as n from workout.workout_session")
+        assert cur.fetchone()["n"] == 0
+
+
+def test_history_rows_carry_session_id_and_are_read_only(client, seed, db_conn):
+    seed(A, "2026-05-01", "Push", [("Bench", 50, [10], "felt strong")])
+    seed(B, "2026-05-08", "Pull", [("Bench", 52.5, [9], None)])
+    hist = rows(client.get("/api/workout/exercises/history?name=bench"))
+    assert [h["session_id"] for h in hist] == [A, B]
+    assert hist[1]["weight_kg"] == 52.5
+    with db_conn.cursor() as cur:
+        cur.execute("select count(*) as n from workout.workout_log")
+        assert cur.fetchone()["n"] == 2
