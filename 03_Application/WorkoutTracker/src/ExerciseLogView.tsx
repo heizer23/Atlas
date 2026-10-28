@@ -21,7 +21,10 @@ import ErrorCard from "@platform-ui/components/ErrorCard";
 import type { ApiError, Dataset } from "@platform-ui/api/types";
 import {
   ConfirmDialog,
+  LARGE_CHART_BAR_H,
+  LARGE_CHART_LABEL_H,
   RepsChart,
+  activeCache,
   fmtClock,
   fmtShortDate,
   fmtWeight,
@@ -218,7 +221,10 @@ export default function ExerciseLogView({
   const [error, setError] = useState<ApiError | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [history, setHistory] = useState<HistoryRow[] | null>(null);
+  // Seeded from the Session list's history when present, so the chart is there on the first paint.
+  const [history, setHistory] = useState<HistoryRow[] | null>(
+    () => (row ? activeCache.histories[row.exercise.toLowerCase()] ?? null : null),
+  );
   const [names, setNames] = useState<string[]>([]);
   const [nameFocused, setNameFocused] = useState(false);
   const submitLock = useRef(false);
@@ -657,7 +663,7 @@ export default function ExerciseLogView({
       {historyName.trim() && (
         <div aria-live="polite">
           {history === null ? (
-            <p style={{ fontSize: 13, color: "var(--md-sys-color-on-surface-variant)" }}>Loading history…</p>
+            <div role="status" aria-label="Loading history" style={{ height: LARGE_CHART_BAR_H + LARGE_CHART_LABEL_H }} />
           ) : (
             <RepsChart rows={earlier} liveRow={liveRow} variant="large" />
           )}

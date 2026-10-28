@@ -1,19 +1,21 @@
 import datetime
+import logging
 import uuid
 import zoneinfo
 from typing import Any
 
 import psycopg2.errors
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, Body
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
 
 from backend.database import get_db
 from platform_errorhandling import api_error
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 
 router = APIRouter(prefix="/workout", tags=["workout"])
+perf_log = logging.getLogger("workouttracker.perf")
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -948,3 +950,22 @@ def delete_exercise(exercise_id: str) -> JSONResponse:
         rows = _fetch_exercises(conn, str(deleted["workout_id"]))
 
     return dataset_response(_exercises_dataset(rows, str(deleted["workout_id"])))
+
+
+# ── Client freeze diagnostics ─────────────────────────────────────────────────
+
+class ClientPerfEvent(BaseModel):
+    """One browser-side stall report. Diagnostic only; nothing is stored beyond the log line."""
+    kind: str = Field(max_length=16)        # longtask | gap | slow_fetch
+    ms: int = Field(ge=0, le=3_600_000)
+    path: str = Field(max_length=200)
+    last_action: str = Field(default="", max_length=120)
+    detail: str = Field(default="", max_length=200)
+
+
+@router.post("/client-perf", response_model=None, status_code=204)
+def client_perf(events: list[ClientPerfEvent] = Body(max_length=20)) -> Response:
+    for e in events:
+        perf_log.warning("CLIENT_STALL kind=%s ms=%d path=%s last_action=%r detail=%r",
+                         e.kind, e.ms, e.path, e.last_action, e.detail)
+    return Response(status_code=204)

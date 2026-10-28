@@ -47,7 +47,7 @@ body[data-app="workout"] select {
 
 body[data-app="workout"] .type-display {
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.02em;
   line-height: 1.15;
 }
@@ -60,7 +60,7 @@ body[data-app="workout"] .type-display {
   }
   body[data-app="workout"] .shell-mobile-header__title {
     font-size: 16px;
-    font-weight: 600;
+    font-weight: 500;
   }
   body[data-app="workout"] .shell-bullet--md {
     width: 24px;
@@ -89,7 +89,7 @@ body[data-app="workout"] .type-display {
   }
   body[data-app="workout"] .shell-bottom-nav-item--active {
     color: var(--md-sys-color-primary);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   /* Workout pages: tighter side gutters than the shell default */

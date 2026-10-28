@@ -57,7 +57,7 @@ export function warmLogCache() {
         if (stale() || isApiError(res)) return;
         archetypesCache = res.rows;
       }
-      const splits = ["", ...archetypesCache.map((r) => String(r.split))];
+      const splits = ["", ...(archetypesCache ?? []).map((r) => String(r.split))];
       for (const split of splits) {
         if (logCache.has(split)) continue;
         const res = await apiFetch<Dataset>(`/workout/sessions?${logQuery(1, split)}`);
@@ -68,6 +68,25 @@ export function warmLogCache() {
       warming = false;
     }
   }, 300);
+}
+
+// ── Active-session cache (stale-while-revalidate) ─────────────────────────────
+// Last known running session with its exercises and per-exercise history, kept at module level so
+// returning to the Session tab paints at once. SessionView/ActiveOverview always refetch and
+// replace it, mirror every local change into it, and clear it when the workout ends. It is only
+// ever a first paint: the server stays the source of truth.
+
+export const activeCache: {
+  session: { id: string; split: string; workout_date: string } | null | undefined; // undefined = unknown
+  exercises: ExerciseRow[] | null;
+  histories: Record<string, HistoryRow[]>;
+  sessionId: string | null; // which session `exercises`/`histories` belong to
+} = { session: undefined, exercises: null, histories: {}, sessionId: null };
+
+export function clearActiveCache() {
+  activeCache.exercises = null;
+  activeCache.histories = {};
+  activeCache.sessionId = null;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -255,8 +274,8 @@ export function SetBlocks({ sets }: { sets: SetReps }) {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 13,
-            fontWeight: 600,
+            fontSize: 12,
+            fontWeight: 500,
             fontVariantNumeric: "tabular-nums",
             background: SET_SHADES[i],
             color: i < 3 ? "#fff" : "var(--md-sys-color-on-surface)",
@@ -285,6 +304,10 @@ export const SET_SHADES = [
 /** Fixed width of the mini chart in the Session list (px). */
 export const MINI_CHART_W = 132;
 
+/** Bar area + weight-label row of the large chart (px); screens reserve this while history loads. */
+export const LARGE_CHART_BAR_H = 96;
+export const LARGE_CHART_LABEL_H = 18;
+
 interface RepsChartProps {
   rows: HistoryRow[];
   /** mini = fixed 148px wide, 15 slots (Session list); large = full width, 20 slots */
@@ -300,8 +323,8 @@ function sameWeight(a: number | null, b: number | null) {
 
 export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
   const slots = variant === "mini" ? 15 : 20;
-  const barAreaH = variant === "mini" ? 40 : 96;
-  const labelH = variant === "mini" ? 14 : 18;
+  const barAreaH = variant === "mini" ? 40 : LARGE_CHART_BAR_H;
+  const labelH = variant === "mini" ? 14 : LARGE_CHART_LABEL_H;
   const gap = variant === "mini" ? 2 : 3;
   const descId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -333,7 +356,7 @@ export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "flex-end",
-          fontSize: 11,
+          fontSize: 12,
           paddingBottom: 2,
           borderBottom: "1px dashed var(--md-sys-color-outline-variant)",
           color: "var(--md-sys-color-on-surface-variant)",
@@ -492,7 +515,7 @@ export function DeltaChip({ delta, completed }: { delta: number | null | undefin
         alignItems: "center",
         justifyContent: "center",
         fontSize: 12,
-        fontWeight: 600,
+        fontWeight: 500,
         fontVariantNumeric: "tabular-nums",
         background: positive
           ? "color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent)"

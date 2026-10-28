@@ -25,6 +25,8 @@ import {
   type HistoryRow,
   clientTz,
   invalidateLogCache,
+  activeCache,
+  clearActiveCache,
   archetypesCache,
   setArchetypesCache,
   warmLogCache,
@@ -55,6 +57,11 @@ function writeOpen(v: OpenExercise | null) {
   } catch {
     /* ignore */
   }
+}
+
+/** Revalidation results usually equal the painted cache; reusing the old reference skips a full re-render. */
+function keepIfEqual<T>(prev: T | undefined, next: T): T {
+  return prev !== undefined && JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
 }
 
 // ── Archetype chooser ─────────────────────────────────────────────────────────
@@ -135,8 +142,8 @@ function ArchetypeChooser({
                 }}
               >
                 <span>
-                  <span style={{ display: "block", fontSize: 18, fontWeight: 600 }}>{String(a.split)}</span>
-                  <span style={{ fontSize: 13, color: "var(--md-sys-color-on-surface-variant)" }}>
+                  <span style={{ display: "block", fontSize: 16, fontWeight: 500 }}>{String(a.split)}</span>
+                  <span style={{ fontSize: 14, color: "var(--md-sys-color-on-surface-variant)" }}>
                     {String(a.session_count)} {Number(a.session_count) === 1 ? "session" : "sessions"} · last {fmtShortDate(String(a.last_date))}
                   </span>
                 </span>
@@ -223,7 +230,7 @@ export function ExerciseListRow({
             flex: 1,
             minWidth: 0,
             fontSize: 16,
-            fontWeight: done ? 600 : 500,
+            fontWeight: 500,
             lineHeight: 1.25,
             overflowWrap: "anywhere",
             color: done ? "var(--md-sys-color-on-surface)" : "var(--md-sys-color-on-surface-variant)",
@@ -250,7 +257,7 @@ const actionBtn: React.CSSProperties = {
   border: "none",
   borderRadius: 14,
   fontSize: 16,
-  fontWeight: 600,
+  fontWeight: 500,
   cursor: "pointer",
   touchAction: "manipulation",
 };
@@ -259,9 +266,19 @@ const actionBtn: React.CSSProperties = {
 
 function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded: () => void }) {
   const navigate = useNavigate();
-  const [exercises, setExercises] = useState<ExerciseRow[] | null>(null);
-  const [histories, setHistories] = useState<Record<string, HistoryRow[]>>({});
+  const cached = activeCache.sessionId === session.id;
+  const [exercises, setExercises] = useState<ExerciseRow[] | null>(cached ? activeCache.exercises : null);
+  const [histories, setHistories] = useState<Record<string, HistoryRow[]>>(cached ? activeCache.histories : {});
   const [error, setError] = useState<ApiError | null>(null);
+
+  // Mirror every change (fetches and local set events alike) into the cache for the next remount.
+  useEffect(() => {
+    if (exercises === null) return;
+    activeCache.sessionId = session.id;
+    activeCache.exercises = exercises;
+    activeCache.histories = histories;
+  }, [session.id, exercises, histories]);
+
   const [view, setView] = useState<{ kind: "overview" } | { kind: "exercise"; rowId: string | "new" }>(() => {
     const open = readOpen();
     return open && open.sessionId === session.id ? { kind: "exercise", rowId: open.rowId } : { kind: "overview" };
@@ -278,7 +295,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
       const next = { ...prev };
       names.forEach((n, i) => {
         const r = results[i];
-        if (!isApiError(r)) next[n.toLowerCase()] = r.rows as unknown as HistoryRow[];
+        if (!isApiError(r)) next[n.toLowerCase()] = keepIfEqual(prev[n.toLowerCase()], r.rows as unknown as HistoryRow[]);
       });
       return next;
     });
@@ -288,7 +305,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
     apiFetch<Dataset>(`/workout/sessions/${session.id}/exercises`).then((res) => {
       if (isApiError(res)) return setError(res);
       const rows = res.rows as unknown as ExerciseRow[];
-      setExercises(rows);
+      setExercises((prev) => keepIfEqual(prev, rows));
       loadHistory([...new Set(rows.map((r) => r.exercise))]).then(warmLogCache);
     });
   }, [session.id, loadHistory]);
@@ -479,11 +496,12 @@ export function localDate(): string {
 // ── SessionView ───────────────────────────────────────────────────────────────
 
 export default function SessionView() {
-  const [active, setActive] = useState<ActiveSession | null | undefined>(undefined); // undefined = loading
+  // undefined = loading; a cached value paints at once and is always revalidated below
+  const [active, setActive] = useState<ActiveSession | null | undefined>(activeCache.session as ActiveSession | null | undefined);
   const [error, setError] = useState<ApiError | null>(null);
 
   // Archetypes are requested in parallel with the active session so the chooser needs no second
-  // round trip. Only the archetype list is prefetched; the active-session state is never cached.
+  // round trip. The active session itself is painted from activeCache and always revalidated.
   const [archetypes, setArchetypes] = useState<Row[] | null>(archetypesCache);
   const [archetypesError, setArchetypesError] = useState<ApiError | null>(null);
 
@@ -505,13 +523,20 @@ export default function SessionView() {
     apiFetch<Dataset>("/workout/sessions/active").then((res) => {
       if (isApiError(res)) return setError(res);
       const row = res.rows[0];
-      setActive(row ? (row as unknown as ActiveSession) : null);
+      setActive((prev) => keepIfEqual(prev ?? null, row ? (row as unknown as ActiveSession) : null));
       if (!row) {
+        clearActiveCache();
         if (!fetchedHere) loadArchetypes();
         warmLogCache(); // with a workout running, the overview warms after its own loads instead
       }
     });
   }, [loadArchetypes]);
+
+  useEffect(() => {
+    if (active === undefined) return;
+    activeCache.session = active;
+    if (active === null) clearActiveCache();
+  }, [active]);
 
   if (error) return <div className="page"><ErrorCard error={error} /></div>;
   if (active === undefined) return <div className="page"><p className="type-body">Loading…</p></div>;

@@ -20,6 +20,7 @@ import SessionView from "./SessionView";
 import LogView from "./LogView";
 import ExerciseHistoryView from "./ExerciseHistoryView";
 import SessionDetailView from "./SessionDetailView";
+import { installFreezeLog } from "./freezeLog";
 import "./workout.css";
 
 // ── Placeholder views for Performance, Settings ──────────────────────
@@ -173,7 +174,9 @@ export default function ShellEntry() {
   // Scope the Workout visual theme (workout.css) to this app while it is mounted.
   useEffect(() => {
     document.body.dataset.app = "workout";
+    const stopFreezeLog = installFreezeLog();
     return () => {
+      stopFreezeLog();
       delete document.body.dataset.app;
     };
   }, []);
