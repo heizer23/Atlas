@@ -26,6 +26,7 @@ import {
   useGoBack,
   type ExerciseRow,
   clientTz,
+  invalidateLogCache,
 } from "./workoutShared";
 
 const smallBtn: React.CSSProperties = {
@@ -99,6 +100,7 @@ export default function SessionDetailView() {
       lock.current = false;
       return;
     }
+    invalidateLogCache();
     navigate("/workout/log", { replace: true });
   }
 
@@ -110,11 +112,13 @@ export default function SessionDetailView() {
         sessionDate={date}
         row={openRow === "new" ? undefined : openRow}
         onSaved={(ds) => {
+          invalidateLogCache();
           setRows(ds.rows as unknown as ExerciseRow[]);
           setOpenRow(null);
         }}
         onCancel={() => setOpenRow(null)}
         onDeleted={(ds) => {
+          invalidateLogCache();
           setRows(ds.rows as unknown as ExerciseRow[]);
           setOpenRow(null);
         }}

@@ -5,6 +5,70 @@
 
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { apiFetch, isApiError } from "@platform-ui/api/client";
+import type { Dataset, Row } from "@platform-ui/api/types";
+
+// ── Log / archetype cache (stale-while-revalidate) ───────────────────────────
+// Last page-1 result per archetype filter and the archetype list, kept at module level so they
+// survive tab-switch remounts. Views paint them immediately and always refetch. Anything that
+// adds, removes or edits a FINISHED session must call invalidateLogCache() so a stale list is
+// never painted. The active-session state is never cached.
+
+export const LOG_PAGE_SIZE = 15;
+
+export interface LogCacheEntry {
+  sessions: unknown[];
+  total: number;
+}
+export const logCache = new Map<string, LogCacheEntry>();
+export let archetypesCache: Row[] | null = null;
+let cacheGen = 0; // bumped on invalidation so an in-flight warm-up can't write stale data back
+
+export function setArchetypesCache(v: Row[] | null) {
+  archetypesCache = v;
+}
+export function invalidateLogCache() {
+  cacheGen++;
+  logCache.clear();
+  archetypesCache = null;
+}
+
+export function logQuery(page: number, split: string): string {
+  const q = new URLSearchParams({ page: String(page), page_size: String(LOG_PAGE_SIZE), include_exercises: "true" });
+  if (split) q.set("split", split);
+  return q.toString();
+}
+
+/**
+ * Fill whatever the Log/Session screens would otherwise fetch on first use: the archetype list and
+ * page 1 for "All" and each archetype filter. Call it once a screen's own requests have finished;
+ * it runs one request at a time, skips what is cached, and ignores errors.
+ */
+let warming = false;
+export function warmLogCache() {
+  if (warming) return;
+  warming = true;
+  const gen = cacheGen;
+  const stale = () => gen !== cacheGen;
+  setTimeout(async () => {
+    try {
+      if (!archetypesCache) {
+        const res = await apiFetch<Dataset>("/workout/archetypes");
+        if (stale() || isApiError(res)) return;
+        archetypesCache = res.rows;
+      }
+      const splits = ["", ...archetypesCache.map((r) => String(r.split))];
+      for (const split of splits) {
+        if (logCache.has(split)) continue;
+        const res = await apiFetch<Dataset>(`/workout/sessions?${logQuery(1, split)}`);
+        if (stale()) return;
+        if (!isApiError(res)) logCache.set(split, { sessions: res.rows, total: res.meta.total });
+      }
+    } finally {
+      warming = false;
+    }
+  }, 300);
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

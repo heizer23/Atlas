@@ -24,6 +24,10 @@ import {
   type ExerciseRow,
   type HistoryRow,
   clientTz,
+  invalidateLogCache,
+  archetypesCache,
+  setArchetypesCache,
+  warmLogCache,
 } from "./workoutShared";
 
 const OPEN_KEY = "workout_open_exercise";
@@ -55,19 +59,21 @@ function writeOpen(v: OpenExercise | null) {
 
 // ── Archetype chooser ─────────────────────────────────────────────────────────
 
-function ArchetypeChooser({ onStarted }: { onStarted: (s: ActiveSession) => void }) {
-  const [archetypes, setArchetypes] = useState<Row[] | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
+function ArchetypeChooser({
+  onStarted,
+  archetypes,
+  archetypesError,
+}: {
+  onStarted: (s: ActiveSession) => void;
+  archetypes: Row[] | null;
+  archetypesError: ApiError | null;
+}) {
+  const [startError, setStartError] = useState<ApiError | null>(null);
+  const error = startError ?? archetypesError;
+  const setError = setStartError;
   const [newName, setNewName] = useState("");
   const [starting, setStarting] = useState(false);
   const lock = useRef(false);
-
-  useEffect(() => {
-    apiFetch<Dataset>("/workout/archetypes").then((res) => {
-      if (isApiError(res)) setError(res);
-      else setArchetypes(res.rows);
-    });
-  }, []);
 
   async function start(split: string) {
     if (lock.current || !split.trim()) return;
@@ -283,7 +289,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
       if (isApiError(res)) return setError(res);
       const rows = res.rows as unknown as ExerciseRow[];
       setExercises(rows);
-      loadHistory([...new Set(rows.map((r) => r.exercise))]);
+      loadHistory([...new Set(rows.map((r) => r.exercise))]).then(warmLogCache);
     });
   }, [session.id, loadHistory]);
 
@@ -316,6 +322,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
       return;
     }
     writeOpen(null);
+    invalidateLogCache();
     onEnded();
     navigate("/workout/log");
   }
@@ -475,15 +482,49 @@ export default function SessionView() {
   const [active, setActive] = useState<ActiveSession | null | undefined>(undefined); // undefined = loading
   const [error, setError] = useState<ApiError | null>(null);
 
-  useEffect(() => {
-    apiFetch<Dataset>("/workout/sessions/active").then((res) => {
-      if (isApiError(res)) return setError(res);
-      setActive(res.rows[0] ? (res.rows[0] as unknown as ActiveSession) : null);
+  // Archetypes are requested in parallel with the active session so the chooser needs no second
+  // round trip. Only the archetype list is prefetched; the active-session state is never cached.
+  const [archetypes, setArchetypes] = useState<Row[] | null>(archetypesCache);
+  const [archetypesError, setArchetypesError] = useState<ApiError | null>(null);
+
+  const loadArchetypes = useCallback(() => {
+    apiFetch<Dataset>("/workout/archetypes").then((res) => {
+      if (isApiError(res)) setArchetypesError(res);
+      else {
+        setArchetypesCache(res.rows);
+        setArchetypes(res.rows);
+      }
     });
   }, []);
 
+  useEffect(() => {
+    // Cold cache: fetch the archetypes in parallel. Warm cache: the chooser paints it at once and
+    // revalidates only if it actually shows up (no active workout), so a running workout pays nothing.
+    const fetchedHere = !archetypesCache;
+    if (fetchedHere) loadArchetypes();
+    apiFetch<Dataset>("/workout/sessions/active").then((res) => {
+      if (isApiError(res)) return setError(res);
+      const row = res.rows[0];
+      setActive(row ? (row as unknown as ActiveSession) : null);
+      if (!row) {
+        if (!fetchedHere) loadArchetypes();
+        warmLogCache(); // with a workout running, the overview warms after its own loads instead
+      }
+    });
+  }, [loadArchetypes]);
+
   if (error) return <div className="page"><ErrorCard error={error} /></div>;
   if (active === undefined) return <div className="page"><p className="type-body">Loading…</p></div>;
-  if (active === null) return <ArchetypeChooser onStarted={setActive} />;
-  return <ActiveOverview session={active} onEnded={() => setActive(null)} />;
+  if (active === null) return <ArchetypeChooser onStarted={setActive} archetypes={archetypes} archetypesError={archetypesError} />;
+  return (
+    <ActiveOverview
+      session={active}
+      onEnded={() => {
+        setArchetypesCache(null); // a discarded workout may have been the only one of its split
+        setArchetypes(null);
+        loadArchetypes();
+        setActive(null);
+      }}
+    />
+  );
 }

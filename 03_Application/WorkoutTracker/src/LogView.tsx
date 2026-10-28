@@ -13,9 +13,11 @@ import { apiFetch, isApiError } from "@platform-ui/api/client";
 import ErrorCard from "@platform-ui/components/ErrorCard";
 import type { ApiError, Dataset } from "@platform-ui/api/types";
 import { localDate } from "./SessionView";
-import { ConfirmDialog, fmtDate, historyPath, repsSummary, setsOf, clientTz } from "./workoutShared";
+import {
+  ConfirmDialog, fmtDate, historyPath, repsSummary, setsOf, clientTz,
+  logCache, archetypesCache, setArchetypesCache, invalidateLogCache, logQuery, warmLogCache,
+} from "./workoutShared";
 
-const PAGE_SIZE = 15;
 const SWIPE_THRESHOLD = 88;
 
 interface LogExercise {
@@ -246,7 +248,7 @@ export default function LogView() {
   const [params, setParams] = useSearchParams();
   const split = params.get("split") ?? "";
 
-  const [archetypes, setArchetypes] = useState<string[]>([]);
+  const [archetypes, setArchetypes] = useState<string[]>(archetypesCache?.map((r) => String(r.split)) ?? []);
   const [sessions, setSessions] = useState<LogSession[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -258,29 +260,38 @@ export default function LogView() {
 
   useEffect(() => {
     apiFetch<Dataset>("/workout/archetypes").then((res) => {
-      if (!isApiError(res)) setArchetypes(res.rows.map((r) => String(r.split)));
+      if (isApiError(res)) return;
+      setArchetypesCache(res.rows);
+      setArchetypes(res.rows.map((r) => String(r.split)));
     });
   }, []);
 
+  const splitRef = useRef(split);
+  splitRef.current = split;
+
   const load = useCallback(
     async (p: number, append: boolean) => {
-      const q = new URLSearchParams({ page: String(p), page_size: String(PAGE_SIZE), include_exercises: "true" });
-      if (split) q.set("split", split);
-      const res = await apiFetch<Dataset>(`/workout/sessions?${q}`);
-      if (isApiError(res)) return setError(res);
+      const res = await apiFetch<Dataset>(`/workout/sessions?${logQuery(p, split)}`);
+      if (isApiError(res)) return splitRef.current === split ? setError(res) : undefined;
       const rows = res.rows as unknown as LogSession[];
+      if (!append) logCache.set(split, { sessions: rows, total: res.meta.total });
+      if (splitRef.current !== split) return; // filter changed while this was in flight
       setSessions((prev) => (append && prev ? [...prev, ...rows] : rows));
       setTotal(res.meta.total);
       setPage(p);
+      warmLogCache();
     },
     [split],
   );
 
   useEffect(() => {
-    setSessions(null);
+    // Paint the cached page 1 (if any) right away; load() always revalidates and replaces it.
+    const cached = logCache.get(split);
+    setSessions(cached ? (cached.sessions as LogSession[]) : null);
+    if (cached) setTotal(cached.total);
     setError(null);
     load(1, false);
-  }, [load]);
+  }, [load, split]);
 
   async function repeat(s: LogSession) {
     if (lock.current) return;
@@ -313,6 +324,7 @@ export default function LogView() {
     setConfirm(null);
     lock.current = false;
     if (isApiError(res)) return setError(res);
+    invalidateLogCache();
     setSessions((prev) => (prev ? prev.filter((x) => x.id !== s.id) : prev));
     setTotal((t) => Math.max(0, t - 1));
   }
