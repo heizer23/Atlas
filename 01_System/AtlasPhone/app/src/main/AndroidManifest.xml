@@ -32,6 +32,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="atlas" />
             </intent-filter>
+            <!-- Trusted Web Activity: full-screen Chrome, verified via
+                 https://workout.linspad.net/.well-known/assetlinks.json -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                android:value="https://workout.linspad.net/" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                android:resource="@color/atlas_bar" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
+                android:resource="@color/atlas_bar" />
         </activity>
 
         <!-- Receives FCM data-only messages in all app states (foreground and background) -->
@@ -42,6 +53,10 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <meta-data
+            android:name="asset_statements"
+            android:resource="@string/asset_statements" />
 
     </application>
 

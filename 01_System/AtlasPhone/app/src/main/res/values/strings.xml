@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">AtlasPhone</string>
+    <string name="asset_statements" translatable="false">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://workout.linspad.net\"}}]</string>
 </resources>
