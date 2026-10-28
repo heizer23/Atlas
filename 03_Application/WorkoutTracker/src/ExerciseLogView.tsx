@@ -22,6 +22,7 @@ import type { ApiError, Dataset } from "@platform-ui/api/types";
 import {
   ConfirmDialog,
   RepsChart,
+  fmtClock,
   fmtShortDate,
   fmtWeight,
   setsOf,
@@ -112,6 +113,44 @@ const card: React.CSSProperties = {
   borderRadius: 12,
   boxShadow: "var(--wt-card-shadow)",
 };
+
+/**
+ * Secondary timing line for the active exercise: time since the first measured set start, and
+ * either the running set or the rest since the last confirmation. Display only: it ticks on the
+ * phone's clock against the server-stamped times (a skewed phone clock shifts the display, never
+ * the stored data). Nothing is shown until something was measured.
+ */
+function LiveTiming({ row }: { row: ExerciseRow | undefined }) {
+  const [now, setNow] = useState(() => Date.now());
+  const ms = (v: string | null) => (v ? Date.parse(v) : NaN);
+  const starts = [0, 1, 2, 3, 4].map((i) => ms(timeOf(row, i, "started")));
+  const ends = [0, 1, 2, 3, 4].map((i) => ms(timeOf(row, i, "ended")));
+  const firstStart = Math.min(...starts.filter((v) => !Number.isNaN(v)));
+  const lastEnd = Math.max(...ends.filter((v) => !Number.isNaN(v)));
+  const running = starts.filter((s, i) => !Number.isNaN(s) && Number.isNaN(ends[i]));
+  const activeStart = running.length ? Math.max(...running) : NaN;
+  const hasAny = Number.isFinite(firstStart) || Number.isFinite(lastEnd);
+
+  useEffect(() => {
+    if (!hasAny) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [hasAny]);
+
+  if (!hasAny) return null;
+  const parts: string[] = [];
+  if (Number.isFinite(firstStart)) parts.push(`Exercise ${fmtClock((now - firstStart) / 1000)}`);
+  if (!Number.isNaN(activeStart)) parts.push(`Set ${fmtClock((now - activeStart) / 1000)}`);
+  else if (Number.isFinite(lastEnd)) parts.push(`Rest ${fmtClock((now - lastEnd) / 1000)}`);
+  return (
+    <p
+      data-testid="live-timing"
+      style={{ margin: "-4px 0 0", fontSize: 12, color: "var(--md-sys-color-on-surface-variant)", fontVariantNumeric: "tabular-nums" }}
+    >
+      {parts.join(" · ")}
+    </p>
+  );
+}
 
 interface Props {
   sessionId: string;
@@ -612,6 +651,8 @@ export default function ExerciseLogView({
           {delta !== null && delta !== 0 ? ` · ${delta > 0 ? "+" : "−"}${Math.abs(delta)} vs last` : ""}
         </p>
       )}
+
+      {live && <LiveTiming row={row} />}
 
       {historyName.trim() && (
         <div aria-live="polite">

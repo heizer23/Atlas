@@ -35,6 +35,14 @@ const BENCH = BENCH_DATES.map((d, i) =>
   exRow(`b${i}`, 'Bench Press', i < 6 ? 60 : i < 10 ? 65 : i < 13 ? 70 : 75, [12 - (i % 3), 11 - (i % 2), 10, i % 2 ? 9 : null], null, i === 13 ? 's4' : `bs${i}`, d, 'Push',
     i === 13 ? 'Shoulder felt a bit unstable on the last set.' : i === 12 ? 'Felt strong today.' : null));
 
+// Timing is measured for the 3 newest occurrences only; older ones must show nothing (never invented)
+const TIMING: Record<number, object> = {
+  13: { time_of_day: '17:42', duration_sec: 480, rest_avg_sec: 120 },
+  12: { time_of_day: '18:05', duration_sec: 75 },
+  11: { rest_avg_sec: 95 },
+};
+BENCH.forEach((r, i) => Object.assign(r, { time_of_day: null, duration_sec: null, rest_avg_sec: null, ...(TIMING[i] ?? {}) }));
+
 const ds = (rows: unknown[], total = rows.length) => ({ meta: { object_type: 'x', label: 'x', total, page: 1, page_size: rows.length || 1 }, schema: [], rows });
 const writes: string[] = [];
 let sessions = [...SESSIONS];
@@ -190,6 +198,16 @@ test.describe('P1 at 393px', () => {
     const dS = diffs(await xs());
     expect(Math.max(...dS) - Math.min(...dS), `sessions spacing ${dS}`).toBeLessThanOrEqual(1);
     await page.screenshot({ path: `${SHOTS}/p1_6_history_sessions.png` });
+
+    // Timing metadata: compact line for measured sessions only; unmeasured ones show none
+    const timing = page.getByTestId('timing');
+    await expect(timing).toHaveCount(3);   // list rows with something measured; the other 11 show nothing
+    await expect(timing.first()).toHaveText('17:42 · 8 min · rest 2:00');
+    await expect(timing.filter({ hasText: '18:05 · 75 s' })).toHaveCount(1);
+    await expect(timing.filter({ hasText: /^rest 1:35$/ })).toHaveCount(1);
+    await cols.last().click();             // select the newest session: its detail card shows the same line
+    await expect(timing).toHaveCount(4);
+    await page.screenshot({ path: `${SHOTS}/p2_history_timing.png` });
 
     // Timeline: same occurrences, spacing follows the calendar (real gaps)
     await page.getByRole('button', { name: 'Timeline', exact: true }).click();

@@ -34,7 +34,7 @@ async function mockApi(page: Page) {
   writes = [];
   clock = 0;
   failNext = 0;
-  const stamp = () => new Date(Date.UTC(2026, 9, 28, 18, 0, clock++ * 40)).toISOString();
+  const stamp = () => new Date(Date.now() + clock++).toISOString(); // monotonic, close to the browser clock
   await page.route(/\/api\/workout\//, async (route) => {
     const req = route.request();
     const p = new URL(req.url()).pathname.replace('/api/workout', '');
@@ -199,4 +199,19 @@ test('a note typed after confirming a set survives a reload', async ({ page }) =
   await page.reload();
   await expect(setRow(page, 1)).toHaveAttribute('data-state', 'done');
   await expect(page.getByLabel('Notes')).toHaveValue('typed, not saved yet');
+});
+
+test('timing line stays hidden until measured, then shows set and rest as secondary text', async ({ page }) => {
+  await expect(page.getByTestId('live-timing')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Start set 1' }).click();
+  await expect(page.getByTestId('live-timing')).toContainText(/Exercise \d+:\d\d · Set \d+:\d\d/);
+  await page.getByRole('button', { name: 'Confirm set 1' }).click();
+  await expect(page.getByTestId('live-timing')).toContainText(/Exercise \d+:\d\d · Rest \d+:\d\d/);
+  await page.screenshot({ path: `${SHOTS}/p2_live_timing.png` });
+  // a set confirmed without a start tap: no exercise elapsed, but the rest is still measured
+  await page.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: /^Dips/ }).click();
+  await page.getByLabel('Set 1 reps').fill('8');
+  await page.getByRole('button', { name: 'Confirm set 1' }).click();
+  await expect(page.getByTestId('live-timing')).toHaveText(/^Rest \d+:\d\d$/);
 });

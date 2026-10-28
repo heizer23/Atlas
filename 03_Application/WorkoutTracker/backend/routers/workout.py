@@ -803,19 +803,28 @@ HISTORY_SCHEMA: list[ColumnSchema] = [
 
 @router.get("/exercises/history", response_model=None)
 def exercise_history(name: str) -> JSONResponse:
+    """Performed occurrences of an exercise (case-insensitive name, any archetype), oldest first.
+
+    Ordering: workout_date, created_at, id. Empty result: an empty dataset. Timing columns
+    (started_at, ended_at, duration_sec, rest_avg_sec, time_of_day) come from the measured-only
+    view workout.exercise_timing and are null when not measured; time_of_day is local to the
+    workout's stored time zone (Europe/Berlin for legacy sessions).
+    """
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT
-                    workout_log_id::text AS id,
-                    workout_id::text     AS session_id,
-                    workout_date::text   AS workout_date,
-                    set1_reps, set2_reps, set3_reps, set4_reps, set5_reps,
-                    weight_kg, comment, split
-                FROM workout.workout_log
-                WHERE LOWER(exercise) = LOWER(%s) AND status = 'done'
-                ORDER BY workout_date ASC, created_at ASC, workout_log_id ASC
+                    l.workout_log_id::text AS id,
+                    l.workout_id::text     AS session_id,
+                    l.workout_date::text   AS workout_date,
+                    l.set1_reps, l.set2_reps, l.set3_reps, l.set4_reps, l.set5_reps,
+                    l.weight_kg, l.comment, l.split,
+                    t.started_at, t.ended_at, t.duration_sec, t.rest_avg_sec, t.time_of_day
+                FROM workout.workout_log l
+                LEFT JOIN workout.exercise_timing t USING (workout_log_id)
+                WHERE LOWER(l.exercise) = LOWER(%s) AND l.status = 'done'
+                ORDER BY l.workout_date ASC, l.created_at ASC, l.workout_log_id ASC
                 """,
                 (name,),
             )
@@ -824,6 +833,9 @@ def exercise_history(name: str) -> JSONResponse:
     for r in rows:
         if r.get("weight_kg") is not None:
             r["weight_kg"] = float(r["weight_kg"])
+        for k in ("started_at", "ended_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
 
     return dataset_response(Dataset(
         meta=DatasetMeta(

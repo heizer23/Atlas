@@ -20,6 +20,7 @@ import {
   fmtDate,
   fmtShortDate,
   fmtWeight,
+  timingSummary,
   placeWeightLabels,
   setsOf,
   totalOf,
@@ -381,6 +382,11 @@ export default function ExerciseHistoryView() {
                   <div style={{ fontSize: 13, color: "var(--md-sys-color-on-surface-variant)" }}>
                     {fmtWeight(sel.weight_kg)} · {setsOf(sel).filter((v) => v != null).length} sets · {totalOf(sel)} reps
                   </div>
+                  {timingSummary(sel) && (
+                    <div data-testid="timing" style={{ fontSize: 12, color: "var(--md-sys-color-on-surface-variant)", fontVariantNumeric: "tabular-nums" }}>
+                      {timingSummary(sel)}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -454,6 +460,11 @@ export default function ExerciseHistoryView() {
                       <SetBlocks sets={sets} />
                     ) : (
                       <span style={{ fontSize: 13, color: "var(--md-sys-color-on-surface-variant)" }}>No reps recorded</span>
+                    )}
+                    {timingSummary(r) && (
+                      <span data-testid="timing" style={{ fontSize: 12, color: "var(--md-sys-color-on-surface-variant)", fontVariantNumeric: "tabular-nums" }}>
+                        {timingSummary(r)}
+                      </span>
                     )}
                     {r.comment && r.comment.trim() && (
                       <span style={{ fontSize: 14, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "var(--md-sys-color-on-surface-variant)" }}>

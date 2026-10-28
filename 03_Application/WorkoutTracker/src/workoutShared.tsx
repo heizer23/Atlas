@@ -22,6 +22,12 @@ export interface HistoryRow {
   set5_reps: number | null;
   comment?: string | null;
   split?: string | null;
+  /** Measured timing summary (exercise history only); null/absent when not measured. */
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_sec?: number | null;
+  rest_avg_sec?: number | null;
+  time_of_day?: string | null;
 }
 
 /** One exercise row of a session as returned by /workout/sessions/{id}/exercises. */
@@ -62,6 +68,27 @@ export function totalOf(
   r: Pick<HistoryRow, "set1_reps" | "set2_reps" | "set3_reps" | "set4_reps" | "set5_reps">,
 ): number {
   return setsOf(r).reduce<number>((a, v) => a + (v ?? 0), 0);
+}
+
+/** m:ss for a running timer or a rest (e.g. 2:05). */
+export function fmtClock(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Elapsed exercise time, compact: "45 s" under 90 s, else whole minutes. */
+export function fmtDuration(sec: number): string {
+  return sec < 90 ? `${Math.round(sec)} s` : `${Math.round(sec / 60)} min`;
+}
+
+/** "17:11 · 9 min · rest 2:00" from whatever was measured; null when nothing was. */
+export function timingSummary(r: Pick<HistoryRow, "time_of_day" | "duration_sec" | "rest_avg_sec">): string | null {
+  const parts = [
+    r.time_of_day ?? null,
+    r.duration_sec != null ? fmtDuration(r.duration_sec) : null,
+    r.rest_avg_sec != null ? `rest ${fmtClock(r.rest_avg_sec)}` : null,
+  ].filter((p): p is string => p !== null);
+  return parts.length ? parts.join(" · ") : null;
 }
 
 export function fmtWeight(w: number | null | undefined): string {
