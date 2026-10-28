@@ -21,6 +21,7 @@ import type { Row, Dataset, ApiError } from "@platform-ui/api/types";
 import SessionView, { ExerciseListRow, localDate } from "./SessionView";
 import ExerciseLogView from "./ExerciseLogView";
 import { ConfirmDialog, type ExerciseRow, type HistoryRow } from "./workoutShared";
+import "./workout.css";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -443,7 +444,7 @@ function LogView() {
         {exercises === null && !exerciseError && <p className="type-body">Loading…</p>}
 
         {exercises && (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, borderBottom: "1px solid var(--md-sys-color-outline-variant)" }}>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {exercises.map((row) => (
               <ExerciseListRow
                 key={row.id}
@@ -639,6 +640,14 @@ function SettingsView() {
  * No BrowserRouter — inherits the shell's router context.
  */
 export default function ShellEntry() {
+  // Scope the Workout visual theme (workout.css) to this app while it is mounted.
+  useEffect(() => {
+    document.body.dataset.app = "workout";
+    return () => {
+      delete document.body.dataset.app;
+    };
+  }, []);
+
   return (
     <Routes>
       <Route path="/" element={<SessionView />} />

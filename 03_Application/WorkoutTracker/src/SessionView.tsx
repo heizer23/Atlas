@@ -17,6 +17,7 @@ import ExerciseLogView from "./ExerciseLogView";
 import {
   ConfirmDialog,
   DeltaChip,
+  MINI_CHART_W,
   RepsChart,
   fmtLongDate,
   fmtShortDate,
@@ -99,9 +100,12 @@ function ArchetypeChooser({ onStarted }: { onStarted: (s: ActiveSession) => void
       {archetypes === null && !error && <p className="type-body">Loading…</p>}
 
       {archetypes && (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0 }} aria-label="Workout types">
+        <ul
+          style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}
+          aria-label="Workout types"
+        >
           {archetypes.map((a) => (
-            <li key={String(a.id)} style={{ borderTop: "1px solid var(--md-sys-color-outline-variant)" }}>
+            <li key={String(a.id)}>
               <button
                 onClick={() => start(String(a.split))}
                 disabled={starting}
@@ -112,9 +116,11 @@ function ArchetypeChooser({ onStarted }: { onStarted: (s: ActiveSession) => void
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 12,
-                  padding: "8px 4px",
-                  border: "none",
-                  background: "transparent",
+                  padding: "8px 14px",
+                  border: "1px solid var(--md-sys-color-outline-variant)",
+                  borderRadius: 12,
+                  boxShadow: "var(--wt-card-shadow)",
+                  background: "var(--md-sys-color-surface)",
                   color: "var(--md-sys-color-on-surface)",
                   textAlign: "left",
                   cursor: "pointer",
@@ -181,38 +187,66 @@ export function ExerciseListRow({
 }) {
   const done = row.status === "done";
   return (
-    <li style={{ borderTop: "1px solid var(--md-sys-color-outline-variant)" }}>
+    <li>
       <button
         onClick={onOpen}
         aria-label={`${row.exercise}, ${done ? "completed" : "not completed yet"}`}
         style={{
           width: "100%",
-          minHeight: 76,
+          minHeight: 72,
           display: "flex",
           alignItems: "center",
           gap: 10,
-          padding: "10px 0",
-          border: "none",
-          background: "transparent",
+          padding: "10px 12px",
+          background: "var(--md-sys-color-surface)",
+          border: "1px solid var(--md-sys-color-outline-variant)",
+          borderLeft: done
+            ? "3px solid var(--md-sys-color-primary)"
+            : "1px solid var(--md-sys-color-outline-variant)",
+          borderRadius: 12,
+          boxShadow: "var(--wt-card-shadow)",
           color: "var(--md-sys-color-on-surface)",
           textAlign: "left",
           cursor: "pointer",
           touchAction: "manipulation",
         }}
       >
-        <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.25, overflowWrap: "anywhere" }}>{row.exercise}</span>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 16,
+            fontWeight: done ? 600 : 500,
+            lineHeight: 1.25,
+            overflowWrap: "anywhere",
+            color: done ? "var(--md-sys-color-on-surface)" : "var(--md-sys-color-on-surface-variant)",
+          }}
+        >
+          {row.exercise}
+        </span>
+        <span style={{ flex: "0 0 40px", display: "flex", justifyContent: "center" }}>
           <DeltaChip delta={row.delta} completed={done} />
         </span>
         {history ? (
           <RepsChart rows={history} variant="mini" />
         ) : (
-          <span style={{ width: 148, height: 52, flexShrink: 0 }} aria-hidden />
+          <span style={{ width: MINI_CHART_W, height: 52, flexShrink: 0 }} aria-hidden />
         )}
       </button>
     </li>
   );
 }
+
+const actionBtn: React.CSSProperties = {
+  flex: 1,
+  minHeight: 48,
+  border: "none",
+  borderRadius: 14,
+  fontSize: 16,
+  fontWeight: 600,
+  cursor: "pointer",
+  touchAction: "manipulation",
+};
 
 // ── Active session overview ───────────────────────────────────────────────────
 
@@ -328,19 +362,19 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
       : `${planned} exercise${planned === 1 ? "" : "s"} not logged will be removed from this workout.`;
 
   return (
-    <div className="page" style={{ gap: "var(--space-sm)", paddingBottom: 0 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <div>
+    <div className="page" style={{ gap: 10, paddingBottom: 0 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
           <h1 className="type-display" style={{ margin: 0 }}>
             {session.split}
           </h1>
-          <p className="type-body" style={{ margin: 0, color: "var(--md-sys-color-on-surface-variant)" }}>
+          <p style={{ margin: "2px 0 0", fontSize: 14, color: "var(--md-sys-color-on-surface-variant)" }}>
             {fmtLongDate(session.workout_date)}
           </p>
         </div>
         <button
           className="btn-text"
-          style={{ minHeight: 44, color: "var(--md-sys-color-on-surface-variant)" }}
+          style={{ minHeight: 44, padding: "0 8px", fontSize: 14, color: "var(--md-sys-color-on-surface-variant)" }}
           onClick={() => setConfirm("discard")}
         >
           Discard
@@ -356,7 +390,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
       )}
 
       {exercises && exercises.length > 0 && (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, borderBottom: "1px solid var(--md-sys-color-outline-variant)" }}>
+        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           {exercises.map((row) => (
             <ExerciseListRow
               key={row.id}
@@ -373,17 +407,21 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
           position: "sticky",
           bottom: 0,
           display: "flex",
-          gap: 12,
-          padding: "12px 0",
+          gap: 10,
+          margin: "0 -12px",
+          padding: "10px 12px",
           background: "var(--md-sys-color-background)",
+          borderTop: "1px solid var(--md-sys-color-outline-variant)",
         }}
       >
-        <button className="btn-outlined" style={{ flex: 1, minHeight: 48 }} onClick={() => openExercise("new")}>
+        <button
+          style={{ ...actionBtn, background: "var(--md-sys-color-primary-container)", color: "var(--md-sys-color-primary)" }}
+          onClick={() => openExercise("new")}
+        >
           + Add Exercise
         </button>
         <button
-          className="btn-filled"
-          style={{ flex: 1, minHeight: 48 }}
+          style={{ ...actionBtn, background: "var(--md-sys-color-primary)", color: "var(--md-sys-color-on-primary)" }}
           disabled={busy || exercises === null}
           onClick={() => (planned > 0 || done === 0 ? setConfirm("finish") : finish())}
         >

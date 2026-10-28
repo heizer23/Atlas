@@ -9,7 +9,7 @@
  * Unsaved input is kept in localStorage per exercise so a reload does not lose entered work.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, isApiError } from "@platform-ui/api/client";
 import ErrorCard from "@platform-ui/components/ErrorCard";
 import type { ApiError, Dataset } from "@platform-ui/api/types";
@@ -61,10 +61,10 @@ function clearDraft(key: string) {
 const stepBtn: React.CSSProperties = {
   width: 44,
   height: 44,
-  borderRadius: 22,
-  border: "none",
-  background: "var(--md-sys-color-surface-variant)",
-  color: "var(--md-sys-color-on-surface-variant)",
+  borderRadius: 10,
+  border: "1px solid var(--md-sys-color-outline-variant)",
+  background: "var(--md-sys-color-surface)",
+  color: "var(--md-sys-color-primary)",
   fontSize: 22,
   lineHeight: 1,
   cursor: "pointer",
@@ -77,16 +77,23 @@ const stepBtn: React.CSSProperties = {
 
 const numberInput: React.CSSProperties = {
   width: "100%",
+  minWidth: 0,
   height: 44,
   textAlign: "center",
   border: "1px solid var(--md-sys-color-outline-variant)",
-  borderRadius: "var(--radius-input)",
+  borderRadius: 10,
   fontSize: 18,
   fontVariantNumeric: "tabular-nums",
   color: "var(--md-sys-color-on-surface)",
   background: "var(--md-sys-color-surface)",
   outline: "none",
-  boxSizing: "border-box",
+};
+
+const card: React.CSSProperties = {
+  background: "var(--md-sys-color-surface)",
+  border: "1px solid var(--md-sys-color-outline-variant)",
+  borderRadius: 12,
+  boxShadow: "var(--wt-card-shadow)",
 };
 
 interface Props {
@@ -136,7 +143,19 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [history, setHistory] = useState<HistoryRow[] | null>(null);
   const [names, setNames] = useState<string[]>([]);
+  const [nameFocused, setNameFocused] = useState(false);
   const submitLock = useRef(false);
+  const nameRef = useRef<HTMLTextAreaElement>(null);
+  // A weight carried over from the previous session is only a suggestion until touched.
+  const [weightTouched, setWeightTouched] = useState(false);
+
+  // Long exercise names wrap: grow the title field to its content.
+  useLayoutEffect(() => {
+    const el = nameRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [name]);
 
   // Persist the draft on every change.
   useEffect(() => {
@@ -202,6 +221,7 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
   }
 
   function adjustWeight(d: number) {
+    setWeightTouched(true);
     const base = weight === "" ? (last?.weight_kg ?? 0) : parseFloat(weight) || 0;
     setWeight(String(Math.max(0, Math.round((base + d) * 100) / 100)));
   }
@@ -259,64 +279,110 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
     onDeleted?.(res);
   }
 
+  const typed = name.trim().toLowerCase();
+  const nameSuggestions = names
+    .filter((n) => (typed ? n.toLowerCase().includes(typed) && n.toLowerCase() !== typed : true))
+    .slice(0, typed ? 5 : 6);
+
+  // Starting weight carried over from the last session: shown as a suggestion until touched.
+  const weightIsSuggestion =
+    !!row && row.status === "planned" && !weightTouched && weight !== "" && weight === String(row.weight_kg ?? "");
+
   const delta = row && row.status === "done" ? row.delta : null;
+  const lastReps = last ? setsOf(last) : null;
 
   return (
-    <div className="page" style={{ gap: "var(--space-md)", paddingBottom: 96 }}>
-      <div className="page-toolbar">
-        <button className="icon-btn" style={{ marginLeft: 0 }} onClick={handleCancel} aria-label="Back without saving">
-          <span className="material-symbols-rounded">arrow_back</span>
-        </button>
-      </div>
-
+    <div className="page" style={{ gap: 12, paddingBottom: 0 }}>
       {error && <ErrorCard error={error} />}
 
-      <div>
-        <input
+      {/* Title row: back + exercise name */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: -6 }}>
+        <button className="icon-btn" style={{ marginLeft: 0, flexShrink: 0 }} onClick={handleCancel} aria-label="Back without saving">
+          <span className="material-symbols-rounded">arrow_back</span>
+        </button>
+        <textarea
+          ref={nameRef}
+          rows={1}
           value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => setHistoryName(name)}
-          list={row ? undefined : "workout-exercise-names"}
+          onChange={(e) => setName(e.target.value.replace(/\n/g, " "))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.preventDefault();
+          }}
+          onFocus={() => setNameFocused(true)}
+          onBlur={() => {
+            setHistoryName(name);
+            setTimeout(() => setNameFocused(false), 150); // let a tap on a suggestion land first
+          }}
           placeholder="Exercise name"
           aria-label="Exercise name"
           autoCapitalize="sentences"
           style={{
-            width: "100%",
+            flex: 1,
+            minWidth: 0,
+            resize: "none",
+            overflow: "hidden",
             border: "none",
             borderBottom: "1px solid var(--md-sys-color-outline-variant)",
-            fontSize: 24,
-            fontWeight: 600,
+            fontFamily: "inherit",
+            fontSize: 22,
+            fontWeight: 700,
+            lineHeight: 1.25,
+            letterSpacing: "-0.01em",
             color: "var(--md-sys-color-on-surface)",
             background: "transparent",
-            padding: "4px 0 8px",
+            padding: "6px 0",
             outline: "none",
-            boxSizing: "border-box",
           }}
         />
-        {!row && (
-          <datalist id="workout-exercise-names">
-            {names.map((n) => (
-              <option key={n} value={n} />
-            ))}
-          </datalist>
-        )}
-        {last && (
-          <p className="type-label" style={{ margin: "8px 0 0", color: "var(--md-sys-color-on-surface-variant)" }}>
-            Last time · {fmtShortDate(last.workout_date)} · {fmtWeight(last.weight_kg)} ·{" "}
-            {setsOf(last)
-              .filter((v) => v != null)
-              .join(" / ")}
-            {delta !== null && delta !== 0 ? ` · ${delta > 0 ? "+" : "−"}${Math.abs(delta)} vs last` : ""}
-          </p>
-        )}
       </div>
+      {!row && nameFocused && nameSuggestions.length > 0 && (
+        <ul
+          aria-label="Exercise suggestions"
+          style={{ ...card, listStyle: "none", margin: "-6px 0 0", padding: 4, display: "flex", flexDirection: "column" }}
+        >
+          {nameSuggestions.map((n) => (
+            <li key={n}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setName(n);
+                  setHistoryName(n);
+                  setNameFocused(false);
+                }}
+                style={{
+                  width: "100%",
+                  minHeight: 44,
+                  padding: "0 10px",
+                  border: "none",
+                  background: "transparent",
+                  textAlign: "left",
+                  fontSize: 16,
+                  color: "var(--md-sys-color-on-surface)",
+                  cursor: "pointer",
+                }}
+              >
+                {n}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {last && (
+        <p style={{ margin: "-4px 0 0", fontSize: 13, color: "var(--md-sys-color-on-surface-variant)" }}>
+          Last time · {fmtShortDate(last.workout_date)} · {fmtWeight(last.weight_kg)} ·{" "}
+          {setsOf(last)
+            .filter((v) => v != null)
+            .join(" / ")}
+          {delta !== null && delta !== 0 ? ` · ${delta > 0 ? "+" : "−"}${Math.abs(delta)} vs last` : ""}
+        </p>
+      )}
 
       {historyName.trim() && (
         <div aria-live="polite">
           {history === null ? (
-            <p className="type-label" style={{ color: "var(--md-sys-color-on-surface-variant)" }}>
-              Loading history…
-            </p>
+            <p style={{ fontSize: 13, color: "var(--md-sys-color-on-surface-variant)" }}>Loading history…</p>
           ) : (
             <RepsChart rows={earlier} liveRow={liveRow} variant="large" />
           )}
@@ -324,9 +390,21 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
       )}
 
       {/* Weight */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <label htmlFor="wt-weight" style={{ flex: "0 0 auto", fontSize: 15, minWidth: 84 }}>
+      <div style={{ ...card, display: "flex", alignItems: "center", gap: 8, padding: "8px 10px" }}>
+        <label htmlFor="wt-weight" style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600 }}>
           Weight (kg)
+          {weightIsSuggestion ? (
+            <span style={{ display: "block", fontSize: 12, fontWeight: 400, color: "var(--md-sys-color-on-surface-variant)" }}>
+              from last session
+            </span>
+          ) : (
+            last?.weight_kg != null &&
+            weight === "" && (
+              <span style={{ display: "block", fontSize: 12, fontWeight: 400, color: "var(--md-sys-color-on-surface-variant)" }}>
+                last {last.weight_kg}
+              </span>
+            )
+          )}
         </label>
         <button style={stepBtn} onClick={() => adjustWeight(-WEIGHT_STEP)} aria-label="Decrease weight">
           −
@@ -338,44 +416,61 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
           step="any"
           min={0}
           value={weight}
-          placeholder="none"
-          onChange={(e) => setWeight(e.target.value)}
-          onFocus={(e) => e.currentTarget.select()}
-          style={numberInput}
+          placeholder="–"
+          onChange={(e) => {
+            setWeightTouched(true);
+            setWeight(e.target.value);
+          }}
+          onFocus={(e) => {
+            setWeightTouched(true);
+            e.currentTarget.select();
+          }}
+          style={{
+            ...numberInput,
+            width: 84,
+            fontWeight: weight !== "" && !weightIsSuggestion ? 600 : 400,
+            color: weightIsSuggestion ? "var(--md-sys-color-on-surface-variant)" : "var(--md-sys-color-on-surface)",
+            borderStyle: weightIsSuggestion ? "dashed" : "solid",
+          }}
         />
         <button style={stepBtn} onClick={() => adjustWeight(WEIGHT_STEP)} aria-label="Increase weight">
           +
         </button>
       </div>
 
-      {/* Sets */}
+      {/* Sets: empty = nothing entered yet; blue + check = a value you entered this session */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {Array.from({ length: visibleSets }, (_, i) => {
-          const has = reps[i] !== "" && parseInt(reps[i], 10) > 0;
-          const hint = last ? setsOf(last)[i] : null;
+          const entered = reps[i] !== "";
+          const hint = lastReps ? lastReps[i] : null;
           return (
             <div
               key={i}
               style={{
+                ...card,
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
-                padding: "6px 8px",
-                borderRadius: "var(--radius-card)",
-                background: has
-                  ? "color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent)"
-                  : "var(--md-sys-color-surface-variant)",
+                padding: "6px 10px",
+                borderColor: entered ? "var(--md-sys-color-primary)" : "var(--md-sys-color-outline-variant)",
               }}
             >
-              <span
-                style={{
-                  flex: "0 0 44px",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  color: has ? "var(--md-sys-color-primary)" : "var(--md-sys-color-on-surface-variant)",
-                }}
-              >
-                Set {i + 1}
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    color: entered ? "var(--md-sys-color-primary)" : "var(--md-sys-color-on-surface-variant)",
+                  }}
+                >
+                  Set {i + 1}
+                </span>
+                {hint != null && !entered && (
+                  <span style={{ display: "block", fontSize: 12, color: "var(--md-sys-color-on-surface-variant)" }}>
+                    last {hint}
+                  </span>
+                )}
               </span>
               <button style={stepBtn} onClick={() => adjustRep(i, -1)} aria-label={`Set ${i + 1}: fewer reps`}>
                 −
@@ -385,7 +480,7 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
                 inputMode="numeric"
                 min={0}
                 value={reps[i]}
-                placeholder={hint != null ? String(hint) : "reps"}
+                placeholder="–"
                 aria-label={`Set ${i + 1} reps`}
                 onChange={(e) =>
                   setReps((prev) => {
@@ -395,7 +490,12 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
                   })
                 }
                 onFocus={(e) => e.currentTarget.select()}
-                style={numberInput}
+                style={{
+                  ...numberInput,
+                  width: 64,
+                  fontWeight: entered ? 700 : 400,
+                  borderColor: entered ? "var(--md-sys-color-primary)" : "var(--md-sys-color-outline-variant)",
+                }}
               />
               <button style={stepBtn} onClick={() => adjustRep(i, 1)} aria-label={`Set ${i + 1}: more reps`}>
                 +
@@ -404,12 +504,13 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
                 aria-hidden
                 className="material-symbols-rounded"
                 style={{
-                  flex: "0 0 28px",
+                  flex: "0 0 24px",
                   fontSize: 24,
-                  color: has ? "var(--md-sys-color-primary)" : "var(--md-sys-color-outline-variant)",
+                  color: entered ? "var(--md-sys-color-primary)" : "var(--md-sys-color-outline-variant)",
+                  fontVariationSettings: entered ? "'FILL' 1" : "'FILL' 0",
                 }}
               >
-                {has ? "check_circle" : "radio_button_unchecked"}
+                {entered ? "check_circle" : "radio_button_unchecked"}
               </span>
             </div>
           );
@@ -417,7 +518,7 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
         {visibleSets < MAX_SETS && (
           <button
             className="btn-text"
-            style={{ alignSelf: "flex-start", minHeight: 44 }}
+            style={{ alignSelf: "flex-start", minHeight: 40, padding: "0 8px", color: "var(--md-sys-color-primary)" }}
             onClick={() => setVisibleSets((n) => Math.min(MAX_SETS, n + 1))}
           >
             + Add set
@@ -427,26 +528,25 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
 
       {/* Recent comments for this exercise (any archetype) */}
       {recentComments.length > 0 && (
-        <section aria-label="Recent comments">
-          <h2 className="type-title" style={{ margin: "0 0 4px" }}>
-            Recent comments
-          </h2>
+        <section aria-label="Recent comments" style={{ ...card, padding: "10px 12px" }}>
+          <h2 style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 700 }}>Recent comments</h2>
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-            {recentComments.map((h) => (
+            {recentComments.map((h, k) => (
               <li
                 key={h.id}
                 style={{
                   display: "flex",
                   gap: 12,
-                  padding: "8px 0",
-                  borderTop: "1px solid var(--md-sys-color-outline-variant)",
+                  padding: "7px 0",
+                  borderTop: k === 0 ? "none" : "1px solid var(--md-sys-color-outline-variant)",
                   fontSize: 14,
+                  lineHeight: 1.35,
                 }}
               >
-                <span style={{ flex: "0 0 52px", color: "var(--md-sys-color-on-surface-variant)" }}>
+                <span style={{ flex: "0 0 48px", color: "var(--md-sys-color-on-surface-variant)" }}>
                   {fmtShortDate(h.workout_date)}
                 </span>
-                <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>{h.comment}</span>
+                <span style={{ flex: 1, minWidth: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.comment}</span>
               </li>
             ))}
           </ul>
@@ -455,7 +555,7 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
 
       {/* Today's note */}
       <div>
-        <label htmlFor="wt-comment" className="type-title" style={{ display: "block", marginBottom: 6 }}>
+        <label htmlFor="wt-comment" style={{ display: "block", marginBottom: 4, fontSize: 15, fontWeight: 700 }}>
           Notes
         </label>
         <textarea
@@ -463,11 +563,11 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           placeholder="Add notes about this exercise…"
-          rows={3}
+          rows={2}
           style={{
             width: "100%",
             border: "1px solid var(--md-sys-color-outline-variant)",
-            borderRadius: "var(--radius-input)",
+            borderRadius: 10,
             padding: "10px 12px",
             fontSize: 16,
             color: "var(--md-sys-color-on-surface)",
@@ -475,13 +575,12 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
             outline: "none",
             resize: "vertical",
             fontFamily: "inherit",
-            boxSizing: "border-box",
           }}
         />
       </div>
 
       {formError && (
-        <p role="alert" className="type-body" style={{ color: "var(--md-sys-color-error)", margin: 0 }}>
+        <p role="alert" style={{ margin: 0, fontSize: 14, color: "var(--md-sys-color-error)" }}>
           {formError}
         </p>
       )}
@@ -489,7 +588,7 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
       {row && onDeleted && (
         <button
           className="btn-text"
-          style={{ alignSelf: "flex-start", minHeight: 44, color: "var(--md-sys-color-error)" }}
+          style={{ alignSelf: "flex-start", minHeight: 44, padding: "0 8px", color: "var(--md-sys-color-error)" }}
           onClick={() => setConfirmDelete(true)}
           disabled={busy}
         >
@@ -497,22 +596,45 @@ export default function ExerciseLogView({ sessionId, sessionDate, row, onSaved, 
         </button>
       )}
 
-      {/* Sticky action bar so Save is always reachable above the keyboard / bottom nav */}
+      {/* Sticky action bar so Save stays reachable above the keyboard / bottom nav */}
       <div
         style={{
           position: "sticky",
           bottom: 0,
           display: "flex",
-          gap: 12,
-          padding: "12px 0",
+          alignItems: "center",
+          gap: 10,
+          margin: "0 -12px",
+          padding: "10px 12px",
           background: "var(--md-sys-color-background)",
           borderTop: "1px solid var(--md-sys-color-outline-variant)",
         }}
       >
-        <button className="btn-filled" style={{ flex: 1, minHeight: 48 }} onClick={handleSave} disabled={busy}>
+        <button
+          onClick={handleSave}
+          disabled={busy}
+          style={{
+            flex: 1,
+            minHeight: 48,
+            border: "none",
+            borderRadius: 14,
+            background: "var(--md-sys-color-primary)",
+            color: "var(--md-sys-color-on-primary)",
+            fontSize: 16,
+            fontWeight: 600,
+            cursor: "pointer",
+            opacity: busy ? 0.6 : 1,
+            touchAction: "manipulation",
+          }}
+        >
           {busy ? "Saving…" : "Save"}
         </button>
-        <button className="btn-text" style={{ minHeight: 48 }} onClick={handleCancel} disabled={busy}>
+        <button
+          className="btn-text"
+          style={{ minHeight: 48, padding: "0 14px", fontSize: 16, color: "var(--md-sys-color-primary)" }}
+          onClick={handleCancel}
+          disabled={busy}
+        >
           Cancel
         </button>
       </div>

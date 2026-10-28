@@ -1,0 +1,99 @@
+/*
+ * WorkoutTracker — scoped visual theme.
+ *
+ * Active only while the Workout app is mounted: ShellEntry sets data-app="workout" on <body>
+ * and removes it on unmount, so no other Atlas app is affected. Overrides colour tokens,
+ * font and the (shared) mobile header / bottom nav sizing under that attribute only.
+ */
+
+body[data-app="workout"] {
+  /* Clean white surface, quiet borders */
+  --md-sys-color-background:         #FFFFFF;
+  --md-sys-color-surface:            #FFFFFF;
+  --md-sys-color-surface-variant:    #F1F4F9;
+  --md-sys-color-outline-variant:    #DDE2EA;
+  --md-sys-color-on-surface:         #14181F;
+  --md-sys-color-on-surface-variant: #5B6472;
+
+  /* Blue accent: interactive elements and meaningful indicators only */
+  --md-sys-color-primary:            #2B5FD9;
+  --md-sys-color-primary-container:  #E4ECFC;
+  --line:                            #2B5FD9;
+
+  /* Set ramp for charts: set 1 darkest → later sets lighter */
+  --wt-set-1: #1F4FC2;
+  --wt-set-2: #3F73DC;
+  --wt-set-3: #6F9AE8;
+  --wt-set-4: #A3C0F2;
+  --wt-set-5: #CFDFF9;
+
+  --wt-card-shadow: 0 1px 2px rgba(20, 24, 31, 0.05);
+
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+body[data-app="workout"] .type-display,
+body[data-app="workout"] .type-headline,
+body[data-app="workout"] .type-title,
+body[data-app="workout"] .type-body,
+body[data-app="workout"] .type-label,
+body[data-app="workout"] button,
+body[data-app="workout"] input,
+body[data-app="workout"] textarea,
+body[data-app="workout"] select {
+  font-family: inherit;
+}
+
+body[data-app="workout"] .type-display {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+/* ── Shared shell chrome, compacted for Workout (mobile only) ─────────────────── */
+@media (max-width: 767px) {
+  body[data-app="workout"] .shell-mobile-header {
+    height: 44px;
+    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  }
+  body[data-app="workout"] .shell-mobile-header__title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  body[data-app="workout"] .shell-bullet--md {
+    width: 24px;
+    height: 24px;
+    font-size: 13px;
+  }
+  body[data-app="workout"] .shell-mobile-header__chevron {
+    width: 18px;
+    height: 18px;
+  }
+
+  body[data-app="workout"] .shell-bottom-nav {
+    height: 48px;
+    border-top: 1px solid var(--md-sys-color-outline-variant);
+  }
+  body[data-app="workout"] .shell-bottom-nav-item {
+    font-size: 12px;
+    padding: 0 var(--space-xs);
+  }
+  body[data-app="workout"] .shell-bottom-nav-item .type-label {
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  body[data-app="workout"] .shell-bottom-nav-item__indicator {
+    height: 3px;
+  }
+  body[data-app="workout"] .shell-bottom-nav-item--active {
+    color: var(--md-sys-color-primary);
+    font-weight: 600;
+  }
+
+  /* Workout pages: tighter side gutters than the shell default */
+  body[data-app="workout"] .page {
+    padding: 12px 12px 8px;
+  }
+}

@@ -59,12 +59,15 @@ export function fmtLongDate(iso: string): string {
 // Right-aligned inside a fixed number of slots so sparse histories don't stretch.
 
 export const SET_SHADES = [
-  "var(--atlas-chart-1)",
-  "var(--atlas-chart-2)",
-  "var(--atlas-chart-3)",
-  "var(--atlas-chart-4)",
-  "color-mix(in srgb, var(--atlas-chart-4) 55%, var(--md-sys-color-surface))",
+  "var(--wt-set-1, var(--atlas-chart-1))",
+  "var(--wt-set-2, var(--atlas-chart-2))",
+  "var(--wt-set-3, var(--atlas-chart-3))",
+  "var(--wt-set-4, var(--atlas-chart-4))",
+  "var(--wt-set-5, color-mix(in srgb, var(--atlas-chart-4) 55%, var(--md-sys-color-surface)))",
 ];
+
+/** Fixed width of the mini chart in the Session list (px). */
+export const MINI_CHART_W = 132;
 
 interface RepsChartProps {
   rows: HistoryRow[];
@@ -81,12 +84,12 @@ function sameWeight(a: number | null, b: number | null) {
 
 export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
   const slots = variant === "mini" ? 15 : 20;
-  const barAreaH = variant === "mini" ? 36 : 120;
+  const barAreaH = variant === "mini" ? 40 : 96;
   const labelH = variant === "mini" ? 14 : 18;
   const gap = variant === "mini" ? 2 : 3;
   const descId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(variant === "mini" ? 148 : 340);
+  const [width, setWidth] = useState(variant === "mini" ? MINI_CHART_W : 340);
 
   useLayoutEffect(() => {
     if (variant === "mini") return;
@@ -108,13 +111,15 @@ export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
         role="img"
         aria-label="No history yet"
         style={{
-          width: variant === "mini" ? 148 : "100%",
-          height: barAreaH + labelH,
+          width: variant === "mini" ? MINI_CHART_W : "100%",
+          height: variant === "mini" ? barAreaH + labelH : 28,
           flexShrink: 0,
           display: "flex",
           alignItems: "flex-end",
           justifyContent: "flex-end",
           fontSize: 11,
+          paddingBottom: 2,
+          borderBottom: "1px dashed var(--md-sys-color-outline-variant)",
           color: "var(--md-sys-color-on-surface-variant)",
         }}
       >
@@ -140,8 +145,8 @@ export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
   const fontPx = variant === "mini" ? 10 : 11;
   const colW = (width - gap * (slots - 1)) / slots;
   const xOf = (i: number) => (offset + i) * (colW + gap);
-  const textW = (t: string) => t.length * fontPx * 0.6 + 2;
-  let limit = width;
+  const textW = (t: string) => t.length * fontPx * 0.56 + 1;
+  let limit = width + 4;
   const labels: { x: number; text: string }[] = [];
   for (let k = runs.length - 1; k >= 0; k--) {
     const run = runs[k];
@@ -150,7 +155,7 @@ export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
     const base = w == null ? "" : `${w}`;
     const text = w != null && textW(`${w} kg`) <= runPx ? `${w} kg` : base;
     if (!text) continue; // no recorded weight: bracket only, nothing asserted
-    const x = Math.min(xOf(run.idx), width - textW(text));
+    const x = Math.min(xOf(run.idx), width - textW(text) + 4);
     if (x + textW(text) <= limit + 0.5) {
       labels.push({ x, text });
       limit = x - 2;
@@ -170,7 +175,7 @@ export function RepsChart({ rows, variant, liveRow }: RepsChartProps) {
       aria-label={summary}
       aria-describedby={descId}
       ref={wrapRef}
-      style={{ width: variant === "mini" ? 148 : "100%", flexShrink: 0 }}
+      style={{ width: variant === "mini" ? MINI_CHART_W : "100%", flexShrink: 0 }}
     >
       <span id={descId} style={{ display: "none" }}>
         {visible
