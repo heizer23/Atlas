@@ -6,206 +6,29 @@
  * All platform imports use the @platform-ui alias.
  *
  * Routes covered:
- *   /workout              → Sessions list (Log tab)
+ *   /workout              → Session tab (archetype chooser / active workout)   — SessionView.tsx
+ *   /workout/log          → Log tab (finished sessions)
  *   /workout/performance  → Performance view
- *   /workout/history      → History view
  *   /workout/settings     → Settings view
  */
 
 import { useState, useEffect, useRef } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
-import {
-  BarChart,
-  Bar,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
 import { apiFetch, isApiError } from "@platform-ui/api/client";
 import { useDataset } from "@platform-ui/hooks/useDataset";
-import CreateForm from "@platform-ui/components/CreateForm";
 import ErrorCard from "@platform-ui/components/ErrorCard";
-import type { Row, FormField, Dataset, ApiError } from "@platform-ui/api/types";
+import type { Row, Dataset, ApiError } from "@platform-ui/api/types";
+import SessionView, { ExerciseListRow, localDate } from "./SessionView";
+import ExerciseLogView from "./ExerciseLogView";
+import { ConfirmDialog, type ExerciseRow, type HistoryRow } from "./workoutShared";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type HistoryData = { rows: Row[] };
 type ExerciseProgress = { exercise: string; total_reps: number; delta: number | null };
-
-// ── Form field definitions ────────────────────────────────────────────────────
-
-const SESSION_FIELDS: FormField[] = [
-  { key: "workout_date", label: "Date",        type: "date",   required: true },
-  { key: "split",        label: "Split",       type: "string", required: true, placeholder: "e.g. Push, Pull, Legs" },
-  { key: "exercise",     label: "Exercise",    type: "string", required: true },
-  { key: "weight_kg",   label: "Weight (kg)", type: "number", placeholder: "optional" },
-  { key: "set1_reps",   label: "Set 1 Reps",  type: "number" },
-  { key: "set2_reps",   label: "Set 2 Reps",  type: "number" },
-  { key: "set3_reps",   label: "Set 3 Reps",  type: "number" },
-  { key: "set4_reps",   label: "Set 4 Reps",  type: "number" },
-  { key: "set5_reps",   label: "Set 5 Reps",  type: "number" },
-  { key: "comment",     label: "Comment",     type: "string" },
-];
-
-const EXERCISE_FIELDS: FormField[] = [
-  { key: "exercise",  label: "Exercise",    type: "string", required: true },
-  { key: "weight_kg", label: "Weight (kg)", type: "number", placeholder: "optional" },
-  { key: "set1_reps", label: "Set 1 Reps",  type: "number" },
-  { key: "set2_reps", label: "Set 2 Reps",  type: "number" },
-  { key: "set3_reps", label: "Set 3 Reps",  type: "number" },
-  { key: "set4_reps", label: "Set 4 Reps",  type: "number" },
-  { key: "set5_reps", label: "Set 5 Reps",  type: "number" },
-  { key: "comment",   label: "Comment",     type: "string" },
-];
-
-const SET_COLORS = [
-  "var(--atlas-chart-1)",
-  "var(--atlas-chart-2)",
-  "var(--atlas-chart-3)",
-  "var(--atlas-chart-4)",
-  "var(--md-sys-color-secondary)",
-];
-
-// ── HistoryChart ──────────────────────────────────────────────────────────────
-
-function HistoryChart({
-  history,
-  size,
-  liveRow,
-}: {
-  history: HistoryData | undefined;
-  size: "mini" | "full";
-  liveRow?: Record<string, unknown>;
-}) {
-  if (!history) {
-    if (size === "mini") {
-      return (
-        <div
-          style={{
-            flex: "1 1 0",
-            minWidth: 0,
-            overflow: "hidden",
-            display: "flex",
-            alignItems: "flex-end",
-            gap: 5,
-            height: 46,
-          }}
-        >
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              style={{
-                flex: 1,
-                height: 20,
-                background: "var(--md-sys-color-outline-variant)",
-                borderRadius: "3px 3px 0 0",
-              }}
-            />
-          ))}
-        </div>
-      );
-    }
-    return (
-      <div
-        style={{
-          height: 200,
-          background: "var(--md-sys-color-surface-variant)",
-          borderRadius: 8,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "var(--md-sys-color-on-surface-variant)",
-          fontSize: 14,
-        }}
-      >
-        Loading history…
-      </div>
-    );
-  }
-
-  const baseRows = (
-    size === "mini" ? history.rows.slice(-8) : history.rows
-  ) as Record<string, unknown>[];
-  const data =
-    size === "full" && liveRow ? [...baseRows, liveRow] : baseRows;
-
-  if (size === "mini") {
-    return (
-      <div
-        style={{ flex: "1 1 0", minWidth: 0, overflow: "hidden", height: 46 }}
-      >
-        <ResponsiveContainer width="100%" height={46}>
-          <BarChart
-            data={data}
-            margin={{ top: 0, right: 0, left: 0, bottom: 0 }}
-            barCategoryGap="20%"
-          >
-            <Bar dataKey="set1_reps" stackId="a" fill={SET_COLORS[0]} isAnimationActive={false} />
-            <Bar dataKey="set2_reps" stackId="a" fill={SET_COLORS[1]} isAnimationActive={false} />
-            <Bar dataKey="set3_reps" stackId="a" fill={SET_COLORS[2]} isAnimationActive={false} />
-            <Bar dataKey="set4_reps" stackId="a" fill={SET_COLORS[3]} isAnimationActive={false} />
-            <Bar dataKey="set5_reps" stackId="a" fill={SET_COLORS[4]} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ background: "var(--md-sys-color-surface-variant)", borderRadius: 8, padding: 16 }}>
-      <ResponsiveContainer width="100%" height={200}>
-        <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="0" stroke="var(--md-sys-color-outline-variant)" vertical={false} />
-          <XAxis dataKey="workout_date" axisLine={false} tickLine={false} tick={false} />
-          <YAxis
-            axisLine={false}
-            tickLine={false}
-            tick={{ fill: "var(--md-sys-color-on-surface-variant)", fontSize: 11 }}
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--md-sys-color-surface)",
-              border: "1px solid var(--md-sys-color-outline-variant)",
-              borderRadius: 8,
-              fontSize: 12,
-            }}
-            labelFormatter={(label) => String(label)}
-            formatter={(value, name) => [
-              `${value} reps`,
-              String(name).replace("_reps", "").replace("set", "Set "),
-            ]}
-          />
-          {SET_COLORS.map((color, si) => (
-            <Bar
-              key={si}
-              dataKey={`set${si + 1}_reps`}
-              stackId="a"
-              fill={color}
-              radius={si === 4 ? [4, 4, 0, 0] : undefined}
-            >
-              {data.map((entry, di) => (
-                <Cell
-                  key={di}
-                  fill={color}
-                  fillOpacity={
-                    (entry as Record<string, unknown>)._active ? 1 : 0.38
-                  }
-                />
-              ))}
-            </Bar>
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
 
 // ── RepChip ───────────────────────────────────────────────────────────────────
 // Renders a colored delta pill for rep-progress comparison.
-// delta > 0 → green; delta < 0 → red; delta === 0 or null → grey outline.
+// delta > 0 → blue; delta < 0 → red; delta === 0 or null → grey outline.
 
 function RepChip({ delta, chipLabel }: { delta: number | null; chipLabel?: string }) {
   const isPositive = delta !== null && delta > 0;
@@ -231,7 +54,7 @@ function RepChip({ delta, chipLabel }: { delta: number | null; chipLabel?: strin
     letterSpacing: ".3px",
     whiteSpace: "nowrap",
     ...(isPositive
-      ? { background: "var(--atlas-chart-3)", color: "#fff" }
+      ? { background: "color-mix(in srgb, var(--md-sys-color-primary) 16%, transparent)", color: "var(--md-sys-color-primary)" }
       : isNegative
       ? { background: "var(--md-sys-color-error)", color: "var(--md-sys-color-on-error)" }
       : {
@@ -242,630 +65,6 @@ function RepChip({ delta, chipLabel }: { delta: number | null; chipLabel?: strin
   };
 
   return <div style={chipStyle}>{displayLabel}</div>;
-}
-
-// ── Exercise row ──────────────────────────────────────────────────────────────
-
-interface ExerciseRowProps {
-  row: Row;
-  history: HistoryData | undefined;
-  menuOpen: boolean;
-  onToggleMenu: (e: React.MouseEvent) => void;
-  onClick: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}
-
-function ExerciseRow({
-  row,
-  history,
-  menuOpen,
-  onToggleMenu,
-  onClick,
-  onEdit,
-  onDelete,
-}: ExerciseRowProps) {
-  // Fixed-position dropdown: capture button viewport coords on open.
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
-
-  function handleToggleMenu(e: React.MouseEvent) {
-    if (buttonRef.current) {
-      setButtonRect(buttonRef.current.getBoundingClientRect());
-    }
-    onToggleMenu(e);
-  }
-
-  // Rep-progress chip: compare current total_reps to most recent prior session.
-  const currentTotal = typeof row.total_reps === "number" ? row.total_reps : null;
-  let repDelta: number | null = null;
-  if (currentTotal !== null && history) {
-    const prevRow = [...history.rows].reverse().find((r) => r.id !== row.id);
-    if (prevRow) {
-      const prevTotal = [
-        prevRow.set1_reps, prevRow.set2_reps, prevRow.set3_reps,
-        prevRow.set4_reps, prevRow.set5_reps,
-      ].reduce<number>((sum, v) => sum + (typeof v === "number" ? v : 0), 0);
-      repDelta = currentTotal - prevTotal;
-    }
-  }
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "12px 16px",
-        minHeight: 80,
-        borderBottom: "1px solid var(--md-sys-color-outline-variant)",
-        gap: 12,
-        cursor: "pointer",
-        position: "relative",
-        transition: "background 200ms",
-        background: "transparent",
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      <div style={{ flex: "0 0 100px", flexShrink: 0 }}>
-        <div
-          style={{
-            fontSize: 16,
-            fontWeight: 500,
-            lineHeight: "24px",
-            color: "var(--md-sys-color-on-surface)",
-            letterSpacing: ".15px",
-          }}
-        >
-          {String(row.exercise ?? "")}
-        </div>
-        {row.weight_kg != null && (
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 400,
-              lineHeight: "20px",
-              color: "var(--md-sys-color-on-surface-variant)",
-              letterSpacing: ".25px",
-            }}
-          >
-            {String(row.weight_kg)} kg
-          </div>
-        )}
-      </div>
-
-      <RepChip delta={repDelta} />
-
-      <HistoryChart history={history} size="mini" />
-
-      <div
-        style={{ flexShrink: 0 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          ref={buttonRef}
-          onClick={handleToggleMenu}
-          style={{
-            width: 40,
-            height: 40,
-            border: "none",
-            borderRadius: "50%",
-            background: "transparent",
-            color: "var(--md-sys-color-on-surface-variant)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-          }}
-          aria-label="More options"
-        >
-          <span className="material-symbols-rounded" style={{ fontSize: 24 }}>
-            more_vert
-          </span>
-        </button>
-
-        {menuOpen && buttonRect && (
-          <div
-            style={{
-              position: "fixed",
-              top: buttonRect.bottom + 4,
-              right: window.innerWidth - buttonRect.right,
-              minWidth: 168,
-              background: "var(--md-sys-color-surface-variant)",
-              borderRadius: 4,
-              boxShadow: "0 2px 6px 2px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.3)",
-              padding: "8px 0",
-              zIndex: 1000,
-            }}
-          >
-            <div
-              onClick={onEdit}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "0 12px",
-                height: 48,
-                fontSize: 14,
-                fontWeight: 400,
-                letterSpacing: ".25px",
-                color: "var(--md-sys-color-on-surface)",
-                cursor: "pointer",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(28,27,31,.08)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <span className="material-symbols-rounded" style={{ fontSize: 18, color: "var(--md-sys-color-on-surface-variant)" }}>
-                edit
-              </span>
-              Edit
-            </div>
-            <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "8px 0" }} />
-            <div
-              onClick={onDelete}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "0 12px",
-                height: 48,
-                fontSize: 14,
-                fontWeight: 400,
-                letterSpacing: ".25px",
-                color: "var(--md-sys-color-on-surface)",
-                cursor: "pointer",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(28,27,31,.08)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <span className="material-symbols-rounded" style={{ fontSize: 18, color: "var(--md-sys-color-on-surface-variant)" }}>
-                delete
-              </span>
-              Delete
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── ExerciseList ──────────────────────────────────────────────────────────────
-
-interface ExerciseListProps {
-  dataset: Dataset | null;
-  historyByExercise: Record<string, HistoryData>;
-  onRowClick: (row: Row) => void;
-  onEdit: (row: Row) => void;
-  onDelete: (id: string) => void;
-}
-
-function ExerciseList({
-  dataset,
-  historyByExercise,
-  onRowClick,
-  onEdit,
-  onDelete,
-}: ExerciseListProps) {
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (listRef.current && !listRef.current.contains(e.target as Node)) {
-        setOpenMenuId(null);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, []);
-
-  if (!dataset)
-    return <p className="type-body">Loading…</p>;
-  if (dataset.rows.length === 0)
-    return <p className="type-body">No exercises yet.</p>;
-
-  return (
-    <div
-      ref={listRef}
-      style={{
-        background: "var(--md-sys-color-surface)",
-        borderRadius: 12,
-        boxShadow: "0px 1px 2px rgba(0,0,0,.3), 0px 1px 3px 1px rgba(0,0,0,.15)",
-        overflow: "hidden",
-        marginTop: 16,
-      }}
-    >
-      {dataset.rows.map((row) => (
-        <ExerciseRow
-          key={row.id}
-          row={row}
-          history={historyByExercise[row.exercise as string]}
-          menuOpen={openMenuId === row.id}
-          onToggleMenu={() =>
-            setOpenMenuId(openMenuId === row.id ? null : row.id)
-          }
-          onClick={() => {
-            setOpenMenuId(null);
-            onRowClick(row);
-          }}
-          onEdit={() => {
-            setOpenMenuId(null);
-            onEdit(row);
-          }}
-          onDelete={() => {
-            setOpenMenuId(null);
-            onDelete(row.id);
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ── ExerciseView ──────────────────────────────────────────────────────────────
-
-interface ExerciseViewProps {
-  row: Row;
-  history: HistoryData | undefined;
-  onBack: () => void;
-  onSave: (data: Record<string, unknown>) => Promise<ApiError | null>;
-}
-
-function ExerciseView({ row, history, onBack, onSave }: ExerciseViewProps) {
-  const [name, setName] = useState(row.exercise as string);
-  const [weight, setWeight] = useState(
-    row.weight_kg != null ? String(row.weight_kg) : ""
-  );
-  const initReps = [1, 2, 3, 4, 5].map((i) =>
-    String((row as Record<string, unknown>)[`set${i}_reps`] ?? "")
-  );
-  const [reps, setReps] = useState(initReps);
-  const [comment, setComment] = useState(String(row.comment ?? ""));
-  const [completed, setCompleted] = useState(
-    [0, 1, 2, 3, 4].map((i) => parseInt(initReps[i]) > 0)
-  );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
-
-  // Build liveRow using row.workout_date (not "Today") so it sorts correctly.
-  const liveRow: Record<string, unknown> = {
-    workout_date: row.workout_date,
-    _active: true,
-    set1_reps: completed[0] ? parseInt(reps[0]) || 0 : (row as Record<string, unknown>).set1_reps ?? 0,
-    set2_reps: completed[1] ? parseInt(reps[1]) || 0 : (row as Record<string, unknown>).set2_reps ?? 0,
-    set3_reps: completed[2] ? parseInt(reps[2]) || 0 : (row as Record<string, unknown>).set3_reps ?? 0,
-    set4_reps: completed[3] ? parseInt(reps[3]) || 0 : (row as Record<string, unknown>).set4_reps ?? 0,
-    set5_reps: completed[4] ? parseInt(reps[4]) || 0 : (row as Record<string, unknown>).set5_reps ?? 0,
-  };
-
-  // Build filteredHistory with liveRow inserted at the correct chronological position.
-  // ISO 8601 date strings sort lexicographically, so direct string comparison is correct.
-  const filteredHistory: HistoryData | undefined = history
-    ? (() => {
-        const baseRows = history.rows.filter((r) => r.id !== row.id);
-        const insertIdx = baseRows.findIndex(
-          (r) => String(r.workout_date) > String(row.workout_date)
-        );
-        const merged =
-          insertIdx === -1
-            ? [...baseRows, liveRow as unknown as Row]
-            : [
-                ...baseRows.slice(0, insertIdx),
-                liveRow as unknown as Row,
-                ...baseRows.slice(insertIdx),
-              ];
-        return { rows: merged };
-      })()
-    : undefined;
-
-  function adjustRep(i: number, delta: number) {
-    setReps((prev) => {
-      const next = [...prev];
-      next[i] = String(Math.max(0, (parseInt(next[i]) || 0) + delta));
-      return next;
-    });
-  }
-
-  async function handleSave() {
-    setBusy(true);
-    setError(null);
-    const data = {
-      exercise: name.trim(),
-      weight_kg: weight !== "" ? parseFloat(weight) : null,
-      set1_reps: reps[0] !== "" ? parseInt(reps[0]) : null,
-      set2_reps: reps[1] !== "" ? parseInt(reps[1]) : null,
-      set3_reps: reps[2] !== "" ? parseInt(reps[2]) : null,
-      set4_reps: reps[3] !== "" ? parseInt(reps[3]) : null,
-      set5_reps: reps[4] !== "" ? parseInt(reps[4]) : null,
-      comment: comment || null,
-    };
-    const err = await onSave(data);
-    if (err) setError(err);
-    setBusy(false);
-  }
-
-  return (
-    <div className="page">
-      <div className="page-toolbar">
-        <button className="icon-btn" onClick={onBack} aria-label="Back">
-          <span className="material-symbols-rounded">arrow_back</span>
-        </button>
-      </div>
-
-      {error && <ErrorCard error={error} />}
-
-      <div style={{ padding: "0 0 16px" }}>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={{
-            width: "100%",
-            border: "none",
-            borderBottom: "2px solid var(--md-sys-color-primary)",
-            fontSize: 22,
-            fontWeight: 500,
-            color: "var(--md-sys-color-on-surface)",
-            background: "transparent",
-            padding: "4px 0",
-            outline: "none",
-            letterSpacing: ".15px",
-          }}
-        />
-      </div>
-
-      <div
-        style={{
-          padding: "0 0 16px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <label style={{ fontSize: 14, color: "var(--md-sys-color-on-surface-variant)", minWidth: 60 }}>
-          Weight
-        </label>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            border: "1px solid var(--md-sys-color-outline-variant)",
-            borderRadius: 8,
-            overflow: "hidden",
-            flex: "0 0 140px",
-          }}
-        >
-          <input
-            type="number"
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-            placeholder="—"
-            style={{
-              flex: 1,
-              border: "none",
-              padding: "8px 12px",
-              fontSize: 16,
-              color: "var(--md-sys-color-on-surface)",
-              background: "transparent",
-              outline: "none",
-            }}
-          />
-          <span style={{ paddingRight: 12, fontSize: 14, color: "var(--md-sys-color-on-surface-variant)" }}>
-            kg
-          </span>
-        </div>
-      </div>
-
-      <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 0 16px" }} />
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          padding: "0 0 16px",
-        }}
-      >
-        {[0, 1, 2, 3, 4].map((i) => {
-          const done = completed[i];
-          return (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 12px",
-                border: `1px solid ${done ? "var(--md-sys-color-primary)" : "var(--md-sys-color-outline-variant)"}`,
-                borderRadius: 8,
-                background: done ? "color-mix(in srgb, var(--md-sys-color-primary) 6%, transparent)" : "var(--md-sys-color-surface)",
-                transition: "all 0.15s",
-              }}
-            >
-              <span
-                style={{
-                  flex: "0 0 44px",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: done ? "var(--md-sys-color-primary)" : "var(--md-sys-color-on-surface-variant)",
-                }}
-              >
-                Set {i + 1}
-              </span>
-              <button
-                onClick={() => adjustRep(i, -1)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  border: "none",
-                  background: "var(--md-sys-color-surface-variant)",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 18,
-                  color: "var(--md-sys-color-on-surface-variant)",
-                }}
-              >
-                −
-              </button>
-              <div
-                style={{
-                  flex: 1,
-                  position: "relative",
-                  display: "flex",
-                  alignItems: "center",
-                }}
-              >
-                <input
-                  type="number"
-                  value={reps[i]}
-                  onChange={(e) => {
-                    const next = [...reps];
-                    next[i] = e.target.value;
-                    setReps(next);
-                  }}
-                  placeholder="0"
-                  style={{
-                    width: "100%",
-                    textAlign: "center",
-                    border: "1px solid var(--md-sys-color-outline-variant)",
-                    borderRadius: 8,
-                    padding: "6px 40px 6px 8px",
-                    fontSize: 16,
-                    color: "var(--md-sys-color-on-surface)",
-                    background: "transparent",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-                <span
-                  style={{
-                    position: "absolute",
-                    right: 10,
-                    fontSize: 12,
-                    color: "var(--md-sys-color-on-surface-variant)",
-                    pointerEvents: "none",
-                  }}
-                >
-                  reps
-                </span>
-              </div>
-              <button
-                onClick={() => adjustRep(i, 1)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  border: "none",
-                  background: "var(--md-sys-color-surface-variant)",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 18,
-                  color: "var(--md-sys-color-on-surface-variant)",
-                }}
-              >
-                +
-              </button>
-              <button
-                onClick={() =>
-                  setCompleted((prev) => {
-                    const n = [...prev];
-                    n[i] = !n[i];
-                    return n;
-                  })
-                }
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  border: "none",
-                  flexShrink: 0,
-                  background: done ? "var(--md-sys-color-primary)" : "var(--md-sys-color-surface-variant)",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transition: "background 0.15s",
-                }}
-                aria-label={done ? "Unmark set" : "Mark set done"}
-              >
-                <span
-                  className="material-symbols-rounded"
-                  style={{ fontSize: 18, color: done ? "var(--md-sys-color-on-primary)" : "var(--md-sys-color-on-surface-variant)" }}
-                >
-                  {done ? "check" : "close"}
-                </span>
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 0 16px" }} />
-
-      <div style={{ padding: "0 0 16px" }}>
-        <HistoryChart
-          history={filteredHistory}
-          size="full"
-        />
-      </div>
-
-      <div style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "0 0 16px" }} />
-
-      <div style={{ padding: "0 0 16px" }}>
-        <label
-          style={{
-            display: "block",
-            fontSize: 14,
-            color: "var(--md-sys-color-on-surface-variant)",
-            marginBottom: 8,
-          }}
-        >
-          Comment
-        </label>
-        <textarea
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="Add notes about your workout…"
-          rows={3}
-          style={{
-            width: "100%",
-            border: "1px solid var(--md-sys-color-outline-variant)",
-            borderRadius: 8,
-            padding: "10px 12px",
-            fontSize: 14,
-            color: "var(--md-sys-color-on-surface)",
-            background: "var(--md-sys-color-surface)",
-            outline: "none",
-            resize: "vertical",
-            fontFamily: "inherit",
-            boxSizing: "border-box",
-          }}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: 12, padding: "0 0 24px" }}>
-        <button
-          className="btn-filled"
-          onClick={handleSave}
-          disabled={busy}
-          style={{ flex: 1 }}
-        >
-          {busy ? "Saving…" : "Save"}
-        </button>
-        <button className="btn-text" onClick={onBack}>
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // ── SessionList ───────────────────────────────────────────────────────────────
@@ -1062,9 +261,9 @@ function SessionList({
                     className="material-symbols-rounded"
                     style={{ fontSize: 18, color: "var(--md-sys-color-on-surface-variant)" }}
                   >
-                    content_copy
+                    replay
                   </span>
-                  Copy
+                  Repeat
                 </div>
                 <div
                   style={{ height: 1, background: "var(--md-sys-color-outline-variant)", margin: "4px 0" }}
@@ -1110,22 +309,19 @@ function SessionList({
   );
 }
 
-// ── LogView (sessions list — default /workout route) ──────────────────────────
+// ── LogView (finished sessions — /workout/log) ────────────────────────────────
 
 function LogView() {
   const navigate = useNavigate();
 
   const [selectedSession, setSelectedSession] = useState<Row | null>(null);
-  const [selectedExercise, setSelectedExercise] = useState<Row | null>(null);
-  const [exerciseDataset, setExerciseDataset] = useState<Dataset | null>(null);
-  const [exerciseLoading, setExerciseLoading] = useState(false);
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseRow | "new" | null>(null);
+  const [exercises, setExercises] = useState<ExerciseRow[] | null>(null);
+  const [histories, setHistories] = useState<Record<string, HistoryRow[]>>({});
   const [exerciseError, setExerciseError] = useState<ApiError | null>(null);
   const [mutateError, setMutateError] = useState<ApiError | null>(null);
-  const [historyByExercise, setHistoryByExercise] = useState<Record<string, HistoryData>>({});
   const [progressBySession, setProgressBySession] = useState<Record<string, ExerciseProgress[]>>({});
-  const [innerView, setInnerView] = useState<
-    "sessions" | "exercises" | "exercise-view" | "session-create" | "exercise-add"
-  >("sessions");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const { dataset: sessionDataset, error: sessionError, refresh: refreshSessions } =
     useDataset("/workout/sessions");
@@ -1148,93 +344,42 @@ function LogView() {
     });
   }, [sessionDataset]);
 
-  // Suppress unused warning — navigate is available for future sub-routing needs
-  void navigate;
-
-  async function loadExercises(sessionId: string) {
-    setExerciseLoading(true);
-    setExerciseError(null);
-    const res = await apiFetch<Dataset>(`/workout/sessions/${sessionId}/exercises`);
-    if (isApiError(res)) {
-      setExerciseError(res);
-      setExerciseLoading(false);
-      return;
-    }
-    setExerciseDataset(res);
-    setExerciseLoading(false);
-    const names = [...new Set(res.rows.map((r) => r.exercise as string))];
+  async function loadHistories(rows: ExerciseRow[]) {
+    const names = [...new Set(rows.map((r) => r.exercise))];
     const results = await Promise.all(
-      names.map((name) =>
-        apiFetch<HistoryData>(
-          `/workout/exercises/history?name=${encodeURIComponent(name)}`
-        )
-      )
+      names.map((n) => apiFetch<Dataset>(`/workout/exercises/history?name=${encodeURIComponent(n)}`)),
     );
-    const map: Record<string, HistoryData> = {};
-    names.forEach((name, i) => {
+    const map: Record<string, HistoryRow[]> = {};
+    names.forEach((n, i) => {
       const r = results[i];
-      if (!isApiError(r)) map[name] = r;
+      if (!isApiError(r)) map[n.toLowerCase()] = r.rows as unknown as HistoryRow[];
     });
-    setHistoryByExercise(map);
+    setHistories(map);
   }
 
-  async function handleSessionCreate(data: Record<string, unknown>) {
-    const res = await apiFetch<Dataset>("/workout/sessions", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    if (isApiError(res)) return res;
-    const sessionsRes = await apiFetch<Dataset>("/workout/sessions");
-    if (!isApiError(sessionsRes) && sessionsRes.rows.length > 0) {
-      setSelectedSession(sessionsRes.rows[0]);
-      setExerciseDataset(res);
-      setInnerView("exercises");
-    } else {
-      refreshSessions();
-      setInnerView("sessions");
-    }
+  async function openSession(row: Row) {
+    setSelectedSession(row);
+    setExercises(null);
+    setHistories({});
+    setExerciseError(null);
+    const res = await apiFetch<Dataset>(`/workout/sessions/${row.id}/exercises`);
+    if (isApiError(res)) return setExerciseError(res);
+    const rows = res.rows as unknown as ExerciseRow[];
+    setExercises(rows);
+    loadHistories(rows);
   }
 
-  async function handleExerciseAdd(data: Record<string, unknown>) {
-    if (!selectedSession) return;
-    const res = await apiFetch<Dataset>(
-      `/workout/sessions/${selectedSession.id}/exercises`,
-      { method: "POST", body: JSON.stringify(data) }
-    );
-    if (isApiError(res)) return res;
-    setExerciseDataset(res);
-    setInnerView("exercises");
-  }
-
-  async function handleExerciseSave(
-    data: Record<string, unknown>
-  ): Promise<ApiError | null> {
-    if (!selectedExercise) return null;
-    const res = await apiFetch<Dataset>(
-      `/workout/exercises/${selectedExercise.id}`,
-      { method: "PATCH", body: JSON.stringify(data) }
-    );
-    if (isApiError(res)) return res;
-    setExerciseDataset(res);
+  function applyDataset(ds: Dataset) {
+    const rows = ds.rows as unknown as ExerciseRow[];
+    setExercises(rows);
+    loadHistories(rows);
     setSelectedExercise(null);
-    setInnerView("exercises");
-    const exerciseName =
-      (data.exercise as string) || (selectedExercise.exercise as string);
-    apiFetch<HistoryData>(
-      `/workout/exercises/history?name=${encodeURIComponent(exerciseName)}`
-    ).then((histRes) => {
-      if (!isApiError(histRes)) {
-        setHistoryByExercise((prev) => ({ ...prev, [exerciseName]: histRes }));
-      }
-    });
-    return null;
   }
 
   async function handleSessionDelete(id: string) {
     setMutateError(null);
-    const res = await apiFetch<unknown>(`/workout/sessions/${id}`, {
-      method: "DELETE",
-    });
+    const res = await apiFetch<unknown>(`/workout/sessions/${id}`, { method: "DELETE" });
+    setConfirmDelete(null);
     if (isApiError(res)) {
       setMutateError(res);
       return;
@@ -1242,143 +387,38 @@ function LogView() {
     refreshSessions();
   }
 
-  async function handleSessionCopy(row: Row) {
+  // Repeat: new session from this one as a template (exercises + starting weights, no results).
+  async function handleSessionRepeat(row: Row) {
     setMutateError(null);
-    const exRes = await apiFetch<Dataset>(
-      `/workout/sessions/${row.id}/exercises`
-    );
-    if (isApiError(exRes) || exRes.rows.length === 0) return;
-    const exercises = exRes.rows;
-    const today = new Date().toISOString().split("T")[0];
-    const first = exercises[0];
-    const createRes = await apiFetch<Dataset>("/workout/sessions", {
+    const res = await apiFetch<Dataset>("/workout/sessions/start", {
       method: "POST",
-      body: JSON.stringify({
-        workout_date: today,
-        split: row.split,
-        exercise: first.exercise,
-        weight_kg: first.weight_kg ?? null,
-        set1_reps: first.set1_reps ?? null,
-        set2_reps: first.set2_reps ?? null,
-        set3_reps: first.set3_reps ?? null,
-        set4_reps: first.set4_reps ?? null,
-        set5_reps: first.set5_reps ?? null,
-        comment: first.comment ?? null,
-      }),
-    });
-    if (isApiError(createRes)) {
-      setMutateError(createRes);
-      return;
-    }
-    const sessionsRes = await apiFetch<Dataset>("/workout/sessions");
-    if (isApiError(sessionsRes) || sessionsRes.rows.length === 0) return;
-    const newSession = sessionsRes.rows[0];
-    let lastDataset: Dataset = createRes;
-    for (const ex of exercises.slice(1)) {
-      const addRes = await apiFetch<Dataset>(
-        `/workout/sessions/${newSession.id}/exercises`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            exercise: ex.exercise,
-            weight_kg: ex.weight_kg ?? null,
-            set1_reps: ex.set1_reps ?? null,
-            set2_reps: ex.set2_reps ?? null,
-            set3_reps: ex.set3_reps ?? null,
-            set4_reps: ex.set4_reps ?? null,
-            set5_reps: ex.set5_reps ?? null,
-            comment: ex.comment ?? null,
-          }),
-        }
-      );
-      if (!isApiError(addRes)) lastDataset = addRes;
-    }
-    refreshSessions();
-    setSelectedSession(newSession);
-    setExerciseDataset(lastDataset);
-    setHistoryByExercise({});
-    setInnerView("exercises");
-    const names = [...new Set(exercises.map((e) => e.exercise as string))];
-    const results = await Promise.all(
-      names.map((n) =>
-        apiFetch<HistoryData>(
-          `/workout/exercises/history?name=${encodeURIComponent(n)}`
-        )
-      )
-    );
-    const map: Record<string, HistoryData> = {};
-    names.forEach((n, i) => {
-      if (!isApiError(results[i])) map[n] = results[i] as HistoryData;
-    });
-    setHistoryByExercise(map);
-  }
-
-  async function handleExerciseDelete(id: string) {
-    setMutateError(null);
-    const res = await apiFetch<Dataset>(`/workout/exercises/${id}`, {
-      method: "DELETE",
+      body: JSON.stringify({ split: row.split, from_session_id: row.id, workout_date: localDate() }),
     });
     if (isApiError(res)) {
-      setMutateError(res);
+      setMutateError(
+        res.error.code === "ACTIVE_SESSION_EXISTS"
+          ? { error: { ...res.error, message: "A workout is already in progress. Finish or discard it first." } }
+          : res,
+      );
       return;
     }
-    setExerciseDataset(res);
-    if (innerView === "exercise-view") setInnerView("exercises");
+    navigate("/workout");
   }
 
-  function openSession(row: Row) {
-    setSelectedSession(row);
-    setHistoryByExercise({});
-    loadExercises(row.id);
-    setInnerView("exercises");
-  }
-
-  if (innerView === "session-create") {
+  if (selectedSession && selectedExercise) {
     return (
-      <div className="page">
-        <CreateForm
-          title="New Workout Session"
-          fields={SESSION_FIELDS}
-          submitLabel="Start Session"
-          onCancel={() => setInnerView("sessions")}
-          onSubmit={handleSessionCreate}
-        />
-      </div>
-    );
-  }
-
-  if (innerView === "exercise-add") {
-    return (
-      <div className="page">
-        <CreateForm
-          title="Add Exercise"
-          fields={EXERCISE_FIELDS}
-          submitLabel="Add Exercise"
-          onCancel={() => setInnerView("exercises")}
-          onSubmit={handleExerciseAdd}
-        />
-      </div>
-    );
-  }
-
-  if (innerView === "exercise-view" && selectedExercise) {
-    return (
-      <ExerciseView
-        row={selectedExercise}
-        history={historyByExercise[selectedExercise.exercise as string]}
-        onBack={() => {
-          setSelectedExercise(null);
-          setInnerView("exercises");
-        }}
-        onSave={handleExerciseSave}
+      <ExerciseLogView
+        sessionId={selectedSession.id}
+        sessionDate={String(selectedSession.workout_date)}
+        row={selectedExercise === "new" ? undefined : selectedExercise}
+        onSaved={applyDataset}
+        onCancel={() => setSelectedExercise(null)}
+        onDeleted={applyDataset}
       />
     );
   }
 
-  if (innerView === "exercises") {
-    const heading = selectedSession
-      ? `${selectedSession.split as string} — ${selectedSession.workout_date as string}`
-      : "Exercises";
+  if (selectedSession) {
     return (
       <div className="page">
         <div className="page-toolbar">
@@ -1386,64 +426,48 @@ function LogView() {
             className="icon-btn"
             aria-label="Back to sessions"
             onClick={() => {
-              setInnerView("sessions");
               setSelectedSession(null);
-              setExerciseDataset(null);
+              setExercises(null);
               setExerciseError(null);
-              setMutateError(null);
-              setHistoryByExercise({});
+              refreshSessions();
             }}
           >
             <span className="material-symbols-rounded">arrow_back</span>
           </button>
-          <h1 className="type-headline">{heading}</h1>
-          <button
-            className="icon-btn filled"
-            aria-label="Add exercise"
-            onClick={() => setInnerView("exercise-add")}
-          >
-            <span className="material-symbols-rounded">add</span>
-          </button>
+          <h1 className="type-headline">
+            {String(selectedSession.split)} — {String(selectedSession.workout_date)}
+          </h1>
         </div>
 
         {exerciseError && <ErrorCard error={exerciseError} />}
-        {mutateError && <ErrorCard error={mutateError} />}
+        {exercises === null && !exerciseError && <p className="type-body">Loading…</p>}
 
-        {exerciseLoading && !exerciseDataset && (
-          <p className="type-body">Loading…</p>
+        {exercises && (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, borderBottom: "1px solid var(--md-sys-color-outline-variant)" }}>
+            {exercises.map((row) => (
+              <ExerciseListRow
+                key={row.id}
+                row={row}
+                history={histories[row.exercise.toLowerCase()]}
+                onOpen={() => setSelectedExercise(row)}
+              />
+            ))}
+          </ul>
         )}
-
-        <ExerciseList
-          dataset={exerciseDataset}
-          historyByExercise={historyByExercise}
-          onRowClick={(row) => {
-            setSelectedExercise(row);
-            setInnerView("exercise-view");
-          }}
-          onEdit={(row) => {
-            setSelectedExercise(row);
-            setInnerView("exercise-view");
-          }}
-          onDelete={handleExerciseDelete}
-        />
+        <button className="btn-outlined" style={{ minHeight: 48 }} onClick={() => setSelectedExercise("new")}>
+          + Add Exercise
+        </button>
       </div>
     );
   }
 
-  // Default: sessions list
   if (sessionError) return <ErrorCard error={sessionError} />;
 
   return (
     <div className="page">
-      <div className="page-header">
-        <button
-          className="icon-btn filled"
-          aria-label="New session"
-          onClick={() => setInnerView("session-create")}
-        >
-          <span className="material-symbols-rounded">add</span>
-        </button>
-      </div>
+      <h1 className="type-display" style={{ margin: 0 }}>
+        Log
+      </h1>
 
       {mutateError && <ErrorCard error={mutateError} />}
 
@@ -1451,30 +475,29 @@ function LogView() {
         dataset={sessionDataset}
         progressBySession={progressBySession}
         onRowClick={openSession}
-        onDelete={handleSessionDelete}
-        onCopy={handleSessionCopy}
+        onDelete={(id) => setConfirmDelete(id)}
+        onCopy={handleSessionRepeat}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete this session?"
+        body="The session and all its exercises, sets and comments are permanently removed. Exercise history for other sessions is not affected."
+        confirmLabel="Delete"
+        onConfirm={() => confirmDelete && handleSessionDelete(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
       />
     </div>
   );
 }
 
-// ── Placeholder views for Performance, History, Settings ──────────────────────
+// ── Placeholder views for Performance, Settings ──────────────────────
 
 function PerformanceView() {
   return (
     <div className="page">
       <p className="type-body" style={{ color: "var(--md-sys-color-on-surface-variant)" }}>
         Performance analytics coming soon.
-      </p>
-    </div>
-  );
-}
-
-function HistoryView() {
-  return (
-    <div className="page">
-      <p className="type-body" style={{ color: "var(--md-sys-color-on-surface-variant)" }}>
-        Full workout history coming soon.
       </p>
     </div>
   );
@@ -1618,9 +641,9 @@ function SettingsView() {
 export default function ShellEntry() {
   return (
     <Routes>
-      <Route path="/" element={<LogView />} />
+      <Route path="/" element={<SessionView />} />
+      <Route path="/log" element={<LogView />} />
       <Route path="/performance" element={<PerformanceView />} />
-      <Route path="/history" element={<HistoryView />} />
       <Route path="/settings" element={<SettingsView />} />
     </Routes>
   );

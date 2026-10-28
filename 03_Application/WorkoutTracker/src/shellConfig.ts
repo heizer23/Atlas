@@ -15,15 +15,15 @@ AppRegistry.register({
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [
-    { id: 'log',         label: 'Log',         path: '/workout',             order: 1 },
-    { id: 'performance', label: 'Performance',  path: '/workout/performance', order: 2 },
-    { id: 'history',     label: 'History',      path: '/workout/history',     order: 3 },
+    { id: 'session',     label: 'Session',      path: '/workout',             order: 1 },
+    { id: 'log',         label: 'Log',          path: '/workout/log',         order: 2 },
+    { id: 'performance', label: 'Performance',  path: '/workout/performance', order: 3 },
   ],
 
   desktopNav: [
-    { id: 'log',         label: 'Log',         path: '/workout',             order: 1 },
-    { id: 'performance', label: 'Performance',  path: '/workout/performance', order: 2 },
-    { id: 'history',     label: 'History',      path: '/workout/history',     order: 3 },
+    { id: 'session',     label: 'Session',      path: '/workout',             order: 1 },
+    { id: 'log',         label: 'Log',          path: '/workout/log',         order: 2 },
+    { id: 'performance', label: 'Performance',  path: '/workout/performance', order: 3 },
     { id: 'settings',    label: 'Settings',     path: '/workout/settings',    order: 4 },
   ],
 

@@ -1088,3 +1088,20 @@ severity: major
 recurrence_hint: "First logged; 3/3 fast-path sprints exhibit it. Suggested resolution: §11 states that a '## Tests' section in 05_fast_path_plan.md satisfies the test-spec requirement (cost of a separate file is pure duplication for <=5-file changes)."
 linked_immediate_artifact: 00_Blueprint/Quality/EssayCards/Code_Review_2026-10-11.md
 ---
+
+---
+entry_id: EVD-2026-10-28-001
+date: 2026-10-28
+source_agent: atlas_code_reviewer
+run_type: audit
+component: WorkoutTracker
+sprint: none (P0 redesign, out-of-pipeline, uncommitted)
+pattern_name: declared_client_time_authority_bypassed_by_optional_field_fallback
+short_description: start_session declares the client's local date as time authority but makes workout_date optional with a CURRENT_DATE (UTC) fallback; the Session tab sends it, the Log tab's Repeat call omits it, so a Repeat shortly after local midnight persists yesterday's date.
+evidence: "backend/routers/workout.py:296-297 'workout_date is the client's local date ... the server date is only the fallback'; :328,336 COALESCE(%s::date, CURRENT_DATE); DB timezone Etc/UTC; src/SessionView.tsx:77 sends workout_date: localDate(); src/ShellEntry.tsx:395 body JSON.stringify({ split: row.split, from_session_id: row.id }) - no workout_date."
+likely_root_cause: rule_gap
+candidate_response: rule
+severity: major
+recurrence_hint: "Related to EVD-2026-04-12-002 (time_authority_deferred_to_implementer) but distinct: authority was declared, then bypassed via an optional field. Suggested R-CON-AL-06 addition: if the client is the declared authority, the time input must be required (no silent server fallback), or every caller must be enumerated."
+linked_immediate_artifact: 00_Blueprint/Quality/WorkoutTracker/Code_Review_P0_2026-10-28.md
+---
