@@ -3,6 +3,6 @@
   "target": {
     "namespace": "android_app",
     "package_name": "net.linspad.atlasphone",
-    "sha256_cert_fingerprints": ["REPLACE_WITH_SHA256_SIGNING_CERT_FINGERPRINT"]
+    "sha256_cert_fingerprints": ["FC:E9:1D:6D:7A:21:13:CA:82:DC:02:70:39:23:DC:1C:1A:21:0D:80:2F:B0:8F:AE:4F:B3:8C:FE:3F:D5:1E:93"]
   }
 }]
