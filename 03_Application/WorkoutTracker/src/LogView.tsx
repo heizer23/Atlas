@@ -13,7 +13,7 @@ import { apiFetch, isApiError } from "@platform-ui/api/client";
 import ErrorCard from "@platform-ui/components/ErrorCard";
 import type { ApiError, Dataset } from "@platform-ui/api/types";
 import { localDate } from "./SessionView";
-import { ConfirmDialog, fmtDate, historyPath, repsSummary, setsOf } from "./workoutShared";
+import { ConfirmDialog, fmtDate, historyPath, repsSummary, setsOf, clientTz } from "./workoutShared";
 
 const PAGE_SIZE = 15;
 const SWIPE_THRESHOLD = 88;
@@ -288,7 +288,7 @@ export default function LogView() {
     setBusy(true);
     const res = await apiFetch<Dataset>("/workout/sessions/start", {
       method: "POST",
-      body: JSON.stringify({ split: s.split, from_session_id: s.id, workout_date: localDate() }),
+      body: JSON.stringify({ split: s.split, from_session_id: s.id, workout_date: localDate(), tz: clientTz() }),
     });
     if (isApiError(res)) {
       setError(

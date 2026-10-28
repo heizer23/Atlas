@@ -25,6 +25,7 @@ import {
   totalOf,
   useGoBack,
   type ExerciseRow,
+  clientTz,
 } from "./workoutShared";
 
 const smallBtn: React.CSSProperties = {
@@ -70,7 +71,7 @@ export default function SessionDetailView() {
     setBusy(true);
     const res = await apiFetch<Dataset>("/workout/sessions/start", {
       method: "POST",
-      body: JSON.stringify({ split, from_session_id: sessionId, workout_date: localDate() }),
+      body: JSON.stringify({ split, from_session_id: sessionId, workout_date: localDate(), tz: clientTz() }),
     });
     if (isApiError(res)) {
       setError(

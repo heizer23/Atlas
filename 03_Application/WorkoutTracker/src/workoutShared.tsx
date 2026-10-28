@@ -30,6 +30,26 @@ export interface ExerciseRow extends HistoryRow {
   status: "planned" | "done";
   total_reps: number;
   delta: number | null;
+  /** Per-set timing from the server clock (ISO). NULL = not measured. Present as set{n}_started_at / set{n}_ended_at. */
+  set1_started_at?: string | null;
+  set1_ended_at?: string | null;
+  set2_started_at?: string | null;
+  set2_ended_at?: string | null;
+  set3_started_at?: string | null;
+  set3_ended_at?: string | null;
+  set4_started_at?: string | null;
+  set4_ended_at?: string | null;
+  set5_started_at?: string | null;
+  set5_ended_at?: string | null;
+}
+
+/** The browser's IANA time zone, stored with a workout when it is started (time-of-day analysis). */
+export function clientTz(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function setsOf(

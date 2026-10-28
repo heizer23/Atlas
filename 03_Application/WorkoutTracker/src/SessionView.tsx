@@ -23,6 +23,7 @@ import {
   fmtShortDate,
   type ExerciseRow,
   type HistoryRow,
+  clientTz,
 } from "./workoutShared";
 
 const OPEN_KEY = "workout_open_exercise";
@@ -75,7 +76,7 @@ function ArchetypeChooser({ onStarted }: { onStarted: (s: ActiveSession) => void
     setError(null);
     const res = await apiFetch<Dataset>("/workout/sessions/start", {
       method: "POST",
-      body: JSON.stringify({ split: split.trim(), workout_date: localDate() }),
+      body: JSON.stringify({ split: split.trim(), workout_date: localDate(), tz: clientTz() }),
     });
     if (isApiError(res)) {
       if (res.error.code === "ACTIVE_SESSION_EXISTS") {
@@ -343,6 +344,12 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
           sessionId={session.id}
           sessionDate={session.workout_date}
           row={row}
+          live
+          onSynced={(ds) => setExercises(ds.rows as unknown as ExerciseRow[])}
+          onRowCreated={(id) => {
+            writeOpen({ sessionId: session.id, rowId: id });
+            setView({ kind: "exercise", rowId: id });
+          }}
           onSaved={applyDataset}
           onCancel={closeExercise}
           onDeleted={applyDataset}

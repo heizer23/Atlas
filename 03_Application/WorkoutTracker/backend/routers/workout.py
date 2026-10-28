@@ -1,5 +1,6 @@
 import datetime
 import uuid
+import zoneinfo
 from typing import Any
 
 import psycopg2.errors
@@ -50,6 +51,7 @@ class SessionStart(BaseModel):
     split:           str
     workout_date:    str | None = None   # ISO date; defaults to the server date
     from_session_id: str | None = None   # template session; defaults to the latest session of this split
+    tz:              str | None = None   # client IANA time zone (e.g. "Europe/Berlin"), stored for time-of-day analysis
 
 
 class ExerciseCreate(BaseModel):
@@ -75,6 +77,18 @@ class ExerciseUpdate(BaseModel):
     comment:   str   | None = None
 
 
+class SetConfirm(BaseModel):
+    reps:      int
+    weight_kg: float | None = None       # explicit null = no weight recorded (never read as bodyweight)
+
+
+class ExerciseDetails(BaseModel):
+    """Name / weight / comment only. All three are always sent: null weight or comment clears it."""
+    exercise:  str
+    weight_kg: float | None
+    comment:   str | None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def dataset_response(dataset: Dataset) -> JSONResponse:
@@ -97,6 +111,10 @@ def _exercise_row(row: Any) -> dict[str, Any]:
     d["id"]         = str(d.pop("workout_log_id"))
     d["total_reps"] = _total_reps(d)
     d["weight_kg"]  = float(d["weight_kg"]) if d.get("weight_kg") is not None else None
+    for n in range(1, 6):
+        for k in (f"set{n}_started_at", f"set{n}_ended_at"):
+            if d.get(k) is not None:
+                d[k] = d[k].isoformat()
     return d
 
 
@@ -122,6 +140,9 @@ def _fetch_exercises(conn: Any, session_id: str) -> list[Any]:
             SELECT l.workout_log_id, l.exercise, l.weight_kg, l.status,
                    l.workout_date::text AS workout_date, l.split,
                    l.set1_reps, l.set2_reps, l.set3_reps, l.set4_reps, l.set5_reps, l.comment,
+                   l.set1_started_at, l.set1_ended_at, l.set2_started_at, l.set2_ended_at,
+                   l.set3_started_at, l.set3_ended_at, l.set4_started_at, l.set4_ended_at,
+                   l.set5_started_at, l.set5_ended_at,
                    h.delta
             FROM workout.workout_log l
             LEFT JOIN workout.exercise_session_history h ON h.id = l.workout_log_id::text
@@ -336,6 +357,11 @@ def start_session(body: SessionStart) -> JSONResponse:
             uuid.UUID(body.from_session_id)
     except ValueError:
         return api_error("VALIDATION_ERROR", "workout_date must be YYYY-MM-DD and from_session_id a UUID")
+    if body.tz:
+        try:
+            zoneinfo.ZoneInfo(body.tz)
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            return api_error("VALIDATION_ERROR", "tz must be an IANA time zone name")
 
     new_id = str(uuid.uuid4())
     with get_db() as conn:
@@ -367,9 +393,9 @@ def start_session(body: SessionStart) -> JSONResponse:
 
             try:
                 cur.execute(
-                    "INSERT INTO workout.workout_session (workout_id, split, workout_date) "
-                    "VALUES (%s, %s, COALESCE(%s::date, CURRENT_DATE))",
-                    (new_id, split, body.workout_date),
+                    "INSERT INTO workout.workout_session (workout_id, split, workout_date, tz) "
+                    "VALUES (%s, %s, COALESCE(%s::date, CURRENT_DATE), %s)",
+                    (new_id, split, body.workout_date, body.tz or None),
                 )
             except psycopg2.errors.UniqueViolation:
                 # Lost a race with another start: the one-active-session index decided.
@@ -587,7 +613,18 @@ def update_exercise(exercise_id: str, body: ExerciseUpdate) -> JSONResponse:
                     set5_reps  = %s,
                     comment    = %s,
                     status     = 'done',
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    -- a set without reps was not performed: its timing goes with it
+                    set1_started_at = CASE WHEN %s IS NULL THEN NULL ELSE set1_started_at END,
+                    set1_ended_at   = CASE WHEN %s IS NULL THEN NULL ELSE set1_ended_at END,
+                    set2_started_at = CASE WHEN %s IS NULL THEN NULL ELSE set2_started_at END,
+                    set2_ended_at   = CASE WHEN %s IS NULL THEN NULL ELSE set2_ended_at END,
+                    set3_started_at = CASE WHEN %s IS NULL THEN NULL ELSE set3_started_at END,
+                    set3_ended_at   = CASE WHEN %s IS NULL THEN NULL ELSE set3_ended_at END,
+                    set4_started_at = CASE WHEN %s IS NULL THEN NULL ELSE set4_started_at END,
+                    set4_ended_at   = CASE WHEN %s IS NULL THEN NULL ELSE set4_ended_at END,
+                    set5_started_at = CASE WHEN %s IS NULL THEN NULL ELSE set5_started_at END,
+                    set5_ended_at   = CASE WHEN %s IS NULL THEN NULL ELSE set5_ended_at END
                 WHERE workout_log_id = %s
                 RETURNING workout_id
                 """,
@@ -595,6 +632,7 @@ def update_exercise(exercise_id: str, body: ExerciseUpdate) -> JSONResponse:
                     body.exercise.strip(), body.weight_kg,
                     body.set1_reps, body.set2_reps, body.set3_reps, body.set4_reps, body.set5_reps,
                     body.comment,
+                    *[r for r in (body.set1_reps, body.set2_reps, body.set3_reps, body.set4_reps, body.set5_reps) for _ in (0, 1)],
                     exercise_id,
                 ),
             )
@@ -608,6 +646,145 @@ def update_exercise(exercise_id: str, body: ExerciseUpdate) -> JSONResponse:
         rows = _fetch_exercises(conn, str(updated["workout_id"]))
 
     return dataset_response(_exercises_dataset(rows, str(updated["workout_id"])))
+
+
+# ── Set events (active workout only) ─────────────────────────────────────────
+# Time authority: the SERVER clock (NOW()) stamps every set event; the client never supplies a
+# time. All three endpoints are idempotent: a repeated start/confirm never moves an existing
+# timestamp, so retries and double taps cannot create duplicate timing events.
+# They only work on exercises of the ACTIVE session; past sessions are edited via PATCH
+# /exercises/{id} and never receive timing events.
+# A set is "performed" once its reps are persisted: only /confirm writes reps in this flow.
+
+def _set_no(n: int) -> bool:
+    return 1 <= n <= 5
+
+
+def _active_exercise(cur: Any, exercise_id: str) -> Any:
+    """Return the exercise row if it belongs to the active session, else an api_error response."""
+    cur.execute(
+        """
+        SELECT l.workout_log_id, l.workout_id, l.status
+        FROM workout.workout_log l
+        JOIN workout.workout_session s ON s.workout_id = l.workout_id AND s.status = 'active'
+        WHERE l.workout_log_id = %s
+        FOR UPDATE OF l
+        """,
+        (exercise_id,),
+    )
+    row = cur.fetchone()
+    if row:
+        return row
+    cur.execute("SELECT 1 FROM workout.workout_log WHERE workout_log_id = %s", (exercise_id,))
+    if cur.fetchone():
+        return api_error("SESSION_NOT_ACTIVE", "set timing only applies to the active workout", status=409)
+    return api_error("NOT_FOUND", f"exercise {exercise_id} not found", status=404)
+
+
+def _set_event_response(conn: Any, workout_id: Any) -> JSONResponse:
+    return dataset_response(_exercises_dataset(_fetch_exercises(conn, str(workout_id)), str(workout_id)))
+
+
+@router.post("/exercises/{exercise_id}/sets/{n}/start", response_model=None)
+def start_set(exercise_id: str, n: int) -> JSONResponse:
+    """The user tapped set n to begin it. Sets setN_started_at once; a no-op if the set is already
+    started or already confirmed (a confirmed set keeps whatever start it had, possibly none)."""
+    if not _set_no(n):
+        return api_error("VALIDATION_ERROR", "set number must be 1..5")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            ex = _active_exercise(cur, exercise_id)
+            if isinstance(ex, JSONResponse):
+                return ex
+            cur.execute(
+                f"UPDATE workout.workout_log SET set{n}_started_at = COALESCE(set{n}_started_at, NOW()) "
+                f"WHERE workout_log_id = %s AND set{n}_ended_at IS NULL",
+                (exercise_id,),
+            )
+        conn.commit()
+        return _set_event_response(conn, ex["workout_id"])
+
+
+@router.post("/exercises/{exercise_id}/sets/{n}/confirm", response_model=None)
+def confirm_set(exercise_id: str, n: int, body: SetConfirm) -> JSONResponse:
+    """The user tapped set n's checkmark. Persists the reps (and the exercise weight), marks the
+    exercise 'done', and sets setN_ended_at once. Re-confirming (e.g. corrected reps) updates the
+    reps but never moves the timestamps. A missing start stays NULL."""
+    if not _set_no(n):
+        return api_error("VALIDATION_ERROR", "set number must be 1..5")
+    if body.reps < 0:
+        return api_error("VALIDATION_ERROR", "reps cannot be negative")
+    if body.weight_kg is not None and body.weight_kg < 0:
+        return api_error("VALIDATION_ERROR", "weight cannot be negative")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            ex = _active_exercise(cur, exercise_id)
+            if isinstance(ex, JSONResponse):
+                return ex
+            cur.execute(
+                f"""
+                UPDATE workout.workout_log SET
+                    set{n}_reps = %s,
+                    weight_kg = %s,
+                    set{n}_ended_at = COALESCE(set{n}_ended_at, NOW()),
+                    status = 'done',
+                    updated_at = NOW()
+                WHERE workout_log_id = %s
+                """,
+                (body.reps, body.weight_kg, exercise_id),
+            )
+        conn.commit()
+        return _set_event_response(conn, ex["workout_id"])
+
+
+@router.post("/exercises/{exercise_id}/sets/{n}/unconfirm", response_model=None)
+def unconfirm_set(exercise_id: str, n: int) -> JSONResponse:
+    """Take a confirmation back: clears set n's reps AND both timestamps (the set returns to
+    'not started', so a later re-confirm cannot produce an inflated duration). If no set has
+    reps any more the exercise returns to 'planned'."""
+    if not _set_no(n):
+        return api_error("VALIDATION_ERROR", "set number must be 1..5")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            ex = _active_exercise(cur, exercise_id)
+            if isinstance(ex, JSONResponse):
+                return ex
+            others_empty = " AND ".join(f"set{i}_reps IS NULL" for i in range(1, 6) if i != n)
+            cur.execute(
+                f"""
+                UPDATE workout.workout_log SET
+                    set{n}_reps = NULL, set{n}_started_at = NULL, set{n}_ended_at = NULL,
+                    status = CASE WHEN {others_empty} THEN 'planned' ELSE status END,
+                    updated_at = NOW()
+                WHERE workout_log_id = %s
+                """,
+                (exercise_id,),
+            )
+        conn.commit()
+        return _set_event_response(conn, ex["workout_id"])
+
+
+@router.patch("/exercises/{exercise_id}/details", response_model=None)
+def update_exercise_details(exercise_id: str, body: ExerciseDetails) -> JSONResponse:
+    """Name, weight and comment of an exercise in the active workout, without touching sets,
+    status or timing. Partial-update semantics: all three fields are always sent; an explicit
+    null weight_kg / comment clears the value."""
+    if not body.exercise.strip():
+        return api_error("VALIDATION_ERROR", "exercise cannot be empty")
+    if body.weight_kg is not None and body.weight_kg < 0:
+        return api_error("VALIDATION_ERROR", "weight cannot be negative")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            ex = _active_exercise(cur, exercise_id)
+            if isinstance(ex, JSONResponse):
+                return ex
+            cur.execute(
+                "UPDATE workout.workout_log SET exercise = %s, weight_kg = %s, comment = %s, "
+                "updated_at = NOW() WHERE workout_log_id = %s",
+                (body.exercise.strip(), body.weight_kg, body.comment if body.comment and body.comment.strip() else None, exercise_id),
+            )
+        conn.commit()
+        return _set_event_response(conn, ex["workout_id"])
 
 
 HISTORY_SCHEMA: list[ColumnSchema] = [

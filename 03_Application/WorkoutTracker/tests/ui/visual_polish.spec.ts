@@ -8,7 +8,7 @@
  * Fixture covers: very long exercise name, exercise with no history, 1-set and 5-set
  * exercises, logged and unlogged rows, varying weights, comments.
  * Checks: no horizontal overflow, mini charts same width and right-aligned, chip column
- * aligned, suggestion ("last N") shown as text while inputs stay empty.
+ * aligned, prefilled suggestion rendered dashed until confirmed.
  * Screenshots go to /tmp/wt-shots inside the container.
  */
 
@@ -112,11 +112,11 @@ for (const width of [360, 393, 412]) {
       await expect(page.getByLabel('Set 5 reps')).toHaveValue('9');
       await noHorizontalOverflow(page, 'exercise 5 sets');
       await page.screenshot({ path: `${SHOTS}/vp${width}_2_exercise_logged_5sets.png` });
-      await page.getByRole('button', { name: 'Back without saving' }).click();
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
 
       // ── very long name, no history, nothing entered
       await page.getByRole('button', { name: new RegExp(LONG_NAME.slice(0, 20)) }).click();
-      await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Done' })).toBeVisible();
       await noHorizontalOverflow(page, 'exercise long name');
       // long title wraps (multi-line, nothing clipped) instead of being cut off
       const title = page.getByLabel('Exercise name');
@@ -124,12 +124,14 @@ for (const width of [360, 393, 412]) {
       expect(th.h, 'title is multi-line').toBeGreaterThan(40);
       expect(th.sh, 'title not clipped').toBeLessThanOrEqual(th.h + 1);
       await page.screenshot({ path: `${SHOTS}/vp${width}_3_exercise_long_name_no_history.png` });
-      await page.getByRole('button', { name: 'Back without saving' }).click();
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
 
       // ── unlogged with history: suggestions are text, inputs empty; entering a value changes the row state
       await page.getByRole('button', { name: /^Squats/ }).click();
-      await expect(page.getByLabel('Set 1 reps')).toHaveValue('');
-      await expect(page.getByText('last 8').first()).toBeVisible();
+      // last session's reps are prefilled as a dashed suggestion (not a confirmed value)
+      await expect(page.getByLabel('Set 1 reps')).toHaveValue('8');
+      await expect(page.getByRole('group', { name: 'Set 1' })).toHaveAttribute('data-state', 'idle');
+      expect(await page.getByLabel('Set 1 reps').evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe('dashed');
       // carried-over weight is marked as a suggestion until touched
       await expect(page.getByText('from last session')).toBeVisible();
       await noHorizontalOverflow(page, 'exercise suggestions');
@@ -139,7 +141,7 @@ for (const width of [360, 393, 412]) {
       await page.getByLabel('Set 1 reps').fill('11');
       await expect(page.getByLabel('Set 1 reps')).toHaveValue('11');
       await page.screenshot({ path: `${SHOTS}/vp${width}_5_exercise_entered.png` });
-      await page.getByRole('button', { name: 'Back without saving' }).click();
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
 
       // ── Add Exercise: tappable name suggestions (replaces the old datalist)
       await page.getByRole('button', { name: '+ Add Exercise' }).click();
@@ -150,7 +152,7 @@ for (const width of [360, 393, 412]) {
       await sugg.getByRole('button', { name: 'Pull up' }).click();
       await expect(page.getByLabel('Exercise name')).toHaveValue('Pull up');
       await expect(sugg).toHaveCount(0);
-      await page.getByRole('button', { name: 'Back without saving' }).click();
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
 
       await page.evaluate(() => { try { Object.keys(localStorage).filter((k) => k.startsWith('workout_')).forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ } });
     });

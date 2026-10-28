@@ -46,30 +46,34 @@ test('session tab: chooser, start, log an exercise, resume after reload, finish'
     // 3. Open first exercise → touch targets, log sets, comment, save
     const first = page.getByRole('button', { name: /not completed yet/ }).first();
     await first.click();
-    await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Done' })).toBeVisible();
     for (const label of ['Decrease weight', 'Increase weight', 'Set 1: more reps', 'Set 1: fewer reps']) {
       const box = await page.getByRole('button', { name: label }).boundingBox();
       expect(box!.width, label).toBeGreaterThanOrEqual(44);
       expect(box!.height, label).toBeGreaterThanOrEqual(44);
     }
-    expect((await page.getByRole('button', { name: 'Save' }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await page.getByRole('button', { name: 'Done' }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await page.waitForTimeout(600);
     await page.screenshot({ path: `${SHOTS}/03_exercise_empty.png` });
 
-    await page.getByLabel('Set 1 reps').fill('9');
-    await page.getByLabel('Set 2 reps').fill('8');
-    await page.getByLabel('Set 3 reps').fill('7');
+    // Tap a set to start it, enter reps, checkmark to confirm (reps + server-side timing are saved)
+    for (const [n, reps] of [[1, '9'], [2, '8'], [3, '7']]) {
+      await page.getByRole('button', { name: `Start set ${n}` }).click();
+      await page.getByLabel(`Set ${n} reps`).fill(reps);
+      await page.getByRole('button', { name: `Confirm set ${n}` }).click();
+      await expect(page.getByRole('group', { name: `Set ${n}`, exact: true })).toHaveAttribute('data-state', 'done');
+    }
     await page.getByLabel('Notes').fill('UI test note');
     await page.screenshot({ path: `${SHOTS}/04_exercise_filled.png` });
 
-    // 4. Reload mid-exercise → same exercise screen, entered values preserved
+    // 4. Reload mid-exercise → same exercise screen; confirmed sets come from the server, notes from the draft
     await page.reload();
     await expect(page.getByLabel('Set 1 reps')).toHaveValue('9');
     await expect(page.getByLabel('Notes')).toHaveValue('UI test note');
     expect(await activeSessionId(page)).toBe(createdId); // no duplicate session
 
-    // 5. Save → back to overview, exercise now completed
-    await page.getByRole('button', { name: 'Save' }).click();
+    // 5. Done → back to overview, exercise now completed
+    await page.getByRole('button', { name: 'Done' }).click();
     await expect(page.getByRole('button', { name: /, completed/ }).first()).toBeVisible();
     await page.waitForTimeout(600);
     await page.screenshot({ path: `${SHOTS}/05_overview_one_done.png` });
