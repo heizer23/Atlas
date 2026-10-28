@@ -42,3 +42,6 @@ dist/
 .claude/settings.local.json
 
 .claude/.frontend_dirty*
+
+# Dev reference images
+DevImages/
