@@ -51,7 +51,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.browser)
-    implementation("com.google.androidbrowserhelper:androidbrowser-helper:2.5.0")
+    implementation("com.google.androidbrowserhelper:androidbrowserhelper:2.7.4")
     implementation("com.google.firebase:firebase-messaging-ktx:24.1.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
