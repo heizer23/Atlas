@@ -369,7 +369,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
       : `${planned} exercise${planned === 1 ? "" : "s"} not logged will be removed from this workout.`;
 
   return (
-    <div className="page" style={{ gap: 10, paddingBottom: 0 }}>
+    <div className="page" style={{ gap: 10, paddingBottom: 0, minHeight: "100%" }}>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <h1 className="type-display" style={{ margin: 0 }}>
@@ -415,7 +415,9 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
           bottom: 0,
           display: "flex",
           gap: 10,
-          margin: "0 -12px",
+          marginTop: "auto", // short list: sit at the bottom of the screen, not right after the last row
+          marginLeft: -12,
+          marginRight: -12,
           padding: "10px 12px",
           background: "var(--md-sys-color-background)",
           borderTop: "1px solid var(--md-sys-color-outline-variant)",
