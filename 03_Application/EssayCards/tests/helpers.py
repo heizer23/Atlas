@@ -29,10 +29,11 @@ def unlock_essay_sections(essay_id: str) -> None:
     """Mark every section of the essay guided_passed (source 'grandfathered')."""
     run_sql(
         """
-        insert into essaycards.section_oral_state (section_id, guided_passed, guided_pass_source)
-        select id, true, 'grandfathered' from essaycards.essay_sections where essay_id = %s
+        insert into essaycards.section_oral_state (section_id, guided_passed, guided_pass_source, guided_level)
+        select id, true, 'grandfathered', 1 from essaycards.essay_sections where essay_id = %s
         on conflict (section_id) do update
             set guided_passed = true,
+                guided_level = greatest(essaycards.section_oral_state.guided_level, 1),
                 guided_pass_source = coalesce(essaycards.section_oral_state.guided_pass_source, 'grandfathered')
         """,
         (essay_id,),

@@ -85,7 +85,7 @@ def _mk_essay_with_sections(client, slug, n_sections):
 # ── Oral import and pass rule ────────────────────────────────────────────────
 
 def test_score_5_of_6_passes_the_70_percent_rule(client):
-    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "guided"))
+    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "unguided"))
     assert r.status_code == 200, r.text
     res = r.json()["results"][0]
     assert res["passed"] is True
@@ -95,7 +95,7 @@ def test_score_5_of_6_passes_the_70_percent_rule(client):
 
 
 def test_score_4_of_6_fails_the_70_percent_rule(client):
-    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 4, "guided"))
+    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 4, "unguided"))
     assert r.status_code == 200, r.text
     res = r.json()["results"][0]
     assert res["passed"] is False
@@ -107,16 +107,23 @@ def test_score_4_of_6_fails_the_70_percent_rule(client):
     assert due == []  # cards still locked
 
 
-def test_same_threshold_for_all_four_oral_kinds(client):
+def test_same_threshold_for_all_exam_oral_kinds(client):
+    # Guided SECTION orals are guided-learning sessions (no score) — see test_guided.py.
     for score, expected in ((4, False), (5, True)):
         for exam_type in ("guided", "unguided"):
-            r = _import(
-                client,
-                _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, score, exam_type),
-                _essay_result("fix-essay-locked", score, exam_type),
-            )
+            results = [_essay_result("fix-essay-locked", score, exam_type)]
+            if exam_type == "unguided":
+                results.append(_section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, score, exam_type))
+            r = _import(client, *results)
             assert r.status_code == 200, r.text
-            assert [x["passed"] for x in r.json()["results"]] == [expected, expected], (score, exam_type)
+            assert [x["passed"] for x in r.json()["results"]] == [expected] * len(results), (score, exam_type)
+
+
+def test_guided_section_result_is_rejected_by_the_exam_import(client):
+    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "guided"))
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert _count("select count(*) as n from essaycards.section_examinations where section_id = %s", (SECTION_LOCKED,)) == 0
 
 
 def test_section_scope_result_requires_section_anchor_slug(client):
@@ -158,9 +165,9 @@ def test_missing_or_invalid_scope_is_rejected(client):
 
 
 def test_batch_import_is_all_or_nothing(client):
-    good1 = _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "guided")
+    good1 = _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "unguided")
     good2 = _essay_result("fix-essay-locked", 5, "guided")
-    bad = _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "guided")
+    bad = _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "unguided")
     bad["section_anchor_slug"] = "does-not-exist"
     r = _import(client, good1, good2, bad)
     assert r.status_code == 404
@@ -177,7 +184,7 @@ def test_examination_package_scope_section_contains_only_that_section(client):
     second = sections[1]
     r = client.get(
         f"/api/essaycards/essays/{essay_id}/examination-package",
-        params={"exam_type": "guided", "scope": "section", "section_id": second["id"]},
+        params={"exam_type": "unguided", "scope": "section", "section_id": second["id"]},
     )
     assert r.status_code == 200, r.text
     body = r.json()
@@ -208,7 +215,7 @@ def test_examination_package_rejects_invalid_parameter_combinations(client):
         assert r.status_code == 400, params
         assert r.json()["error"]["code"] == "VALIDATION_ERROR"
     # a section that belongs to another essay
-    r = client.get(base, params={"exam_type": "guided", "scope": "section", "section_id": SECTION_LOCKED})
+    r = client.get(base, params={"exam_type": "unguided", "scope": "section", "section_id": SECTION_LOCKED})
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
 

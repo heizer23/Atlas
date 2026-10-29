@@ -33,6 +33,8 @@ SECTION_PROGRESS_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="next_step",            label="Next step",        type="string",  sortable=False, filterable=False),
     ColumnSchema(key="guided_passed",        label="Guided passed",    type="boolean", sortable=False, filterable=False),
     ColumnSchema(key="unguided_passed",      label="Unguided passed",  type="boolean", sortable=False, filterable=False),
+    ColumnSchema(key="guided_level",         label="Guided level",     type="number",  sortable=False, filterable=False),
+    ColumnSchema(key="unguided_suggested",   label="Unguided suggested", type="boolean", sortable=False, filterable=False),
     ColumnSchema(key="guided_pass_source",   label="Guided pass source", type="string", sortable=False, filterable=False),
     ColumnSchema(key="guided_latest_score",  label="Guided score",     type="number",  sortable=False, filterable=False),
     ColumnSchema(key="unguided_latest_score", label="Unguided score",  type="number",  sortable=False, filterable=False),

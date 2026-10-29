@@ -134,7 +134,7 @@ def test_import_stores_new_result_without_overwriting_history(client, db_conn):
                 "answer_transcript": "An even more integrated account.",
                 "score": 5,
                 "feedback": "Deep understanding now.",
-                "exam_type": "guided",
+                "exam_type": "unguided",
             }
         ]
     }
@@ -173,7 +173,7 @@ def test_import_multiple_sections_in_one_batch(client, db_conn):
                 "answer_transcript": "A1",
                 "score": 3,
                 "feedback": None,
-                "exam_type": "guided",
+                "exam_type": "unguided",
             },
             {
                 "scope": "section",
@@ -321,7 +321,7 @@ def test_import_rejects_unknown_essay_slug(client, db_conn):
                 "question": "Q",
                 "answer_transcript": "A",
                 "score": 3,
-                "exam_type": "guided",
+                "exam_type": "unguided",
             }
         ]
     }
@@ -342,7 +342,7 @@ def test_import_rejects_unknown_section_anchor_slug(client):
                 "question": "Q",
                 "answer_transcript": "A",
                 "score": 3,
-                "exam_type": "guided",
+                "exam_type": "unguided",
             }
         ]
     }
@@ -365,7 +365,7 @@ def test_import_batch_with_one_unknown_section_writes_nothing(client, db_conn):
                 "question": "Q",
                 "answer_transcript": "A",
                 "score": 3,
-                "exam_type": "guided",
+                "exam_type": "unguided",
             },
             {
                 "scope": "section",
@@ -376,7 +376,7 @@ def test_import_batch_with_one_unknown_section_writes_nothing(client, db_conn):
                 "question": "Q2",
                 "answer_transcript": "A2",
                 "score": 2,
-                "exam_type": "guided",
+                "exam_type": "unguided",
             },
         ]
     }
@@ -499,7 +499,7 @@ def test_examination_import_stores_nugget_versions_verbatim(client, db_conn):
                 "section_version": _f1_section_version(client),
                 "examined_at": "2026-08-28T14:30:00Z",
                 "question": "Q", "answer_transcript": "A", "score": 4,
-                "exam_type": "guided",
+                "exam_type": "unguided",
                 "nugget_versions": {"fix-nugget-cogito": "2026-01-01T00:00:00Z"},
             }
         ]
@@ -528,7 +528,7 @@ def test_examination_import_without_nugget_versions_stores_null(client, db_conn)
                 "section_version": _f1_section_version(client),
                 "examined_at": "2026-08-28T14:30:00Z",
                 "question": "Q", "answer_transcript": "A", "score": 4,
-                "exam_type": "guided",
+                "exam_type": "unguided",
             }
         ]
     }

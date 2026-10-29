@@ -871,4 +871,64 @@ create table if not exists essaycards.revalidation_events (
 create index if not exists ix_revalidation_events_essay_checked
     on essaycards.revalidation_events(essay_id, checked_at desc);
 
+-- ── 7. Guided progression (Levels 1-6) ─────────────────────────────────────
+-- Guided section orals are Socratic learning conversations in six levels, not
+-- exams. section_oral_state.guided_level = highest level the LEARNER confirmed
+-- completing (0 = none). guided_passed keeps its meaning "Level 1 completed" and
+-- remains the single flashcard-unlock flag (UNLOCKED_SECTION_SQL is unchanged).
+-- No FSRS / cooldown applies; this is not oral mastery (unguided_* is).
+alter table essaycards.section_oral_state
+    add column if not exists guided_level smallint not null default 0;
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_section_oral_state_guided_level') then
+        alter table essaycards.section_oral_state
+            add constraint ck_section_oral_state_guided_level check (guided_level between 0 and 6);
+    end if;
+    -- widen guided_pass_source with 'guided_level' (a Level-1 completion)
+    if exists (
+        select 1 from pg_constraint
+        where conname = 'ck_section_oral_state_guided_source'
+          and pg_get_constraintdef(oid) not like '%guided_level%'
+    ) then
+        alter table essaycards.section_oral_state drop constraint ck_section_oral_state_guided_source;
+        alter table essaycards.section_oral_state
+            add constraint ck_section_oral_state_guided_source
+            check (guided_pass_source is null
+                   or guided_pass_source in ('exam', 'grandfathered', 'guided_level'));
+    end if;
+end $$;
+
+-- Migration: every existing binary guided pass becomes Level 1 and nothing
+-- higher (no evidence for more). Only a legacy state (passed, level 0) matches,
+-- so this is safe to re-run.
+update essaycards.section_oral_state set guided_level = 1 where guided_passed and guided_level = 0;
+
+-- Append-only history of guided sessions: the AI's recommendation, the
+-- learner's decision and brief carried-forward records. Never an exam row.
+create table if not exists essaycards.section_guided_sessions (
+    id                 uuid        primary key default gen_random_uuid(),
+    essay_id           uuid        not null references essaycards.essays(id) on delete cascade,
+    section_id         uuid        not null references essaycards.essay_sections(id) on delete cascade,
+    level              smallint    not null,
+    section_version_at timestamptz not null,
+    session_at         timestamptz not null,
+    transcript         text        not null,
+    recommendation     text        not null,
+    rationale          text        not null,
+    demonstrated       text        not null,
+    gaps               jsonb       not null default '[]'::jsonb,   -- [{"text": str, "serious": bool}]
+    unguided_suggested boolean     not null default false,
+    learner_decision   text        not null,
+    advanced_to        smallint,                                   -- level reached by this session, else null
+    created_at         timestamptz not null default now(),
+    constraint ck_guided_sessions_level check (level between 1 and 6),
+    constraint ck_guided_sessions_recommendation check (recommendation in ('advance', 'continue')),
+    constraint ck_guided_sessions_decision check (learner_decision in ('advance', 'stay')),
+    constraint ck_guided_sessions_advanced_to check (advanced_to is null or advanced_to between 1 and 6)
+);
+
+create index if not exists ix_guided_sessions_section_at
+    on essaycards.section_guided_sessions(section_id, session_at desc);
+
 commit;

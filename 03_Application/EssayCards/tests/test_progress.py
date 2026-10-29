@@ -91,10 +91,23 @@ def _questions(client, essay_id):
 
 # ── Section state and unlocking ──────────────────────────────────────────────
 
-def test_passing_the_guided_section_oral_unlocks_that_sections_cards(client):
+def _guided(client, slug, anchor, section_id, level, decision, recommendation="advance", gaps=()):
+    r = client.post("/api/essaycards/guided/import", json={
+        "learner_decision": decision,
+        "guided_session": {
+            "essay_slug": slug, "section_anchor_slug": anchor, "section_version": _section_version(section_id),
+            "level": level, "session_at": "2026-09-01T10:00:00Z", "transcript": "Examiner: ...\nMe: ...",
+            "recommendation": recommendation, "rationale": "R", "demonstrated": "D", "gaps": list(gaps),
+        },
+    })
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_completing_guided_level_1_unlocks_that_sections_cards(client):
     assert client.get(f"{FLASHCARDS}/due?essay_id={ESSAY_LOCKED}").json()["rows"] == []
-    body = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "guided"))
-    assert any(e["effect"] == "section_guided_unlocked" for e in body["results"][0]["effects"])
+    body = _guided(client, "fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 1, "advance")
+    assert any(e["effect"] == "section_guided_unlocked" for e in body["effects"])
     assert _section(client, ESSAY_LOCKED, SECTION_LOCKED)["state"] == "yellow"
     due = client.get(f"{FLASHCARDS}/due?essay_id={ESSAY_LOCKED}").json()["rows"]
     assert {r["flashcard_id"] for r in due} == {CARD_LOCKED_1, CARD_LOCKED_2}
@@ -118,11 +131,12 @@ def test_locked_cards_are_not_counted_in_the_queue_forecast(client):
     assert len(rows) == 7 and all(r["count"] == 0 for r in rows)
 
 
-def test_failing_a_guided_attempt_after_passing_does_not_relock(client):
-    _import(client, _section_result("fix-essay-yellow", "fix-yellow-1", SECTION_YELLOW_1, 3, "guided"))
+def test_a_later_stay_session_after_level_1_does_not_relock(client):
+    _guided(client, "fix-essay-yellow", "fix-yellow-1", SECTION_YELLOW_1, 2, "stay", "continue",
+            gaps=[{"text": "g", "serious": True}])
     row = _section(client, ESSAY_YELLOW, SECTION_YELLOW_1)
     assert row["state"] == "yellow" and row["is_locked"] is False
-    assert row["guided_latest_score"] == 3
+    assert row["guided_level"] == 1
     q = _questions(client, ESSAY_YELLOW)
     assert q["fix-yellow-est"]["is_locked"] is False
 

@@ -114,7 +114,8 @@ def _review_stats_aggregate(cur: Any) -> dict[str, Any]:
 
 def _orals_aggregate(cur: Any) -> dict[str, Any]:
     """Oral exams taken per rolling window, section and essay scope combined
-    (section_examinations UNION ALL essay_examinations). Time basis is the
+    (section_examinations UNION ALL essay_examinations UNION ALL guided
+    sessions, which count as guided orals). Time basis is the
     stored examined_at (persisted domain time, supplied at import) against the
     server's now(), same rolling windows as the review aggregates. Counts every
     attempt, passed or not."""
@@ -130,7 +131,8 @@ def _orals_aggregate(cur: Any) -> dict[str, Any]:
     cur.execute(
         "select " + ", ".join(select_parts) + " from ("
         "select examined_at, exam_type from essaycards.section_examinations "
-        "union all select examined_at, exam_type from essaycards.essay_examinations"
+        "union all select examined_at, exam_type from essaycards.essay_examinations "
+        "union all select session_at, 'guided' from essaycards.section_guided_sessions"
         ") x where examined_at >= now() - interval '30 days'"
     )
     return dict(cur.fetchone())

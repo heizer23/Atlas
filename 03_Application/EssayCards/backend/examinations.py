@@ -332,6 +332,12 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
                 f"results[{idx}].exam_type is required and must be one of: {', '.join(VALID_EXAM_TYPES)}",
             )
 
+        if scope == "section" and exam_type == "guided":
+            return None, api_error(
+                "VALIDATION_ERROR",
+                f"results[{idx}]: guided section orals are guided-learning sessions; import them with POST /guided/import",
+            )
+
         feedback = entry.get("feedback")
         if feedback is not None and not isinstance(feedback, str):
             return None, api_error("VALIDATION_ERROR", f"results[{idx}].feedback must be a string or null")

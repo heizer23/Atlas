@@ -103,6 +103,11 @@ def get_examination_package(
             "VALIDATION_ERROR",
             f"scope query parameter is required and must be one of: {', '.join(VALID_SCOPES)}",
         )
+    if exam_type == "guided" and scope == "section":
+        return api_error(
+            "VALIDATION_ERROR",
+            "guided section orals are guided-learning sessions: use GET /sections/{section_id}/guided-package",
+        )
     if scope == "section" and not section_id:
         return api_error("VALIDATION_ERROR", "section_id is required when scope is 'section'")
     if scope == "essay" and section_id:

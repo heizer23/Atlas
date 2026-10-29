@@ -25,6 +25,14 @@ from __future__ import annotations
 ESTABLISHED_INTERVAL_SQL = "interval '24 hours'"
 LEARNED_INTERVAL_SQL = "interval '30 days'"
 
+# Guided progression (Levels 1-6; backend/guided.py). guided_passed means "Level 1
+# completed", so a legacy passed-but-level-0 row still reads as Level 1.
+# From this level on the next step is the unguided oral, whatever the card state.
+UNGUIDED_SUGGESTED_FROM_LEVEL = 5
+GUIDED_LEVEL_SQL = (
+    "greatest(coalesce(sos.guided_level, 0), case when coalesce(sos.guided_passed, false) then 1 else 0 end)"
+)
+
 # Expects flashcards aliased `f`. A card is unlocked iff its section has passed
 # the guided section oral (derived; no per-card lock column).
 UNLOCKED_SECTION_SQL = (
@@ -61,9 +69,12 @@ def section_progress_sql() -> str:
       case
         when coalesce(sos.unguided_passed, false) then null
         when not coalesce(sos.guided_passed, false) then 'guided_oral'
+        when {GUIDED_LEVEL_SQL} >= {UNGUIDED_SUGGESTED_FROM_LEVEL} then 'unguided_oral'
         when cc.total > 0 and cc.established = cc.total then 'unguided_oral'
         else 'flashcards_established'
       end as next_step,
+      {GUIDED_LEVEL_SQL} as guided_level,
+      {GUIDED_LEVEL_SQL} >= {UNGUIDED_SUGGESTED_FROM_LEVEL} as unguided_suggested,
       coalesce(sos.guided_passed, false) as guided_passed,
       coalesce(sos.unguided_passed, false) as unguided_passed,
       sos.guided_pass_source,
