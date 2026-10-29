@@ -44,7 +44,7 @@ export const ESSAY_STATE_LABELS: Record<EssayState, { name: string; meaning: str
 
 export const NEXT_STEP_LABELS: Record<string, string> = {
   // section ladder
-  guided_oral: 'Pass the guided oral for this section',
+  guided_oral: 'Complete guided Level 1 for this section',
   flashcards_established: 'Get every flashcard to an interval of 24h or more',
   unguided_oral: 'Pass the unguided oral for this section',
   // essay ladder
@@ -122,7 +122,7 @@ export function SectionProgressDots({ sections }: { sections: SectionProgressRow
             color={TRAFFIC_COLORS[sec.state]}
             size={12}
             label={`Section: ${st.name}`}
-            detail={`${sec.heading}\n${next}`}
+            detail={`${sec.heading}\nGuided level ${sec.guided_level}/6\n${next}`}
           />
         );
       })}

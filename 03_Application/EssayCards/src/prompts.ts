@@ -1,4 +1,4 @@
-import type { EssayExportPackage, ExaminationPackage, ExplorationPackage, GenerateFlashcardsPackage, NuggetAuthoringPackage, QuestionExportPackage, SectionExportPackage } from './types';
+import type { EssayExportPackage, ExaminationPackage, ExplorationPackage, GenerateFlashcardsPackage, GuidedPackage, NuggetAuthoringPackage, QuestionExportPackage, SectionExportPackage } from './types';
 
 // ── Clipboard helpers ────────────────────────────────────────────────────────
 //
@@ -149,6 +149,56 @@ Every string value must be valid JSON — escape any double quote that appears i
 Here is the examination package:
 
 `
+
+// ── Guided learning prompt (Levels 1-6) ──────────────────────────────────────
+//
+// Guided section orals are Socratic LEARNING conversations, not exams. The
+// per-level specification (name / expectation / AI behaviour / advance
+// criteria) is owned by backend/guided.py::GUIDED_LEVELS and travels inside the
+// package as "level_spec"; this prompt is level-agnostic on purpose. The reply
+// shape must stay in sync with backend/guided.py::validate_guided_body. The
+// LEARNER, not the AI, confirms advancement (ImportGuidedView).
+
+export const GUIDED_PROMPT_INTRO = `You are my Socratic tutor for a GUIDED LEARNING session in an app called EssayCards. This is a learning conversation, NOT an examination: there is no score and you never decide whether I advance. Below this prompt is a JSON "guided package" for ONE section. "section.body_markdown" (the argument spine) and "section.nuggets" are the authoritative material; "essay_spine_markdown" is context.
+
+LEVELS: guided learning has six progressively demanding levels (1 Orientation, 2 Comprehension, 3 Connections, 4 Application, 5 Critical understanding, 6 Independence). This session is the level given in the package's "level_spec" — follow its "expectation" and "ai_behavior" exactly, and use its "advance_when" as your yardstick. EVERY level revisits the ENTIRE argument spine of the section, with more depth and independence at each higher level.
+
+HOW TO TEACH:
+- Converse naturally; ask one question at a time. Calibrate how much you help to the level's "ai_behavior": the higher the level, the fewer hints and explanations, the more open and probing your questions.
+- Follow up ("Nachhaken") whenever an answer could be memorized or superficial. Distinguish genuine understanding from merely mentioning terminology — naming a thinker, concept or keyword is not understanding. Ask for reasons, distinctions, examples, consequences and objections.
+- Never simply supply the answer and count my agreement as evidence; after helping, ask something that lets me show the point myself (except where the level, e.g. Level 1, explicitly allows explaining).
+- Start by checking "guided_progress.carried": its "unresolved_gaps" are what I could not do earlier, "demonstrated" is what I already showed. Revisit the unresolved gaps early, and do not re-teach what I already demonstrated beyond a quick check.
+- I answer by typing or by pasting a transcript of spoken answers.
+
+ADVANCEMENT IS A JOINT DECISION. When the conversation has produced enough evidence (or I ask to stop), give me a candid, evidence-based recommendation in plain words — name my strengths and the conceptual gaps — and recommend either advancing to the next level or continuing at this one. A SERIOUS conceptual gap (one that would undermine later material) must prevent a recommendation to advance; minor imperfections are acceptable, particularly at Level 1. Do not inflate. I will then decide myself; do not assume the outcome. From about Level 5 onward, if my understanding looks solid, say that an unguided oral is a sensible next step (Level 6 is optional preparation for it).
+
+WHEN THE SESSION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after:
+
+{
+  "guided_session": {
+    "essay_slug": "copy verbatim from the package's essay_slug",
+    "section_anchor_slug": "copy verbatim from the package's section.anchor_slug",
+    "section_version": "copy verbatim from the package's section.section_version",
+    "level": 1,
+    "session_at": "now, ISO-8601 WITH a UTC offset, e.g. 2026-08-28T14:30:00Z",
+    "transcript": "near-verbatim record of the session in order, labelled \\"Examiner:\\" and \\"Me:\\"; keep my wording; mark where you hinted, explained or corrected, e.g. [hint given]",
+    "recommendation": "advance or continue",
+    "rationale": "your candid recommendation: strengths shown and the gaps that decide it (3-6 sentences)",
+    "demonstrated": "BRIEF (1-3 sentences): what I demonstrably understand now",
+    "gaps": [ { "text": "a short, specific unresolved conceptual gap", "serious": false } ],
+    "unguided_suggested": false
+  }
+}
+
+"level" must equal the package's "level". "gaps" lists only gaps STILL unresolved at the end (empty list if none); "serious": true marks a gap that must prevent advancing — if any gap is serious, "recommendation" must be "continue". Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
+
+Here is the guided package:
+
+`;
+
+export function buildGuidedClipboardText(pkg: GuidedPackage): string {
+  return GUIDED_PROMPT_INTRO + JSON.stringify(pkg, null, 2);
+}
 
 export function buildExamClipboardText(pkg: ExaminationPackage, examType: 'guided' | 'unguided'): string {
   // pkg.scope ('section' | 'essay') travels inside the package JSON itself, and

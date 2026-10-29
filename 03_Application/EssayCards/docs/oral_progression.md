@@ -112,3 +112,44 @@ offer section-scope orals, the essay menu whole-essay orals.
 `examined_at` order; editing a section after its oral pass does not invalidate the pass;
 re-importing an identical failing result double-applies at most once (a second failing result is
 history-only because the claim is already false).
+
+
+## Guided progression (Levels 1-6)
+Guided SECTION orals are Socratic learning conversations, not exams. They never score, never schedule
+and never confer mastery (only `unguided_*` does). Code: `backend/guided.py`, `backend/routers/guided.py`.
+
+**Levels** (specs live once in `guided.py::GUIDED_LEVELS`, shipped in the package as `level_spec`):
+1 Orientation, 2 Comprehension, 3 Connections, 4 Application, 5 Critical understanding, 6 Independence.
+Every level revisits the whole argument spine with more depth and less AI guidance.
+
+**State.** `section_oral_state.guided_level` (0-6) = highest level the LEARNER confirmed. `guided_passed`
+now means "Level 1 completed" and stays the single card-unlock flag (`UNLOCKED_SECTION_SQL` unchanged);
+a passed row with level 0 (legacy/test seed) reads as Level 1 (`guided.current_level`,
+`progress.GUIDED_LEVEL_SQL`). `guided_pass_source` gains `'guided_level'`.
+
+**History.** `section_guided_sessions` (append-only): level, `section_version_at`, `session_at`,
+transcript, AI `recommendation` (`advance|continue`) + `rationale`, brief `demonstrated`, `gaps`
+(`[{text, serious}]`, only gaps still unresolved), `unguided_suggested`, the learner's `learner_decision`
+(`advance|stay`) and `advanced_to`. The latest session's `demonstrated` + `gaps` plus the last 3 sessions'
+outcomes are carried into the next package as `guided_progress`.
+
+**Flow.** `GET /sections/{id}/guided-package` (default level = completed+1; `?level=` 1..completed+1)
+-> ChatGPT -> paste in `ImportGuidedView`, which previews the recommendation and asks the learner to
+Advance or Stay (advancing against an AI `continue` needs a second confirmation) -> `POST /guided/import`
+with `learner_decision`. Server rules: advance iff `learner_decision = advance` AND `level = completed+1`;
+a level above completed+1 is a `VALIDATION_ERROR`; a level at or below completed is recorded as practice;
+progress never goes down; a reply recommending `advance` while listing a `serious` gap is rejected.
+Several levels may be completed in one sitting; no cooldown, no FSRS. Completing Level 1 unlocks the
+section's cards (effect `section_guided_unlocked`).
+
+**Closed path.** `POST /examinations/import` rejects `exam_type=guided` + `scope=section`, and the
+examination package rejects the same combination, so there is exactly one way to unlock cards.
+Guided ESSAY-scope orals are unchanged exams (essay yellow light).
+
+**Progress payload.** `GET /progress/sections` rows gain `guided_level` and `unguided_suggested`
+(level >= 5); `next_step` becomes `unguided_oral` from Level 5 regardless of card state. Traffic-light
+colours are unchanged. Guided sessions count in `GET /review-stats/summary` `orals_count` /
+`guided_orals_count`.
+
+**Migration.** At schema init every existing `guided_passed` section gets `guided_level = 1` (the backfill
+is re-run safe); no higher level is inferred. Old guided `section_examinations` rows remain as history.

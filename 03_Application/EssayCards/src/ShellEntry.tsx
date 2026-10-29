@@ -33,6 +33,7 @@ import { ExploreImportView } from './views/ExploreImportView';
 import { GenerateFlashcardsImportView } from './views/GenerateFlashcardsImportView';
 import { ImagesView } from './views/ImagesView';
 import { ImportExaminationsView } from './views/ImportExaminationsView';
+import { ImportGuidedView } from './views/ImportGuidedView';
 import { IngestView } from './views/IngestView';
 import { NuggetAuthoringImportView } from './views/NuggetAuthoringImportView';
 import { QuestionImportView } from './views/QuestionImportView';
@@ -55,6 +56,7 @@ export default function EssayCardsApp() {
         <Route path="/review" element={<ReviewSessionView />} />
         <Route path="/ingest" element={<IngestView />} />
         <Route path="/examinations/import" element={<ImportExaminationsView />} />
+        <Route path="/guided/import" element={<ImportGuidedView />} />
         <Route path="/explore/import" element={<ExploreImportView />} />
         <Route path="/images" element={<ImagesView />} />
         <Route path="/nuggets/authoring" element={<NuggetAuthoringImportView />} />

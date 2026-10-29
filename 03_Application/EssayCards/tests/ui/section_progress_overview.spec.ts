@@ -168,7 +168,7 @@ test('[UI] locked section is visibly locked in the reader', async ({ page }) => 
 
   // A guided-oral action is offered for that section.
   await page.getByRole('button', { name: 'More actions' }).nth(1).click();
-  await expect(page.getByRole('menuitem', { name: 'Guided oral (section)', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /^Guided learning — Level [1-6]$/ })).toBeVisible();
 });
 
 test('[UI] section and essay oral actions are distinct', async ({ page, context }) => {
@@ -192,7 +192,7 @@ test('[UI] section and essay oral actions are distinct', async ({ page, context 
   // Section menu: section orals.
   await page.getByRole('button', { name: 'More actions' }).nth(1).click();
   const sectionMenu = page.getByRole('menu').first();
-  await expect(sectionMenu.getByRole('menuitem', { name: 'Guided oral (section)', exact: true })).toBeVisible();
+  await expect(sectionMenu.getByRole('menuitem', { name: /^Guided learning — Level [1-6]$/ })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: 'Unguided oral (section)', exact: true })).toBeVisible();
   await sectionMenu.getByRole('menuitem', { name: 'Unguided oral (section)', exact: true }).click();
   await expect.poll(() => urls.length).toBe(2);

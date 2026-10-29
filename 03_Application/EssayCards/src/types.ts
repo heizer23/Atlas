@@ -18,7 +18,10 @@ export interface SectionProgressRow {
   next_step: SectionNextStep | null;
   guided_passed: boolean;
   unguided_passed: boolean;
-  guided_pass_source: 'exam' | 'grandfathered' | null;
+  guided_pass_source: 'exam' | 'grandfathered' | 'guided_level' | null;
+  // Guided progression (Levels 1-6): highest learner-confirmed level; >= 5 suggests the unguided oral.
+  guided_level: number;
+  unguided_suggested: boolean;
   guided_latest_score: number | null;
   unguided_latest_score: number | null;
   guided_passed_at: string | null;
@@ -171,6 +174,30 @@ export interface ExaminationPackage {
   scoring: { score_max: number; pass_threshold_percent: number; min_passing_score: number };
   last_essay_examination?: LastExamination | null;
   sections: ExaminationPackageSection[];
+}
+
+// GET /sections/{id}/guided-package (guided progression, Levels 1-6).
+export interface GuidedPackage {
+  kind: 'guided_session';
+  essay_slug: string;
+  level: number;
+  max_level: number;
+  level_spec: { level: number; name: string; expectation: string; ai_behavior: string; advance_when: string };
+  guided_progress: { completed_level: number };
+  section: { section_id: string; anchor_slug: string; heading: string };
+}
+
+// GET /sections/{id}/guided-sessions row.
+export interface GuidedSessionRow {
+  id: string;
+  session_at: string;
+  level: number;
+  recommendation: 'advance' | 'continue';
+  learner_decision: 'advance' | 'stay';
+  advanced_to: number | null;
+  rationale: string;
+  demonstrated: string;
+  gaps_text: string;
 }
 
 export interface SectionExaminationRow {

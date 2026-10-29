@@ -7,12 +7,12 @@ import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
 import { ActionMenu } from '../components/ActionMenu';
 import type { ActionMenuItem } from '../components/ActionMenu';
-import { EssayExaminationHistory, SectionExaminationHistory } from '../components/ExaminationHistory';
+import { EssayExaminationHistory, SectionExaminationHistory, SectionGuidedHistory } from '../components/ExaminationHistory';
 import { EssayProgressDot, SectionProgressDots } from '../components/Progress';
 import { NuggetLink, NuggetPanel, loadNuggetIndex, mainSpineTitleMap, nuggetAwareUrlTransform, remarkNuggetRefs } from '../nuggets';
-import { buildEssayExportClipboardText, buildExamClipboardText, buildSectionExportClipboardText, buildSectionImproveClipboardText, buildSectionInsertClipboardText, writeClipboard } from '../prompts';
+import { buildEssayExportClipboardText, buildExamClipboardText, buildGuidedClipboardText, buildSectionExportClipboardText, buildSectionImproveClipboardText, buildSectionInsertClipboardText, writeClipboard } from '../prompts';
 import { btnStyle, pageStyle, studyBtnStyle } from '../styles';
-import type { Dataset, EssayDetailRow, EssayExportPackage, ExaminationPackage, SectionExportPackage, SectionProgressRow } from '../types';
+import type { Dataset, EssayDetailRow, EssayExportPackage, ExaminationPackage, GuidedPackage, SectionExportPackage, SectionProgressRow } from '../types';
 
 // ── Sentence feedback (Sprint13_ReviewStatsSentenceFeedback) ─────────────────
 //
@@ -184,6 +184,25 @@ export function ReaderView() {
       err ??
         'Copied. Paste into ChatGPT (or similar), conduct the examination, then paste its JSON reply ' +
           'into "Import exam results" on the essay list page.',
+    );
+  };
+
+  // Guided learning (Levels 1-6): the package's level is chosen by the server
+  // (next level to conduct). Reply is imported on /essaycards/guided/import.
+  const handleExportGuided = async (sectionId: string) => {
+    setExamBusyKey(`section:guided:${sectionId}`);
+    setExamMsg(null);
+    const res = await apiFetch<GuidedPackage>(`/essaycards/sections/${sectionId}/guided-package`);
+    setExamBusyKey(null);
+    if (isApiError(res)) {
+      setExamMsg(`Export failed: ${res.error.message}`);
+      return;
+    }
+    const err = await writeClipboard(buildGuidedClipboardText(res));
+    setExamMsg(
+      err ??
+        `Copied guided Level ${res.level} (${res.level_spec.name}). Paste into ChatGPT (or similar), hold the ` +
+          'conversation, then paste its JSON reply into "Import guided session".',
     );
   };
 
@@ -547,9 +566,15 @@ export function ReaderView() {
           <ActionMenu
             items={[
               {
-                label: examBusyKey === `section:guided:${section.id}` ? 'Preparing…' : 'Guided oral (section)',
-                onClick: () => handleExportExam('section', 'guided', section.id),
+                label: examBusyKey === `section:guided:${section.id}`
+                  ? 'Preparing…'
+                  : `Guided learning — Level ${Math.min((sectionProgress[section.id]?.guided_level ?? 0) + 1, 6)}`,
+                onClick: () => handleExportGuided(section.id),
                 disabled: essay.status !== 'complete' || examBusyKey !== null,
+              },
+              {
+                label: 'Import guided session →',
+                onClick: () => navigate('/essaycards/guided/import'),
               },
               {
                 label: examBusyKey === `section:unguided:${section.id}` ? 'Preparing…' : 'Unguided oral (section)',
@@ -595,7 +620,12 @@ export function ReaderView() {
           {sectionActionMsg && sectionActionMsg.sectionId === section.id && (
             <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>{sectionActionMsg.text}</div>
           )}
-          {historyOpenIds.has(section.id) && <SectionExaminationHistory sectionId={section.id} />}
+          {historyOpenIds.has(section.id) && (
+            <>
+              <SectionGuidedHistory sectionId={section.id} />
+              <SectionExaminationHistory sectionId={section.id} />
+            </>
+          )}
         </section>
         );
       })}

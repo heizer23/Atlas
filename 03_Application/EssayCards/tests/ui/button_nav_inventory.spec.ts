@@ -133,7 +133,7 @@ test('section-end action menu and examination history remain reachable after con
   const sectionMenu = page.getByRole('menu').first();
   await expect(sectionMenu).toBeVisible();
   // Sprint14: the section menu also offers the two section-scope oral exams.
-  await expect(sectionMenu.getByRole('menuitem', { name: 'Guided oral (section)', exact: true })).toBeVisible();
+  await expect(sectionMenu.getByRole('menuitem', { name: /^Guided learning — Level [1-6]$/ })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: 'Unguided oral (section)', exact: true })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Export section|Import section →)$/ })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Insert section after|Import insertion →)$/ })).toBeVisible();

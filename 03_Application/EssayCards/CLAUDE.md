@@ -86,8 +86,8 @@ they must be built.
 - **learned** (Sprint14) — interval `>= 30 days`. A stricter level ABOVE established
   (learned is a subset of established). Thresholds live once in `backend/progress.py`
   (`ESTABLISHED_INTERVAL_SQL`, `LEARNED_INTERVAL_SQL`).
-- **locked** (Sprint14) — a card whose section has not passed its guided section oral
-  exam. Derived, never stored: unlocked iff `section_oral_state.guided_passed`. A locked
+- **locked** (Sprint14) — a card whose section has not completed guided Level 1
+  (formerly: passed the guided section oral exam). Derived, never stored: unlocked iff `section_oral_state.guided_passed`. A locked
   card stays stored and counted in `progress_total`, but is excluded from every review
   queue, from `GET /flashcards/stats` and from `open_count`, and cannot be reviewed.
 - Every UNLOCKED scheduled card is exactly one of **new** / **learning** / **established** /
@@ -109,6 +109,10 @@ they must be built.
   `## Section progression (Sprint14)`.
 
 ### Oral exams
+- **guided level** — a section's confirmed guided-learning level 0-6
+  (`section_oral_state.guided_level`). Guided section orals are Socratic learning sessions,
+  not exams: the AI recommends, the learner confirms, Level 1 unlocks the section's cards,
+  no score/FSRS. See `## Guided progression (Levels 1-6)`.
 - **exam** — a historical oral-examination result for one section, stored as a
   `section_examinations` row (append-only, one row per section per occasion). "Current
   understanding" of a section is always the latest such row (highest `examined_at`).
@@ -169,7 +173,7 @@ Cross-references written as `## Heading` elsewhere in these files resolve via th
 | `docs/question_levels.md` | Card `level`, question-overview screen, single-question maintenance. Headings: `Question levels and overview` |
 | `docs/nuggets.md` | Nugget model, `[[nugget:key]]` references, nugget endpoints/UI. Headings: `Nuggets (Sprint09)` |
 | `docs/export_insert.md` | Section export/insert flow. Headings: `Single-section export / insert` |
-| `docs/oral_progression.md` | Oral examinations, traffic lights, locking, revalidation. Headings: `Oral examinations`; `Section progression (Sprint14)` |
+| `docs/oral_progression.md` | Oral examinations, traffic lights, locking, revalidation, guided Levels 1-6. Headings: `Oral examinations`; `Section progression (Sprint14)`; `Guided progression (Levels 1-6)` |
 | `docs/exploration.md` | Explore-a-card-with-ChatGPT package/import flow. Headings: `Flashcard exploration (Sprint06)` |
 
 ## Pattern references
@@ -202,7 +206,7 @@ was dropped in Sprint12), essaycards.pre_fsrs_migration_backup_sprint12
 assignment data, retained indefinitely, never read by live code — see
 `## FSRS scheduling (Sprint12)`), and (Sprint14) essaycards.essay_examinations
 (append-only), essaycards.section_oral_state, essaycards.essay_oral_state,
-essaycards.revalidation_events (append-only), plus `section_examinations.passed` and
+essaycards.revalidation_events (append-only), essaycards.section_guided_sessions (append-only, guided Levels 1-6), plus `section_examinations.passed` and
 `flashcard_review_state.needs_revalidation`.
 Schema initialized idempotently at startup from schema.sql.
 

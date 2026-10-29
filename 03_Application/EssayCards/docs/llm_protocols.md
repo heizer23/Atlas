@@ -11,7 +11,8 @@ Packages are bespoke JSON, not `Dataset` (R-CON-BP-04 exemption, as for `examina
 
 | # | Flow | Trigger (view) | Export endpoint | Prompt (`src/prompts.ts`) | Import view → endpoint | Reply is |
 |---|---|---|---|---|---|---|
-| 1 | Guided oral (section / essay) | `ReaderView` section / essay menu | `GET /essays/{id}/examination-package?scope=essay (or section)&exam_type=guided[&section_id=…]` | `EXAM_PROMPT_INTRO_GUIDED` via `buildExamClipboardText` | `ImportExaminationsView` → `POST /examinations/import` | exam result JSON |
+| 1 | Guided oral (ESSAY scope only; section scope moved to 1b) | `ReaderView` essay menu | `GET /essays/{id}/examination-package?scope=essay&exam_type=guided` | `EXAM_PROMPT_INTRO_GUIDED` via `buildExamClipboardText` | `ImportExaminationsView` → `POST /examinations/import` | exam result JSON |
+| 1b | Guided learning, Levels 1-6 (section) | `ReaderView` section menu | `GET /sections/{id}/guided-package[?level=n]` | `GUIDED_PROMPT_INTRO` via `buildGuidedClipboardText` (level text comes from the package's `level_spec`, owned by `backend/guided.py`) | `ImportGuidedView` (learner confirms) → `POST /guided/import` | `{guided_session: {...}}` + UI-added `learner_decision` |
 | 2 | Unguided oral (section / essay) | `ReaderView` section / essay menu | same, `exam_type=unguided` | `EXAM_PROMPT_INTRO_UNGUIDED` via `buildExamClipboardText` | same as 1 | exam result JSON |
 | 3 | Explore a flashcard | `ReviewSessionView` | `GET /flashcards/{id}/exploration-package` | `EXPLORE_PROMPT_INTRO` | `ExploreImportView` → `POST /flashcards/exploration/import` (`?dry_run=true` preview, then apply) | exploration actions JSON |
 | 4 | Export whole essay | `ReaderView` essay menu | `GET /essays/{id}/export` | `ESSAY_EXPORT_PROMPT_INTRO` | `IngestView` → `POST /essays/ingest` | full ingest payload |
