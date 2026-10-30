@@ -7,11 +7,15 @@
 
 import React from 'react';
 import { AppRegistry } from '@atlas/shell';
+import { essayCardsLauncherSummary } from './launcherSummary';
 
 AppRegistry.register({
   appId: 'essaycards',
   label: 'EssayCards',
   basePath: '/essaycards',
+  launcherIcon: 'menu_book',
+  launcherTone: 'amber',
+  launcherSummary: essayCardsLauncherSummary,
   component: React.lazy(() => import('./ShellEntry')),
 
   // Sprint12_FSRSAndUXOverhaul (internal_flow step 14): trimmed to the

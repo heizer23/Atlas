@@ -7,11 +7,15 @@
 
 import React from 'react';
 import { AppRegistry } from '@atlas/shell';
+import { taskLauncherSummary } from './launcherSummary';
 
 AppRegistry.register({
   appId: 'tasks',
   label: 'Tasks',
   basePath: '/tasks',
+  launcherIcon: 'task_alt',
+  launcherTone: 'grey',
+  launcherSummary: taskLauncherSummary,
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [

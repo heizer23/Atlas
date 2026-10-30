@@ -11,11 +11,15 @@
 
 import React from 'react';
 import { AppRegistry } from '@atlas/shell';
+import { habitLauncherSummary } from './launcherSummary';
 
 AppRegistry.register({
   appId: 'habittracker',
   label: 'Habits',
   basePath: '/habittracker',
+  launcherIcon: 'eco',
+  launcherTone: 'amber',
+  launcherSummary: habitLauncherSummary,
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [

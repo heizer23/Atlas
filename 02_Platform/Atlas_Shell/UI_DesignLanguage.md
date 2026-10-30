@@ -18,7 +18,7 @@ Atlas uses **Material Design 3 (M3)** as its design language foundation.
 **What M3 is not used for:**
 - Navigation Drawer or FAB clusters.
 - Touch-optimized interaction models (long-press, swipe-to-dismiss).
-- Consumer app aesthetics (large hero images, rounded display type).
+- Consumer app aesthetics (large hero images, rounded display type), with one ratified exception: the launcher hero header (§11).
 
 Atlas uses M3 as a **token and component discipline**. Bottom Navigation is permitted for mobile viewports (see §2 and §10).
 
@@ -108,8 +108,8 @@ No other sizes are used, with these ratified exceptions:
 
 | Where | Size / weight | Why |
 |---|---|---|
-| Shell launcher page title | 34px / 700, tracking −0.02em | Sign-scale wayfinding (§11) |
-| Shell launcher app label | 22px / 700 | Sign-scale wayfinding |
+| Shell launcher page title | 44px / 700, serif (`--shell-serif`, Source Serif 4) | Hero header (§11) |
+| Shell launcher app label | 22px / 700, serif (`--shell-serif`) | Sign-scale wayfinding |
 | Shell mobile header title, sidebar sign label | 20px / 700, 18px / 700 | Sign-scale wayfinding |
 | Shell bullet letter | 17px / 700 (32px bullet), 24px / 700 (44px bullet) | Bullet legibility |
 | Reading column (long-form text, e.g. EssayCards reader) | 16px / 400, line-height 1.65, measure ≤ 68ch | Comfortable long-form reading |
@@ -218,6 +218,7 @@ Maps Atlas UI primitives to their M3 component counterparts. Use these mappings 
 | Buttons (secondary) | Outlined Button | `outline` border; same pill shape and height |
 | Buttons (grade / outcome choices) | Outlined + Filled Button | Negative outcome uses `error` outline, expected outcome uses filled `primary`, others neutral |
 | Overflow menu | Menu | Button labelled "More" opens a menu of rare actions; items ≥ 44px; right-aligned dropdown near the viewport edge |
+| App icon chip (launcher) | No M3 equivalent | 44px circle, pastel tone from the shell palette, Material Symbols Rounded glyph in `--shell-ink`; decorative |
 | App bullet | No M3 equivalent | Circle in `primary` with the app label's first letter in `on-primary`; decorative (label always beside it); 32px / 44px |
 | Buttons (destructive) | Filled Button | `error` color; always requires confirmation dialog |
 | Segmented buttons | Segmented Button | Standard M3; used for view mode switching |
@@ -232,9 +233,10 @@ Atlas shell chrome follows a wayfinding vocabulary — it answers "which app am 
 
 - **Launcher:** the root page lists every registered app as a full-width row: app bullet, then label at 22px / 700, separated by 1px hairlines. No cards, no raw paths. Order is most recently opened first (per-device `localStorage` key `atlas.shell.recency`; falls back to registry order when unavailable). This state is ephemeral and not a durable domain object.
 - **Station sign (mobile header):** 60px, white; back chevron, app bullet and app label; a 3px rule in `--line` (the primary colour) along the bottom. Tapping it returns to the launcher.
-- **Colour:** apps do not get individual colours. The bullet, sign rule, bottom-nav indicator and active sidebar tint all use the single primary colour. (A per-app palette was tried and rejected as visually busy.)
+- **Launcher (2026-10-30 redesign):** a hero header (optional photo `public/launcher-hero.jpg` over a sunset-gradient fallback) with the white serif "Atlas" title, then full-width rows on white: icon chip, serif label (22px / 700), and — when the app supplies `AppConfig.launcherSummary` — a status line, an optional activity-dot strip (groups of 7, today ringed) and up to three list items. The shell renders the returned `LauncherSummary` structure only; each app owns the meaning of its summary. Apps without an icon keep the letter bullet.
+- **Colour:** inside apps and shell chrome (sign rule, bottom-nav indicator, sidebar tint) the single primary colour applies. The one exception is the launcher icon chip: a shell-owned pastel palette (`amber, green, grey, violet, rose, blue, teal`) selected per app via `AppConfig.launcherTone`. (The 2026-10-11 per-app palette for chrome was rejected as visually busy; the launcher chips are ratified because they are the only place apps are told apart at a glance.)
 - **Tokens (shell only):** `--shell-ink` (`#14161A`, shell headings and focus outline), `--shell-sign-rule` (`3px`), `--line` (alias of the primary colour). White (`#FFFFFF`) is used for shell chrome surfaces.
-- **Contract:** `AppConfig` is unchanged; bullets derive from `label` only.
+- **Contract:** `AppConfig` v1.1.0 adds optional `launcherIcon`, `launcherTone`, `launcherSummary` (additive, non-breaking). Without them a row is the letter bullet and label only.
 
 Apps must not restyle shell chrome, and must not reproduce a second app switcher inside their own pages.
 
@@ -253,3 +255,4 @@ Any LLM session that produces UI code inconsistent with this document has made a
 ### Change log
 
 - **2026-10-11** — Shell wayfinding redesign and app UI polish ratified: flat shell chrome (§2, §5), single pill button style and ≥44px touch targets (§2, §10), sign-scale and reading-column type exceptions and weight 700 for shell (§4), no all-caps labels, form controls inherit the page font (§4), shell focus style (§8), app bullet / overflow menu / grade-button mappings (§10), new §11 Shell wayfinding. Google Sans, the M3 token set, the single light theme and the 5-level scale are unchanged.
+- **2026-10-30** — Launcher redesign ratified: hero header, serif launcher title/labels (§4 exceptions), per-app pastel icon chips (§11, §10), live status block per row via `AppConfig.launcherSummary` (§11). Reference mockup: `DevImages/Atlas-Dashboard mit Sonnenuntergangsstadt.png`.

@@ -7,11 +7,15 @@
 
 import React from 'react';
 import { AppRegistry } from '@atlas/shell';
+import { workoutLauncherSummary } from './launcherSummary';
 
 AppRegistry.register({
   appId: 'workout',
   label: 'Workout',
   basePath: '/workout',
+  launcherIcon: 'fitness_center',
+  launcherTone: 'green',
+  launcherSummary: workoutLauncherSummary,
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [

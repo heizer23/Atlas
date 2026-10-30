@@ -27,6 +27,8 @@
   --line: var(--md-sys-color-primary);
   --shell-ink: #14161A;
   --shell-sign-rule: 3px;
+  --shell-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --shell-dot-on: #3F8F63;
 }
 
 .shell-bullet {
@@ -416,39 +418,54 @@
 /* ─── AppLauncher ────────────────────────────────────────────────────────────── */
 
 .shell-launcher {
-  padding: var(--space-lg) var(--space-md) var(--space-xl);
   max-width: 960px;
   margin: 0 auto;
+  padding-bottom: var(--space-xl);
+}
+
+/* Hero: photo (public/launcher-hero.jpg, optional) over a sunset gradient fallback. */
+.shell-launcher__hero {
+  position: relative;
+  height: 160px;
+  display: flex;
+  align-items: flex-end;
+  padding: var(--space-md);
+  background:
+    linear-gradient(180deg, rgba(20,22,26,0) 35%, rgba(20,22,26,.55) 100%),
+    url('/launcher-hero.jpg') center / cover no-repeat,
+    linear-gradient(180deg, #5D6F96 0%, #C98B6B 55%, #E9A25E 78%, #2F3A2E 100%);
 }
 
 .shell-launcher__heading {
-  font-size: 34px;
+  font-family: var(--shell-serif);
+  font-size: 44px;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  color: var(--shell-ink);
-  padding-bottom: var(--space-md);
-  border-bottom: 4px solid var(--shell-ink);
+  letter-spacing: -0.01em;
+  line-height: 1;
+  color: #FFFFFF;
+  text-shadow: 0 1px 8px rgba(20,22,26,.45);
 }
 
 .shell-launcher__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   column-gap: var(--space-lg);
+  padding: 0 var(--space-md);
+  background: #FFFFFF;
 }
 
 .shell-launcher__empty {
   color: var(--md-sys-color-on-surface-variant);
   font-size: 15px;
-  padding: var(--space-xl) 0;
+  padding: var(--space-xl) var(--space-md);
 }
 
 .shell-app-entry {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-md);
   min-height: 68px;
-  padding: var(--space-sm) var(--space-xs);
+  padding: var(--space-md) var(--space-xs);
   background: none;
   border: none;
   border-bottom: 1px solid var(--md-sys-color-outline-variant);
@@ -465,10 +482,119 @@
   background: color-mix(in srgb, var(--md-sys-color-surface-variant) 45%, #FFFFFF);
 }
 
+.shell-app-entry__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
 .shell-app-entry__label {
+  font-family: var(--shell-serif);
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.shell-app-entry__line {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface);
+}
+
+.shell-app-entry__meta {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.shell-app-entry__items {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shell-app-entry__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 14px;
+}
+
+.shell-app-entry__item-box {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--md-sys-color-outline);
+}
+
+.shell-app-entry__item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-app-entry__item-when {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.shell-app-entry__more {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+/* Per-app icon chip: shell-owned pastel palette, selected via AppConfig.launcherTone. */
+.shell-app-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--tone-bg, #D8E4F5);
+  color: var(--shell-ink);
+}
+.shell-app-icon .material-symbols-rounded { font-size: 24px; }
+.shell-app-icon--amber  { --tone-bg: #FCE9CF; }
+.shell-app-icon--green  { --tone-bg: #DDEBD6; }
+.shell-app-icon--grey   { --tone-bg: #E6E8EC; }
+.shell-app-icon--violet { --tone-bg: #E6DDF6; }
+.shell-app-icon--rose   { --tone-bg: #F8DCDC; }
+.shell-app-icon--blue   { --tone-bg: #D8E4F5; }
+.shell-app-icon--teal   { --tone-bg: #D3EBE3; }
+
+/* Activity dot strip */
+.shell-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.shell-dots__group {
+  display: inline-flex;
+  gap: 3px;
+  padding-right: 8px;
+  border-right: 1px solid var(--md-sys-color-outline-variant);
+}
+.shell-dots__group:last-child { border-right: none; padding-right: 0; }
+.shell-dots__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--md-sys-color-surface-variant);
+}
+.shell-dots__dot--filled { background: var(--shell-dot-on, #3F8F63); }
+.shell-dots__dot--today { box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 3.5px var(--shell-dot-on, #3F8F63); }
+@media (min-width: 600px) {
+  .shell-dots__dot { width: 9px; height: 9px; }
+  .shell-dots__group { gap: 4px; }
 }
 
 /* ─── ShellNotFound ──────────────────────────────────────────────────────────── */

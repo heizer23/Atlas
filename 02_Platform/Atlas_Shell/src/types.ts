@@ -10,7 +10,7 @@
  * applications and the shell. Treat any change as a breaking change and
  * update the comment below with the change summary.
  *
- * Contract version: 1.0.0
+ * Contract version: 1.1.0 (additive: launcherIcon, launcherTone, launcherSummary)
  */
 
 import type React from 'react';
@@ -47,4 +47,37 @@ export interface AppConfig {
   desktopNav: NavItem[];
   /** Optional secondary navigation items surfaced in the mobile MoreMenu. */
   secondaryMenu?: NavItem[];
+  /** Optional Material Symbols Rounded icon name for the launcher row (e.g. 'fitness_center'). Falls back to the letter bullet. */
+  launcherIcon?: string;
+  /** Optional launcher icon tint, chosen from the shell-owned palette. Defaults to 'blue'. */
+  launcherTone?: LauncherTone;
+  /**
+   * Optional provider of the live status shown under the app label in the launcher.
+   * The app owns the meaning; the shell only renders the returned structure.
+   * Return null (or reject) to show the label alone. Called once per launcher mount.
+   */
+  launcherSummary?: () => Promise<LauncherSummary | null>;
+}
+
+export type LauncherTone = 'amber' | 'green' | 'grey' | 'violet' | 'rose' | 'blue' | 'teal';
+
+/** One dot in a launcher activity strip. */
+export interface LauncherDot {
+  filled: boolean;
+  /** Marks the current day; rendered with a ring. */
+  today?: boolean;
+}
+
+/** Display-only status block rendered by the launcher row. */
+export interface LauncherSummary {
+  /** Primary status line, e.g. "18 due reviews". */
+  line: string;
+  /** Optional secondary text shown after the primary line, e.g. "42 reviewed today". */
+  meta?: string;
+  /** Optional activity strip: groups of dots (e.g. one group per week), oldest first. */
+  dots?: LauncherDot[][];
+  /** Optional short list under the status line (max 3 rendered). */
+  items?: Array<{ label: string; when?: string }>;
+  /** Optional trailing note under the list, e.g. "+ 2 more upcoming". */
+  more?: string;
 }

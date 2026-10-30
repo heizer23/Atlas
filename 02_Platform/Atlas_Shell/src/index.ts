@@ -14,7 +14,7 @@
  */
 
 // Contract types
-export type { NavItem, AppConfig } from './types';
+export type { NavItem, AppConfig, LauncherSummary, LauncherDot, LauncherTone } from './types';
 
 // Registry API
 export { AppRegistry } from './registry/AppRegistry';
