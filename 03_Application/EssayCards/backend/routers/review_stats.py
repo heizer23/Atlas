@@ -211,6 +211,7 @@ ACTIVITY_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="unique_cards_seen", label="Unique cards seen", type="number", sortable=False, filterable=False),
     ColumnSchema(key="first_cards_seen",  label="First cards seen",  type="number", sortable=False, filterable=False),
     ColumnSchema(key="recall_rate",       label="Recall rate",       type="number", sortable=False, filterable=False),
+    ColumnSchema(key="orals",             label="Orals taken",       type="number", sortable=False, filterable=False),
 ]
 
 
@@ -220,7 +221,8 @@ def _activity_rows(cur: Any) -> list[dict[str, Any]]:
     — the 30 most recent UTC calendar days ending today (UTC). Per day:
     recalls (all reviews), unique_cards_seen (distinct cards), first_cards_seen
     (distinct cards whose first-ever review is that day's), recall_rate
-    ((recalls - again) / recalls, null when recalls = 0). generate_series
+    ((recalls - again) / recalls, null when recalls = 0), orals (oral exams taken
+    that UTC day — same four sources as _orals_aggregate). generate_series
     builds the day spine so empty days still appear (R-CON-AL-06: UTC calendar
     days, server time).
     """
@@ -244,6 +246,17 @@ def _activity_rows(cur: Any) -> list[dict[str, Any]]:
             join first_ever fe on fe.flashcard_id = e.flashcard_id
             where e.reviewed_at >= date_trunc('day', now() at time zone 'utc') - interval '29 days'
             group by 1
+        ),
+        oral_agg as (
+            select date_trunc('day', examined_at at time zone 'utc') as day, count(*) as orals
+            from (
+                select examined_at from essaycards.section_examinations
+                union all select examined_at from essaycards.essay_examinations
+                union all select session_at from essaycards.section_guided_sessions
+                union all select examined_at from essaycards.recall_reviews
+            ) x
+            where examined_at >= date_trunc('day', now() at time zone 'utc') - interval '29 days'
+            group by 1
         )
         select
             to_char(d.day, 'YYYY-MM-DD') as date,
@@ -252,9 +265,11 @@ def _activity_rows(cur: Any) -> list[dict[str, Any]]:
             coalesce(a.first_cards_seen, 0)::int as first_cards_seen,
             case when coalesce(a.recalls, 0) > 0
                  then (a.recalls - a.again_count)::float / a.recalls
-                 else null end as recall_rate
+                 else null end as recall_rate,
+            coalesce(o.orals, 0)::int as orals
         from days d
         left join day_agg a on a.day = d.day
+        left join oral_agg o on o.day = d.day
         order by d.day asc
         """
     )

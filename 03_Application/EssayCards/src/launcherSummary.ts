@@ -15,7 +15,7 @@ interface Dataset<R> {
 
 const WEEKS = 4;
 
-interface ActivityRow { date: string; recalls: number }
+interface ActivityRow { date: string; recalls: number; orals: number }
 
 export async function essayCardsLauncherSummary(): Promise<LauncherSummary | null> {
   const [due, activity] = await Promise.all([
@@ -34,7 +34,7 @@ export async function essayCardsLauncherSummary(): Promise<LauncherSummary | nul
     const days = activity.rows.slice(-WEEKS * 7);
     const last = days.length - 1;
     summary.meta = `${days[last].recalls} reviewed today`;
-    const dots = days.map((d, i) => ({ filled: d.recalls > 0, today: i === last }));
+    const dots = days.map((d, i) => ({ filled: d.recalls > 0, ring: d.orals > 0, today: i === last }));
     const groups = [];
     for (let i = 0; i < dots.length; i += 7) groups.push(dots.slice(i, i + 7));
     summary.dots = groups;

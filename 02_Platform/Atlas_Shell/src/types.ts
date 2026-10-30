@@ -64,7 +64,9 @@ export type LauncherTone = 'amber' | 'green' | 'grey' | 'violet' | 'rose' | 'blu
 /** One dot in a launcher activity strip. */
 export interface LauncherDot {
   filled: boolean;
-  /** Marks the current day; rendered with a ring. */
+  /** Extra emphasis ring (app-defined meaning, e.g. an oral exam that day). */
+  ring?: boolean;
+  /** Marks the current day; rendered slightly larger. */
   today?: boolean;
 }
 

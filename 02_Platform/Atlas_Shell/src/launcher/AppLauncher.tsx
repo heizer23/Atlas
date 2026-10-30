@@ -28,6 +28,7 @@ function DotStrip({ groups }: { groups: LauncherDot[][] }): JSX.Element {
               className={
                 'shell-dots__dot' +
                 (dot.filled ? ' shell-dots__dot--filled' : '') +
+                (dot.ring ? ' shell-dots__dot--ring' : '') +
                 (dot.today ? ' shell-dots__dot--today' : '')
               }
             />

@@ -598,7 +598,8 @@
   background: var(--md-sys-color-surface-variant);
 }
 .shell-dots__dot--filled { background: var(--shell-dot-on, #3F8F63); }
-.shell-dots__dot--today { box-shadow: 0 0 0 1.5px #FFFFFF, 0 0 0 3px var(--shell-dot-on, #3F8F63); }
+.shell-dots__dot--ring { box-shadow: 0 0 0 1.5px #FFFFFF, 0 0 0 3px var(--shell-dot-on, #3F8F63); }
+.shell-dots__dot--today { transform: scale(1.35); }
 /* Single-group strips (Habits) keep natural size instead of stretching. */
 .shell-dots__group:only-child { flex: 0 1 auto; justify-content: flex-start; gap: 6px; }
 .shell-dots__group:only-child .shell-dots__dot { flex: 0 0 12px; }
