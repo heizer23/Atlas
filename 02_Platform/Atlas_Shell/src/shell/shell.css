@@ -570,36 +570,38 @@
 .shell-app-icon--blue   { --tone-bg: #D8E4F5; }
 .shell-app-icon--teal   { --tone-bg: #D3EBE3; }
 
-/* Activity dot strip — dots shrink to fit the row instead of overflowing. */
+/* Activity dot strip — groups share the row width; dots fill their group (capped), so the strip spans the row. */
 .shell-dots {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 .shell-dots__group {
-  display: inline-flex;
-  gap: 3px;
+  display: flex;
+  flex: 1 1 0;
+  justify-content: space-between;
+  gap: 2px;
   min-width: 0;
-  padding-right: 8px;
+  padding-right: 6px;
   border-right: 1px solid var(--md-sys-color-outline-variant);
 }
 .shell-dots__group:last-child { border-right: none; padding-right: 0; }
 .shell-dots__dot {
-  flex: 0 1 8px;
-  min-width: 3px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 14px;
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--md-sys-color-surface-variant);
 }
 .shell-dots__dot--filled { background: var(--shell-dot-on, #3F8F63); }
 .shell-dots__dot--today { box-shadow: 0 0 0 1.5px #FFFFFF, 0 0 0 3px var(--shell-dot-on, #3F8F63); }
-@media (min-width: 600px) {
-  .shell-dots__dot { flex-basis: 10px; }
-  .shell-dots__group { gap: 4px; }
-}
+/* Single-group strips (Habits) keep natural size instead of stretching. */
+.shell-dots__group:only-child { flex: 0 1 auto; justify-content: flex-start; gap: 6px; }
+.shell-dots__group:only-child .shell-dots__dot { flex: 0 0 12px; }
 
 /* ─── ShellNotFound ──────────────────────────────────────────────────────────── */
 
