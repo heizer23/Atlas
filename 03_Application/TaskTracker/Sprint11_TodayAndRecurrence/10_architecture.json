@@ -1,0 +1,434 @@
+{
+  "sprint_note": "Adds a read-only Today/Upcoming agenda endpoint (GET /api/tasks/agenda) and recurring tasks (4 new columns, recurrence fields on POST/PATCH, atomic successor spawn on completion), plus the matching Today tab, Repeat control and next-date toast.",
+  "component_name": "tasktracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Lightweight single-user task management application that creates, tracks, labels, schedules and recurs tasks, shows a Today/Upcoming agenda, persists tasks in Postgres and delegates label management to LabelEngine, user preferences to PreferenceStore, and calendar blocking to CalendarConnector.",
+  "classification": {
+    "why_application": "Owns task domain state (tasktracker.tasks) and task-specific rules: agenda bucketing by effective date, recurrence date arithmetic, successor spawning, and recurrence validation. Contains no reusable infrastructure.",
+    "non_goals": [
+      "Multi-user or authentication — single-user only",
+      "Server-side label filtering on GET /tasks or GET /tasks/agenda — label filtering stays client-side",
+      "Label storage — delegated to LabelEngine",
+      "Preference storage — delegated to PreferenceStore",
+      "Reverse calendar sync — changes in Google Calendar do not flow back to Atlas",
+      "LinkingEngine integration — task.id is used directly as atlas_event_id",
+      "Retry logic for failed calendar or label calls",
+      "Background job scheduler — auto-promotion stays lazy on fetch",
+      "[NEW] Weekday sets, end dates/counts, nth-weekday rules (future work)",
+      "[NEW] Skipping one occurrence, editing 'this and future'",
+      "[NEW] Reminders/notifications, drag-reorder, quick-add parsing",
+      "[NEW] HabitTracker integration — streak-style habits stay in HabitTracker; no cross-app calls",
+      "[NEW] Today view entries for undated in_progress tasks",
+      "[NEW] Calendar cleanup on task DELETE (still deferred from Sprint10)"
+    ],
+    "not_platform": "Agenda bucketing, recurrence arithmetic and successor spawning encode TaskTracker domain meaning (effective date, task statuses, task_type) and are not reusable platform capability. Label copy and calendar blocker creation reuse existing platform services via their existing HTTP APIs."
+  },
+  "contracts": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL — POST /api/objects/labels/batch, GET /api/labels, GET /api/labels/used?object_type=task, GET /api/objects/{task_id}/labels, POST /api/objects/{task_id}/labels, DELETE /api/objects/{task_id}/labels/{label_id}",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL — GET and PUT /api/preferences/tasktracker.task-list/label_filter",
+      "CalendarConnector HTTP API at CALENDAR_CONNECTOR_URL (optional, empty = disabled) — POST/PATCH/DELETE /api/calendar/events",
+      "Shared Atlas Postgres instance (02_Platform/Postgres) — connection via ATLAS_PG_* / DATABASE_URL",
+      "platform_contracts — ColumnSchema, Dataset, DatasetMeta from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling — api_error helper, exception handlers, request timing, structured logging"
+    ],
+    "provides": [
+      "GET /api/tasks — list tasks (params status, view in {active, pending_board, scheduled}, task_type, parent_task_id, page, page_size); labels embedded; row shape per exposed_surfaces",
+      "[NEW] GET /api/tasks/agenda — bounded agenda (overdue + today + next 7 days) as one flat Dataset, rows carry agenda_bucket and agenda_date; no parameters",
+      "[CHANGED] POST /api/tasks — also accepts recurrence_freq, recurrence_interval, recurrence_mode",
+      "[CHANGED] PATCH /api/tasks/{task_id} — also accepts the three recurrence fields; completing a recurring task spawns exactly one successor atomically; response row carries recurrence_next_date when a successor was spawned by this request",
+      "DELETE /api/tasks/{task_id} — deletes task; returns empty Dataset",
+      "Label proxy endpoints (search, used, per-task CRUD, set) — thin forwards to LabelEngine",
+      "Preference proxy endpoints (label_filter GET/PUT) — thin forwards to PreferenceStore"
+    ],
+    "invariants": [
+      "All GET endpoints return Dataset | ApiError per R-CON-BP-04",
+      "task.id is a UUID generated at insert time; never caller-supplied",
+      "task.status in {open, in_progress, scheduled, pending, done}; task.priority in {low, medium, high}; effort_hours >= 0; title non-blank",
+      "On POST, status is restricted to open, pending, or scheduled (done is never a creation state, so POST never spawns)",
+      "PATCH distinguishes field omitted (no change) from explicit null (clear) via model_fields_set",
+      "task.updated_at is set server-side to now() on every PATCH",
+      "Calendar sync is best-effort and runs only after a successful DB commit",
+      "[NEW] Effective date (agenda) = scheduled_at when status = 'scheduled', otherwise due_date. This is the single definition used by GET /api/tasks/agenda.",
+      "[NEW] Agenda time authority is the server: 'today' = Postgres current_date, evaluated once inside the agenda query transaction. The client never computes buckets.",
+      "[NEW] Agenda contains only tasks with status != 'done', task_type != 'training_unit', non-null effective date, and effective date <= today + 7 days. Bucket: effective < today = overdue; = today = today; > today = upcoming.",
+      "[NEW] A task is recurring iff recurrence_freq is not null. Recurring tasks have task_type = 'normal' (API-enforced). recurrence_mode = 'fixed' requires due_date or scheduled_at at write time unless the resulting status is 'done'.",
+      "[NEW] When recurrence_freq resolves to null, recurrence_interval is stored as 1 and recurrence_mode as 'fixed' regardless of values sent.",
+      "[NEW] A successor is spawned only on the PATCH that transitions status from non-done to done, when the post-update row has recurrence_freq not null and recurrence_next_id null. The source row is read with SELECT ... FOR UPDATE, so concurrent completions cannot spawn two successors.",
+      "[NEW] Successor INSERT, source recurrence_next_id UPDATE and the status UPDATE commit in one transaction; either all persist or none.",
+      "[NEW] The successor is an independent row: status 'open' (or 'scheduled' when the source had a schedule date), completed_at null, actual_duration_minutes null, recurrence_next_id null, task_type 'normal', same title/description/priority/effort_hours/parent_task_id/recurrence_* as the post-update source row.",
+      "[NEW] Next-date rule is defined once by compute_next_date in backend/recurrence.py (see 10_scaffolding.json); the 'today' input comes from the DB (select current_date) in the spawn transaction.",
+      "[NEW] Undo (done -> other) and re-done never spawn a second successor while recurrence_next_id is non-null. Deleting the successor nulls the pointer (ON DELETE SET NULL), after which a re-done of the source spawns a new successor.",
+      "[NEW] Clearing recurrence (recurrence_freq: null) does not touch recurrence_next_id.",
+      "[NEW] recurrence_label is derived server-side by format_recurrence_label on every task row; null when not recurring."
+    ],
+    "failure_modes": [
+      "INVALID_FILTER — GET /tasks with unknown status, view or task_type — 400 ApiError",
+      "INVALID_PARAM — GET /tasks with page < 1 — 400 ApiError",
+      "VALIDATION_ERROR — POST or PATCH with invalid field values, status=scheduled without scheduled_at, no fields provided — 400 ApiError",
+      "[NEW] VALIDATION_ERROR — recurrence_freq not in {daily, weekly, monthly}; recurrence_mode not in {fixed, after_completion}; recurrence_interval < 1; recurrence_interval or recurrence_mode explicitly null (not nullable); recurring with task_type != 'normal'; recurrence_mode 'fixed' with neither due_date nor scheduled_at while resulting status != 'done' — 400 ApiError",
+      "NOT_FOUND — PATCH or DELETE on unknown task_id — 404 ApiError",
+      "[NEW] Successor spawn DB failure — whole PATCH rolls back (source stays un-done), error surfaced through the platform exception handler as 500 ApiError",
+      "[NEW] LabelEngine unreachable during successor label copy — warning logged, successor exists without labels, PATCH succeeds",
+      "[NEW] CalendarConnector failure on successor blocker create — warning logged, PATCH succeeds",
+      "LabelEngine unreachable on GET /tasks or GET /tasks/agenda — labels defaults to empty list; request succeeds",
+      "LabelEngine unreachable on GET /tasks/labels/used — empty Dataset",
+      "LabelEngine/PreferenceStore unreachable on proxy endpoints — pass-through status and body",
+      "CALENDAR_SYNC_WARNING — CalendarConnector unreachable or non-2xx — warning logged, task response unaffected",
+      "DATABASE_UNAVAILABLE — Postgres unreachable — startup logs error; requests fail until DB reachable"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "platform_contracts.Dataset",
+      "platform_contracts.DatasetMeta",
+      "platform_contracts.ColumnSchema"
+    ],
+    "provides": [
+      "[CHANGED] TaskRow — authoritative shape is exposed_surfaces[GET /api/tasks].row_shape; consumed by PersonalDevelopment frontend via /tasks, /tasks/training-units, POST/PATCH (all new fields additive, no removals or renames)"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "LabelEngine HTTP API at LABEL_ENGINE_URL — httpx.Client with 5s timeout",
+      "PreferenceStore HTTP API at PREFERENCE_STORE_URL — httpx.Client with 5s timeout",
+      "CalendarConnector HTTP API at CALENDAR_CONNECTOR_URL — httpx.Client with 5s timeout; all errors caught and logged",
+      "psycopg2.pool.SimpleConnectionPool via get_db() — RealDictCursor",
+      "platform_contracts from 02_Platform/packages/platform_contracts/contracts.py",
+      "platform_errorhandling from 02_Platform/packages/platform_errorhandling"
+    ],
+    "provides": [
+      "HTTP API mounted at /api (FastAPI, uvicorn); no new ports, env vars or hosts this sprint",
+      "CORS: allow_origin_regex=http://localhost:\\d+",
+      "Allowed methods: GET, POST, PATCH, DELETE"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks",
+        "purpose": "List tasks with optional status or view filter and pagination; labels embedded. Behaviour unchanged except rows now include recurrence fields.",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed",
+        "row_shape": {
+          "id": "str (UUID)",
+          "title": "str",
+          "description": "str|null",
+          "status": "str",
+          "priority": "str",
+          "due_date": "str|null (ISO date)",
+          "effort_hours": "float|null",
+          "created_at": "str (ISO date)",
+          "updated_at": "str (ISO date)",
+          "task_type": "str",
+          "parent_task_id": "str|null",
+          "actual_duration_minutes": "int|null",
+          "completed_at": "str|null (ISO datetime)",
+          "scheduled_at": "str|null (ISO date)",
+          "labels": "[{id, name, attached_at}]",
+          "recurrence_freq": "[NEW] str|null (daily|weekly|monthly)",
+          "recurrence_interval": "[NEW] int >= 1 (1 when not recurring)",
+          "recurrence_mode": "[NEW] str (fixed|after_completion; 'fixed' when not recurring)",
+          "recurrence_next_id": "[NEW] str|null (UUID of spawned successor)",
+          "recurrence_label": "[NEW] str|null (derived; null when not recurring)",
+          "recurrence_next_date": "[NEW] str|null (ISO date; non-null ONLY in the single-row PATCH response that spawned a successor, i.e. successor scheduled_at when scheduled else due_date; null in every other response)"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/agenda",
+        "purpose": "Return the agenda window (overdue, today, next 7 days) as one flat Dataset ordered for direct sectioned rendering. Runs auto-promotion first (and commits it), then one SELECT. Parameters: none (any query string is ignored). Pagination: none (window is bounded). Ordering: agenda_date ASC, then priority high>medium>low, then created_at ASC, then id ASC. Grouping: server returns a flat list; client sections by agenda_bucket and groups upcoming rows by agenda_date; days without tasks are not emitted (no zero-fill). Empty result: 200 with rows [] and meta.total 0. Totals: client sums effort_hours (null = 0) over displayed rows per bucket and per upcoming day.",
+        "ui_contract": "Dataset | ApiError",
+        "change": "new",
+        "row_shape": {
+          "extends": "GET /api/tasks row_shape",
+          "agenda_bucket": "str (overdue|today|upcoming)",
+          "agenda_date": "str (ISO date; the effective date)"
+        }
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/tasks",
+        "purpose": "Create a task. Body additionally accepts recurrence_freq (str|null, default null), recurrence_interval (int, default 1), recurrence_mode (str, default 'fixed'). Recurrence validation per contracts.failure_modes. Returns created task as single-row Dataset.",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/tasks/{task_id}",
+        "purpose": "Partial update. Null-vs-omit for recurrence fields: recurrence_freq omitted = unchanged, value = set, explicit null = clear recurrence (interval/mode normalised to 1/'fixed', recurrence_next_id untouched). recurrence_interval and recurrence_mode omitted = unchanged, value = set, explicit null = VALIDATION_ERROR (columns are NOT NULL). due_date explicit null now clears due_date (previously ignored). Frontend always sends all three recurrence fields from the edit form; 'None' sends recurrence_freq: null, recurrence_interval: 1, recurrence_mode: 'fixed'. When this request transitions the task to done and a successor is spawned, the response row's recurrence_next_date is set. Returns single-row Dataset.",
+        "ui_contract": "Dataset | ApiError",
+        "change": "changed"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/tasks/{task_id}",
+        "purpose": "Delete a task. Returns empty Dataset on success.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/search",
+        "purpose": "Search labels by name prefix via LabelEngine.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/labels/used",
+        "purpose": "All labels attached to at least one task; empty Dataset on LabelEngine failure.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/{task_id}/labels",
+        "purpose": "Labels attached to one task via LabelEngine.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/tasks/{task_id}/labels",
+        "purpose": "Attach a label by name via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/tasks/{task_id}/labels/{label_id}",
+        "purpose": "Detach a label via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/{task_id}/labels",
+        "purpose": "Replace all labels on a task via LabelEngine.",
+        "ui_contract": "ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/tasks/preferences/label_filter",
+        "purpose": "Retrieve stored label filter from PreferenceStore.",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/tasks/preferences/label_filter",
+        "purpose": "Persist label filter to PreferenceStore.",
+        "ui_contract": "ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "startup_init",
+      "description": "On FastAPI startup: init_pool() then init_schema() executes schema.sql idempotently (now includes the four recurrence columns). Errors logged; application continues.",
+      "inputs": ["ATLAS_PG_* or DATABASE_URL", "CALENDAR_CONNECTOR_URL (may be empty)", "ATLAS_BASE_URL", "schema.sql"],
+      "outputs": ["live connection pool", "tasktracker.tasks with recurrence columns"]
+    },
+    {
+      "step": 2,
+      "name": "task_list",
+      "description": "[CHANGED] GET /tasks unchanged except the shared TASK_SELECT_COLS now include the four recurrence columns and row_to_dict adds recurrence_label / recurrence_next_date (null).",
+      "inputs": ["status", "view", "task_type", "parent_task_id", "page", "page_size", "server CURRENT_DATE"],
+      "outputs": ["Dataset with task rows and embedded labels"]
+    },
+    {
+      "step": 3,
+      "name": "task_create",
+      "description": "[CHANGED] POST /tasks validates existing fields plus recurrence (step 10), inserts the row including recurrence_* (interval/mode normalised to 1/'fixed' when freq is null), commits, then calendar create when status=scheduled. Returns single-row Dataset.",
+      "inputs": ["TaskCreate body incl. recurrence_*"],
+      "outputs": ["Dataset (inserted row)", "optional calendar create"]
+    },
+    {
+      "step": 4,
+      "name": "task_update",
+      "description": "[CHANGED] PATCH /tasks/{task_id}: (a) body-only validation incl. recurrence enums/interval (step 10); (b) build field set via model_fields_set (due_date and the three recurrence fields use model_fields_set; null semantics per exposed_surfaces PATCH); (c) open transaction, read snapshot with SELECT * ... FOR UPDATE (404 if absent); (d) merged-state recurrence validation (step 10); (e) compute completed_at as before; (f) UPDATE ... RETURNING * ; (g) if spawn condition holds run step 11 inside the same transaction; (h) single commit; (i) post-commit side effects: existing calendar create/update/delete decisions from the pre-update snapshot, then step 12 for the successor. Returns single-row Dataset (with recurrence_next_date when spawned) or 404.",
+      "inputs": ["task_id", "TaskUpdate body", "locked pre-update snapshot (all columns)"],
+      "outputs": ["Dataset (updated row, optional recurrence_next_date) | 404 ApiError", "optional successor row", "post-commit calendar/label side effects"]
+    },
+    {
+      "step": 5,
+      "name": "task_delete",
+      "description": "Unchanged. DELETE removes the row; FK ON DELETE SET NULL clears any recurrence_next_id pointing at it. No calendar cleanup (deferred).",
+      "inputs": ["task_id"],
+      "outputs": ["empty Dataset | 404 ApiError"]
+    },
+    {
+      "step": 6,
+      "name": "calendar_sync",
+      "description": "Unchanged helper _sync_calendar_event(task_id, title, scheduled_at, description, action). Now also invoked for the successor with action 'create'.",
+      "inputs": ["task_id", "title", "scheduled_at: date", "description", "action"],
+      "outputs": ["none (side effect, errors swallowed)"]
+    },
+    {
+      "step": 7,
+      "name": "label_proxy",
+      "description": "Unchanged thin proxies to LabelEngine with object_type=task.",
+      "inputs": ["task_id / label_name / label_id"],
+      "outputs": ["Dataset or pass-through"]
+    },
+    {
+      "step": 8,
+      "name": "preference_proxy",
+      "description": "Unchanged thin proxies to PreferenceStore.",
+      "inputs": ["label_ids"],
+      "outputs": ["Dataset / PreferenceRecord / ApiError"]
+    },
+    {
+      "step": 9,
+      "name": "agenda_query",
+      "description": "[NEW] GET /tasks/agenda: (1) get_db connection; (2) _run_auto_promotion(conn) then conn.commit() so promotion persists (existing list views do not commit, see risks); (3) one SELECT of TASK_SELECT_COLS plus effective date as agenda_date, filtered by status != 'done', task_type != 'training_unit', effective date not null, effective date <= current_date + 7; agenda_bucket derived from comparing effective date with current_date in the same statement; ordered per exposed_surfaces; (4) fetch_labels_for_tasks batch (failure -> empty labels); (5) build Dataset with AGENDA_SCHEMA, object_type 'task', label 'Agenda', total = row count, page 1, page_size max(total, 1), row_actions ['edit','delete'].",
+      "inputs": ["server current_date (Postgres)", "tasktracker.tasks", "LabelEngine batch"],
+      "outputs": ["Dataset (flat rows with agenda_bucket, agenda_date) | ApiError"]
+    },
+    {
+      "step": 10,
+      "name": "recurrence_validation",
+      "description": "[NEW] Body-level: freq in VALID_RECURRENCE_FREQ when not null; mode in VALID_RECURRENCE_MODE; interval >= 1; explicit null interval/mode rejected. Merged-state (PATCH: snapshot overlaid with body; POST: body): if resulting freq not null then task_type must be 'normal'; and if mode is 'fixed' and resulting status != 'done' then due_date or scheduled_at must be non-null. Resulting freq null -> interval/mode forced to 1/'fixed'. All failures return VALIDATION_ERROR via api_error.",
+      "inputs": ["body recurrence fields", "snapshot (PATCH)", "resulting status/task_type/due_date/scheduled_at"],
+      "outputs": ["normalised recurrence values | 400 ApiError"]
+    },
+    {
+      "step": 11,
+      "name": "recurrence_spawn",
+      "description": "[NEW] Inside the PATCH transaction after the status UPDATE, when pre.status != 'done' and post.status == 'done' and post.recurrence_freq is not null and post.recurrence_next_id is null: (1) today = select current_date; (2) schedule_date = post.scheduled_at, else pre.scheduled_at if pre.status == 'scheduled', else none (the edit form clears scheduled_at on save, hence the snapshot fallback); (3) anchor = schedule_date if present else post.due_date (may be none); (4) next = compute_next_date(anchor, freq, interval, mode, today); (5) if schedule_date present: successor status 'scheduled', scheduled_at = next, due_date = post.due_date + (next - schedule_date) in days when post.due_date present else null; otherwise successor status 'open', scheduled_at null, due_date = next; (6) INSERT successor (new uuid) with fields per invariants; (7) UPDATE source SET recurrence_next_id = successor.id (no updated_at bump beyond the one already applied). No spawn if any condition fails (including done->done PATCH, non-recurring, freq cleared in the same request, pointer already set).",
+      "inputs": ["pre-update snapshot", "post-update row (RETURNING *)", "db current_date"],
+      "outputs": ["successor row", "next date for response recurrence_next_date"]
+    },
+    {
+      "step": 12,
+      "name": "successor_side_effects",
+      "description": "[NEW] After commit, only when a successor was spawned: (a) if successor is scheduled, _sync_calendar_event(successor_id, title, next, description, 'create') (best-effort); (b) _copy_labels_best_effort(source_id, successor_id): GET source labels from LabelEngine, POST each label name to the successor with object_type=task; any exception logged and swallowed. Order relative to the source's own calendar delete is irrelevant (different event ids).",
+      "inputs": ["source id", "successor id/title/description/scheduled_at"],
+      "outputs": ["none (side effects only)"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/Postgres", "role": "Shared Postgres; TaskTracker owns the tasktracker schema"},
+      {"component": "02_Platform/LabelEngine", "role": "All label data incl. copying labels onto recurrence successors"},
+      {"component": "02_Platform/PreferenceStore", "role": "Persists label filter selection"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset, DatasetMeta, ColumnSchema"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error helper, handlers, timing, logging"}
+    ],
+    "internal_optional": [
+      {"component": "02_Platform/CalendarConnector", "role": "Calendar blocker for scheduled tasks and scheduled recurrence successors; best-effort"}
+    ],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn", "role": "ASGI server", "reuse_existing": true},
+      {"name": "psycopg2-binary", "role": "Postgres driver", "reuse_existing": true},
+      {"name": "pydantic", "role": "Request body validation", "reuse_existing": true},
+      {"name": "httpx", "role": "HTTP client for LabelEngine, PreferenceStore, CalendarConnector", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Frontend calling LabelEngine, PreferenceStore, or CalendarConnector directly",
+      "Calendar or label-copy failures failing the task API response",
+      "Any call to or from HabitTracker; no shared tables or contracts with it",
+      "Third-party date libraries (dateutil etc.) for month arithmetic — use stdlib date plus calendar.monthrange in backend/recurrence.py",
+      "Client-side computation of agenda buckets or of 'today' for the agenda",
+      "Spawning successors from a background job or on read — spawn happens only inside the completing PATCH transaction",
+      "Re-implementing label storage or preference storage in TaskTracker"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "runtime_schema_path": "03_Application/TaskTracker/schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state",
+    "schema_name": "tasktracker",
+    "table_name": "tasktracker.tasks",
+    "notes": "[CHANGED] Four new columns on tasktracker.tasks (recurrence_freq, recurrence_interval, recurrence_mode, recurrence_next_id). The implementer appends the Sprint11 block of 10_schema.sql to the runtime schema.sql and writes the same statements to migrations/011_recurrence.sql. No new tables, no new indexes (table is small; agenda filter is a seq-scan-acceptable bounded query)."
+  },
+  "deferrals": {
+    "application_implementer": [
+      "[NEW] Create backend/recurrence.py per 10_scaffolding.json (add_months with day clamp, advance_date, compute_next_date, format_recurrence_label, VALID_RECURRENCE_FREQ/MODE). compute_next_date for 'fixed' computes anchor advanced by k*interval units from the ORIGINAL anchor for the smallest k >= 1 giving a date > today (no cumulative drift: Jan 31 monthly stays on day 31 where the month allows); 'after_completion' (or fixed with anchor None) returns advance_date(today, freq, interval, 1).",
+      "[NEW] Append the Sprint11 block of 10_schema.sql to schema.sql and add migrations/011_recurrence.sql with identical idempotent statements.",
+      "[CHANGED] In tasks.py promote the local select_cols to module constant TASK_SELECT_COLS (add the four recurrence columns); extend TASK_SCHEMA, row_to_dict (str() recurrence_next_id, add recurrence_label via format_recurrence_label, default recurrence_next_date None) and single_row_dataset(row, extra=None) so PATCH can inject recurrence_next_date.",
+      "[NEW] Add GET /tasks/agenda (list_agenda) per internal_flow step 9; register it so it is not shadowed by any '/{task_id}...' route; commit after _run_auto_promotion.",
+      "[CHANGED] TaskCreate/TaskUpdate gain recurrence_freq, recurrence_interval, recurrence_mode; apply null-vs-omit exactly as written in exposed_surfaces PATCH; switch due_date handling in update_task to model_fields_set so explicit null clears it.",
+      "[CHANGED] update_task: SELECT * ... FOR UPDATE snapshot, merged-state validation, spawn inside the same transaction, single commit, post-commit calendar and label copy per steps 4, 11, 12. Existing calendar create/update/delete decisions must keep using the pre-update snapshot status.",
+      "[NEW] Implement _spawn_successor and _copy_labels_best_effort (private in tasks.py).",
+      "[CHANGED] Extend tests/fixtures.sql only additively (use dates relative to current_date; existing fixture fix-scheduled-future lands on today+7 and fix-scheduled-further on today+14, so agenda tests must account for them); add tests/test_agenda.py, tests/test_recurrence.py."
+    ],
+    "ui_implementer": [
+      "[CHANGED] shellConfig.ts: add nav entry 'Today' (id tasks-today, path /tasks, order 1) to mobilePrimaryNav and desktopNav; move Active to path /tasks/active (order 2) and renumber Scheduled/Pending/Done to 3/4/5.",
+      "[CHANGED] ShellEntry.tsx TasksPage: ViewTab gains 'today'; pathname mapping: /tasks/active -> active, /tasks/scheduled, /tasks/pending, /tasks/done as before, any other path (including /tasks and /tasks/<unknown>) -> today. viewFetchUrl('today') = '/tasks/agenda'.",
+      "[NEW] Today view: sections in order Overdue, Today, Next 7 days from agenda_bucket; Today header shows summed effort of displayed today rows (null = 0, formatEffort); upcoming rows grouped by agenda_date with a header showing formatScheduledAt(agenda_date) and that day's effort sum; sections with no rows are not rendered; empty state text 'Nothing due' when no section has rows. Rows reuse TaskCard (overdue rows show agenda_date via a new optional date-hint prop). Apply the existing client-side label filter before sectioning and summing. Do not compute today/tomorrow on the client.",
+      "[NEW] Completing a task in Today view: on PATCH success remove the row from local state immediately (no skeleton), then silently refetch /tasks/agenda to pick up a spawned successor.",
+      "[NEW] RepeatControl in TaskCreatePanel and TaskDetailEdit: select None/Daily/Weekly/Monthly, number input interval (min 1, shown only when not None), checkbox 'From completion date' (maps to after_completion). Payload (R-CON-AL-05): None -> recurrence_freq null, recurrence_interval 1, recurrence_mode 'fixed' (always sent on edit, never omitted); otherwise the chosen values. Empty/invalid interval input falls back to 1. Persisted state of a cleared control = recurrence_freq null, interval 1, mode fixed. Edit form initialises from the row's recurrence_* fields. Create panel sends the three fields on POST.",
+      "[NEW] TaskCard (all tabs) shows a repeat icon (material-symbols 'repeat') with title/tooltip recurrence_label when recurrence_label is non-null; TaskDetailEdit shows recurrence_label under the Repeat control.",
+      "[NEW] Toast 'Next: <formatted recurrence_next_date>' (simple local component in ShellEntry.tsx, auto-dismiss ~4s) shown when a PATCH response row has recurrence_next_date non-null; wire in handleStatusToggle (all tabs) and in the TaskDetailEdit save path via onSaved.",
+      "[CHANGED] TaskRow interface gains recurrence_freq, recurrence_interval, recurrence_mode, recurrence_next_id, recurrence_label, recurrence_next_date, agenda_bucket, agenda_date (all optional/nullable).",
+      "[NEW] Write tests/ui/today_recurrence.spec.ts covering the [UI] scenarios in 10_test_spec.md (shared atlas-playwright container, http://atlas-shell)."
+    ],
+    "test_writer": [
+      "[NEW] Map every scenario in 10_test_spec.md to a test in tests/test_agenda.py, tests/test_recurrence.py or tests/ui/today_recurrence.spec.ts using the scenario name as traceability link.",
+      "[NEW] Month-end and catch-up date arithmetic scenarios must exercise the pure date function with explicit anchor/today values (not server date); API-level scenarios must use dates relative to the DB current_date.",
+      "[NEW] Mock LabelEngine and CalendarConnector at the HTTP-client boundary (as in tests/test_calendar_blocker.py) for label-copy and blocker scenarios."
+    ],
+    "reviewer": [
+      "[NEW] Verify successor INSERT, recurrence_next_id UPDATE and status UPDATE share one transaction and one commit, and that the snapshot read uses FOR UPDATE.",
+      "[NEW] Verify no code path spawns on POST, on done->done, when freq cleared in the same request, or when recurrence_next_id is already set.",
+      "[NEW] Verify agenda endpoint commits auto-promotion and that existing views' behaviour is byte-for-byte unchanged apart from added row fields.",
+      "[NEW] Verify explicit-null handling: recurrence_freq null clears; recurrence_interval/mode null -> 400; due_date null clears; omitted fields untouched.",
+      "[NEW] Verify no new ports, env vars, hosts or third-party packages were introduced (R-OPS-BP-02).",
+      "[NEW] Verify PersonalDevelopment callers (POST/PATCH /tasks, GET /tasks?task_type=...) still work with the additive fields."
+    ]
+  },
+  "deferred_decisions": [
+    "Weekday sets, end dates/counts, nth-weekday recurrence (explicitly future work per draft)",
+    "Calendar cleanup on task DELETE (carried over from Sprint10)",
+    "Deep link route /tasks/{task_id} (Sprint10 calendar descriptions link there); with this sprint any unknown /tasks/<x> path lands on the Today tab",
+    "Whether successor spawning should also copy link relations from LinkingEngine (not copied this sprint)"
+  ],
+  "risks": [
+    {
+      "risk": "Literal effective-date definition hides scheduled tasks due today: auto-promotion turns status 'scheduled' (scheduled_at <= today) into 'in_progress', whose effective date is due_date, so a scheduled-for-today task without due_date does not appear in Today, and the Overdue/Today buckets can never contain status 'scheduled' rows",
+      "impact": "A task the user scheduled for today may be invisible in the Today view. Implemented literally per draft; fix is a one-expression change (effective date = coalesce(scheduled_at, due_date) for non-done tasks) because the expression is defined once in internal_flow step 9. See open_questions."
+    },
+    {
+      "risk": "Existing list_tasks views call _run_auto_promotion but never commit; get_db returns the connection to the pool, which rolls back an open transaction, so promotion appears applied in the response but is not persisted",
+      "impact": "Unverified on a live DB by the designer. The agenda endpoint commits explicitly so its promotion persists, which makes agenda and other views disagree about stored status until the other views are touched. Existing views are intentionally unchanged this sprint (draft: existing views/tests unaffected)."
+    },
+    {
+      "risk": "Edit form clears scheduled_at on save when status != 'scheduled'; completing a scheduled recurring task via the edit form would lose the schedule date",
+      "impact": "Mitigated by the snapshot fallback in recurrence_spawn step (pre.scheduled_at used when pre.status == 'scheduled'); a promoted in_progress task whose scheduled_at was already cleared falls back to due_date anchor or, with no date, to today + interval."
+    },
+    {
+      "risk": "Month arithmetic computed from the original anchor (not cumulatively) intentionally differs from a naive 'keep adding' loop",
+      "impact": "Results differ only after clamping (Jan 31 -> Feb 28 -> Mar 31 instead of Mar 28); this is the same 'first date > today' outcome the draft asks for, without day-of-month drift."
+    },
+    {
+      "risk": "Deleting a successor nulls the source pointer, so a later undo+redo of the source spawns a fresh successor",
+      "impact": "Acceptable for a single-user app; idempotency guard only protects against duplicate live successors."
+    },
+    {
+      "risk": "Label copy and calendar create happen after commit and are best-effort",
+      "impact": "A successor can exist without labels or without a calendar blocker if those services are down; no retry this sprint."
+    },
+    {
+      "risk": "Moving Active from /tasks to /tasks/active changes the default landing path",
+      "impact": "Any bookmark or external link to /tasks now lands on Today. No other repository consumer of the Active path was found (searched 02_Platform and 03_Application for '/tasks' route usage)."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should the effective date for promoted tasks (status in_progress with scheduled_at retained by promotion) fall back to scheduled_at so that tasks scheduled for today stay visible in Today? Design implements the draft literally (scheduled_at only while status='scheduled').",
+      "owner": "product"
+    },
+    {
+      "question": "Should dated tasks with status 'pending' appear in the agenda? Draft excludes only done and training_unit, so the design includes them (and includes task_type 'training_session').",
+      "owner": "product"
+    },
+    {
+      "question": "Confirm that persisting auto-promotion from the agenda endpoint (explicit commit) is acceptable while the existing active/pending_board views keep their current non-committing behaviour, or should those be fixed in a follow-up sprint?",
+      "owner": "product"
+    },
+    {
+      "question": "The draft says PATCH explicit null clears nullable fields but the current implementation ignores due_date: null. The design fixes due_date null-clearing (needed so removing a date removes a task from the agenda and from fixed-mode recurrence). Confirm no caller depends on due_date: null being ignored (grep of 03_Application/PersonalDevelopment/frontend found no due_date usage).",
+      "owner": "implementer"
+    }
+  ]
+}

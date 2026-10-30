@@ -46,6 +46,10 @@ def init_schema() -> None:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(ddl)
+        # schema.sql contains its own begin/commit; psycopg2 would otherwise believe a
+        # transaction is still open and run this pooled connection's next statements in
+        # autocommit mode. commit() resynchronises it (needed for atomic multi-statement requests).
+        conn.commit()
 
 
 @contextmanager

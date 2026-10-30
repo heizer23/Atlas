@@ -1,0 +1,566 @@
+{
+  "sprint_note": "Adds backend/recurrence.py, GET /tasks/agenda, recurrence fields and spawn logic in tasks.py, migration 011, Today tab / Repeat control / toast in the frontend, and new tests.",
+  "component_name": "tasktracker",
+  "target_root": "03_Application/TaskTracker",
+  "directories": [
+    "03_Application/TaskTracker",
+    "03_Application/TaskTracker/backend",
+    "03_Application/TaskTracker/backend/routers",
+    "03_Application/TaskTracker/migrations",
+    "03_Application/TaskTracker/src",
+    "03_Application/TaskTracker/tests",
+    "[NEW] 03_Application/TaskTracker/tests/ui",
+    "03_Application/TaskTracker/00_architecture"
+  ],
+  "files": [
+    {
+      "path": "03_Application/TaskTracker/pyproject.toml",
+      "stub_kind": "toml",
+      "role": "Package metadata and dependencies — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "Container image definition — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/compose.yml",
+      "stub_kind": "yaml",
+      "role": "Docker Compose service definition — unchanged (no new env vars or ports).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/schema.sql",
+      "stub_kind": "sql",
+      "role": "Canonical runtime DDL. Append the Sprint11 block of 10_schema.sql (four recurrence columns).",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/migrations/011_recurrence.sql",
+      "stub_kind": "sql",
+      "role": "Idempotent migration adding recurrence_freq, recurrence_interval, recurrence_mode, recurrence_next_id; same statements as the Sprint11 block of 10_schema.sql, wrapped in begin/commit.",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/run_local.py",
+      "stub_kind": "python_module",
+      "role": "Local development launcher — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool and schema init — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI entrypoint — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker — unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/recurrence.py",
+      "stub_kind": "python_module",
+      "role": "Pure, DB-free recurrence helpers: constants, month arithmetic with day clamp, next-date computation, human label. No imports from routers or database. Authoritative definition of the next-date rule.",
+      "change": "new",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "VALID_RECURRENCE_FREQ",
+          "pattern": "module_constant",
+          "purpose": "Allowed recurrence_freq values: {'daily', 'weekly', 'monthly'}."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_RECURRENCE_MODE",
+          "pattern": "module_constant",
+          "purpose": "Allowed recurrence_mode values: {'fixed', 'after_completion'}."
+        },
+        {
+          "kind": "function",
+          "name": "add_months",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "add_months",
+              "visibility": "public",
+              "args": ["d: date", "months: int"],
+              "returns": "date",
+              "purpose": "Return d shifted by months calendar months; day-of-month clamped to the target month's last day (Jan 31 + 1 -> Feb 28/29)."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "advance_date",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "advance_date",
+              "visibility": "public",
+              "args": ["anchor: date", "freq: str", "interval: int", "steps: int"],
+              "returns": "date",
+              "purpose": "Return anchor advanced by steps*interval units (days for daily, 7-day weeks for weekly, add_months for monthly) always measured from anchor, never cumulatively."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "compute_next_date",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "compute_next_date",
+              "visibility": "public",
+              "args": ["anchor: date | None", "freq: str", "interval: int", "mode: str", "today: date"],
+              "returns": "date",
+              "purpose": "mode 'after_completion' or anchor None: advance_date(today, freq, interval, 1). mode 'fixed': smallest steps >= 1 such that advance_date(anchor, freq, interval, steps) > today. Result is always strictly greater than today."
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "format_recurrence_label",
+          "pattern": "helper",
+          "methods": [
+            {
+              "name": "format_recurrence_label",
+              "visibility": "public",
+              "args": ["freq: str | None", "interval: int", "mode: str"],
+              "returns": "str | None",
+              "purpose": "None when freq is None. interval 1: 'Daily' / 'Weekly' / 'Monthly'; interval n>1: 'Every n days|weeks|months'; when mode is after_completion append ', after completion' (e.g. 'Every 2 weeks', 'Daily, after completion')."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/backend/routers/tasks.py",
+      "stub_kind": "python_module",
+      "role": "All task HTTP endpoints plus label and preference proxies. Sprint11: agenda endpoint, recurrence fields on create/update, successor spawn, shared TASK_SELECT_COLS.",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "singleton",
+          "purpose": "APIRouter prefix=/tasks, mounted by main.py under /api."
+        },
+        {
+          "kind": "constant",
+          "name": "TASK_SCHEMA",
+          "pattern": "module_constant",
+          "purpose": "[CHANGED] ColumnSchema list for task Datasets; adds recurrence_freq, recurrence_interval, recurrence_mode, recurrence_next_id, recurrence_label, recurrence_next_date.",
+          "change": "changed"
+        },
+        {
+          "kind": "constant",
+          "name": "AGENDA_SCHEMA",
+          "pattern": "module_constant",
+          "purpose": "[NEW] TASK_SCHEMA plus ColumnSchema entries agenda_bucket (enum) and agenda_date (date).",
+          "change": "new"
+        },
+        {
+          "kind": "constant",
+          "name": "TASK_SELECT_COLS",
+          "pattern": "module_constant",
+          "purpose": "[NEW] Comma-separated column list used by list_tasks and list_agenda: id, title, description, status, priority, due_date, effort_hours, created_at, updated_at, task_type, parent_task_id, actual_duration_minutes, completed_at, scheduled_at, recurrence_freq, recurrence_interval, recurrence_mode, recurrence_next_id. Replaces list_tasks' local select_cols.",
+          "change": "new"
+        },
+        {
+          "kind": "constant",
+          "name": "AGENDA_WINDOW_DAYS",
+          "pattern": "module_constant",
+          "purpose": "[NEW] 7 — upper bound of the upcoming bucket (today + 7 days inclusive).",
+          "change": "new"
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_STATUS",
+          "pattern": "module_constant",
+          "purpose": "open, in_progress, scheduled, pending, done — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_PRIORITY",
+          "pattern": "module_constant",
+          "purpose": "low, medium, high — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "VALID_VIEW",
+          "pattern": "module_constant",
+          "purpose": "active, pending_board, scheduled — unchanged ('agenda' is NOT a view value; it is a separate endpoint)."
+        },
+        {
+          "kind": "class",
+          "name": "TaskCreate",
+          "pattern": "data_model",
+          "fields": [
+            {"name": "recurrence_freq", "type": "str | None", "default": "None", "change": "new"},
+            {"name": "recurrence_interval", "type": "int", "default": "1", "change": "new"},
+            {"name": "recurrence_mode", "type": "str", "default": "fixed", "change": "new"}
+          ],
+          "purpose": "[CHANGED] Request body for POST /api/tasks; existing fields unchanged, three recurrence fields added (listed fields are the additions only).",
+          "change": "changed"
+        },
+        {
+          "kind": "class",
+          "name": "TaskUpdate",
+          "pattern": "data_model",
+          "fields": [
+            {"name": "recurrence_freq", "type": "str | None", "default": "None", "change": "new"},
+            {"name": "recurrence_interval", "type": "int | None", "default": "None", "change": "new"},
+            {"name": "recurrence_mode", "type": "str | None", "default": "None", "change": "new"}
+          ],
+          "purpose": "[CHANGED] Request body for PATCH. Existing fields unchanged; three recurrence fields added (additions only listed). All three, and due_date, are applied via model_fields_set (omit = unchanged; explicit null semantics per 10_architecture.json PATCH surface).",
+          "change": "changed"
+        },
+        {
+          "kind": "class",
+          "name": "LabelAttachBody",
+          "pattern": "data_model",
+          "purpose": "POST /{task_id}/labels body — unchanged."
+        },
+        {
+          "kind": "class",
+          "name": "LabelFilterPutBody",
+          "pattern": "data_model",
+          "purpose": "PUT /preferences/label_filter body — unchanged."
+        },
+        {
+          "kind": "class",
+          "name": "LabelSetBody",
+          "pattern": "data_model",
+          "purpose": "PUT /{task_id}/labels body — unchanged."
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "constant",
+          "name": "LABEL_ENGINE_URL",
+          "purpose": "LabelEngine base URL — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "PREFERENCE_STORE_URL",
+          "purpose": "PreferenceStore base URL — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "CALENDAR_CONNECTOR_URL",
+          "purpose": "CalendarConnector base URL, empty disables — unchanged."
+        },
+        {
+          "kind": "constant",
+          "name": "ATLAS_BASE_URL",
+          "purpose": "Deep link base — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_label_client",
+          "purpose": "httpx.Client to LabelEngine, 5s — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_preference_client",
+          "purpose": "httpx.Client to PreferenceStore, 5s — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_calendar_client",
+          "purpose": "httpx.Client to CalendarConnector, 5s — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "_sync_calendar_event",
+          "visibility": "private",
+          "args": ["task_id: str", "title: str", "scheduled_at: date | None", "description: str | None", "action: str"],
+          "returns": "None",
+          "purpose": "Best-effort calendar sync — unchanged; also called for scheduled recurrence successors with action 'create'."
+        },
+        {
+          "kind": "function",
+          "name": "row_to_dict",
+          "visibility": "private",
+          "args": ["row: Any"],
+          "returns": "dict[str, Any]",
+          "purpose": "[CHANGED] As before, plus str() of recurrence_next_id, derived recurrence_label via format_recurrence_label, and recurrence_next_date defaulting to None.",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "fetch_labels_for_tasks",
+          "purpose": "Batch label fetch; empty dict on failure — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "dataset_response",
+          "purpose": "Dataset -> JSONResponse — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "single_row_dataset",
+          "visibility": "private",
+          "args": ["row: Any", "extra: dict[str, Any] | None = None"],
+          "returns": "JSONResponse",
+          "purpose": "[CHANGED] Wrap one task row in a Dataset (TASK_SCHEMA); extra keys, if given, are merged into the serialized row after row_to_dict (used to inject recurrence_next_date).",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "_run_auto_promotion",
+          "purpose": "Promote due scheduled tasks to in_progress within caller's connection — unchanged (list_agenda commits afterwards)."
+        },
+        {
+          "kind": "function",
+          "name": "_validate_recurrence",
+          "visibility": "private",
+          "args": [
+            "freq: str | None",
+            "interval: int",
+            "mode: str",
+            "task_type: str",
+            "status: str",
+            "due_date: str | date | None",
+            "scheduled_at: str | date | None"
+          ],
+          "returns": "str | None",
+          "purpose": "[NEW] Merged-state recurrence validation (internal_flow step 10): returns an error message or None. freq None -> always None. Otherwise enforces freq/mode enums, interval >= 1, task_type == 'normal', and (mode == 'fixed' and status != 'done') requires due_date or scheduled_at.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "_spawn_successor",
+          "visibility": "private",
+          "args": [
+            "cur: Any",
+            "pre: dict[str, Any]",
+            "post: dict[str, Any]"
+          ],
+          "returns": "dict[str, Any]",
+          "purpose": "[NEW] Run internal_flow step 11 on the caller's cursor/transaction: select current_date, derive schedule_date/anchor, call compute_next_date, INSERT successor, UPDATE source recurrence_next_id. pre = locked snapshot row, post = RETURNING * row. Returns the successor row dict plus key 'next_date' (date). Does not commit.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "_copy_labels_best_effort",
+          "visibility": "private",
+          "args": ["source_id: str", "successor_id: str"],
+          "returns": "None",
+          "purpose": "[NEW] GET source labels from LabelEngine and POST each label name to the successor (object_type=task). Catches and logs all exceptions; never raises. Call after commit only.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "list_training_units",
+          "purpose": "GET /api/tasks/training-units — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "list_tasks",
+          "purpose": "[CHANGED] GET /api/tasks — behaviour unchanged; uses TASK_SELECT_COLS instead of local select_cols.",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "list_agenda",
+          "visibility": "public",
+          "args": [],
+          "returns": "JSONResponse",
+          "purpose": "[NEW] GET /api/tasks/agenda (response_model=None) — internal_flow step 9. No parameters.",
+          "change": "new"
+        },
+        {
+          "kind": "function",
+          "name": "create_task",
+          "purpose": "[CHANGED] POST /api/tasks — adds recurrence validation/normalisation and inserts recurrence_* columns (internal_flow steps 3, 10).",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "update_task",
+          "purpose": "[CHANGED] PATCH /api/tasks/{task_id} — FOR UPDATE snapshot, recurrence validation, due_date explicit-null fix, spawn in-transaction, post-commit calendar/label side effects (internal_flow steps 4, 10, 11, 12).",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "delete_task",
+          "purpose": "DELETE /api/tasks/{task_id} — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "search_labels",
+          "purpose": "Label search proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "list_used_labels",
+          "purpose": "Used-labels proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "get_label_filter_preference",
+          "purpose": "Preference GET proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "put_label_filter_preference",
+          "purpose": "Preference PUT proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "get_task_labels",
+          "purpose": "Per-task labels proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "attach_task_label",
+          "purpose": "Attach label proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "detach_task_label",
+          "purpose": "Detach label proxy — unchanged."
+        },
+        {
+          "kind": "function",
+          "name": "set_task_labels",
+          "purpose": "Replace labels proxy — unchanged."
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/src/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "Shell registration. Add Today entry (id tasks-today, path /tasks, order 1) to mobilePrimaryNav and desktopNav; Active moves to /tasks/active (order 2); Scheduled/Pending/Done become orders 3/4/5.",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/src/ShellEntry.tsx",
+      "stub_kind": "typescript_react_module",
+      "role": "Main React entry. Sprint11: Today view, RepeatControl, repeat icon on TaskCard, next-date toast, extended TaskRow, route mapping.",
+      "change": "changed",
+      "public_objects": [
+        {
+          "kind": "component",
+          "name": "TasksPage",
+          "purpose": "[CHANGED] ViewTab gains 'today' (default for /tasks and unknown paths; /tasks/active maps to active); fetches /tasks/agenda for today; completion handler removes the row then silently refetches; toast state set from PATCH response recurrence_next_date.",
+          "change": "changed"
+        },
+        {
+          "kind": "component",
+          "name": "TodayAgenda",
+          "purpose": "[NEW] Renders Overdue / Today / Next 7 days sections from agenda rows (already label-filtered): section headers with effort sums, upcoming grouped by agenda_date, empty state, TaskCard rows.",
+          "change": "new"
+        },
+        {
+          "kind": "component",
+          "name": "RepeatControl",
+          "purpose": "[NEW] Controlled Repeat control (None/Daily/Weekly/Monthly select, interval number input, 'From completion date' checkbox) used by TaskCreatePanel and TaskDetailEdit; exposes value {freq, interval, fromCompletion} and a pure helper that maps it to the recurrence_* payload fields.",
+          "change": "new"
+        },
+        {
+          "kind": "component",
+          "name": "NextToast",
+          "purpose": "[NEW] Small auto-dismissing toast showing 'Next: <date>'.",
+          "change": "new"
+        },
+        {
+          "kind": "component",
+          "name": "TaskCard",
+          "purpose": "[CHANGED] Shows repeat icon with recurrence_label tooltip when present; optional dateHint prop (used for overdue rows).",
+          "change": "changed"
+        },
+        {
+          "kind": "component",
+          "name": "TaskCreatePanel",
+          "purpose": "[CHANGED] Adds RepeatControl; sends recurrence_freq/interval/mode on POST.",
+          "change": "changed"
+        },
+        {
+          "kind": "component",
+          "name": "TaskDetailEdit",
+          "purpose": "[CHANGED] Adds RepeatControl initialised from the row; always sends all three recurrence fields on PATCH; shows recurrence_label; passes the PATCH response row to onSaved so TasksPage can show the toast.",
+          "change": "changed"
+        }
+      ],
+      "private_objects": [
+        {
+          "kind": "function",
+          "name": "viewFetchUrl",
+          "purpose": "[CHANGED] Adds 'today' -> '/tasks/agenda'.",
+          "change": "changed"
+        },
+        {
+          "kind": "function",
+          "name": "sumEffort",
+          "purpose": "[NEW] Sum effort_hours over rows treating null/undefined as 0.",
+          "change": "new"
+        }
+      ]
+    },
+    {
+      "path": "03_Application/TaskTracker/tests/fixtures.sql",
+      "stub_kind": "sql",
+      "role": "Test world. Extend additively with recurrence and agenda fixtures (fix- prefixed ids, dates relative to current_date).",
+      "change": "changed",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/tests/test_agenda.py",
+      "stub_kind": "python_module",
+      "role": "Tests for GET /api/tasks/agenda scenarios in 10_test_spec.md.",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/tests/test_recurrence.py",
+      "stub_kind": "python_module",
+      "role": "Tests for recurrence validation, date arithmetic, spawn, idempotency, label copy and calendar blocker scenarios in 10_test_spec.md.",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/TaskTracker/tests/ui/today_recurrence.spec.ts",
+      "stub_kind": "typescript_module",
+      "role": "Playwright specs for the [UI] scenarios in 10_test_spec.md (runs via shared atlas-playwright against http://atlas-shell).",
+      "change": "new",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

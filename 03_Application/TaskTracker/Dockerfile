@@ -17,5 +17,7 @@ COPY 03_Application/PersonalDevelopment/tests/ ./tests/
 # Copy TaskTracker-specific sprint tests into the same tests/ directory.
 # They share the conftest from PersonalDevelopment and create their own data directly.
 COPY 03_Application/TaskTracker/tests/test_scheduled_status.py ./tests/test_scheduled_status.py
+COPY 03_Application/TaskTracker/tests/test_agenda.py ./tests/test_agenda.py
+COPY 03_Application/TaskTracker/tests/test_recurrence.py ./tests/test_recurrence.py
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

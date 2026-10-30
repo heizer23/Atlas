@@ -15,16 +15,18 @@ AppRegistry.register({
   component: React.lazy(() => import('./ShellEntry')),
 
   mobilePrimaryNav: [
-    { id: 'tasks-active',     label: 'Active',     path: '/tasks',              order: 1 },
-    { id: 'tasks-scheduled',  label: 'Scheduled',  path: '/tasks/scheduled',    order: 2 },
-    { id: 'tasks-pending',    label: 'Pending',    path: '/tasks/pending',      order: 3 },
-    { id: 'tasks-done',       label: 'Done',       path: '/tasks/done',         order: 4 },
+    { id: 'tasks-today',      label: 'Today',      path: '/tasks',              order: 1 },
+    { id: 'tasks-active',     label: 'Active',     path: '/tasks/active',       order: 2 },
+    { id: 'tasks-scheduled',  label: 'Scheduled',  path: '/tasks/scheduled',    order: 3 },
+    { id: 'tasks-pending',    label: 'Pending',    path: '/tasks/pending',      order: 4 },
+    { id: 'tasks-done',       label: 'Done',       path: '/tasks/done',         order: 5 },
   ],
 
   desktopNav: [
-    { id: 'tasks-active',     label: 'Active',     path: '/tasks',              order: 1 },
-    { id: 'tasks-scheduled',  label: 'Scheduled',  path: '/tasks/scheduled',    order: 2 },
-    { id: 'tasks-pending',    label: 'Pending',    path: '/tasks/pending',      order: 3 },
-    { id: 'tasks-done',       label: 'Done',       path: '/tasks/done',         order: 4 },
+    { id: 'tasks-today',      label: 'Today',      path: '/tasks',              order: 1 },
+    { id: 'tasks-active',     label: 'Active',     path: '/tasks/active',       order: 2 },
+    { id: 'tasks-scheduled',  label: 'Scheduled',  path: '/tasks/scheduled',    order: 3 },
+    { id: 'tasks-pending',    label: 'Pending',    path: '/tasks/pending',      order: 4 },
+    { id: 'tasks-done',       label: 'Done',       path: '/tasks/done',         order: 5 },
   ],
 });

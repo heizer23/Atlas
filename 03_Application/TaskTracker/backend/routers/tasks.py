@@ -10,6 +10,12 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from backend.database import get_db
+from backend.recurrence import (
+    VALID_RECURRENCE_FREQ,
+    VALID_RECURRENCE_MODE,
+    compute_next_date,
+    format_recurrence_label,
+)
 from platform_errorhandling import api_error
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
 
@@ -119,7 +125,27 @@ TASK_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="actual_duration_minutes",  label="Duration (min)",    type="number", sortable=False, filterable=False),
     ColumnSchema(key="completed_at",             label="Completed At",      type="date",   sortable=False, filterable=False),
     ColumnSchema(key="scheduled_at",             label="Scheduled At",      type="string", sortable=True,  filterable=False),
+    ColumnSchema(key="recurrence_freq",          label="Repeat",            type="enum",   sortable=False, filterable=False),
+    ColumnSchema(key="recurrence_interval",      label="Repeat Interval",   type="number", sortable=False, filterable=False),
+    ColumnSchema(key="recurrence_mode",          label="Repeat Mode",       type="enum",   sortable=False, filterable=False),
+    ColumnSchema(key="recurrence_next_id",       label="Next Occurrence",   type="string", sortable=False, filterable=False),
+    ColumnSchema(key="recurrence_label",         label="Repeat Summary",    type="string", sortable=False, filterable=False),
+    ColumnSchema(key="recurrence_next_date",     label="Next Date",         type="date",   sortable=False, filterable=False),
 ]
+
+# Agenda adds the bucket and the effective date
+AGENDA_SCHEMA: list[ColumnSchema] = TASK_SCHEMA + [
+    ColumnSchema(key="agenda_bucket", label="Bucket", type="enum", sortable=False, filterable=False),
+    ColumnSchema(key="agenda_date",   label="Date",   type="date", sortable=True,  filterable=False),
+]
+
+TASK_SELECT_COLS = """id, title, description, status, priority, due_date,
+                     effort_hours, created_at, updated_at,
+                     task_type, parent_task_id, actual_duration_minutes, completed_at,
+                     scheduled_at, recurrence_freq, recurrence_interval, recurrence_mode,
+                     recurrence_next_id"""
+
+AGENDA_WINDOW_DAYS = 7
 
 # Schema for the training-units endpoint (declares derived fields)
 TRAINING_UNIT_SCHEMA: list[ColumnSchema] = [
@@ -153,6 +179,9 @@ class TaskCreate(BaseModel):
     parent_task_id:          str | None = None
     actual_duration_minutes: int | None = None
     scheduled_at:            str | None = None
+    recurrence_freq:         str | None = None
+    recurrence_interval:     int = 1
+    recurrence_mode:         str = "fixed"
 
 
 class TaskUpdate(BaseModel):
@@ -166,6 +195,9 @@ class TaskUpdate(BaseModel):
     parent_task_id:          str | None = None
     actual_duration_minutes: int | None = None
     scheduled_at:            str | None = None
+    recurrence_freq:         str | None = None
+    recurrence_interval:     int | None = None
+    recurrence_mode:         str | None = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -185,6 +217,13 @@ def row_to_dict(row: Any) -> dict[str, Any]:
         d["scheduled_at"] = d["scheduled_at"].isoformat()
     if d.get("parent_task_id"):
         d["parent_task_id"] = str(d["parent_task_id"])
+    if d.get("recurrence_next_id"):
+        d["recurrence_next_id"] = str(d["recurrence_next_id"])
+    if "recurrence_freq" in d:
+        d["recurrence_label"] = format_recurrence_label(
+            d["recurrence_freq"], d.get("recurrence_interval") or 1, d.get("recurrence_mode") or "fixed"
+        )
+        d["recurrence_next_date"] = None
     return d
 
 
@@ -206,7 +245,10 @@ def dataset_response(dataset: Dataset) -> JSONResponse:
     return JSONResponse(content=dataset.model_dump(by_alias=True, mode="json"))
 
 
-def single_row_dataset(row: Any) -> JSONResponse:
+def single_row_dataset(row: Any, extra: "dict[str, Any] | None" = None) -> JSONResponse:
+    row_dict = row_to_dict(row)
+    if extra:
+        row_dict.update(extra)
     return dataset_response(Dataset(
         meta=DatasetMeta(
             object_type="task",
@@ -217,7 +259,7 @@ def single_row_dataset(row: Any) -> JSONResponse:
             row_actions=["edit", "delete"],
         ),
         **{"schema": TASK_SCHEMA},
-        rows=[row_to_dict(row)],
+        rows=[row_dict],
     ))
 
 
@@ -359,16 +401,14 @@ def list_tasks(
 
     extra_sql = (" and " + " and ".join(extra_conditions)) if extra_conditions else ""
 
-    select_cols = """id, title, description, status, priority, due_date,
-                     effort_hours, created_at, updated_at,
-                     task_type, parent_task_id, actual_duration_minutes, completed_at,
-                     scheduled_at"""
+    select_cols = TASK_SELECT_COLS
 
     with get_db() as conn:
         with conn.cursor() as cur:
             if view == "active":
                 # Auto-promote scheduled tasks whose time has arrived
                 _run_auto_promotion(conn)
+                conn.commit()  # persist promotion (otherwise rolled back when the connection is returned)
                 # Active view: open + in_progress (excluding scheduled), plus done tasks updated today
                 cur.execute(
                     f"""
@@ -395,6 +435,7 @@ def list_tasks(
             elif view == "pending_board":
                 # Auto-promote scheduled tasks whose time has arrived
                 _run_auto_promotion(conn)
+                conn.commit()  # persist promotion (otherwise rolled back when the connection is returned)
                 # Pending board: open + pending tasks
                 cur.execute(
                     f"select count(*) from tasktracker.tasks where status in ('open', 'pending'){extra_sql}",
@@ -508,6 +549,173 @@ def list_tasks(
     ))
 
 
+@router.get("/agenda", response_model=None)
+def list_agenda() -> JSONResponse:
+    """Agenda window: overdue + today + next AGENDA_WINDOW_DAYS days, flat list.
+
+    Effective date = coalesce(scheduled_at, due_date).
+    Excludes done and training_unit tasks. Time authority: Postgres current_date.
+    Order: agenda_date asc, priority high>medium>low, created_at asc, id asc.
+    """
+    with get_db() as conn:
+        _run_auto_promotion(conn)
+        conn.commit()  # persist promotion (list_tasks views do not commit)
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                select * from (
+                    select {TASK_SELECT_COLS},
+                           coalesce(scheduled_at, due_date) as agenda_date
+                    from tasktracker.tasks
+                    where status != 'done' and task_type != 'training_unit'
+                ) t
+                where agenda_date is not null
+                  and agenda_date <= current_date + %s
+                order by agenda_date asc,
+                         case priority when 'high' then 1 when 'medium' then 2 else 3 end asc,
+                         created_at asc, id asc
+                """,  # noqa: S608
+                (AGENDA_WINDOW_DAYS,),
+            )
+            raw_rows = cur.fetchall()
+            cur.execute("select current_date as today")
+            today = cur.fetchone()["today"]
+        conn.rollback()  # end the read transaction
+
+        rows = []
+        for r in raw_rows:
+            agenda_date = r["agenda_date"]
+            d = row_to_dict({k: v for k, v in r.items() if k != "agenda_date"})
+            d["agenda_date"] = agenda_date.isoformat()
+            d["agenda_bucket"] = (
+                "overdue" if agenda_date < today else "today" if agenda_date == today else "upcoming"
+            )
+            rows.append(d)
+
+        try:
+            labels_by_task = fetch_labels_for_tasks([r["id"] for r in rows])
+        except Exception as exc:
+            log.warning("Agenda label fetch failed: %s", exc)
+            labels_by_task = {}
+        for r in rows:
+            r["labels"] = labels_by_task.get(r["id"], [])
+
+    return dataset_response(Dataset(
+        meta=DatasetMeta(
+            object_type="task",
+            label="Agenda",
+            total=len(rows),
+            page=1,
+            page_size=max(len(rows), 1),
+            row_actions=["edit", "delete"],
+        ),
+        **{"schema": AGENDA_SCHEMA},
+        rows=rows,
+    ))
+
+
+def _validate_recurrence_values(freq: "str | None", interval: int, mode: str) -> "str | None":
+    """Body-level checks on recurrence values."""
+    if freq is not None and freq not in VALID_RECURRENCE_FREQ:
+        return f"recurrence_freq must be one of: {', '.join(sorted(VALID_RECURRENCE_FREQ))}"
+    if mode not in VALID_RECURRENCE_MODE:
+        return f"recurrence_mode must be one of: {', '.join(sorted(VALID_RECURRENCE_MODE))}"
+    if interval < 1:
+        return "recurrence_interval must be >= 1"
+    return None
+
+
+def _validate_recurrence(
+    freq: "str | None",
+    interval: int,
+    mode: str,
+    task_type: str,
+    status: str,
+    due_date: Any,
+    scheduled_at: Any,
+) -> "str | None":
+    """Merged-state recurrence validation. Returns an error message or None."""
+    if freq is None:
+        return None
+    msg = _validate_recurrence_values(freq, interval, mode)
+    if msg:
+        return msg
+    if task_type != "normal":
+        return "recurring tasks must have task_type 'normal'"
+    if mode == "fixed" and status != "done" and not due_date and not scheduled_at:
+        return "a fixed recurring task requires due_date or scheduled_at"
+    return None
+
+
+def _spawn_successor(cur: Any, pre: dict[str, Any], post: dict[str, Any]) -> dict[str, Any]:
+    """Create the next occurrence in the caller's transaction. Does not commit.
+
+    pre = locked snapshot row, post = row after the status UPDATE.
+    Returns the successor row dict with extra key 'next_date'.
+    """
+    cur.execute("select current_date as today")
+    today = cur.fetchone()["today"]
+
+    # Edit form clears scheduled_at on save, so fall back to the snapshot when it was scheduled
+    schedule_date = post["scheduled_at"] or (pre["scheduled_at"] if pre["status"] == "scheduled" else None)
+    anchor = schedule_date or post["due_date"]
+    next_date = compute_next_date(
+        anchor, post["recurrence_freq"], post["recurrence_interval"], post["recurrence_mode"], today
+    )
+
+    if schedule_date:
+        status = "scheduled"
+        scheduled_at = next_date
+        due_date = (post["due_date"] + (next_date - schedule_date)) if post["due_date"] else None
+    else:
+        status = "open"
+        scheduled_at = None
+        due_date = next_date
+
+    successor_id = str(uuid.uuid4())
+    cur.execute(
+        """
+        insert into tasktracker.tasks
+            (id, title, description, status, priority, due_date, effort_hours,
+             task_type, parent_task_id, scheduled_at,
+             recurrence_freq, recurrence_interval, recurrence_mode)
+        values (%s, %s, %s, %s, %s, %s, %s, 'normal', %s, %s, %s, %s, %s)
+        returning *
+        """,
+        (
+            successor_id, post["title"], post["description"], status, post["priority"],
+            due_date, post["effort_hours"], post["parent_task_id"], scheduled_at,
+            post["recurrence_freq"], post["recurrence_interval"], post["recurrence_mode"],
+        ),
+    )
+    successor = dict(cur.fetchone())
+    cur.execute(
+        "update tasktracker.tasks set recurrence_next_id = %s where id = %s",
+        (successor_id, str(post["id"])),
+    )
+    successor["next_date"] = next_date
+    return successor
+
+
+def _copy_labels_best_effort(source_id: str, successor_id: str) -> None:
+    """Copy source labels onto the successor via LabelEngine. Never raises. Call after commit."""
+    try:
+        with _label_client() as client:
+            resp = client.get(f"/api/objects/{source_id}/labels")
+            if resp.status_code != 200:
+                log.warning("Label copy: source labels fetch returned %s task_id=%s", resp.status_code, source_id)
+                return
+            for lbl in resp.json().get("labels", []):
+                r = client.post(
+                    f"/api/objects/{successor_id}/labels",
+                    json={"label_name": lbl["label_name"], "object_type": "task"},
+                )
+                if r.status_code not in (200, 201):
+                    log.warning("Label copy: attach returned %s task_id=%s", r.status_code, successor_id)
+    except Exception as exc:
+        log.warning("Label copy failed (best-effort): source=%s successor=%s error=%s", source_id, successor_id, exc)
+
+
 @router.post("", response_model=None)
 def create_task(body: TaskCreate) -> JSONResponse:
     if not body.title.strip():
@@ -524,6 +732,18 @@ def create_task(body: TaskCreate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"task_type must be one of: {', '.join(sorted(VALID_TASK_TYPE))}")
     if body.actual_duration_minutes is not None and body.actual_duration_minutes < 0:
         return api_error("VALIDATION_ERROR", "actual_duration_minutes must be >= 0")
+    msg = _validate_recurrence_values(body.recurrence_freq, body.recurrence_interval, body.recurrence_mode)
+    if msg:
+        return api_error("VALIDATION_ERROR", msg)
+    rec_freq     = body.recurrence_freq
+    rec_interval = body.recurrence_interval if rec_freq else 1
+    rec_mode     = body.recurrence_mode if rec_freq else "fixed"
+    msg = _validate_recurrence(
+        rec_freq, rec_interval, rec_mode, body.task_type, body.status,
+        body.due_date, body.scheduled_at,
+    )
+    if msg:
+        return api_error("VALIDATION_ERROR", msg)
 
     task_id = str(uuid.uuid4())
     with get_db() as conn:
@@ -532,8 +752,9 @@ def create_task(body: TaskCreate) -> JSONResponse:
                 """
                 insert into tasktracker.tasks
                     (id, title, description, status, priority, due_date, effort_hours,
-                     task_type, parent_task_id, actual_duration_minutes, scheduled_at)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     task_type, parent_task_id, actual_duration_minutes, scheduled_at,
+                     recurrence_freq, recurrence_interval, recurrence_mode)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (
@@ -548,6 +769,9 @@ def create_task(body: TaskCreate) -> JSONResponse:
                     body.parent_task_id or None,
                     body.actual_duration_minutes,
                     body.scheduled_at or None,
+                    rec_freq,
+                    rec_interval,
+                    rec_mode,
                 ),
             )
             row = cur.fetchone()
@@ -578,34 +802,74 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"task_type must be one of: {', '.join(sorted(VALID_TASK_TYPE))}")
     if body.actual_duration_minutes is not None and body.actual_duration_minutes < 0:
         return api_error("VALIDATION_ERROR", "actual_duration_minutes must be >= 0")
+    sent = body.model_fields_set
+    if "recurrence_interval" in sent and body.recurrence_interval is None:
+        return api_error("VALIDATION_ERROR", "recurrence_interval cannot be null")
+    if "recurrence_mode" in sent and body.recurrence_mode is None:
+        return api_error("VALIDATION_ERROR", "recurrence_mode cannot be null")
+    msg = _validate_recurrence_values(
+        body.recurrence_freq,
+        body.recurrence_interval if body.recurrence_interval is not None else 1,
+        body.recurrence_mode if body.recurrence_mode is not None else "fixed",
+    )
+    if msg:
+        return api_error("VALIDATION_ERROR", msg)
 
     fields: dict[str, Any] = {}
     if body.title       is not None: fields["title"]       = body.title.strip() or None
     if body.description is not None: fields["description"] = body.description or None
     if body.status      is not None: fields["status"]      = body.status
     if body.priority    is not None: fields["priority"]    = body.priority
-    if body.due_date    is not None: fields["due_date"]    = body.due_date or None
     if body.task_type   is not None: fields["task_type"]   = body.task_type
     # Use model_fields_set to distinguish "not sent" (skip) from "explicitly null" (clear column)
+    if "due_date"                in body.model_fields_set: fields["due_date"]                = body.due_date or None
     if "effort_hours"            in body.model_fields_set: fields["effort_hours"]            = body.effort_hours
     if "actual_duration_minutes" in body.model_fields_set: fields["actual_duration_minutes"] = body.actual_duration_minutes
     if "parent_task_id"          in body.model_fields_set: fields["parent_task_id"]          = body.parent_task_id or None
     if "scheduled_at"            in body.model_fields_set: fields["scheduled_at"]            = body.scheduled_at or None
 
-    if not fields:
+    if not fields and not (sent & {"recurrence_freq", "recurrence_interval", "recurrence_mode"}):
         return api_error("VALIDATION_ERROR", "no fields provided to update")
 
-    # Fetch current row to determine status transitions and calendar sync
+    # Fetch current row (locked) to determine status transitions, recurrence and calendar sync
+    successor: dict[str, Any] | None = None
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select status, completed_at, scheduled_at, title, description from tasktracker.tasks where id = %s",
+                "select * from tasktracker.tasks where id = %s for update",
                 (task_id,),
             )
             current = cur.fetchone()
 
         if current is None:
+            conn.rollback()
             return api_error("NOT_FOUND", f"task {task_id} not found", status=404)
+
+        # Merged-state recurrence validation + normalisation
+        res_freq = body.recurrence_freq if "recurrence_freq" in sent else current["recurrence_freq"]
+        res_interval = body.recurrence_interval if "recurrence_interval" in sent else current["recurrence_interval"]
+        res_mode = body.recurrence_mode if "recurrence_mode" in sent else current["recurrence_mode"]
+        if res_freq is None:
+            res_interval, res_mode = 1, "fixed"
+        msg = _validate_recurrence(
+            res_freq, res_interval, res_mode,
+            fields.get("task_type", current["task_type"]),
+            fields.get("status", current["status"]),
+            fields["due_date"] if "due_date" in fields else current["due_date"],
+            fields["scheduled_at"] if "scheduled_at" in fields else current["scheduled_at"],
+        )
+        if msg:
+            conn.rollback()
+            return api_error("VALIDATION_ERROR", msg)
+        if "recurrence_freq" in sent:
+            fields["recurrence_freq"] = res_freq
+        if res_freq is None:
+            if sent & {"recurrence_freq", "recurrence_interval", "recurrence_mode"}:
+                fields["recurrence_interval"] = 1
+                fields["recurrence_mode"] = "fixed"
+        else:
+            if "recurrence_interval" in sent: fields["recurrence_interval"] = res_interval
+            if "recurrence_mode"     in sent: fields["recurrence_mode"]     = res_mode
 
         # If transitioning to scheduled, ensure scheduled_at is set (from body or existing)
         new_status_from_body = fields.get("status")
@@ -614,6 +878,7 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
             scheduled_at_in_body = "scheduled_at" in body.model_fields_set and body.scheduled_at
             scheduled_at_in_db   = current.get("scheduled_at") is not None
             if not scheduled_at_in_body and not scheduled_at_in_db:
+                conn.rollback()
                 return api_error("VALIDATION_ERROR", "scheduled_at is required when status is scheduled")
 
         # Server-side completed_at management:
@@ -644,6 +909,15 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
                 values,
             )
             row = cur.fetchone()
+
+            # Spawn the next occurrence in the same transaction (exactly once)
+            if (
+                current["status"] != "done"
+                and row["status"] == "done"
+                and row["recurrence_freq"] is not None
+                and row["recurrence_next_id"] is None
+            ):
+                successor = _spawn_successor(cur, current, row)
         conn.commit()
 
     if row is None:
@@ -700,7 +974,21 @@ def update_task(task_id: str, body: TaskUpdate) -> JSONResponse:
             action="delete",
         )
 
-    return single_row_dataset(row)
+    extra = None
+    if successor is not None:
+        successor_id = str(successor["id"])
+        if successor["status"] == "scheduled":
+            _sync_calendar_event(
+                task_id=successor_id,
+                title=successor["title"],
+                scheduled_at=successor["scheduled_at"],
+                description=successor["description"],
+                action="create",
+            )
+        _copy_labels_best_effort(task_id, successor_id)
+        extra = {"recurrence_next_date": successor["next_date"].isoformat()}
+
+    return single_row_dataset(row, extra)
 
 
 @router.delete("/{task_id}", response_model=None)

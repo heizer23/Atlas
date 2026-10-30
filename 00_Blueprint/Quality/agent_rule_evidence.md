@@ -1105,3 +1105,37 @@ severity: major
 recurrence_hint: "Related to EVD-2026-04-12-002 (time_authority_deferred_to_implementer) but distinct: authority was declared, then bypassed via an optional field. Suggested R-CON-AL-06 addition: if the client is the declared authority, the time input must be required (no silent server fallback), or every caller must be enumerated."
 linked_immediate_artifact: 00_Blueprint/Quality/WorkoutTracker/Code_Review_P0_2026-10-28.md
 ---
+
+---
+entry_id: EVD-2026-10-30-001
+date: 2026-10-30
+source_agent: sprint_implement
+run_type: implementer_note
+component: TaskTracker
+sprint: Sprint11_TodayAndRecurrence
+pattern_name: schema_script_transaction_state_desync_makes_first_pooled_connection_autocommit
+short_description: schema.sql contains its own begin/commit; after init_schema() psycopg2 believes a transaction is still open, so the first pooled connection runs later statements in autocommit mode until commit()/rollback() is called. This broke the design's atomic-spawn invariant (failed spawn left the source done) and masked that list views' auto-promotion is never committed.
+evidence: "Reproduced with a patched compute_next_date raising inside PATCH: cursor.connection.info.transaction_status == 0 (IDLE) after each execute and source row stayed 'done'. Fixed by conn.commit() at the end of backend/database.py init_schema(). With the fix, test_scheduled_status.py::test_auto_promotion_promotes_past_due_task failed (it had passed only through the autocommit quirk), confirming design risks[1]; fixed by conn.commit() after _run_auto_promotion in the active and pending_board branches of list_tasks (small deviation from 'existing views unchanged')."
+likely_root_cause: design_gap
+candidate_response: none
+severity: major
+recurrence_hint: "Design listed database.py as unchanged and left the auto-promotion persistence question open; any sprint relying on multi-statement transaction atomicity in apps whose schema.sql self-commits should assert it with a failure-injection test."
+linked_immediate_artifact: 03_Application/TaskTracker/tests/test_recurrence.py::test_recurrence_spawn_is_atomic
+---
+
+---
+entry_id: EVD-2026-10-30-002
+date: 2026-10-30
+source_agent: sprint_implement
+run_type: implementer_note
+component: TaskTracker
+sprint: Sprint11_TodayAndRecurrence
+pattern_name: test_container_image_copies_only_listed_test_files
+short_description: The TaskTracker Dockerfile (declared unchanged by the design) copies PersonalDevelopment's tests/conftest/fixtures plus only test_scheduled_status.py, so new TaskTracker test files never run in atlas-tasktracker-test unless copied explicitly; Sprint10's test_calendar_blocker.py is also not copied.
+evidence: "Dockerfile COPY lines; docker exec atlas-tasktracker-test ls tests -> conftest.py fixtures.sql (PD) test_markdown_subtasks.py test_scheduled_status.py test_training_units.py. Added COPY lines for test_agenda.py and test_recurrence.py; new tests therefore do not rely on TaskTracker tests/fixtures.sql (PD fixtures are loaded) and create their own rows."
+likely_root_cause: design_gap
+candidate_response: none
+severity: minor
+recurrence_hint: "Shared-container test arrangement from Sprint09; test_calendar_blocker.py (Sprint10) remains un-copied and unverified."
+linked_immediate_artifact: 03_Application/TaskTracker/Dockerfile
+---

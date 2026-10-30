@@ -36,6 +36,14 @@ interface TaskRow extends Row {
   completed_at?: string;
   scheduled_at?: string | null;
   labels?:       TaskLabel[];
+  recurrence_freq?:      string | null;
+  recurrence_interval?:  number;
+  recurrence_mode?:      string;
+  recurrence_next_id?:   string | null;
+  recurrence_label?:     string | null;
+  recurrence_next_date?: string | null;   // only set on the PATCH response that spawned a successor
+  agenda_bucket?:        string;          // agenda rows only: overdue | today | upcoming
+  agenda_date?:          string;          // agenda rows only: effective date (ISO)
 }
 
 interface LinkGroupItem {
@@ -92,6 +100,135 @@ function formatScheduledAt(dateStr: string | null | undefined): string {
   const dt = new Date(y, m - 1, d);
   if (isNaN(dt.getTime())) return '';
   return dt.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+// ── Effort sum (null/undefined = 0) ───────────────────────────────────────────
+
+function sumEffort(rows: TaskRow[]): number {
+  return rows.reduce((acc, r) => acc + (r.effort_hours ?? 0), 0);
+}
+
+// ── Repeat control ────────────────────────────────────────────────────────────
+// Value is kept as strings/booleans for the form; repeatPayload maps it to the
+// recurrence_* fields. "None" always sends explicit null/1/'fixed' (R-CON-AL-05).
+
+interface RepeatValue {
+  freq:           '' | 'daily' | 'weekly' | 'monthly';
+  interval:       string;
+  fromCompletion: boolean;
+}
+
+function repeatFromRow(task: TaskRow): RepeatValue {
+  const freq = (task.recurrence_freq ?? '') as RepeatValue['freq'];
+  return {
+    freq,
+    interval:       String(task.recurrence_interval ?? 1),
+    fromCompletion: task.recurrence_mode === 'after_completion',
+  };
+}
+
+function repeatPayload(v: RepeatValue) {
+  if (v.freq === '') {
+    return { recurrence_freq: null, recurrence_interval: 1, recurrence_mode: 'fixed' };
+  }
+  const n = parseInt(v.interval, 10);
+  return {
+    recurrence_freq:     v.freq,
+    recurrence_interval: Number.isFinite(n) && n >= 1 ? n : 1,
+    recurrence_mode:     v.fromCompletion ? 'after_completion' : 'fixed',
+  };
+}
+
+function RepeatControl({
+  value,
+  onChange,
+  recurrenceLabel,
+  inputStyle,
+  labelStyle,
+}: {
+  value:            RepeatValue;
+  onChange:         (v: RepeatValue) => void;
+  recurrenceLabel?: string | null;
+  inputStyle:       React.CSSProperties;
+  labelStyle:       React.CSSProperties;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }} data-testid="repeat-control">
+      <label style={labelStyle}>Repeat</label>
+      <select
+        data-testid="repeat-freq"
+        value={value.freq}
+        onChange={(e) => onChange({ ...value, freq: e.target.value as RepeatValue['freq'] })}
+        style={inputStyle}
+      >
+        <option value="">None</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
+      {value.freq !== '' && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+            <span className="type-label">Every</span>
+            <input
+              data-testid="repeat-interval"
+              type="number"
+              min={1}
+              step={1}
+              value={value.interval}
+              onChange={(e) => onChange({ ...value, interval: e.target.value })}
+              style={{ ...inputStyle, width: '80px' }}
+            />
+            <span className="type-label">
+              {value.freq === 'daily' ? 'day(s)' : value.freq === 'weekly' ? 'week(s)' : 'month(s)'}
+            </span>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: '0.9rem' }}>
+            <input
+              data-testid="repeat-from-completion"
+              type="checkbox"
+              checked={value.fromCompletion}
+              onChange={(e) => onChange({ ...value, fromCompletion: e.target.checked })}
+            />
+            From completion date
+          </label>
+        </>
+      )}
+      {recurrenceLabel && (
+        <span className="type-label" data-testid="repeat-label" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+          {recurrenceLabel}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Next-date toast ───────────────────────────────────────────────────────────
+
+function NextToast({ message, onDone }: { message: string; onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 4000);
+    return () => clearTimeout(t);
+  }, [message, onDone]);
+  return (
+    <div
+      role="status"
+      data-testid="next-toast"
+      style={{
+        position:     'fixed',
+        left:         '50%',
+        bottom:       '80px',
+        transform:    'translateX(-50%)',
+        padding:      'var(--space-sm) var(--space-md)',
+        borderRadius: '8px',
+        background:   'var(--md-sys-color-inverse-surface, #323232)',
+        color:        'var(--md-sys-color-inverse-on-surface, #fff)',
+        zIndex:       1000,
+      }}
+    >
+      {message}
+    </div>
+  );
 }
 
 // ── LinkModal ─────────────────────────────────────────────────────────────────
@@ -553,6 +690,7 @@ function TaskCard({
   onLink,
   onAddLabel,
   pendingMode = false,
+  dateHint,
 }: {
   task:           TaskRow;
   onOpen:         (task: TaskRow) => void;
@@ -561,6 +699,7 @@ function TaskCard({
   onLink:         (id: string) => void;
   onAddLabel:     (id: string) => void;
   pendingMode?:   boolean;
+  dateHint?:      string;
 }) {
   const [labelPopoverOpen, setLabelPopoverOpen] = useState(false);
 
@@ -638,6 +777,30 @@ function TaskCard({
       >
         {task.title}
       </span>
+
+      {/* Repeat indicator */}
+      {task.recurrence_label && (
+        <span
+          className="material-symbols-rounded"
+          data-testid="repeat-icon"
+          title={task.recurrence_label}
+          aria-label={task.recurrence_label}
+          style={{ flexShrink: 0, fontSize: '1.1rem', color: 'var(--md-sys-color-on-surface-variant)' }}
+        >
+          repeat
+        </span>
+      )}
+
+      {/* Date hint (overdue rows in Today view) */}
+      {dateHint && (
+        <span
+          className="type-label"
+          data-testid="date-hint"
+          style={{ flexShrink: 0, color: 'var(--md-sys-color-error)', fontSize: '0.8rem' }}
+        >
+          {dateHint}
+        </span>
+      )}
 
       {/* Effort chip */}
       <span
@@ -892,6 +1055,7 @@ function TaskDetailEdit({
   );
   // scheduled_at: stored as YYYY-MM-DD date string
   const [scheduledAt, setScheduledAt] = useState(task.scheduled_at ?? '');
+  const [repeat,      setRepeat]      = useState<RepeatValue>(repeatFromRow(task));
   const [saving,          setSaving]          = useState(false);
   const [saveError,       setSaveError]       = useState<ApiError | null>(null);
   const [linkGroups,      setLinkGroups]      = useState<LinkGroup[]>([]);
@@ -929,6 +1093,7 @@ function TaskDetailEdit({
       due_date:     dueDate || null,
       effort_hours: effortValue,
       scheduled_at: scheduledAtValue,
+      ...repeatPayload(repeat),   // always sent; None = explicit null/1/'fixed'
     };
 
     const res = await apiFetch<{ meta: object; schema: object[]; rows: TaskRow[] }>(
@@ -1049,6 +1214,14 @@ function TaskDetailEdit({
           />
         </div>
 
+        <RepeatControl
+          value={repeat}
+          onChange={setRepeat}
+          recurrenceLabel={task.recurrence_label}
+          inputStyle={inputStyle}
+          labelStyle={labelStyle}
+        />
+
         <LabelSection
           taskId={task.id}
           attachedLabels={attachedLabels}
@@ -1125,6 +1298,7 @@ function TaskCreatePanel({
   const [dueDate,      setDueDate]      = useState('');
   const [effortHours,  setEffortHours]  = useState('');
   const [scheduledAt,  setScheduledAt]  = useState('');
+  const [repeat,       setRepeat]       = useState<RepeatValue>({ freq: '', interval: '1', fromCompletion: false });
   const [pendingLabels, setPendingLabels] = useState<string[]>([]);
   const [labelQuery,   setLabelQuery]   = useState('');
   const [labelSugs,    setLabelSugs]    = useState<LabelRecord[]>([]);
@@ -1176,6 +1350,7 @@ function TaskCreatePanel({
         due_date:     dueDate || null,
         effort_hours: effortValue,
         ...(createStatus === 'scheduled' ? { scheduled_at: scheduledAt } : {}),
+        ...repeatPayload(repeat),
       }),
     });
 
@@ -1313,6 +1488,8 @@ function TaskCreatePanel({
             style={inputStyle}
           />
         </div>
+
+        <RepeatControl value={repeat} onChange={setRepeat} inputStyle={inputStyle} labelStyle={labelStyle} />
 
         {/* ── Labels ─────────────────────────────────────────────────────── */}
         <div style={fieldStyle}>
@@ -1574,13 +1751,104 @@ function LabelFilterBar({
 
 // ── View types ────────────────────────────────────────────────────────────────
 
-type ViewTab = 'active' | 'scheduled' | 'pending' | 'done';
+type ViewTab = 'today' | 'active' | 'scheduled' | 'pending' | 'done';
 
 function viewFetchUrl(view: ViewTab): string {
+  if (view === 'today')     return '/tasks/agenda';
   if (view === 'active')    return '/tasks?view=active';
   if (view === 'scheduled') return '/tasks?view=scheduled';
   if (view === 'pending')   return '/tasks?view=pending_board';
   return '/tasks?status=done';
+}
+
+// ── TodayAgenda ───────────────────────────────────────────────────────────────
+// Sections come from the server's agenda_bucket; the client never computes today/tomorrow.
+
+function TodayAgenda({
+  tasks,
+  onOpen,
+  onStatusToggle,
+  onDelete,
+  onLink,
+  onAddLabel,
+}: {
+  tasks:          TaskRow[];
+  onOpen:         (task: TaskRow) => void;
+  onStatusToggle: (id: string, newStatus: string) => void;
+  onDelete:       (id: string) => void;
+  onLink:         (id: string) => void;
+  onAddLabel:     (id: string) => void;
+}) {
+  const overdue  = tasks.filter(t => t.agenda_bucket === 'overdue');
+  const today    = tasks.filter(t => t.agenda_bucket === 'today');
+  const upcoming = tasks.filter(t => t.agenda_bucket === 'upcoming');
+
+  if (overdue.length === 0 && today.length === 0 && upcoming.length === 0) {
+    return (
+      <p className="type-body" data-testid="today-empty" style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+        Nothing due
+      </p>
+    );
+  }
+
+  // Group upcoming rows by agenda_date (server order is already date ascending)
+  const days = new Map<string, TaskRow[]>();
+  for (const t of upcoming) {
+    const key = t.agenda_date ?? '';
+    if (!days.has(key)) days.set(key, []);
+    days.get(key)!.push(t);
+  }
+
+  const card = (task: TaskRow, dateHint?: string) => (
+    <TaskCard
+      key={task.id}
+      task={task}
+      dateHint={dateHint}
+      onOpen={onOpen}
+      onStatusToggle={onStatusToggle}
+      onDelete={onDelete}
+      onLink={onLink}
+      onAddLabel={onAddLabel}
+    />
+  );
+
+  const list: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
+      {overdue.length > 0 && (
+        <div data-testid="today-section-overdue">
+          <div className="section-header"><span className="section-label">Overdue</span></div>
+          <div style={list}>{overdue.map(t => card(t, formatScheduledAt(t.agenda_date)))}</div>
+        </div>
+      )}
+      {today.length > 0 && (
+        <div data-testid="today-section-today">
+          <div className="section-header">
+            <span className="section-label">Today</span>
+            <span className="type-label" data-testid="today-effort">{formatEffort(sumEffort(today))}</span>
+          </div>
+          <div style={list}>{today.map(t => card(t))}</div>
+        </div>
+      )}
+      {upcoming.length > 0 && (
+        <div data-testid="today-section-upcoming">
+          <div className="section-header"><span className="section-label">Next 7 days</span></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+            {[...days.entries()].map(([dateKey, rows]) => (
+              <div key={dateKey} data-testid="today-day">
+                <div className="section-header">
+                  <span className="type-label" data-testid="today-day-header">{formatScheduledAt(dateKey)}</span>
+                  <span className="type-label" data-testid="today-day-effort">{formatEffort(sumEffort(rows))}</span>
+                </div>
+                <div style={list}>{rows.map(t => card(t))}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── TasksPage ─────────────────────────────────────────────────────────────────
@@ -1588,9 +1856,10 @@ function viewFetchUrl(view: ViewTab): string {
 function TasksPage() {
   const location = useLocation();
   const view: ViewTab =
+    location.pathname === '/tasks/active'    ? 'active'    :
     location.pathname === '/tasks/scheduled' ? 'scheduled' :
     location.pathname === '/tasks/pending'   ? 'pending'   :
-    location.pathname === '/tasks/done'      ? 'done'      : 'active';
+    location.pathname === '/tasks/done'      ? 'done'      : 'today';
 
   const [tasks,            setTasks]            = useState<TaskRow[] | null>(null);
   const [isLoading,        setIsLoading]        = useState(true);
@@ -1601,13 +1870,16 @@ function TasksPage() {
   const [linkingTask,      setLinkingTask]      = useState<TaskRow | null>(null);
   const [availableLabels,  setAvailableLabels]  = useState<TaskLabel[]>([]);
   const [selectedLabelIds, setSelectedLabelIds] = useState<Set<string>>(new Set());
+  const [toast,            setToast]            = useState<string | null>(null);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   // Track whether selectedLabelIds has been initialised from PreferenceStore.
   // We use a ref so that the save effect can skip the first render.
   const labelIdsInitialised = useRef(false);
 
-  const fetchTasks = useCallback(async (currentView: ViewTab) => {
-    setIsLoading(true);
+  // silent = refetch without the loading skeleton (used to update the Today list in place)
+  const fetchTasks = useCallback(async (currentView: ViewTab, silent = false) => {
+    if (!silent) setIsLoading(true);
     const res = await apiFetch<{ meta: object; schema: object[]; rows: TaskRow[] }>(viewFetchUrl(currentView));
     setIsLoading(false);
     if (isApiError(res)) {
@@ -1693,7 +1965,15 @@ function TasksPage() {
     if (isApiError(res)) {
       setActionError(res);
     } else {
-      fetchTasks(view);
+      const nextDate = (res as { rows: TaskRow[] }).rows?.[0]?.recurrence_next_date;
+      if (nextDate) setToast(`Next: ${formatScheduledAt(nextDate)}`);
+      if (view === 'today') {
+        // Update in place: drop the row now, then silently pick up a spawned successor
+        setTasks((prev) => prev ? prev.filter((t) => t.id !== id) : prev);
+        fetchTasks(view, true);
+      } else {
+        fetchTasks(view);
+      }
     }
   }
 
@@ -1713,6 +1993,13 @@ function TasksPage() {
   }
 
   function handleSaved(updated: TaskRow) {
+    if (updated.recurrence_next_date) setToast(`Next: ${formatScheduledAt(updated.recurrence_next_date)}`);
+    if (view === 'today') {
+      // Agenda rows carry bucket/date fields the PATCH response lacks — refetch
+      setSelected(null);
+      fetchTasks(view, true);
+      return;
+    }
     setTasks((prev) => prev ? prev.map((t) => t.id === updated.id ? updated : t) : prev);
     setSelected(null);
   }
@@ -1767,6 +2054,16 @@ function TasksPage() {
         >
           {task.title}
         </span>
+        {task.recurrence_label && (
+          <span
+            className="material-symbols-rounded"
+            data-testid="repeat-icon"
+            title={task.recurrence_label}
+            style={{ flexShrink: 0, fontSize: '1.1rem', color: 'var(--md-sys-color-on-surface-variant)' }}
+          >
+            repeat
+          </span>
+        )}
         <span
           className="type-label"
           title={task.priority}
@@ -1893,6 +2190,15 @@ function TasksPage() {
         <Skeleton />
       ) : error ? (
         <ErrorCard error={error} />
+      ) : view === 'today' ? (
+        <TodayAgenda
+          tasks={displayedTasks}
+          onOpen={setSelected}
+          onStatusToggle={handleStatusToggle}
+          onDelete={handleDelete}
+          onLink={handleLink}
+          onAddLabel={handleAddLabel}
+        />
       ) : view === 'scheduled' ? (
         renderScheduledTab(tasks ?? [])
       ) : view === 'pending' ? (
@@ -2002,6 +2308,8 @@ function TasksPage() {
           );
         })()
       )}
+
+      {toast && <NextToast message={toast} onDone={dismissToast} />}
 
       {linkingTask && (
         <LinkModal
