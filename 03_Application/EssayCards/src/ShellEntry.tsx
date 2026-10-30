@@ -6,6 +6,7 @@
  *   /essaycards/essays/:id     → ReaderView
  *   /essaycards/review         → ReviewSessionView (no query = review/maintenance;
  *                                 query topic? | essay_id? [+ section_id?] = focus session)
+ *   /essaycards/recall         → RecallQueueView (Sprint16: oral-recall FSRS queue; never mixes with /review)
  *   /essaycards/ingest         → IngestView (Sprint02: paste-JSON add/update essay)
  *   /essaycards/stats          → ReviewStatsView (study activity, scheduled-reviews
  *                                 forecast, observed recall, scheduled intervals,
@@ -39,6 +40,7 @@ import { NuggetAuthoringImportView } from './views/NuggetAuthoringImportView';
 import { QuestionImportView } from './views/QuestionImportView';
 import { QuestionOverviewView } from './views/QuestionOverviewView';
 import { ReaderView } from './views/ReaderView';
+import { RecallQueueView } from './views/RecallQueueView';
 import { ReviewSessionView } from './views/ReviewSessionView';
 import { ReviewStatsView } from './views/ReviewStatsView';
 
@@ -54,6 +56,7 @@ export default function EssayCardsApp() {
         <Route path="/essays/:id/questions" element={<QuestionOverviewView />} />
         <Route path="/questions/import" element={<QuestionImportView />} />
         <Route path="/review" element={<ReviewSessionView />} />
+        <Route path="/recall" element={<RecallQueueView />} />
         <Route path="/ingest" element={<IngestView />} />
         <Route path="/examinations/import" element={<ImportExaminationsView />} />
         <Route path="/guided/import" element={<ImportGuidedView />} />

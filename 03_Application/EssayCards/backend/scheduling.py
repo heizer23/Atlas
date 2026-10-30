@@ -62,6 +62,14 @@ class SchedulerResult(NamedTuple):
 # immutable construction-time config). Unchanged rationale from Sprint10.
 _FSRS_SCHEDULER = fsrs.Scheduler(desired_retention=DESIRED_RETENTION)
 
+# Oral recall (Sprint16_RecallFSRS) uses the same FSRS-6 model and retention but
+# NO intra-day learning/relearning steps: an oral assessment is a heavy,
+# once-in-a-while event, so even a first Good/Again must yield a day-scale due
+# date (min 1 day), never a 10-minute step.
+_RECALL_SCHEDULER = fsrs.Scheduler(
+    desired_retention=DESIRED_RETENTION, learning_steps=(), relearning_steps=()
+)
+
 # Direct 1:1 name match — no numeric or semantic translation.
 _GRADE_TO_FSRS_RATING: dict[str, "fsrs.Rating"] = {
     "again": fsrs.Rating.Again,
@@ -75,7 +83,11 @@ class FSRSScheduler:
     """Loads or creates an fsrs.Card, drives the module-level fsrs.Scheduler,
     and returns next_due_at/review_interval plus FSRS's own memory state as
     extra_state. Unchanged from Sprint10_DualSchedulerAB — now the only
-    scheduler dispatched to, unconditionally, by every review."""
+    scheduler dispatched to, unconditionally, by every flashcard review.
+    Recall passes `_RECALL_SCHEDULER` (separate state, same model)."""
+
+    def __init__(self, scheduler: "fsrs.Scheduler | None" = None) -> None:
+        self._scheduler = scheduler or _FSRS_SCHEDULER
 
     def review(
         self,
@@ -97,7 +109,7 @@ class FSRSScheduler:
             else fsrs.Card()
         )
         rating = _GRADE_TO_FSRS_RATING[grade]
-        new_card, _log = _FSRS_SCHEDULER.review_card(card, rating, review_datetime=now_utc)
+        new_card, _log = self._scheduler.review_card(card, rating, review_datetime=now_utc)
 
         next_due_at = new_card.due
         review_interval = next_due_at - now_utc
@@ -219,3 +231,8 @@ def estimate_initial_fsrs_state(
         "last_review_at": last_reviewed_at_utc,
         "raw_state": card.to_dict(),
     }
+
+
+def recall_scheduler() -> FSRSScheduler:
+    """FSRS scheduler for oral recall (no intra-day steps; see _RECALL_SCHEDULER)."""
+    return FSRSScheduler(_RECALL_SCHEDULER)

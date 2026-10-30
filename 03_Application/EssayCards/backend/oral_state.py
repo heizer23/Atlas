@@ -3,12 +3,16 @@ Oral pass rule and oral-state transitions (Sprint14_SectionProgressionAndRevalid
 
 Single home of:
   - the pass rule (SCORE_MAX, PASS_THRESHOLD_PERCENT, is_passing_score)
-  - section_oral_state / essay_oral_state transitions
-  - the unguided-essay FAILURE CASCADE
+  - section_oral_state / essay_oral_state GUIDED transitions
 
 No HTTP, no request parsing. The caller owns the transaction (these
 functions only issue statements against `cur`). Traffic-light colors are
 never stored here — they are derived in backend/progress.py.
+
+Sprint16_RecallFSRS: unguided attempts no longer pass through here — they are
+FSRS-scheduled recall reviews (backend/recall.py). The unguided_* columns and the
+unguided-essay failure cascade are retired; legacy values remain as history and
+seed recall_state once (backend/migrate_recall_state.py).
 
 Time authority (R-CON-AL-06): *_passed_at = the attempt's examined_at
 (external, supplied by the examiner reply); unguided_invalidated_at = server
@@ -19,8 +23,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
-
-from backend.revalidation import flag_essay_cards_for_revalidation
 
 SCORE_MAX = 6
 PASS_THRESHOLD_PERCENT = 70
@@ -50,8 +52,7 @@ def apply_section_attempt(
 ) -> list[dict[str, Any]]:
     """
     Upsert section_oral_state for one section-scope attempt. A failing attempt
-    only updates *_latest_score. Guided pass is sticky; a failing unguided
-    section attempt never clears unguided_passed. Returns effects.
+    only updates *_latest_score. Guided pass is sticky. Returns effects.
     """
     cur.execute(
         "insert into essaycards.section_oral_state (section_id) values (%s) on conflict (section_id) do nothing",
@@ -81,24 +82,6 @@ def apply_section_attempt(
         else:
             cur.execute(
                 "update essaycards.section_oral_state set guided_latest_score = %s, updated_at = now() "
-                "where section_id = %s",
-                (score, section_id),
-            )
-    else:
-        if passed:
-            cur.execute(
-                """
-                update essaycards.section_oral_state
-                set unguided_passed = true, unguided_passed_at = %s, unguided_invalidated_at = null,
-                    unguided_latest_score = %s, updated_at = now()
-                where section_id = %s
-                """,
-                (examined_at, score, section_id),
-            )
-            effects.append({"effect": "section_unguided_passed", "section_id": str(section_id)})
-        else:
-            cur.execute(
-                "update essaycards.section_oral_state set unguided_latest_score = %s, updated_at = now() "
                 "where section_id = %s",
                 (score, section_id),
             )
@@ -144,50 +127,4 @@ def apply_essay_attempt(
                 "where essay_id = %s",
                 (score, essay_id),
             )
-    elif passed:
-        cur.execute(
-            """
-            update essaycards.essay_oral_state
-            set unguided_passed = true, unguided_passed_at = %s, unguided_invalidated_at = null,
-                unguided_latest_score = %s, updated_at = now()
-            where essay_id = %s
-            """,
-            (examined_at, score, essay_id),
-        )
-        effects.append({"effect": "essay_unguided_passed", "essay_id": str(essay_id)})
-    elif prior["unguided_passed"]:
-        # FAILURE CASCADE — same transaction as the attempt INSERT.
-        # (1) essay Violet (and, derived, Blue) removed.
-        cur.execute(
-            """
-            update essaycards.essay_oral_state
-            set unguided_passed = false, unguided_invalidated_at = now(),
-                unguided_latest_score = %s, updated_at = now()
-            where essay_id = %s
-            """,
-            (score, essay_id),
-        )
-        # (2) every section's unguided pass invalidated. Guided columns untouched.
-        cur.execute(
-            """
-            update essaycards.section_oral_state
-            set unguided_passed = false, unguided_invalidated_at = now(), updated_at = now()
-            where unguided_passed
-              and section_id in (select id from essaycards.essay_sections where essay_id = %s)
-            """,
-            (essay_id,),
-        )
-        # (3) revalidation flagging (reviewed cards only).
-        flagged = flag_essay_cards_for_revalidation(cur, essay_id)
-        effects.append({
-            "effect": "essay_unguided_failed_cascade",
-            "essay_id": str(essay_id),
-            "cards_flagged": flagged,
-        })
-    else:
-        cur.execute(
-            "update essaycards.essay_oral_state set unguided_latest_score = %s, updated_at = now() "
-            "where essay_id = %s",
-            (score, essay_id),
-        )
     return effects

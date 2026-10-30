@@ -51,8 +51,8 @@ test('essay header exposes a primary action plus a secondary action menu, no clu
   await moreTrigger.click();
   const menu = page.getByRole('menu');
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: 'Guided oral exam', exact: true })).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: 'Unguided oral exam', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Guided oral exam (essay)', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Oral recall (whole essay)', exact: true })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: /Export essay|Import essay/ })).toBeVisible();
 
   // Escape closes the menu (keyboard operable).

@@ -3,7 +3,7 @@ import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import type { ApiError } from '@platform-ui/api/types';
 import { btnStyle } from '../styles';
-import type { Dataset, EssayExaminationRow, GuidedSessionRow, SectionExaminationRow } from '../types';
+import type { Dataset, EssayExaminationRow, GuidedSessionRow, RecallReviewRow, SectionExaminationRow } from '../types';
 
 // ── Section Examination History ────────────────────────────────────────────────
 //
@@ -159,6 +159,55 @@ export function EssayExaminationHistory({ essayId }: { essayId: string }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Recall history (Sprint16) ─────────────────────────────────────────────────
+//
+// FSRS-scheduled unguided recall assessments for one section or one whole essay.
+// Legacy 0-6 unguided exams stay in the examination lists above (historical evidence).
+
+export function RecallHistory({ sectionId, essayId, hideWhenEmpty = false }: { sectionId?: string; essayId?: string; hideWhenEmpty?: boolean }) {
+  const [rows, setRows] = useState<RecallReviewRow[] | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const query = sectionId ? `section_id=${sectionId}` : `essay_id=${essayId}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await apiFetch<Dataset<RecallReviewRow>>(`/essaycards/recall/reviews?${query}`);
+      if (cancelled) return;
+      if (isApiError(res)) setError(res); else setRows(res.rows);
+    })();
+    return () => { cancelled = true; };
+  }, [query]);
+
+  if (hideWhenEmpty && !error && (rows === null || rows.length === 0)) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, fontWeight: 600 }}>Recall history{rows ? ` (${rows.length})` : ''}</div>
+      {error && <ErrorCard error={error} />}
+      {rows && rows.length === 0 && (
+        <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginTop: 4 }}>No recall assessments yet.</div>
+      )}
+      {rows?.map(r => (
+        <div
+          key={r.id}
+          style={{
+            padding: 8, borderRadius: 6, marginTop: 6, fontSize: 13,
+            border: '1px solid var(--md-sys-color-outline-variant)',
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>
+            {new Date(r.reviewed_at).toLocaleDateString()} — <span style={{ textTransform: 'capitalize' }}>{r.rating}</span>
+            <span style={{ fontWeight: 400, color: 'var(--md-sys-color-on-surface-variant)' }}>
+              {' · '}next {new Date(r.next_due_at).toLocaleDateString()}
+            </span>
+          </div>
+          {r.feedback && <div style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>{r.feedback}</div>}
+        </div>
+      ))}
     </div>
   );
 }

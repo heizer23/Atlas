@@ -85,6 +85,9 @@ ESSAY_OVERVIEW_SCHEMA: list[ColumnSchema] = ESSAY_SCHEMA + [
     ColumnSchema(key="sections_total",                  label="Sections",              type="number",  sortable=True,  filterable=False),
     ColumnSchema(key="sections_unguided_passed_count",  label="Sections unguided passed", type="number", sortable=True, filterable=False),
     ColumnSchema(key="revalidation_pending_count",      label="Revalidation pending",  type="number",  sortable=True,  filterable=False),
+    ColumnSchema(key="essay_recall_status",             label="Essay recall status",   type="string",  sortable=False, filterable=True),
+    ColumnSchema(key="essay_recall_next_due_at",        label="Essay recall due",      type="date",    sortable=False, filterable=False),
+    ColumnSchema(key="recall_due_count",                label="Recall due (sections + essay)", type="number", sortable=True, filterable=False),
 ]
 
 # GET /essays/{essay_id}/questions — the question-overview screen. A flat row
@@ -117,7 +120,7 @@ QUESTION_SCHEMA: list[ColumnSchema] = [
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     d["id"] = str(d["id"])
-    for k in ("created_at", "updated_at", "essay_guided_passed_at", "essay_unguided_passed_at"):
+    for k in ("created_at", "updated_at", "essay_guided_passed_at", "essay_unguided_passed_at", "essay_recall_next_due_at"):
         if d.get(k):
             d[k] = d[k].isoformat()
     return d

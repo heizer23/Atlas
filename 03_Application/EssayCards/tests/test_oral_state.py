@@ -1,6 +1,7 @@
 """
 EssayCards — Sprint14_SectionProgressionAndRevalidation: oral import and pass
-rule, examination-package scope, and the unguided-essay failure cascade.
+rule (guided essay orals), examination-package scope. Sprint16: the unguided-essay
+failure cascade was retired — unguided results are FSRS recall reviews (tests/test_recall.py).
 
 Traceability: each function name maps to a scenario in
 Sprint14_SectionProgressionAndRevalidation/10_test_spec.md ("Oral import and
@@ -38,19 +39,36 @@ def _section_version(section_id: str) -> str:
     ].isoformat()
 
 
+GOOD_RECALL = {
+    "rating": "good", "independent_elements": ["spine"], "prompted_elements": [],
+    "missing_elements": [], "misunderstandings": [], "followups_asked": 0,
+}
+
+
 def _section_result(slug, anchor, section_id, score, exam_type, examined_at="2026-09-01T10:00:00Z"):
-    return {
+    """Unguided results carry recall evidence instead of a score (Sprint16)."""
+    entry = {
         "scope": "section", "essay_slug": slug, "section_anchor_slug": anchor,
         "section_version": _section_version(section_id), "examined_at": examined_at,
-        "question": "Q", "answer_transcript": "A", "score": score, "exam_type": exam_type,
+        "question": "Q", "answer_transcript": "A", "exam_type": exam_type,
     }
+    if exam_type == "unguided":
+        entry["recall"] = GOOD_RECALL
+    else:
+        entry["score"] = score
+    return entry
 
 
 def _essay_result(slug, score, exam_type, examined_at="2026-09-01T10:00:00Z", **extra):
-    return {
+    entry = {
         "scope": "essay", "essay_slug": slug, "examined_at": examined_at,
-        "question": "Q", "answer_transcript": "A", "score": score, "exam_type": exam_type, **extra,
+        "question": "Q", "answer_transcript": "A", "exam_type": exam_type, **extra,
     }
+    if exam_type == "unguided":
+        entry["recall"] = GOOD_RECALL
+    else:
+        entry["score"] = score
+    return entry
 
 
 def _import(client, *results):
@@ -85,38 +103,37 @@ def _mk_essay_with_sections(client, slug, n_sections):
 # ── Oral import and pass rule ────────────────────────────────────────────────
 
 def test_score_5_of_6_passes_the_70_percent_rule(client):
-    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "unguided"))
+    r = _import(client, _essay_result("fix-essay-locked", 5, "guided"))
     assert r.status_code == 200, r.text
     res = r.json()["results"][0]
     assert res["passed"] is True
     assert res["score_percent"] == 83.3
-    hist = client.get(f"/api/essaycards/sections/{SECTION_LOCKED}/examinations").json()["rows"]
+    hist = client.get(f"/api/essaycards/essays/{ESSAY_LOCKED}/examinations").json()["rows"]
     assert hist[0]["passed"] is True
 
 
 def test_score_4_of_6_fails_the_70_percent_rule(client):
-    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 4, "unguided"))
+    r = _import(client, _essay_result("fix-essay-locked", 4, "guided"))
     assert r.status_code == 200, r.text
     res = r.json()["results"][0]
     assert res["passed"] is False
     assert res["score_percent"] == 66.7
-    hist = client.get(f"/api/essaycards/sections/{SECTION_LOCKED}/examinations").json()["rows"]
+    hist = client.get(f"/api/essaycards/essays/{ESSAY_LOCKED}/examinations").json()["rows"]
     assert len(hist) == 1 and hist[0]["passed"] is False
-    assert _section_state(client, ESSAY_LOCKED, SECTION_LOCKED)["state"] == "grey"
-    due = client.get(f"/api/essaycards/flashcards/due?essay_id={ESSAY_LOCKED}").json()["rows"]
-    assert due == []  # cards still locked
+    assert _essay_row(client, ESSAY_LOCKED)["essay_guided_passed"] is False
 
 
-def test_same_threshold_for_all_exam_oral_kinds(client):
-    # Guided SECTION orals are guided-learning sessions (no score) — see test_guided.py.
-    for score, expected in ((4, False), (5, True)):
-        for exam_type in ("guided", "unguided"):
-            results = [_essay_result("fix-essay-locked", score, exam_type)]
-            if exam_type == "unguided":
-                results.append(_section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, score, exam_type))
-            r = _import(client, *results)
-            assert r.status_code == 200, r.text
-            assert [x["passed"] for x in r.json()["results"]] == [expected] * len(results), (score, exam_type)
+def test_unguided_results_carry_recall_evidence_not_a_score(client):
+    r = _import(client, _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "unguided"))
+    assert r.status_code == 200, r.text
+    res = r.json()["results"][0]
+    assert res["score"] is None and res["passed"] is None and res["rating"] == "good"
+    # a numeric-score-only unguided result (the retired format) is rejected with a pointer to `recall`
+    old = _section_result("fix-essay-locked", "fix-locked-1", SECTION_LOCKED, 5, "unguided")
+    del old["recall"]
+    old["score"] = 5
+    r = _import(client, old)
+    assert r.status_code == 400 and "recall" in r.json()["error"]["message"]
 
 
 def test_guided_section_result_is_rejected_by_the_exam_import(client):
@@ -172,7 +189,8 @@ def test_batch_import_is_all_or_nothing(client):
     r = _import(client, good1, good2, bad)
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
-    assert _count("select count(*) as n from essaycards.section_examinations where section_id = %s", (SECTION_LOCKED,)) == 0
+    assert _count("select count(*) as n from essaycards.recall_reviews where section_id = %s", (SECTION_LOCKED,)) == 0
+    assert _count("select count(*) as n from essaycards.recall_state where section_id = %s", (SECTION_LOCKED,)) == 0
     assert _count("select count(*) as n from essaycards.essay_examinations where essay_id = %s", (ESSAY_LOCKED,)) == 0
     assert _count("select count(*) as n from essaycards.section_oral_state where section_id = %s", (SECTION_LOCKED,)) == 0
     assert _count("select count(*) as n from essaycards.essay_oral_state where essay_id = %s", (ESSAY_LOCKED,)) == 0
@@ -190,7 +208,14 @@ def test_examination_package_scope_section_contains_only_that_section(client):
     body = r.json()
     assert [s["section_id"] for s in body["sections"]] == [second["id"]]
     assert body["scope"] == "section"
-    assert body["scoring"] == {"score_max": 6, "pass_threshold_percent": 70, "min_passing_score": 5}
+    assert "scoring" not in body  # unguided packages carry the recall rubric instead
+    assert set(body["recall_grading"]["ratings"]) == {"again", "hard", "good", "easy"}
+    assert "maximum rating is hard" in body["recall_grading"]["critical_rule"]
+    guided = client.get(
+        f"/api/essaycards/essays/{essay_id}/examination-package", params={"exam_type": "guided", "scope": "essay"}
+    ).json()
+    assert guided["scoring"] == {"score_max": 6, "pass_threshold_percent": 70, "min_passing_score": 5}
+    assert "recall_grading" not in guided
 
 
 def test_examination_package_scope_essay_contains_all_sections_and_last_essay_result(client):
@@ -218,105 +243,3 @@ def test_examination_package_rejects_invalid_parameter_combinations(client):
     r = client.get(base, params={"exam_type": "unguided", "scope": "section", "section_id": SECTION_LOCKED})
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
-
-
-# ── Failure cascade and revalidation flagging ────────────────────────────────
-
-def _fail_violet(client, examined_at="2026-09-02T10:00:00Z"):
-    return _import(client, _essay_result("fix-essay-violet", 3, "unguided", examined_at=examined_at))
-
-
-def _snapshot_violet():
-    return {
-        "cards": run_sql(
-            "select flashcard_id, last_reviewed_at, next_due_at, review_interval "
-            "from essaycards.flashcard_review_state where flashcard_id in "
-            "(select id from essaycards.flashcards where essay_id = %s) order by flashcard_id",
-            (ESSAY_VIOLET,),
-        ),
-        "fsrs": run_sql(
-            "select flashcard_id, raw_state from essaycards.fsrs_card_state where flashcard_id = %s",
-            ("fc000046-0000-0000-0000-000000000046",),
-        ),
-        "section_exams": _count("select count(*) as n from essaycards.section_examinations"),
-        "guided": run_sql(
-            "select section_id, guided_passed, guided_passed_at, guided_latest_score "
-            "from essaycards.section_oral_state where section_id in (%s, %s) order by section_id",
-            (SECTION_VIOLET_1, SECTION_VIOLET_2),
-        ),
-    }
-
-
-def test_failing_the_unguided_essay_oral_at_violet_removes_violet_and_blue(client):
-    assert _essay_row(client, ESSAY_VIOLET)["essay_state"] == "violet"
-    r = _fail_violet(client)
-    assert r.status_code == 200, r.text
-    row = _essay_row(client, ESSAY_VIOLET)
-    assert row["essay_state"] == "yellow"  # guided essay oral still stands, cards not all learned
-    assert row["essay_unguided_passed"] is False
-    assert row["sections_unguided_passed_count"] == 0
-
-
-def test_cascade_invalidates_every_sections_unguided_pass_but_nothing_else(client):
-    before = _snapshot_violet()
-    r = _fail_violet(client)
-    assert r.status_code == 200, r.text
-    after = _snapshot_violet()
-    assert after == before  # FSRS state, schedules, section guided state, section exam history untouched
-    assert _section_state(client, ESSAY_VIOLET, SECTION_VIOLET_1)["state"] == "green"
-    assert _section_state(client, ESSAY_VIOLET, SECTION_VIOLET_2)["state"] == "yellow"
-    assert _count("select count(*) as n from essaycards.essay_examinations where essay_id = %s", (ESSAY_VIOLET,)) == 3
-
-
-def test_cascade_flags_only_cards_that_have_been_reviewed(client):
-    r = _fail_violet(client)
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["revalidation"] == [{"essay_id": ESSAY_VIOLET, "cards_flagged": 3}]
-    assert any(e["effect"] == "essay_unguided_failed_cascade" for e in body["results"][0]["effects"])
-    flagged = {
-        str(x["flashcard_id"]) for x in run_sql(
-            "select flashcard_id from essaycards.flashcard_review_state where needs_revalidation"
-        )
-    }
-    assert flagged == VIOLET_REVIEWED_CARDS
-    assert VIOLET_NEVER_REVIEWED_CARD not in flagged
-
-
-def test_failing_the_unguided_essay_oral_when_not_violet_is_history_only(client):
-    r = _import(client, _essay_result("fix-essay-blue", 3, "unguided"))
-    assert r.status_code == 200, r.text
-    assert r.json()["revalidation"] == []
-    assert _count("select count(*) as n from essaycards.essay_examinations where essay_id = %s", (ESSAY_BLUE,)) == 1
-    assert _section_state(client, ESSAY_BLUE, SECTION_BLUE_1)["state"] == "blue"
-    assert _essay_row(client, ESSAY_BLUE)["essay_state"] == "blue"
-    assert _count("select count(*) as n from essaycards.flashcard_review_state where needs_revalidation") == 0
-
-
-def test_duplicate_failing_result_cascades_once(client):
-    first = _fail_violet(client)
-    flagged_after_first = run_sql("select flashcard_id from essaycards.flashcard_review_state where needs_revalidation order by 1")
-    second = _fail_violet(client)
-    assert first.json()["revalidation"] != []
-    assert second.json()["revalidation"] == []
-    assert run_sql(
-        "select flashcard_id from essaycards.flashcard_review_state where needs_revalidation order by 1"
-    ) == flagged_after_first
-
-
-def test_re_passing_a_section_unguided_after_invalidation_restores_blue(client):
-    _fail_violet(client)
-    row = run_sql(
-        "select unguided_passed, unguided_invalidated_at from essaycards.section_oral_state where section_id = %s",
-        (SECTION_VIOLET_1,),
-    )[0]
-    assert row["unguided_passed"] is False and row["unguided_invalidated_at"] is not None
-
-    r = _import(client, _section_result("fix-essay-violet", "fix-violet-1", SECTION_VIOLET_1, 5, "unguided"))
-    assert r.status_code == 200, r.text
-    assert _section_state(client, ESSAY_VIOLET, SECTION_VIOLET_1)["state"] == "blue"
-    row = run_sql(
-        "select unguided_invalidated_at from essaycards.section_oral_state where section_id = %s",
-        (SECTION_VIOLET_1,),
-    )[0]
-    assert row["unguided_invalidated_at"] is None

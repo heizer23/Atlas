@@ -5,8 +5,8 @@ import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
 import { ActionMenu } from '../components/ActionMenu';
-import { EssayProgressDot, ProgressLegend, SectionProgressDots } from '../components/Progress';
-import { btnStyle, pageStyle, studyBtnStyle } from '../styles';
+import { EssayRecallMarker, LevelBar, ProgressLegend, SectionProgressDots } from '../components/Progress';
+import { SERIF, btnStyle, pageStyle, studyBtnStyle } from '../styles';
 import type { Dataset, EssayRow, SectionProgressRow } from '../types';
 
 // ── Essay List View ───────────────────────────────────────────────────────────
@@ -175,66 +175,76 @@ export function EssayListView() {
         const showHeadings = !(groups.length === 1 && groups[0][0] === UNCATEGORIZED);
         return groups.map(([category, rows]) => {
           const isTopic = category !== UNCATEGORIZED;
-          const est = rows.reduce((n, e) => n + e.progress_established, 0);
           const tot = rows.reduce((n, e) => n + e.progress_total, 0);
           const open = rows.reduce((n, e) => n + e.open_count, 0);
+          const recallDue = rows.reduce((n, e) => n + e.recall_due_count, 0);
           const categoryCollapsed = showHeadings && isCollapsed(category);
+          const secs = (e: EssayRow) => sectionsByEssay[e.id] ?? [];
+          const dueIn = (e: EssayRow) => e.recall_due_count > 0;
           return (
-            <div key={category} style={{ marginBottom: 24 }}>
+            <div
+              key={category}
+              style={{
+                marginBottom: 12, borderRadius: 20, background: 'var(--md-sys-color-surface)',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+              }}
+            >
               {showHeadings && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 8px', padding: '0 4px 0 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 12px 12px 4px' }}>
                   <CategoryCollapseToggle
                     category={category}
                     collapsed={categoryCollapsed}
                     onToggle={() => toggleCategory(category)}
                   />
-                  <div
-                    style={{
-                      fontSize: 16,
-                      fontWeight: 600,
-                      color: 'var(--md-sys-color-on-surface)',
-                    }}
-                  >
-                    {category}
+                  <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                    <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, lineHeight: 1.15, color: 'var(--md-sys-color-on-surface)' }}>
+                      {category}
+                    </div>
+                    <div style={{ fontSize: 14, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 2 }}>
+                      {open} open{recallDue > 0 ? ` · ${recallDue} recall due` : ''}
+                    </div>
                   </div>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {rows.map(e => (
+                      <LevelBar key={e.id} sections={secs(e)} recallDue={dueIn(e)} label={e.title} width={7} height={34} />
+                    ))}
+                  </span>
                   {isTopic && tot > 0 && (
-                    <>
-                      <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', flex: '1 1 0', minWidth: 0 }}>
-                        {est} / {tot} established · {open} open
-                      </div>
-                      <button
-                        style={{ ...studyBtnStyle, marginLeft: 'auto' }}
-                        onClick={() => navigate(`/essaycards/review?topic=${encodeURIComponent(category)}`)}
-                      >
-                        Study
-                      </button>
-                    </>
+                    <button
+                      aria-label="Study"
+                      title="Study"
+                      style={{
+                        width: 48, height: 48, borderRadius: '50%', flexShrink: 0, cursor: 'pointer', padding: 0,
+                        border: '1px solid var(--md-sys-color-outline)', background: 'transparent',
+                        color: 'var(--md-sys-color-on-surface)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                      onClick={() => navigate(`/essaycards/review?topic=${encodeURIComponent(category)}`)}
+                    >
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 5.5v13l10.5-6.5z" />
+                      </svg>
+                    </button>
                   )}
                 </div>
               )}
-              {!categoryCollapsed && rows.map(e => (
+              {!categoryCollapsed && rows.map((e, i) => (
                 <div
                   key={e.id}
                   onClick={() => navigate(`/essaycards/essays/${e.id}`)}
                   style={{
-                    padding: 16,
-                    borderRadius: 'var(--radius-card, 12px)',
-                    border: '1px solid var(--md-sys-color-outline-variant)',
-                    background: 'var(--md-sys-color-surface)',
-                    marginBottom: 8,
+                    padding: '14px 16px 14px 20px',
+                    margin: showHeadings ? '0 12px' : 0,
+                    borderTop: showHeadings || i > 0 ? '1px solid var(--md-sys-color-outline-variant)' : 'none',
                     cursor: 'pointer',
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10,
+                    alignItems: 'stretch',
+                    gap: 12,
                   }}
                 >
-                  <span style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', minWidth: 16, textAlign: 'right', lineHeight: '20px' }}>
-                    {e.sort_index}
-                  </span>
-                  <EssayProgressDot essay={e} />
+                  <LevelBar sections={secs(e)} recallDue={dueIn(e)} label={e.title} width={5} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 600, fontSize: 16 }}>{e.title}</span>
+                      <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 18, lineHeight: 1.3 }}>{e.title}</span>
                       {e.revalidation_pending_count > 0 && (
                         <button
                           style={{ ...studyBtnStyle, padding: '2px 8px', fontSize: 12 }}
@@ -247,8 +257,9 @@ export function EssayListView() {
                         </button>
                       )}
                     </div>
-                    <div style={{ marginTop: 6 }}>
-                      <SectionProgressDots sections={sectionsByEssay[e.id] ?? []} />
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <SectionProgressDots sections={secs(e)} />
+                      <EssayRecallMarker essay={e} size={20} />
                     </div>
                   </div>
                 </div>

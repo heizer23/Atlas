@@ -30,10 +30,10 @@ export const primaryBtnStyle: React.CSSProperties = {
 export const reviewCardStyle: React.CSSProperties = {
   background: 'var(--md-sys-color-surface)',
   border: '1px solid var(--md-sys-color-outline-variant)',
-  borderRadius: 'var(--radius-card, 12px)',
-  padding: 24,
+  borderRadius: 20,
+  padding: '20px 22px 24px',
   margin: '16px 0',
-  minHeight: 140,
+  minHeight: 200,
   boxShadow: 'var(--elevation-1)',
   position: 'relative',
 };
@@ -41,8 +41,8 @@ export const reviewCardStyle: React.CSSProperties = {
 // Full-width primary action after reading the question (goal 1).
 export const flipBtnStyle: React.CSSProperties = {
   width: '100%',
-  height: 52,
-  borderRadius: 'var(--radius-button, 20px)',
+  height: 56,
+  borderRadius: 28,
   border: 'none',
   background: 'var(--md-sys-color-primary)',
   color: 'var(--md-sys-color-on-primary)',
@@ -55,8 +55,13 @@ export const flipBtnStyle: React.CSSProperties = {
 
 export const gradeBtnStyle: React.CSSProperties = {
   flex: 1,
-  height: 52,
-  borderRadius: 'var(--radius-button, 20px)',
+  minHeight: 56,
+  borderRadius: 18,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 2,
   border: '1px solid var(--md-sys-color-outline)',
   background: 'var(--md-sys-color-surface)',
   color: 'var(--md-sys-color-on-surface)',
@@ -83,6 +88,17 @@ export function gradeStyleFor(g: Grade): React.CSSProperties {
   return g === 'again' ? gradeBtnAgainStyle : g === 'good' ? gradeBtnGoodStyle : gradeBtnStyle;
 }
 
+// Eyebrow above a review question: small tracked caps (topic).
+export const eyebrowStyle: React.CSSProperties = {
+  fontSize: 12, fontWeight: 500, letterSpacing: '0.12em', textTransform: 'uppercase',
+  color: 'var(--md-sys-color-on-surface-variant)',
+};
+
+export const iconBtnStyle: React.CSSProperties = {
+  width: 40, height: 40, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer',
+  color: 'var(--md-sys-color-on-surface-variant)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+};
+
 export const jumpBtnStyle: React.CSSProperties = {
   ...btnStyle,
   marginTop: 8,
@@ -97,7 +113,10 @@ export const jumpBtnStyle: React.CSSProperties = {
 // Rendered once by the root component. Keeps a Markdown image inside the
 // reading column / review card from overflowing. CSS-only per
 // Sprint03_Images/10_architecture.json — no custom img component.
+export const SERIF = "'Source Serif 4', Georgia, 'Times New Roman', serif";
+
 export const ESSAYCARDS_IMG_CSS =
+  "@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap');" +
   '.essaycards-section-body img, .essaycards-review-card img { max-width: 100%; height: auto; }' +
   // Reading column: 16px body, relaxed leading, ~68ch measure.
   ' .essaycards-section-body { font-size: 16px; line-height: 1.65; }' +

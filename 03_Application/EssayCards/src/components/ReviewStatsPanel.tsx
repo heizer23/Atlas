@@ -51,30 +51,54 @@ export function ForecastRow({ label, values }: { label: string; values: (number 
 // from any session state — only `rows` (label + values, one entry per
 // FORECAST_COLUMNS column) is accepted.
 export function ForecastGrid({ rows }: { rows: { label: string; values: (number | null)[] }[] }) {
+  // Mockup style: six equal columns, header above, count in a soft pill (grey dot when empty).
+  // A row's own label (if any) sits in a left gutter; the review panel passes none.
+  const hasLabels = rows.some(r => r.label);
   return (
     <div style={{ overflowX: 'auto' }}>
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: `minmax(44px, auto) repeat(${FORECAST_COLUMNS.length}, minmax(34px, 1fr))`,
-          rowGap: 4,
-          columnGap: 8,
-          alignItems: 'baseline',
+          gridTemplateColumns: `${hasLabels ? 'minmax(44px, auto) ' : ''}repeat(${FORECAST_COLUMNS.length}, minmax(40px, 1fr))`,
+          rowGap: 6,
+          columnGap: 4,
+          alignItems: 'center',
+          justifyItems: 'center',
           minWidth: 300,
         }}
       >
-        <span />
+        {hasLabels && <span />}
         {FORECAST_COLUMNS.map(c => (
-          <span
-            key={c.key}
-            style={{ fontSize: 12, textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}
-          >
-            {c.label}
-          </span>
+          <span key={c.key} style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>{c.label}</span>
         ))}
-        {rows.map(row => <ForecastRow key={row.label} label={row.label} values={row.values} />)}
+        {rows.map(row => (
+          <React.Fragment key={row.label}>
+            {hasLabels && <ForecastLabel label={row.label} />}
+            {row.values.map((v, i) => <ForecastPill key={i} value={v} />)}
+          </React.Fragment>
+        ))}
       </div>
     </div>
+  );
+}
+
+function ForecastLabel({ label }: { label: string }) {
+  return <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--md-sys-color-on-surface-variant)', justifySelf: 'start' }}>{label}</span>;
+}
+
+function ForecastPill({ value }: { value: number | null }) {
+  const on = !!value;
+  return (
+    <span
+      style={{
+        minWidth: 30, textAlign: 'center', fontSize: 14, fontVariantNumeric: 'tabular-nums', lineHeight: '24px',
+        padding: '0 8px', borderRadius: 12,
+        background: on ? 'var(--md-sys-color-primary-container, #dbe6f7)' : 'transparent',
+        color: on ? 'var(--md-sys-color-on-primary-container, #0b2a55)' : 'var(--md-sys-color-outline)',
+      }}
+    >
+      {value == null ? '·' : value}
+    </span>
   );
 }
 
@@ -119,28 +143,35 @@ export function ReviewStatsPanel({
   // Recalls/Unique/First are backend-owned (GET /review-stats/today, UTC day);
   // Due/New are derived from the already-scoped due queue.
   const metrics: [string, string][] = [
+    [String(backlog), 'Due'],
+    [String(newRemaining), 'New'],
     [today ? String(today.recalls) : '·', 'Recalls'],
     [today ? String(today.unique_cards_seen) : '·', 'Unique'],
     [today ? String(today.first_cards_seen) : '·', 'First'],
-    [String(backlog), 'Due'],
-    [String(newRemaining), 'New'],
   ];
   const allRow = FORECAST_COLUMNS.map(c => (stats ? stats[c.key] ?? 0 : null));
 
   return (
     <div
       style={{
-        background: 'var(--md-sys-color-surface-variant)',
-        borderRadius: 'var(--radius-card, 12px)',
-        padding: 12,
+        background: 'var(--md-sys-color-surface)',
+        border: '1px solid var(--md-sys-color-outline-variant)',
+        borderRadius: 20,
+        padding: '12px 8px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
+        gap: 10,
       }}
     >
-      <div data-testid="review-daily-metrics" style={{ display: 'flex', gap: 8 }}>
-        {metrics.map(([value, label]) => (
-          <div key={label} style={{ flex: 1, textAlign: 'center' }}>
+      <div data-testid="review-daily-metrics" style={{ display: 'flex' }}>
+        {metrics.map(([value, label], i) => (
+          <div
+            key={label}
+            style={{
+              flex: 1, textAlign: 'center',
+              borderLeft: i === 0 ? 'none' : '1px solid var(--md-sys-color-outline-variant)',
+            }}
+          >
             <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.1, color: 'var(--md-sys-color-on-surface)' }}>
               {value}
             </div>
@@ -148,6 +179,8 @@ export function ReviewStatsPanel({
           </div>
         ))}
       </div>
+
+      <div style={{ borderTop: '1px solid var(--md-sys-color-outline-variant)' }} />
 
       <div data-testid="review-interval-row">
         <ForecastGrid rows={[{ label: '', values: allRow }]} />

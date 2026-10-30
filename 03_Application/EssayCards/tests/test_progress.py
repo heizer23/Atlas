@@ -41,19 +41,32 @@ def _section_version(section_id):
     ].isoformat()
 
 
+def _recall(score):
+    """Sprint16: unguided results carry recall evidence; score >= 5 -> good, else again."""
+    if score >= 5:
+        return {"rating": "good", "independent_elements": ["spine"], "prompted_elements": [],
+                "missing_elements": [], "misunderstandings": [], "followups_asked": 0}
+    return {"rating": "again", "independent_elements": [], "prompted_elements": [],
+            "missing_elements": ["spine"], "misunderstandings": [], "followups_asked": 1}
+
+
 def _section_result(slug, anchor, section_id, score, exam_type):
-    return {
+    entry = {
         "scope": "section", "essay_slug": slug, "section_anchor_slug": anchor,
         "section_version": _section_version(section_id), "examined_at": "2026-09-01T10:00:00Z",
-        "question": "Q", "answer_transcript": "A", "score": score, "exam_type": exam_type,
+        "question": "Q", "answer_transcript": "A", "exam_type": exam_type,
     }
+    entry.update({"recall": _recall(score)} if exam_type == "unguided" else {"score": score})
+    return entry
 
 
 def _essay_result(slug, score, exam_type, examined_at="2026-09-01T10:00:00Z"):
-    return {
+    entry = {
         "scope": "essay", "essay_slug": slug, "examined_at": examined_at,
-        "question": "Q", "answer_transcript": "A", "score": score, "exam_type": exam_type,
+        "question": "Q", "answer_transcript": "A", "exam_type": exam_type,
     }
+    entry.update({"recall": _recall(score)} if exam_type == "unguided" else {"score": score})
+    return entry
 
 
 def _import(client, *results):
@@ -184,7 +197,7 @@ def test_passing_the_unguided_section_oral_makes_the_section_blue(client):
     assert _section(client, ESSAY_GREEN, SECTION_GREEN)["state"] == "green"
     _import(client, _section_result("fix-essay-green", "fix-green-1", SECTION_GREEN, 5, "unguided"))
     row = _section(client, ESSAY_GREEN, SECTION_GREEN)
-    assert row["state"] == "blue" and row["next_step"] is None
+    assert row["state"] == "blue" and row["next_step"] == "guided_next"  # recall established; understanding still to deepen
 
 
 def test_unguided_pass_on_a_section_that_never_passed_guided_is_blue(client):
@@ -198,8 +211,8 @@ def test_failing_an_unguided_section_oral_does_not_revoke_blue(client):
     assert _section(client, ESSAY_BLUE, section_id)["state"] == "blue"
     _import(client, _section_result("fix-essay-blue", "fix-blue-1", section_id, 2, "unguided"))
     assert _section(client, ESSAY_BLUE, section_id)["state"] == "blue"
-    hist = client.get(f"/api/essaycards/sections/{section_id}/examinations").json()["rows"]
-    assert len(hist) == 1 and hist[0]["passed"] is False
+    hist = client.get(f"/api/essaycards/recall/reviews?section_id={section_id}").json()["rows"]
+    assert len(hist) == 1 and hist[0]["rating"] == "again"  # a lapse is history + FSRS, never an un-establishing
 
 
 def test_section_progress_lists_every_section_in_essay_then_section_order(client):
@@ -294,8 +307,7 @@ def test_essay_is_violet_after_a_passing_unguided_essay_oral(client):
     assert _essay(client, ESSAY_BLUE)["essay_state"] == "blue"
     _import(client, _essay_result("fix-essay-blue", 5, "unguided", examined_at="2026-09-03T08:00:00Z"))
     row = _essay(client, ESSAY_BLUE)
-    assert row["essay_state"] == "violet"
-    assert datetime.fromisoformat(row["essay_unguided_passed_at"]) == datetime.fromisoformat("2026-09-03T08:00:00+00:00")
+    assert row["essay_state"] == "violet" and row["essay_recall_status"] == "current"
 
 
 def test_violet_retake_that_passes_keeps_violet_and_updates_the_date(client):
@@ -303,10 +315,11 @@ def test_violet_retake_that_passes_keeps_violet_and_updates_the_date(client):
     body = _import(client, _essay_result("fix-essay-violet", 6, "unguided", examined_at="2030-01-01T00:00:00Z"))
     after = _essay(client, ESSAY_VIOLET)
     assert after["essay_state"] == "violet"
-    assert after["essay_unguided_passed_at"] > before["essay_unguided_passed_at"]
+    assert before["essay_recall_status"] == "due"          # legacy pass, genuinely old -> overdue, not "fresh"
+    assert after["essay_recall_status"] == "current" and after["essay_recall_next_due_at"] > before["essay_recall_next_due_at"]
     assert body["revalidation"] == [] and after["revalidation_pending_count"] == 0
-    hist = client.get(f"/api/essaycards/essays/{ESSAY_VIOLET}/examinations").json()["rows"]
-    assert hist[0]["score"] == 6 and hist[0]["passed"] is True
+    hist = client.get(f"/api/essaycards/recall/reviews?essay_id={ESSAY_VIOLET}").json()["rows"]
+    assert hist[0]["rating"] == "good"
 
 
 def test_highest_satisfied_state_is_shown(client):

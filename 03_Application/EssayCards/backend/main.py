@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
 from backend.migrate_fsrs_state import migrate_legacy_fsrs_state
-from backend.routers import essays, examinations, exploration, flashcards, guided, images, nuggets, progress, review_stats, sentence_feedback
+from backend.migrate_recall_state import migrate_legacy_unguided_to_recall
+from backend.routers import essays, examinations, exploration, flashcards, guided, images, nuggets, progress, recall, review_stats, sentence_feedback
 from platform_errorhandling.api_response import api_error
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.logging import setup_logging
@@ -73,6 +74,7 @@ app.include_router(guided.router, prefix="/api/essaycards")
 app.include_router(images.router, prefix="/api/essaycards")
 app.include_router(nuggets.router, prefix="/api/essaycards")
 app.include_router(progress.router, prefix="/api/essaycards")
+app.include_router(recall.router, prefix="/api/essaycards")
 app.include_router(review_stats.router, prefix="/api/essaycards")
 app.include_router(sentence_feedback.router, prefix="/api/essaycards")
 
@@ -89,6 +91,7 @@ def on_startup() -> None:
             from backend.database import get_db
             with get_db() as conn:
                 migrate_legacy_fsrs_state(conn)
+                log.info("recall seed: %s", migrate_legacy_unguided_to_recall(conn))
             log.info("Ready.")
             return
         except Exception as exc:

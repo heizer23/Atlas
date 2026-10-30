@@ -931,4 +931,70 @@ create table if not exists essaycards.section_guided_sessions (
 create index if not exists ix_guided_sessions_section_at
     on essaycards.section_guided_sessions(section_id, session_at desc);
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- Sprint16_RecallFSRS — unguided oral RECALL as an independent FSRS-scheduled
+-- dimension (section- and essay-scope). Separate from flashcard scheduling
+-- (flashcard_review_state / fsrs_card_state) and from guided learning.
+--
+-- recall_state   one row per section/essay that has had a recall attempt, or
+--                was seeded from a legacy passed unguided exam. raw_state is
+--                the authoritative fsrs.Card.to_dict(). established_at is set
+--                by the first successful (hard/good/easy) review; a row whose
+--                established_at is null reads as "not established".
+-- recall_reviews append-only history of recall assessments (never updated).
+--
+-- Legacy section_examinations / essay_examinations rows (exam_type 'unguided')
+-- are untouched evidence. backend/migrate_recall_state.py seeds recall_state
+-- for sections/essays whose unguided_passed is still true, using the genuine
+-- unguided_passed_at as last_reviewed_at (no recall_reviews row is fabricated).
+-- ════════════════════════════════════════════════════════════════════════════
+create table if not exists essaycards.recall_state (
+    id               uuid        primary key default gen_random_uuid(),
+    scope            text        not null,
+    essay_id         uuid        not null references essaycards.essays(id) on delete cascade,
+    section_id       uuid        references essaycards.essay_sections(id) on delete cascade,
+    raw_state        jsonb       not null,
+    established_at   timestamptz,
+    last_rating      text,
+    last_reviewed_at timestamptz,
+    next_due_at      timestamptz not null,
+    review_count     integer     not null default 0,
+    lapse_count      integer     not null default 0,
+    source           text        not null default 'review',
+    updated_at       timestamptz not null default now(),
+    constraint ck_recall_state_scope check (scope in ('section', 'essay')),
+    constraint ck_recall_state_target check ((scope = 'section') = (section_id is not null)),
+    constraint ck_recall_state_rating check (last_rating is null or last_rating in ('again', 'hard', 'good', 'easy')),
+    constraint ck_recall_state_source check (source in ('review', 'migrated_exam'))
+);
+
+create unique index if not exists ux_recall_state_section
+    on essaycards.recall_state(section_id) where scope = 'section';
+create unique index if not exists ux_recall_state_essay
+    on essaycards.recall_state(essay_id) where scope = 'essay';
+create index if not exists ix_recall_state_due on essaycards.recall_state(next_due_at);
+
+create table if not exists essaycards.recall_reviews (
+    id                uuid        primary key default gen_random_uuid(),
+    recall_state_id   uuid        not null references essaycards.recall_state(id) on delete cascade,
+    essay_id          uuid        not null references essaycards.essays(id) on delete cascade,
+    section_id        uuid        references essaycards.essay_sections(id) on delete cascade,
+    rating            text        not null,
+    examined_at       timestamptz not null,      -- external (ChatGPT-supplied) evidence only; scheduling uses reviewed_at
+    reviewed_at       timestamptz not null default now(),
+    question          text        not null,
+    answer_transcript text        not null,
+    feedback          text,
+    evidence          jsonb       not null,      -- independent / prompted / missing elements, misunderstandings, followups_asked
+    section_version_at  timestamptz,                 -- section scope only: the section_version the learner was assessed on
+    nugget_versions_at  jsonb,                       -- optional echo, same meaning as section_examinations.nugget_versions_at
+    next_due_at       timestamptz not null,
+    constraint ck_recall_reviews_rating check (rating in ('again', 'hard', 'good', 'easy'))
+);
+
+alter table essaycards.recall_reviews add column if not exists section_version_at timestamptz;
+alter table essaycards.recall_reviews add column if not exists nugget_versions_at jsonb;
+
+create index if not exists ix_recall_reviews_state on essaycards.recall_reviews(recall_state_id, reviewed_at desc);
+
 commit;

@@ -7,8 +7,8 @@ import Skeleton from '@platform-ui/components/Skeleton';
 import type { ApiError } from '@platform-ui/api/types';
 import { ActionMenu } from '../components/ActionMenu';
 import type { ActionMenuItem } from '../components/ActionMenu';
-import { EssayExaminationHistory, SectionExaminationHistory, SectionGuidedHistory } from '../components/ExaminationHistory';
-import { EssayProgressDot, SectionProgressDots } from '../components/Progress';
+import { EssayExaminationHistory, RecallHistory, SectionExaminationHistory, SectionGuidedHistory } from '../components/ExaminationHistory';
+import { EssayRecallMarker, NEXT_STEP_LABELS, SectionProgressDots, recallDetail } from '../components/Progress';
 import { NuggetLink, NuggetPanel, loadNuggetIndex, mainSpineTitleMap, nuggetAwareUrlTransform, remarkNuggetRefs } from '../nuggets';
 import { buildEssayExportClipboardText, buildExamClipboardText, buildGuidedClipboardText, buildSectionExportClipboardText, buildSectionImproveClipboardText, buildSectionInsertClipboardText, writeClipboard } from '../prompts';
 import { btnStyle, pageStyle, studyBtnStyle } from '../styles';
@@ -438,12 +438,12 @@ export function ReaderView() {
   const secondaryItems: ActionMenuItem[] = [
     ...(hasCards ? [questionOverviewItem] : []),
     {
-      label: examBusyKey === 'essay:guided:' ? 'Preparing…' : 'Guided oral exam',
+      label: examBusyKey === 'essay:guided:' ? 'Preparing…' : 'Guided oral exam (essay)',
       onClick: () => handleExportExam('essay', 'guided'),
       disabled: essay.status !== 'complete' || examBusyKey !== null,
     },
     {
-      label: examBusyKey === 'essay:unguided:' ? 'Preparing…' : 'Unguided oral exam',
+      label: examBusyKey === 'essay:unguided:' ? 'Preparing…' : 'Oral recall (whole essay)',
       onClick: () => handleExportExam('essay', 'unguided'),
       disabled: essay.status !== 'complete' || examBusyKey !== null,
     },
@@ -475,7 +475,7 @@ export function ReaderView() {
           }
           items={secondaryItems}
         />
-        <EssayProgressDot essay={essay} />
+        <EssayRecallMarker essay={essay} />
         {essay.revalidation_pending_count > 0 && (
           <button
             style={studyBtnStyle}
@@ -493,6 +493,7 @@ export function ReaderView() {
       )}
       <h1 style={{ marginBottom: 12 }}>{essay.title}</h1>
       <EssayExaminationHistory essayId={essay.id} />
+      <RecallHistory essayId={essay.id} hideWhenEmpty />
 
       {essay.main_spine_markdown.trim() !== '' && (
         <div
@@ -528,6 +529,12 @@ export function ReaderView() {
             {prog && <SectionProgressDots sections={[prog]} />}
             {section.heading}
           </h2>
+          {prog && prog.next_step && (
+            <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 6 }}>
+              {recallDetail(prog.recall_status, prog.recall_next_due_at)} · Next: {NEXT_STEP_LABELS[prog.next_step]}
+              {prog.next_step === 'guided_next' && prog.next_guided_level ? ` (Level ${prog.next_guided_level})` : ''}
+            </div>
+          )}
           {lockedWithCards && (
             <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 6 }}>
               🔒 Flashcards locked — pass the guided oral for this section to unlock them.
@@ -577,12 +584,12 @@ export function ReaderView() {
                 onClick: () => navigate('/essaycards/guided/import'),
               },
               {
-                label: examBusyKey === `section:unguided:${section.id}` ? 'Preparing…' : 'Unguided oral (section)',
+                label: examBusyKey === `section:unguided:${section.id}` ? 'Preparing…' : 'Oral recall (section)',
                 onClick: () => handleExportExam('section', 'unguided', section.id),
                 disabled: essay.status !== 'complete' || examBusyKey !== null,
               },
               {
-                label: 'Import oral exam result →',
+                label: 'Import recall result →',
                 onClick: () => navigate('/essaycards/examinations/import'),
               },
               {
@@ -624,6 +631,7 @@ export function ReaderView() {
             <>
               <SectionGuidedHistory sectionId={section.id} />
               <SectionExaminationHistory sectionId={section.id} />
+              <RecallHistory sectionId={section.id} />
             </>
           )}
         </section>

@@ -9,11 +9,10 @@ import { btnStyle, pageStyle, primaryBtnStyle } from '../styles';
 // ── Import Examinations View ───────────────────────────────────────────────────
 
 export interface ImportResultEffect {
-  effect: 'section_guided_unlocked' | 'section_unguided_passed' | 'essay_guided_passed'
-    | 'essay_unguided_passed' | 'essay_unguided_failed_cascade';
+  effect: 'section_guided_unlocked' | 'essay_guided_passed'
+    | 'recall_established' | 'recall_reviewed' | 'recall_lapsed' | 'recall_not_established';
   section_id?: string;
   essay_id?: string;
-  cards_flagged?: number;
 }
 
 export interface ImportSummary {
@@ -24,21 +23,26 @@ export interface ImportSummary {
     essay_id: string;
     section_id: string | null;
     examined_at: string;
-    score: number;
-    passed: boolean;
-    score_percent: number;
+    exam_type?: 'guided' | 'unguided';
+    // Guided results: score/passed. Unguided (recall) results: rating/next_due_at instead.
+    score: number | null;
+    passed: boolean | null;
+    score_percent: number | null;
+    rating?: 'again' | 'hard' | 'good' | 'easy';
+    next_due_at?: string;
     effects: ImportResultEffect[];
   }[];
-  // One entry per unguided-essay failure cascade that fired in this import.
+  // Always empty since Sprint16 (the unguided-essay failure cascade was retired).
   revalidation: { essay_id: string; cards_flagged: number }[];
 }
 
 export const EFFECT_TEXT: Record<ImportResultEffect['effect'], string> = {
   section_guided_unlocked: 'Section flashcards unlocked',
-  section_unguided_passed: 'Section unguided oral passed',
   essay_guided_passed: 'Guided essay oral passed',
-  essay_unguided_passed: 'Unguided essay oral passed',
-  essay_unguided_failed_cascade: 'Essay mastery invalidated',
+  recall_established: 'Oral recall established',
+  recall_reviewed: 'Oral recall reviewed',
+  recall_lapsed: 'Oral recall lapsed — due again',
+  recall_not_established: 'Recall not yet established',
 };
 
 export const EXAM_RESULT_PLACEHOLDER_JSON = `{
@@ -61,8 +65,15 @@ export const EXAM_RESULT_PLACEHOLDER_JSON = `{
       "examined_at": "2026-08-28T15:00:00Z",
       "question": "summary of what was asked",
       "answer_transcript": "summary or transcript of the answer given",
-      "score": 5,
       "exam_type": "unguided",
+      "recall": {
+        "rating": "good",
+        "independent_elements": ["short phrases the learner recalled unaided"],
+        "prompted_elements": [],
+        "missing_elements": [],
+        "misunderstandings": [],
+        "followups_asked": 0
+      },
       "feedback": null
     }
   ]
@@ -111,9 +122,9 @@ export function ImportExaminationsView() {
       </button>
       <h2 style={{ marginTop: 0 }}>Import Exam Results</h2>
       <div style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13, marginBottom: 12 }}>
-        Paste ChatGPT's JSON reply from an oral examination (started with "Export for examination" on an
-        essay's page). Each result is stored as a new historical record — importing never overwrites a
-        previous examination, so re-examining a section months later just adds another entry.
+        Paste ChatGPT's JSON reply from an oral recall assessment or guided essay oral (started from the
+        essay's page). Each result is stored as a new historical record and never overwrites an earlier one. Recall results
+        also schedule the next oral-recall review.
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -165,34 +176,15 @@ export function ImportExaminationsView() {
           <ul style={{ fontSize: 13, margin: '8px 0 0', paddingLeft: 18 }}>
             {result.results.map(r => (
               <li key={r.id}>
-                {r.scope === 'essay' ? 'Whole essay' : 'Section'}: score {r.score}/6 ({r.score_percent}%) —{' '}
-                <strong>{r.passed ? 'Passed' : 'Not passed'}</strong>
+                {r.scope === 'essay' ? 'Whole essay' : 'Section'}:{' '}
+                {r.rating
+                  ? <><strong style={{ textTransform: 'capitalize' }}>{r.rating}</strong>
+                      {r.next_due_at && <> — next recall {new Date(r.next_due_at).toLocaleDateString()}</>}</>
+                  : <>score {r.score}/6 ({r.score_percent}%) — <strong>{r.passed ? 'Passed' : 'Not passed'}</strong></>}
                 {r.effects.length > 0 && <> · {r.effects.map(e => EFFECT_TEXT[e.effect]).join(', ')}</>}
               </li>
             ))}
           </ul>
-          {result.revalidation.map(rv => (
-            <div
-              key={rv.essay_id}
-              role="alert"
-              style={{
-                marginTop: 12, padding: 10, borderRadius: 6,
-                background: 'var(--md-sys-color-error-container)', color: 'var(--md-sys-color-on-surface)',
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>Mastery invalidated</div>
-              <div style={{ fontSize: 13, margin: '4px 0 8px' }}>
-                The unguided essay oral was failed: Violet and Blue were removed and every section's unguided
-                pass was cleared. {rv.cards_flagged} card{rv.cards_flagged === 1 ? '' : 's'} need revalidation.
-              </div>
-              <button
-                style={primaryBtnStyle}
-                onClick={() => navigate(`/essaycards/review?revalidate=1&essay_id=${rv.essay_id}`)}
-              >
-                Start revalidation
-              </button>
-            </div>
-          ))}
         </div>
       )}
     </div>

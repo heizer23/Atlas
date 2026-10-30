@@ -84,6 +84,10 @@ def clean_tables(db_conn):
         if sql.strip():
             with db_conn.cursor() as cur:
                 cur.execute(sql)
+        # Sprint16: fixture sections/essays with a legacy passed unguided oral
+        # get their recall_state through the same one-time migration the app runs at startup.
+        from backend.migrate_recall_state import migrate_legacy_unguided_to_recall
+        migrate_legacy_unguided_to_recall(db_conn)
     yield
 
 

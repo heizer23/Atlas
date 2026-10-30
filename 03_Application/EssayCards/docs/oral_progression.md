@@ -153,3 +153,13 @@ colours are unchanged. Guided sessions count in `GET /review-stats/summary` `ora
 
 **Migration.** At schema init every existing `guided_passed` section gets `guided_level = 1` (the backfill
 is re-run safe); no higher level is inferred. Old guided `section_examinations` rows remain as history.
+
+## Oral recall (Sprint16_RecallFSRS)
+Two independent dimensions: **understanding** = guided level 0-6 (no FSRS); **recall** = unguided oral reconstruction, FSRS-scheduled per section and per essay (`recall_state`, append-only `recall_reviews`; `backend/recall.py`). Flashcards, oral recall and guided learning are three separate activities with separate queues (`/review`, `/recall`, reader menu).
+- Status (derived): `not_established` (no successful review) / `current` / `due` (`next_due_at <= now()` or last rating `again` after establishment). Hard/Good/Easy establish; a first Again does not.
+- Scheduler: FSRS-6 with no intra-day steps (`scheduling.recall_scheduler()`); the server clock drives scheduling, the reply's `examined_at` is evidence only.
+- Import (`POST /examinations/import`, `exam_type: unguided`): `recall {rating, independent_elements, prompted_elements, missing_elements, misunderstandings, followups_asked<=2}` replaces the 0-6 score. Prompted recall caps at Hard (validated). Guided essay orals still use the score.
+- Retired: the unguided-essay failure cascade (no more automatic revalidation flags from oral failures); legacy `unguided_*` columns are frozen history. `migrate_recall_state.py` seeds `recall_state` once from passed legacy unguided orals (one synthetic Good dated at the real `unguided_passed_at`; no review rows fabricated; legacy exam rows untouched).
+- Recommendations (`GET /progress/sections` `next_step`): `guided_oral` (Level 1) -> `recall_due` -> `guided_next` (below Level 5) -> `unguided_recall` (Level >= 5, not established) -> `guided_next` (Level 6). Flashcard state never gates anything.
+- API: `GET /recall/due`, `GET /recall/reviews`; progress rows gain `recall_*`, `next_guided_level`; essay rows gain `essay_recall_*`, `recall_due_count`.
+- Overview dots: fill = guided level (grey/yellow -> dark green), ring = recall (none / solid / dashed). No essay-level fill; essay shows only a recall ring.

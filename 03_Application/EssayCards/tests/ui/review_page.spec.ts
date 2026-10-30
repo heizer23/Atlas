@@ -28,7 +28,7 @@ test('review page shows the five daily metrics in order', async ({ page }) => {
   const metrics = page.getByTestId('review-daily-metrics');
   await expect(metrics).toBeVisible({ timeout: 10000 });
   const texts = await metrics.locator('div > div:nth-child(2)').allTextContents();
-  expect(texts).toEqual(['Recalls', 'Unique', 'First', 'Due', 'New']);
+  expect(texts).toEqual(['Due', 'New', 'Recalls', 'Unique', 'First']);
 });
 
 test('interval row is one unlabeled row of six numbers', async ({ page }) => {

@@ -77,8 +77,8 @@ test('essay header action menu exposes every pre-existing essay-level action', a
   // Guided / Unguided oral exam — always present as menu items (gated on
   // status === 'complete' via `disabled`, not hidden — "reachable" per the
   // inventory means present in the menu, same gate as pre-sprint).
-  await expect(menu.getByRole('menuitem', { name: 'Guided oral exam', exact: true })).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: 'Unguided oral exam', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Guided oral exam (essay)', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Oral recall (whole essay)', exact: true })).toBeVisible();
 
   // Export essay / Import essay → — same toggle-to-Import pattern as before.
   await expect(menu.getByRole('menuitem', { name: /^(Export essay|Import essay →)$/ })).toBeVisible();
@@ -134,7 +134,7 @@ test('section-end action menu and examination history remain reachable after con
   await expect(sectionMenu).toBeVisible();
   // Sprint14: the section menu also offers the two section-scope oral exams.
   await expect(sectionMenu.getByRole('menuitem', { name: /^Guided learning — Level [1-6]$/ })).toBeVisible();
-  await expect(sectionMenu.getByRole('menuitem', { name: 'Unguided oral (section)', exact: true })).toBeVisible();
+  await expect(sectionMenu.getByRole('menuitem', { name: 'Oral recall (section)', exact: true })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Export section|Import section →)$/ })).toBeVisible();
   await expect(sectionMenu.getByRole('menuitem', { name: /^(Insert section after|Import insertion →)$/ })).toBeVisible();
 
@@ -151,7 +151,8 @@ test('desktop nav reflects the Sprint12 regrouping — Experiment removed, Add /
 
   const sidebar = page.getByRole('navigation', { name: 'Application navigation' });
   await expect(sidebar.getByRole('button', { name: 'Essays', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('button', { name: 'Due for review', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Flashcards', exact: true })).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'Oral Recall', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'Add / Update Essay', exact: true })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'Stats', exact: true })).toBeVisible();
 

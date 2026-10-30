@@ -50,6 +50,7 @@ from backend.oral_state import (
     score_percent,
     scoring_echo,
 )
+from backend.recall import GRADING, apply_recall_review, validate_evidence
 from platform_errorhandling import api_error
 
 _SLUG_LIKE_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -191,7 +192,7 @@ def build_export_package(
         "essay_title": essay_row["title"],
         "exam_type": exam_type,
         "scope": scope,
-        "scoring": scoring_echo(),
+        **({"recall_grading": GRADING} if exam_type == "unguided" else {"scoring": scoring_echo()}),
         "sections": sections,
     }
 
@@ -319,18 +320,27 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
                 "VALIDATION_ERROR", f"results[{idx}].answer_transcript is required and must be a non-empty string"
             )
 
-        score = entry.get("score")
-        if not isinstance(score, int) or isinstance(score, bool) or not (0 <= score <= 6):
-            return None, api_error(
-                "VALIDATION_ERROR", f"results[{idx}].score is required and must be an integer between 0 and 6"
-            )
-
         exam_type = entry.get("exam_type")
         if exam_type not in VALID_EXAM_TYPES:
             return None, api_error(
                 "VALIDATION_ERROR",
                 f"results[{idx}].exam_type is required and must be one of: {', '.join(VALID_EXAM_TYPES)}",
             )
+
+        # Sprint16: unguided results are recall assessments (rating + evidence,
+        # FSRS-scheduled); only guided essay results still carry a 0-6 score.
+        score = None
+        evidence = None
+        if exam_type == "unguided":
+            evidence, err = validate_evidence(entry.get("recall"), idx)
+            if err is not None:
+                return None, err
+        else:
+            score = entry.get("score")
+            if not isinstance(score, int) or isinstance(score, bool) or not (0 <= score <= 6):
+                return None, api_error(
+                    "VALIDATION_ERROR", f"results[{idx}].score is required and must be an integer between 0 and 6"
+                )
 
         if scope == "section" and exam_type == "guided":
             return None, api_error(
@@ -361,7 +371,8 @@ def validate_import_body(body: Any) -> tuple[list[dict[str, Any]] | None, Any]:
 
         results.append({
             "scope": scope,
-            "passed": is_passing_score(score),
+            "passed": is_passing_score(score) if score is not None else None,
+            "evidence": evidence,
             "essay_slug": essay_slug,
             "section_anchor_slug": section_anchor_slug,
             "section_version": section_version,
@@ -424,6 +435,24 @@ def import_results(cur: Any, results: list[dict[str, Any]]) -> tuple[list[dict[s
 
     inserted: list[dict[str, Any]] = []
     for r in resolved:
+        if r["exam_type"] == "unguided":
+            applied = apply_recall_review(
+                cur, r["scope"], r["essay_id"], r["section_id"], r["evidence"], r["examined_at"],
+                r["question"], r["answer_transcript"], r["feedback"],
+                r["section_version"], r.get("nugget_versions"),
+            )
+            inserted.append({
+                **applied,
+                "scope": r["scope"],
+                "exam_type": "unguided",
+                "essay_id": str(r["essay_id"]),
+                "section_id": str(r["section_id"]) if r["section_id"] else None,
+                "examined_at": r["examined_at"].isoformat(),
+                "score": None,
+                "passed": None,
+                "score_percent": None,
+            })
+            continue
         if r["scope"] == "section":
             nugget_versions = r.get("nugget_versions")
             cur.execute(

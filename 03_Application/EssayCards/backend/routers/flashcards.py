@@ -97,6 +97,9 @@ DUE_SCHEMA: list[ColumnSchema] = [
     # Feeds the review screen's source-navigation branch: set -> "Flashcard ->
     # Nugget" overlay; null -> unchanged legacy "Jump to passage" navigation.
     ColumnSchema(key="nugget_id", label="Nugget", type="string", sortable=False, filterable=True),
+    # Review-card eyebrow (topic, falling back to the essay title).
+    ColumnSchema(key="category", label="Topic", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="essay_title", label="Essay", type="string", sortable=False, filterable=False),
 ]
 
 STATS_SCHEMA: list[ColumnSchema] = [
@@ -239,12 +242,11 @@ def list_due_flashcards(
         "frs.needs_revalidation = false",
     ]
     params: list[Any] = []
-    extra_join = ""
+    extra_join = "join essaycards.essays e on e.id = f.essay_id"
     if not scoped:
         # REVIEW / maintenance: only established cards that are also due.
         conditions.append(f"frs.review_interval >= {ESTABLISHED_INTERVAL_SQL}")
     if topic:
-        extra_join = "join essaycards.essays e on e.id = f.essay_id"
         conditions.append("e.category = %s")
         params.append(topic)
     if essay_id:
@@ -260,7 +262,7 @@ def list_due_flashcards(
             cur.execute(
                 f"""
                 select f.id as flashcard_id, f.question, f.answer, f.essay_id, f.section_id,
-                       f.nugget_id, s.anchor_slug, frs.next_due_at,
+                       f.nugget_id, s.anchor_slug, frs.next_due_at, e.category, e.title as essay_title,
                        (frs.last_reviewed_at is null) as is_new,
                        coalesce(frs.last_reviewed_at >= now() - interval '24 hours', false)
                            as is_recent,
@@ -860,6 +862,49 @@ def _insert_review_event(
         """,
         (flashcard_id, grade, now, was_due, prior_review_interval, resulting_review_interval),
     )
+
+
+GRADE_PREVIEW_SCHEMA: list[ColumnSchema] = [
+    ColumnSchema(key="grade", label="Grade", type="string", sortable=False, filterable=False),
+    ColumnSchema(key="interval_seconds", label="Next interval (s)", type="number", sortable=False, filterable=False),
+]
+
+
+@router.get("/{flashcard_id}/grade-preview", response_model=None)
+def grade_preview(flashcard_id: str) -> JSONResponse:
+    """
+    Read-only: the interval each grade WOULD schedule for this card right now
+    (the labels under the Again/Hard/Good/Easy buttons). Runs the same
+    FSRSScheduler.review as POST /review against the persisted FSRS state and the
+    server's now(), but writes nothing. Rows: again, hard, good, easy, in that
+    order. Unknown card -> 404.
+    """
+    if not _is_uuid(flashcard_id):
+        return api_error("NOT_FOUND", f"Flashcard {flashcard_id} not found", status=404)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select now() as now")
+            now = cur.fetchone()["now"]
+            cur.execute(
+                "select last_reviewed_at from essaycards.flashcard_review_state where flashcard_id = %s",
+                (flashcard_id,),
+            )
+            state_row = cur.fetchone()
+            if not state_row:
+                return api_error("NOT_FOUND", f"Flashcard {flashcard_id} not found", status=404)
+            existing = _load_fsrs_existing_state(cur, flashcard_id)
+    scheduler = FSRSScheduler()
+    rows = [
+        {"grade": g, "interval_seconds": int(scheduler.review(g, state_row["last_reviewed_at"], now, existing)
+                                              .review_interval.total_seconds())}
+        for g in ("again", "hard", "good", "easy")
+    ]
+    ds = Dataset(
+        meta=DatasetMeta(object_type="grade_preview", label="Grade Preview", total=4, page=1, page_size=4, row_actions=[]),
+        **{"schema": GRADE_PREVIEW_SCHEMA},
+        rows=rows,
+    )
+    return _dataset_response(ds)
 
 
 @router.post("/{flashcard_id}/review", response_model=None)

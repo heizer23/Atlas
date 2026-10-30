@@ -160,7 +160,7 @@ def test_unguided_suggested_from_level_5_in_progress_next_step(client):
     rows = client.get("/api/essaycards/progress/sections", params={"essay_id": ESSAY_LOCKED}).json()["rows"]
     row = next(r for r in rows if r["section_id"] == SECTION_LOCKED)
     assert row["guided_level"] == 5 and row["unguided_suggested"] is True
-    assert row["next_step"] == "unguided_oral" and row["state"] == "yellow"  # light unchanged
+    assert row["next_step"] == "unguided_recall" and row["state"] == "yellow"  # light unchanged
 
 
 def test_progress_exposes_level_and_next_step_below_5(client):
@@ -168,7 +168,7 @@ def test_progress_exposes_level_and_next_step_below_5(client):
     rows = client.get("/api/essaycards/progress/sections", params={"essay_id": ESSAY_LOCKED}).json()["rows"]
     row = next(r for r in rows if r["section_id"] == SECTION_LOCKED)
     assert row["guided_level"] == 1 and row["unguided_suggested"] is False
-    assert row["next_step"] == "flashcards_established"
+    assert row["next_step"] == "guided_next" and row["next_guided_level"] == 2  # Sprint16: Level 2, not an unguided oral
 
 
 # ── Migration / legacy ────────────────────────────────────────────────────────

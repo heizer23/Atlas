@@ -900,3 +900,28 @@ def test_export_question_includes_nugget_id(client):
     r = client.get(f"/api/essaycards/flashcards/{FC_NUGGET_LINKED}/export")
     assert r.status_code == 200
     assert r.json()["card"]["nugget_id"] == NUGGET_COGITO_ID
+
+
+# ── Sprint16 restyle: grade preview + due-row eyebrow ───────────────────────────
+
+def test_grade_preview_returns_four_increasing_intervals_without_writing(client):
+    from tests.helpers import run_sql, unlock_essay_sections
+    unlock_essay_sections("ea000001-0000-0000-0000-000000000001")
+    card = run_sql("select flashcard_id from essaycards.flashcard_review_state limit 1")[0]["flashcard_id"]
+    before = run_sql("select * from essaycards.flashcard_review_state where flashcard_id = %s", (str(card),))
+    r = client.get(f"/api/essaycards/flashcards/{card}/grade-preview")
+    assert r.status_code == 200, r.text
+    rows = r.json()["rows"]
+    assert [x["grade"] for x in rows] == ["again", "hard", "good", "easy"]
+    secs = [x["interval_seconds"] for x in rows]
+    assert secs == sorted(secs) and secs[0] < secs[-1]
+    assert run_sql("select * from essaycards.flashcard_review_state where flashcard_id = %s", (str(card),)) == before
+    assert client.get("/api/essaycards/flashcards/not-a-uuid/grade-preview").status_code == 404
+    assert client.get("/api/essaycards/flashcards/00000000-0000-0000-0000-000000000000/grade-preview").status_code == 404
+
+
+def test_due_rows_carry_topic_and_essay_title(client):
+    from tests.helpers import unlock_essay_sections
+    unlock_essay_sections("ea000001-0000-0000-0000-000000000001")
+    rows = client.get("/api/essaycards/flashcards/due?essay_id=ea000001-0000-0000-0000-000000000001").json()["rows"]
+    assert rows and all("essay_title" in r and "category" in r for r in rows)

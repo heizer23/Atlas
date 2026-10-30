@@ -132,7 +132,8 @@ def _orals_aggregate(cur: Any) -> dict[str, Any]:
         "select " + ", ".join(select_parts) + " from ("
         "select examined_at, exam_type from essaycards.section_examinations "
         "union all select examined_at, exam_type from essaycards.essay_examinations "
-        "union all select session_at, 'guided' from essaycards.section_guided_sessions"
+        "union all select session_at, 'guided' from essaycards.section_guided_sessions "
+        "union all select examined_at, 'unguided' from essaycards.recall_reviews"
         ") x where examined_at >= now() - interval '30 days'"
     )
     return dict(cur.fetchone())

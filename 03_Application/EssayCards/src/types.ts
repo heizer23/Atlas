@@ -4,7 +4,8 @@
 
 export type SectionState = 'grey' | 'yellow' | 'green' | 'blue';
 export type EssayState = 'grey' | 'yellow' | 'green' | 'blue' | 'violet';
-export type SectionNextStep = 'guided_oral' | 'flashcards_established' | 'unguided_oral';
+export type RecallStatus = 'not_established' | 'current' | 'due';
+export type SectionNextStep = 'guided_oral' | 'recall_due' | 'guided_next' | 'unguided_recall';
 export type EssayNextStep = 'guided_essay_oral' | 'cards_learned' | 'section_unguided_orals' | 'unguided_essay_oral';
 
 // GET /progress/sections row (Sprint14).
@@ -22,6 +23,12 @@ export interface SectionProgressRow {
   // Guided progression (Levels 1-6): highest learner-confirmed level; >= 5 suggests the unguided oral.
   guided_level: number;
   unguided_suggested: boolean;
+  // Sprint16: next guided level to conduct (null at Level 6) and the independent recall dimension.
+  next_guided_level: number | null;
+  recall_status: RecallStatus;
+  recall_next_due_at: string | null;
+  recall_last_reviewed_at: string | null;
+  recall_last_rating: 'again' | 'hard' | 'good' | 'easy' | null;
   guided_latest_score: number | null;
   unguided_latest_score: number | null;
   guided_passed_at: string | null;
@@ -54,6 +61,10 @@ export interface EssayRow {
   sections_total: number;
   sections_unguided_passed_count: number;
   revalidation_pending_count: number;
+  // Sprint16: essay-scope recall status and the number of due recall items (sections + essay).
+  essay_recall_status: RecallStatus;
+  essay_recall_next_due_at: string | null;
+  recall_due_count: number;
 }
 
 // {nugget_key, title} — the light pair shape every nugget-reference field
@@ -92,6 +103,14 @@ export interface DueCardRow {
   is_recent: boolean;
   scheduled_interval_seconds: number;
   nugget_id: string | null;
+  category: string | null;
+  essay_title: string;
+}
+
+// GET /flashcards/{id}/grade-preview row.
+export interface GradePreviewRow {
+  grade: Grade;
+  interval_seconds: number;
 }
 
 // Sprint12_FSRSAndUXOverhaul — GET /review-stats/activity and
@@ -171,7 +190,13 @@ export interface ExaminationPackage {
   exam_type: 'guided' | 'unguided';
   // Sprint14: section-scope or whole-essay package, plus the backend-owned pass rule.
   scope: 'section' | 'essay';
-  scoring: { score_max: number; pass_threshold_percent: number; min_passing_score: number };
+  // Guided packages carry `scoring`; unguided (recall) packages carry `recall_grading` instead.
+  scoring?: { score_max: number; pass_threshold_percent: number; min_passing_score: number };
+  recall_grading?: {
+    ratings: Record<'again' | 'hard' | 'good' | 'easy', string>;
+    critical_rule: string;
+    max_followups: number;
+  };
   last_essay_examination?: LastExamination | null;
   sections: ExaminationPackageSection[];
 }
@@ -479,3 +504,32 @@ export interface Dataset<T> {
 }
 
 export type Grade = 'again' | 'hard' | 'good' | 'easy';
+
+// GET /recall/due row (Sprint16): one due oral-recall item (section or whole essay).
+export interface RecallDueRow {
+  id: string;
+  scope: 'section' | 'essay';
+  essay_id: string;
+  section_id: string | null;
+  essay_title: string;
+  category: string | null;
+  section_heading: string | null;
+  anchor_slug: string | null;
+  last_reviewed_at: string | null;
+  next_due_at: string;
+  last_rating: 'again' | 'hard' | 'good' | 'easy' | null;
+  review_count: number;
+  lapse_count: number;
+}
+
+// GET /recall/reviews row.
+export interface RecallReviewRow {
+  id: string;
+  reviewed_at: string;
+  rating: 'again' | 'hard' | 'good' | 'easy';
+  next_due_at: string;
+  question: string;
+  answer_transcript: string;
+  feedback: string | null;
+  evidence: string;
+}

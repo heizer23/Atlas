@@ -34,6 +34,11 @@ SECTION_PROGRESS_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="guided_passed",        label="Guided passed",    type="boolean", sortable=False, filterable=False),
     ColumnSchema(key="unguided_passed",      label="Unguided passed",  type="boolean", sortable=False, filterable=False),
     ColumnSchema(key="guided_level",         label="Guided level",     type="number",  sortable=False, filterable=False),
+    ColumnSchema(key="next_guided_level",    label="Next guided level", type="number", sortable=False, filterable=False),
+    ColumnSchema(key="recall_status",        label="Recall status",    type="string",  sortable=False, filterable=True),
+    ColumnSchema(key="recall_next_due_at",   label="Recall due",       type="date",    sortable=False, filterable=False),
+    ColumnSchema(key="recall_last_reviewed_at", label="Recall last reviewed", type="date", sortable=False, filterable=False),
+    ColumnSchema(key="recall_last_rating",   label="Recall last rating", type="string", sortable=False, filterable=False),
     ColumnSchema(key="unguided_suggested",   label="Unguided suggested", type="boolean", sortable=False, filterable=False),
     ColumnSchema(key="guided_pass_source",   label="Guided pass source", type="string", sortable=False, filterable=False),
     ColumnSchema(key="guided_latest_score",  label="Guided score",     type="number",  sortable=False, filterable=False),
@@ -79,7 +84,7 @@ def list_section_progress(essay_id: str | None = None) -> JSONResponse:
                     d = dict(r)
                     d["section_id"] = str(d["section_id"])
                     d["essay_id"] = str(d["essay_id"])
-                    for k in ("guided_passed_at", "unguided_passed_at"):
+                    for k in ("guided_passed_at", "unguided_passed_at", "recall_next_due_at", "recall_last_reviewed_at"):
                         if d.get(k):
                             d[k] = d[k].isoformat()
                     rows.append(d)

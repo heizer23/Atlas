@@ -8,7 +8,7 @@ colors are never stored; they are computed at query time from
 section_oral_state / essay_oral_state plus flashcard_review_state.review_interval.
 
 Section state (highest satisfied wins):
-  blue   unguided_passed
+  blue   recall established (Sprint16: unguided_passed = recall_state.established_at set)
   green  guided_passed AND >= 1 card AND every card established (seen, interval >= 24h)
   yellow guided_passed
   grey   otherwise
@@ -22,6 +22,10 @@ Essay state (highest satisfied wins):
 
 from __future__ import annotations
 
+# Sprint16_RecallFSRS: recall (unguided oral, FSRS-scheduled) status joined as `rs`;
+# unguided_passed now means "recall established".
+from backend.recall import RECALL_STATUS_SQL
+
 ESTABLISHED_INTERVAL_SQL = "interval '24 hours'"
 LEARNED_INTERVAL_SQL = "interval '30 days'"
 
@@ -29,6 +33,8 @@ LEARNED_INTERVAL_SQL = "interval '30 days'"
 # completed", so a legacy passed-but-level-0 row still reads as Level 1.
 # From this level on the next step is the unguided oral, whatever the card state.
 UNGUIDED_SUGGESTED_FROM_LEVEL = 5
+MAX_GUIDED_LEVEL = 6
+
 GUIDED_LEVEL_SQL = (
     "greatest(coalesce(sos.guided_level, 0), case when coalesce(sos.guided_passed, false) then 1 else 0 end)"
 )
@@ -61,30 +67,38 @@ def section_progress_sql() -> str:
     select
       s.id as section_id, s.essay_id, s.heading, s.anchor_slug, s.order_index,
       case
-        when coalesce(sos.unguided_passed, false) then 'blue'
+        when rs.established_at is not null then 'blue'
         when coalesce(sos.guided_passed, false) and cc.total > 0 and cc.established = cc.total then 'green'
         when coalesce(sos.guided_passed, false) then 'yellow'
         else 'grey'
       end as state,
       case
-        when coalesce(sos.unguided_passed, false) then null
         when not coalesce(sos.guided_passed, false) then 'guided_oral'
-        when {GUIDED_LEVEL_SQL} >= {UNGUIDED_SUGGESTED_FROM_LEVEL} then 'unguided_oral'
-        when cc.total > 0 and cc.established = cc.total then 'unguided_oral'
-        else 'flashcards_established'
+        when {RECALL_STATUS_SQL} = 'due' then 'recall_due'
+        when {GUIDED_LEVEL_SQL} < {UNGUIDED_SUGGESTED_FROM_LEVEL} then 'guided_next'
+        when {RECALL_STATUS_SQL} = 'not_established' then 'unguided_recall'
+        when {GUIDED_LEVEL_SQL} < {MAX_GUIDED_LEVEL} then 'guided_next'
+        else null
       end as next_step,
+      case when {GUIDED_LEVEL_SQL} < {MAX_GUIDED_LEVEL} then {GUIDED_LEVEL_SQL} + 1 end as next_guided_level,
       {GUIDED_LEVEL_SQL} as guided_level,
-      {GUIDED_LEVEL_SQL} >= {UNGUIDED_SUGGESTED_FROM_LEVEL} as unguided_suggested,
+      ({GUIDED_LEVEL_SQL} >= {UNGUIDED_SUGGESTED_FROM_LEVEL}
+        and {RECALL_STATUS_SQL} = 'not_established') as unguided_suggested,
       coalesce(sos.guided_passed, false) as guided_passed,
-      coalesce(sos.unguided_passed, false) as unguided_passed,
+      (rs.established_at is not null) as unguided_passed,
+      {RECALL_STATUS_SQL} as recall_status,
+      rs.next_due_at as recall_next_due_at,
+      rs.last_reviewed_at as recall_last_reviewed_at,
+      rs.last_rating as recall_last_rating,
       sos.guided_pass_source,
-      sos.guided_latest_score, sos.unguided_latest_score,
-      sos.guided_passed_at, sos.unguided_passed_at,
+      sos.guided_latest_score, null::smallint as unguided_latest_score,
+      sos.guided_passed_at, rs.established_at as unguided_passed_at,
       cc.total as cards_total, cc.established as cards_established,
       not coalesce(sos.guided_passed, false) as is_locked
     from essaycards.essay_sections s
     join essaycards.essays e on e.id = s.essay_id
     left join essaycards.section_oral_state sos on sos.section_id = s.id
+    left join essaycards.recall_state rs on rs.section_id = s.id and rs.scope = 'section'
     left join lateral (
       select count(*) as total,
              count(*) filter (
@@ -105,7 +119,8 @@ ESSAY_PROGRESS_SELECT = """
   ep.essay_guided_latest_score, ep.essay_unguided_latest_score,
   ep.essay_guided_passed_at, ep.essay_unguided_passed_at,
   ep.cards_learned_count, ep.sections_total, ep.sections_unguided_passed_count,
-  ep.revalidation_pending_count
+  ep.revalidation_pending_count,
+  ep.essay_recall_status, ep.essay_recall_next_due_at, ep.recall_due_count
 """
 
 
@@ -118,31 +133,35 @@ def essay_progress_lateral_sql() -> str:
     left join lateral (
       select
         case
-          when coalesce(eos.unguided_passed, false) then 'violet'
+          when ers.established_at is not null then 'violet'
           when sc.n > 0 and sc.unguided_n = sc.n then 'blue'
           when cc.total > 0 and cc.learned = cc.total then 'green'
           when coalesce(eos.guided_passed, false) then 'yellow'
           else 'grey'
         end as essay_state,
         case
-          when coalesce(eos.unguided_passed, false) then null
+          when ers.established_at is not null then null
           when sc.n > 0 and sc.unguided_n = sc.n then 'unguided_essay_oral'
           when cc.total > 0 and cc.learned = cc.total then 'section_unguided_orals'
           when coalesce(eos.guided_passed, false) then 'cards_learned'
           else 'guided_essay_oral'
         end as essay_next_step,
         coalesce(eos.guided_passed, false) as essay_guided_passed,
-        coalesce(eos.unguided_passed, false) as essay_unguided_passed,
+        (ers.established_at is not null) as essay_unguided_passed,
         eos.guided_latest_score as essay_guided_latest_score,
-        eos.unguided_latest_score as essay_unguided_latest_score,
+        null::smallint as essay_unguided_latest_score,
         eos.guided_passed_at as essay_guided_passed_at,
-        eos.unguided_passed_at as essay_unguided_passed_at,
+        ers.established_at as essay_unguided_passed_at,
         cc.learned as cards_learned_count,
         sc.n as sections_total,
         sc.unguided_n as sections_unguided_passed_count,
-        cc.pending as revalidation_pending_count
+        cc.pending as revalidation_pending_count,
+        {RECALL_STATUS_SQL.replace('rs.', 'ers.')} as essay_recall_status,
+        ers.next_due_at as essay_recall_next_due_at,
+        sc.recall_due + (case when {RECALL_STATUS_SQL.replace('rs.', 'ers.')} = 'due' then 1 else 0 end) as recall_due_count
       from (select 1) one
       left join essaycards.essay_oral_state eos on eos.essay_id = e.id
+      left join essaycards.recall_state ers on ers.essay_id = e.id and ers.scope = 'essay'
       cross join (
         select count(*) as total,
                count(*) filter (where frs.review_interval >= {LEARNED_INTERVAL_SQL}) as learned,
@@ -152,9 +171,11 @@ def essay_progress_lateral_sql() -> str:
         where f.essay_id = e.id
       ) cc
       cross join (
-        select count(*) as n, count(*) filter (where sos.unguided_passed) as unguided_n
+        select count(*) as n,
+               count(*) filter (where srs.established_at is not null) as unguided_n,
+               count(*) filter (where {RECALL_STATUS_SQL.replace('rs.', 'srs.')} = 'due') as recall_due
         from essaycards.essay_sections s
-        left join essaycards.section_oral_state sos on sos.section_id = s.id
+        left join essaycards.recall_state srs on srs.section_id = s.id and srs.scope = 'section'
         where s.essay_id = e.id
       ) sc
     ) ep on true

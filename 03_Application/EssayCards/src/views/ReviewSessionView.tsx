@@ -9,8 +9,8 @@ import { ReviewStatsPanel } from '../components/ReviewStatsPanel';
 import { formatInterval } from '../format';
 import { NuggetPanel } from '../nuggets';
 import { buildExploreClipboardText, writeClipboard } from '../prompts';
-import { flipBtnStyle, gradeBtnAgainStyle, gradeBtnGoodStyle, gradeBtnStyle, gradeStyleFor, jumpBtnStyle, pageStyle, reviewCardStyle } from '../styles';
-import type { Dataset, DueCardRow, ExplorationPackage, Grade, ReviewResult } from '../types';
+import { SERIF, eyebrowStyle, flipBtnStyle, gradeBtnAgainStyle, gradeBtnGoodStyle, gradeBtnStyle, gradeStyleFor, iconBtnStyle, jumpBtnStyle, pageStyle, reviewCardStyle } from '../styles';
+import type { Dataset, DueCardRow, ExplorationPackage, Grade, GradePreviewRow, ReviewResult } from '../types';
 
 // ── Review Session View ───────────────────────────────────────────────────────
 
@@ -25,6 +25,16 @@ export const diagFrameStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 4,
 };
+
+const deckLayer: React.CSSProperties = {
+  position: 'absolute', height: 20, borderRadius: '0 0 18px 18px',
+  background: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline-variant)',
+  boxShadow: '0 3px 8px rgba(20, 35, 70, 0.06)',
+};
+
+const iconProps = { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
+const BookIcon = () => (<svg {...iconProps}><path d="M12 6.5C10.5 5.3 8 4.8 4 5v13c4-.2 6.5.3 8 1.5 1.5-1.2 4-1.7 8-1.5V5c-4-.2-6.5.3-8 1.5z" /><path d="M12 6.5v13" /></svg>);
+const ExternalIcon = () => (<svg {...iconProps}><path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>);
 
 export function ReviewSessionView() {
   const [searchParams] = useSearchParams();
@@ -71,6 +81,8 @@ export function ReviewSessionView() {
   // view and interrupt the session); current.nugget_id null keeps the
   // unchanged "Jump to passage" route navigation below.
   const [nuggetPanelOpen, setNuggetPanelOpen] = useState(false);
+  // Next-interval labels under the grade buttons (GET /flashcards/{id}/grade-preview), fetched on flip.
+  const [preview, setPreview] = useState<Record<string, number> | null>(null);
 
   const dueUrl = useCallback(() => {
     const qs = new URLSearchParams();
@@ -110,6 +122,17 @@ export function ReviewSessionView() {
   // The server returns the queue already ordered (RECENT closest-due-first,
   // then BACKLOG); always work the head of the list.
   const current = queue[0] ?? null;
+  const currentId = current?.flashcard_id ?? null;
+  useEffect(() => {
+    setPreview(null);
+    if (!flipped || !currentId || revalidate) return;
+    let cancelled = false;
+    (async () => {
+      const res = await apiFetch<Dataset<GradePreviewRow>>(`/essaycards/flashcards/${currentId}/grade-preview`);
+      if (!cancelled && !isApiError(res)) setPreview(Object.fromEntries(res.rows.map(r => [r.grade, r.interval_seconds])));
+    })();
+    return () => { cancelled = true; };
+  }, [flipped, currentId, revalidate]);
   const showingRelearn = current != null && againIds.has(current.flashcard_id);
 
   const handleExplore = async () => {
@@ -240,68 +263,83 @@ export function ReviewSessionView() {
       {scopeCaption}
       {statsPanel}
 
-      <div
-        className="essaycards-review-card"
-        style={
-          current.is_recent
-            ? { ...reviewCardStyle, border: '2px solid var(--md-sys-color-primary)' }
-            : reviewCardStyle
-        }
-      >
-        <div className="type-title" style={{ lineHeight: 1.5 }}>
-          <ReactMarkdown>{current.question}</ReactMarkdown>
-        </div>
-        {flipped && (
-          <>
+      <div style={{ position: 'relative', margin: '16px 0 22px' }}>
+        {/* stacked-deck hint: layers shown only while more cards wait */}
+        {queue.length > 2 && <div aria-hidden="true" style={{ ...deckLayer, bottom: -12, left: 22, right: 22 }} />}
+        {queue.length > 1 && <div aria-hidden="true" style={{ ...deckLayer, bottom: -6, left: 11, right: 11 }} />}
+        <div
+          className="essaycards-review-card"
+          style={{
+            ...reviewCardStyle,
+            margin: 0,
+            position: 'relative',
+            boxShadow: '0 6px 20px rgba(20, 35, 70, 0.10)',
+            ...(current.is_recent ? { border: '2px solid var(--md-sys-color-primary)' } : null),
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 40 }}>
+            <span style={eyebrowStyle}>{current.category ?? current.essay_title}</span>
+            {flipped && (
+              <span style={{ display: 'inline-flex', gap: 2 }}>
+                {current.nugget_id ? (
+                  <button style={iconBtnStyle} aria-label="Flashcard → Nugget" title="Flashcard → Nugget" onClick={() => setNuggetPanelOpen(true)}>
+                    <BookIcon />
+                  </button>
+                ) : (
+                  <button
+                    style={iconBtnStyle}
+                    aria-label="Jump to passage"
+                    title="Jump to passage"
+                    onClick={() => navigate(`/essaycards/essays/${current.essay_id}#${current.anchor_slug}`)}
+                  >
+                    <BookIcon />
+                  </button>
+                )}
+                {exported ? (
+                  <button style={{ ...jumpBtnStyle, margin: 0 }} onClick={() => navigate('/essaycards/explore/import')}>
+                    Import result →
+                  </button>
+                ) : (
+                  <button style={iconBtnStyle} aria-label="Explore" title="Explore with ChatGPT" disabled={exploring} onClick={handleExplore}>
+                    <ExternalIcon />
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              fontFamily: SERIF, fontSize: flipped ? 24 : 30, fontWeight: 500, lineHeight: 1.3,
+              color: 'var(--md-sys-color-on-surface)', margin: flipped ? '8px 0 0' : '36px 0 28px',
+            }}
+          >
+            <ReactMarkdown>{current.question}</ReactMarkdown>
+          </div>
+          {flipped && (
             <div
               style={{
                 borderTop: '1px solid var(--md-sys-color-outline-variant)',
                 paddingTop: 16,
                 marginTop: 16,
+                fontSize: 17,
                 lineHeight: 1.6,
               }}
             >
               <ReactMarkdown>{current.answer}</ReactMarkdown>
+              {exploreMsg && (
+                <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>
+                  {exploreMsg}
+                </div>
+              )}
             </div>
-            {current.nugget_id ? (
-              <button style={jumpBtnStyle} onClick={() => setNuggetPanelOpen(true)}>
-                Flashcard → Nugget
-              </button>
-            ) : (
-              <button
-                style={jumpBtnStyle}
-                onClick={() => navigate(`/essaycards/essays/${current.essay_id}#${current.anchor_slug}`)}
-              >
-                Jump to passage →
-              </button>
-            )}
-            {exported ? (
-              <button
-                style={{ ...jumpBtnStyle, marginLeft: 12 }}
-                onClick={() => navigate('/essaycards/explore/import')}
-              >
-                Import result →
-              </button>
-            ) : (
-              <button
-                style={{ ...jumpBtnStyle, marginLeft: 12 }}
-                disabled={exploring}
-                onClick={handleExplore}
-              >
-                {exploring ? 'Preparing…' : 'Explore'}
-              </button>
-            )}
-            {exploreMsg && (
-              <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>
-                {exploreMsg}
-              </div>
-            )}
-          </>
-        )}
+          )}
+        </div>
       </div>
 
       {!flipped ? (
-        <button style={flipBtnStyle} onClick={() => setFlipped(true)}>Flip</button>
+        <button style={{ ...flipBtnStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }} onClick={() => setFlipped(true)}>
+          <span style={{ flex: 1, textAlign: 'center' }}>Show answer</span><span aria-hidden="true">→</span>
+        </button>
       ) : (
         <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
           {revalidate ? (
@@ -318,7 +356,8 @@ export function ReviewSessionView() {
           ) : (
             (['again', 'hard', 'good', 'easy'] as Grade[]).map(g => (
               <button key={g} style={gradeStyleFor(g)} disabled={grading} onClick={() => handleGrade(g)}>
-                {g[0].toUpperCase() + g.slice(1)}
+                <span>{g[0].toUpperCase() + g.slice(1)}</span>
+                {preview?.[g] != null && <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.75 }}>{formatInterval(preview[g])}</span>}
               </button>
             ))
           )}

@@ -104,26 +104,41 @@ Here is the examination package:
 
 `
 
-export const EXAM_PROMPT_INTRO_UNGUIDED = `You are conducting an UNGUIDED oral philosophical examination for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and the section(s) to examine. Each section's "nuggets" array holds the full text of the nuggets that section references via [[nugget:key]]; treat them as part of that section's material.
+export const EXAM_PROMPT_INTRO_UNGUIDED = `You are conducting an UNGUIDED ORAL RECALL assessment for an app called EssayCards. Below this prompt is a JSON "examination package" describing one essay and the section(s) to assess. Each section's "nuggets" array holds the full text of the nuggets that section references via [[nugget:key]]; treat them as part of that section's material. The package's "sections[].body_markdown" (and nuggets) are the CANONICAL content you compare my explanation against. Do not reveal or quote them to me during the assessment.
 
-GOAL: test whether I actually understand the ideas — NOT whether I can reproduce the essay's wording. Ask me to explain concepts, draw distinctions, connect ideas, and discuss the position in my own words. Do not accept a paraphrase of the text as evidence of understanding.
+WHAT THIS IS: a short, practical check whether I can independently retrieve and reconstruct what I have learned — the argument spine, the main concepts, the important nuggets and how they relate. It is NOT a Socratic examination and NOT a teaching session. Guided learning is a separate activity; do not turn this into one.
 
-IMPORTANT — this is a COLD-START examination: do NOT use any prior-history or calibration context, even if you happen to know it from earlier in this conversation. Start from the fundamentals, exactly as you would for a learner with no recorded history, regardless of how well I may have done before. Do not hint or prompt me through the material.
+COLD START: do NOT use any prior-history or calibration context, even if you know it from earlier in this conversation. Assess exactly as for a learner with no recorded history.
 
-SCOPE: the package's "scope" field is either "section" — "sections" then holds exactly ONE section and you examine only that section — or "essay" — you examine the essay as an INTEGRATED WHOLE (its overall argument, structure, and how the sections connect); every section is included only as context. Produce exactly one result for the whole examination.
+SCOPE: the package's "scope" field is either "section" — "sections" then holds exactly ONE section and you assess only that section — or "essay" — you assess the essay as a whole (its overall argument and how its sections connect; each section's key points, not every detail). Produce exactly one result for the whole assessment.
 
-SCORING (0-6, for my demonstrated understanding — not the essay's quality). The package's "scoring" block states the pass rule: a score of "scoring.min_passing_score" (5) or higher PASSES (70%). Scores of 3 and 4 are recorded but do NOT advance my progress, so do not inflate a score to be kind.
-  0-2: insufficient / fragmentary — needs active study
-  3:   functional understanding, but not yet passing
-  4:   strong understanding, but not yet passing
-  5:   deep/integrated understanding (pass)
-  6:   generative — able to use, criticize, extend, reinterpret, or connect the ideas independently (pass)
+HOW TO CONDUCT IT:
+1. Start with ONE broad, open-ended invitation and nothing else. For scope "section", for example: "Please explain <section heading> in your own words." or "How would you explain <the section's central idea> to someone unfamiliar with it?" For scope "essay": "Please explain the essay <title> in your own words: its main argument and how it develops." Do not list sub-topics, hint at structure, or paraphrase the text.
+2. Let me explain WITHOUT interruption. I will speak or type; I may hesitate or express things imperfectly. Do not correct, confirm, praise, rephrase or teach while I explain. Do not demand an unnecessarily long explanation; accurate, reasonably complete reconstruction is the goal, not rhetorical perfection.
+3. Silently compare what I said with the canonical argument spine and key nuggets. Note what I recalled independently.
+4. If an IMPORTANT element was omitted or is ambiguous, you may ask at most ONE or TWO brief, NEUTRAL follow-up questions in total (see "followups_asked"). Neutral means: you may point to the general area ("Is there anything you would add about how the argument moves from the first step to the conclusion?") or ask me to clarify what I already said, but you must NEVER name, hint at, rephrase or lead me toward the missing element, never give multiple-choice options, and never explain the answer. After my reply, do not ask more follow-ups about the same gap.
+5. Stop as soon as you have sufficient evidence. Do not keep probing, do not ask application, critical or "why" questions, and do not ask me to defend or extend the ideas. Minor omissions of supporting detail are not worth a follow-up.
 
-PROCESS:
-- Ask follow-up questions until you can confidently assess my understanding — this is a conversation, not a fixed quiz.
-- I will answer by typing or by pasting a transcript of a spoken answer.
+GRADING (use exactly one rating; the package's "recall_grading" block repeats these rules):
+  easy:  complete, accurate and fluent reconstruction; the essential material recalled spontaneously; no prompting required.
+  good:  the essential argument spine and nuggets recalled independently; minor omissions or hesitation are acceptable; NO prompting was needed to retrieve any important missing material.
+  hard:  an important element was initially omitted; a neutral follow-up question was needed; I then successfully recalled the missing material after being prompted.
+  again: an important element could not be recalled even after prompting; OR the reconstruction contained a substantial misunderstanding or omission.
+CRITICAL RULE: if an important element REQUIRED A FOLLOW-UP QUESTION to retrieve, the maximum rating is "hard" — even a perfect answer after the prompt cannot be "good" or "easy". A clarification question about something I had ALREADY recalled independently does NOT impose this cap (count it in "followups_asked" but do not list it under "prompted_elements"). Be candid: do not inflate a rating to be kind.
 
-WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after. For scope "section":
+RECORD: "answer_transcript" is kept as learning data. Do NOT summarize it: reproduce the exchange in order, labelled "Examiner:" and "Me:", near-verbatim (light trimming of filler is fine). Mark every follow-up question with "[follow-up]" so it is visible what I did unaided. "question" is the opening invitation you used.
+
+EVIDENCE (the "recall" object — the app validates it and rejects ratings that contradict it):
+- "rating": "again" | "hard" | "good" | "easy".
+- "independent_elements": the important elements I recalled WITHOUT any prompting (short phrases).
+- "prompted_elements": important elements I recalled only AFTER a follow-up question (empty for good/easy; at least one for hard).
+- "missing_elements": important elements I could not recall even after prompting (empty for good/easy/hard).
+- "misunderstandings": substantial misunderstandings (empty for good/easy). "again" requires at least one missing element or misunderstanding.
+- "followups_asked": the number of follow-up questions you asked of any kind, 0, 1 or 2.
+
+FEEDBACK: two to four sentences, specific and candid: what was recalled securely, what was missing or shaky, what to restudy. This is saved with the result.
+
+WHEN THE ASSESSMENT IS COMPLETE, reply with ONLY a JSON object in this exact shape — no markdown code fences, no commentary before or after. For scope "section":
 
 {
   "results": [
@@ -133,16 +148,23 @@ WHEN THE EXAMINATION IS COMPLETE, reply with ONLY a JSON object in this exact sh
       "section_anchor_slug": "copy verbatim from this section's anchor_slug",
       "section_version": "copy verbatim from this section's section_version",
       "examined_at": "today's date/time in ISO-8601 WITH a UTC offset, e.g. 2026-08-28T14:30:00Z",
-      "question": "a summary of what you asked/covered (can be multiple questions, written as one text block)",
-      "answer_transcript": "a summary or verbatim transcript of my answer(s)",
-      "score": 0,
+      "question": "the opening invitation you used",
+      "answer_transcript": "the near-verbatim record per the RECORD instructions above",
       "exam_type": "unguided",
-      "feedback": "one or two sentences of feedback (optional, use null to omit)"
+      "recall": {
+        "rating": "good",
+        "independent_elements": ["..."],
+        "prompted_elements": [],
+        "missing_elements": [],
+        "misunderstandings": [],
+        "followups_asked": 0
+      },
+      "feedback": "per the FEEDBACK instructions above"
     }
   ]
 }
 
-For scope "essay", use the same shape but with "scope": "essay" and OMIT "section_anchor_slug" and "section_version" (they do not apply to a whole-essay result).
+For scope "essay", use the same shape but with "scope": "essay" and OMIT "section_anchor_slug" and "section_version" (they do not apply to a whole-essay result). There is no numeric score.
 
 Every string value must be valid JSON — escape any double quote that appears inside a value as \\".
 

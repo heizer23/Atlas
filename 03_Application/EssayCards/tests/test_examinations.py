@@ -15,6 +15,12 @@ ESSAY_A_SLUG = "origins-of-long-form-formats"
 SECTION_ORIGINS_ID = "ec000001-0000-0000-0000-000000000001"
 SECTION_STRUCTURE_ID = "ec000002-0000-0000-0000-000000000002"
 
+# Sprint16: unguided results are FSRS-scheduled recall assessments (no 0-6 score).
+GOOD_RECALL = {
+    "rating": "good", "independent_elements": ["spine", "key nugget"], "prompted_elements": [],
+    "missing_elements": [], "misunderstandings": [], "followups_asked": 0,
+}
+
 EXPORT_URL = f"/api/essaycards/essays/{ESSAY_A_ID}/examination-package"
 IMPORT_URL = "/api/essaycards/examinations/import"
 
@@ -116,6 +122,7 @@ def test_examination_package_guided_uses_only_guided_history_for_calibration(cli
 # ── Import — success ─────────────────────────────────────────────────────────────
 
 def test_import_stores_new_result_without_overwriting_history(client, db_conn):
+    """Unguided (recall) results are appended to recall_reviews; legacy exam rows stay untouched."""
     section_version = _section_version(client, "origins")
 
     payload = {
@@ -125,39 +132,37 @@ def test_import_stores_new_result_without_overwriting_history(client, db_conn):
                 "essay_slug": ESSAY_A_SLUG,
                 "section_anchor_slug": "origins",
                 "section_version": section_version,
-                # Far-future fixed date so this import is always the most
-                # recent examination of this section regardless of the
-                # fixtures' now()-relative timestamps or actual wall-clock
-                # time (pre-existing test; unrelated to this sprint).
                 "examined_at": "2030-01-01T00:00:00Z",
-                "question": "Explain the origins a third time.",
+                "question": "Please explain the origins in your own words.",
                 "answer_transcript": "An even more integrated account.",
-                "score": 5,
-                "feedback": "Deep understanding now.",
-                "exam_type": "unguided",
+                "feedback": "Solid independent recall.",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             }
         ]
     }
 
     r = client.post(IMPORT_URL, json=payload)
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
     assert body["imported"] == 1
-    assert body["results"][0]["score"] == 5
+    assert body["results"][0]["rating"] == "good"
     assert body["results"][0]["section_id"] == SECTION_ORIGINS_ID
+    assert body["results"][0]["effects"][0]["effect"] == "recall_established"
 
     with db_conn.cursor() as cur:
         cur.execute(
             "select count(*) as n from essaycards.section_examinations where section_id = %s",
             (SECTION_ORIGINS_ID,),
         )
-        assert cur.fetchone()["n"] == 3  # two fixture rows + this new one, none overwritten
+        assert cur.fetchone()["n"] == 2  # the two fixture rows, untouched
+        cur.execute("select count(*) as n from essaycards.recall_reviews where section_id = %s", (SECTION_ORIGINS_ID,))
+        assert cur.fetchone()["n"] == 1
 
-    history = client.get(_history_url(SECTION_ORIGINS_ID))
+    history = client.get(f"/api/essaycards/recall/reviews?section_id={SECTION_ORIGINS_ID}")
     assert history.status_code == 200
-    rows = history.json()["rows"]
-    assert len(rows) == 3
-    assert rows[0]["score"] == 5  # most recent first
+    assert [x["rating"] for x in history.json()["rows"]] == ["good"]
+    # legacy history endpoint still serves the historical evidence
+    assert len(client.get(_history_url(SECTION_ORIGINS_ID)).json()["rows"]) == 2
 
 
 def test_import_multiple_sections_in_one_batch(client, db_conn):
@@ -171,9 +176,8 @@ def test_import_multiple_sections_in_one_batch(client, db_conn):
                 "examined_at": "2026-08-28T14:30:00Z",
                 "question": "Q1",
                 "answer_transcript": "A1",
-                "score": 3,
                 "feedback": None,
-                "exam_type": "unguided",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             },
             {
                 "scope": "section",
@@ -183,8 +187,7 @@ def test_import_multiple_sections_in_one_batch(client, db_conn):
                 "examined_at": "2026-08-28T14:31:00Z",
                 "question": "Q2",
                 "answer_transcript": "A2",
-                "score": 2,
-                "exam_type": "unguided",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             },
         ]
     }
@@ -193,10 +196,9 @@ def test_import_multiple_sections_in_one_batch(client, db_conn):
     assert r.status_code == 200
     assert r.json()["imported"] == 2
 
-    history = client.get(_history_url(SECTION_STRUCTURE_ID))
-    assert len(history.json()["rows"]) == 1
-    assert history.json()["rows"][0]["score"] == 2
-    assert history.json()["rows"][0]["exam_type"] == "unguided"
+    for sid in (SECTION_ORIGINS_ID, SECTION_STRUCTURE_ID):
+        rows = client.get(f"/api/essaycards/recall/reviews?section_id={sid}").json()["rows"]
+        assert [x["rating"] for x in rows] == ["good"]
 
 
 # ── Import — validation failures (all-or-nothing) ──────────────────────────────
@@ -242,7 +244,7 @@ def test_import_rejects_score_out_of_range_and_writes_nothing(client, db_conn):
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select count(*) as n from essaycards.section_examinations where section_id = %s",
+            "select count(*) as n from essaycards.recall_reviews where section_id = %s",
             (SECTION_STRUCTURE_ID,),
         )
         assert cur.fetchone()["n"] == 0
@@ -320,8 +322,7 @@ def test_import_rejects_unknown_essay_slug(client, db_conn):
                 "examined_at": "2026-08-28T14:30:00Z",
                 "question": "Q",
                 "answer_transcript": "A",
-                "score": 3,
-                "exam_type": "unguided",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             }
         ]
     }
@@ -341,8 +342,7 @@ def test_import_rejects_unknown_section_anchor_slug(client):
                 "examined_at": "2026-08-28T14:30:00Z",
                 "question": "Q",
                 "answer_transcript": "A",
-                "score": 3,
-                "exam_type": "unguided",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             }
         ]
     }
@@ -364,8 +364,7 @@ def test_import_batch_with_one_unknown_section_writes_nothing(client, db_conn):
                 "examined_at": "2026-08-28T14:30:00Z",
                 "question": "Q",
                 "answer_transcript": "A",
-                "score": 3,
-                "exam_type": "unguided",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             },
             {
                 "scope": "section",
@@ -375,8 +374,7 @@ def test_import_batch_with_one_unknown_section_writes_nothing(client, db_conn):
                 "examined_at": "2026-08-28T14:31:00Z",
                 "question": "Q2",
                 "answer_transcript": "A2",
-                "score": 2,
-                "exam_type": "unguided",
+                "exam_type": "unguided", "recall": GOOD_RECALL,
             },
         ]
     }
@@ -498,8 +496,7 @@ def test_examination_import_stores_nugget_versions_verbatim(client, db_conn):
                 "section_anchor_slug": SECTION_F1_ANCHOR,
                 "section_version": _f1_section_version(client),
                 "examined_at": "2026-08-28T14:30:00Z",
-                "question": "Q", "answer_transcript": "A", "score": 4,
-                "exam_type": "unguided",
+                "question": "Q", "answer_transcript": "A", "exam_type": "unguided", "recall": GOOD_RECALL,
                 "nugget_versions": {"fix-nugget-cogito": "2026-01-01T00:00:00Z"},
             }
         ]
@@ -509,8 +506,8 @@ def test_examination_import_stores_nugget_versions_verbatim(client, db_conn):
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select nugget_versions_at from essaycards.section_examinations "
-            "where section_id = %s order by created_at desc limit 1",
+            "select nugget_versions_at from essaycards.recall_reviews "
+            "where section_id = %s order by reviewed_at desc limit 1",
             (SECTION_F1_ID,),
         )
         row = cur.fetchone()
@@ -527,8 +524,7 @@ def test_examination_import_without_nugget_versions_stores_null(client, db_conn)
                 "section_anchor_slug": SECTION_F1_ANCHOR,
                 "section_version": _f1_section_version(client),
                 "examined_at": "2026-08-28T14:30:00Z",
-                "question": "Q", "answer_transcript": "A", "score": 4,
-                "exam_type": "unguided",
+                "question": "Q", "answer_transcript": "A", "exam_type": "unguided", "recall": GOOD_RECALL,
             }
         ]
     }
@@ -537,8 +533,8 @@ def test_examination_import_without_nugget_versions_stores_null(client, db_conn)
 
     with db_conn.cursor() as cur:
         cur.execute(
-            "select nugget_versions_at from essaycards.section_examinations "
-            "where section_id = %s order by created_at desc limit 1",
+            "select nugget_versions_at from essaycards.recall_reviews "
+            "where section_id = %s order by reviewed_at desc limit 1",
             (SECTION_F1_ID,),
         )
         assert cur.fetchone()["nugget_versions_at"] is None

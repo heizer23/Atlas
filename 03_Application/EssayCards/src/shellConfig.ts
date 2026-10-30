@@ -21,8 +21,9 @@ AppRegistry.register({
   // entirely (the Sprint10 A/B experiment and its dashboard are retired).
   mobilePrimaryNav: [
     { id: 'essaycards-essays', label: 'Essays',           path: '/essaycards',        order: 1 },
-    { id: 'essaycards-due',    label: 'Due for review',   path: '/essaycards/review', order: 2 },
-    { id: 'essaycards-stats',  label: 'Stats',             path: '/essaycards/stats',  order: 3 },
+    { id: 'essaycards-due',    label: 'Flashcards',       path: '/essaycards/review', order: 2 },
+    { id: 'essaycards-recall', label: 'Oral Recall',      path: '/essaycards/recall', order: 3 },
+    { id: 'essaycards-stats',  label: 'Stats',             path: '/essaycards/stats',  order: 4 },
   ],
 
   // The Shell's Sidebar renders desktopNav as a flat ordered list with no
@@ -33,9 +34,10 @@ AppRegistry.register({
   // Platform-layer Atlas_Shell change — out of scope this sprint.
   desktopNav: [
     { id: 'essaycards-essays', label: 'Essays',           path: '/essaycards',        order: 1 },
-    { id: 'essaycards-due',    label: 'Due for review',   path: '/essaycards/review', order: 2 },
-    { id: 'essaycards-ingest', label: 'Add / Update Essay', path: '/essaycards/ingest', order: 3 },
-    { id: 'essaycards-stats',  label: 'Stats',             path: '/essaycards/stats',  order: 4 },
+    { id: 'essaycards-due',    label: 'Flashcards',       path: '/essaycards/review', order: 2 },
+    { id: 'essaycards-recall', label: 'Oral Recall',      path: '/essaycards/recall', order: 3 },
+    { id: 'essaycards-ingest', label: 'Add / Update Essay', path: '/essaycards/ingest', order: 4 },
+    { id: 'essaycards-stats',  label: 'Stats',             path: '/essaycards/stats',  order: 5 },
   ],
 
   // Reachable via the Shell's mobile "More" overlay.

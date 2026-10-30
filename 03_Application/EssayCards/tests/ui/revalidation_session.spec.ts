@@ -44,7 +44,7 @@ test('[UI] revalidation session shows remaining count and completes', async ({ p
   await expect(page.getByText('3 remaining')).toBeVisible();
   expect(statsCalls).toBe(0);
 
-  await page.getByRole('button', { name: 'Flip' }).click();
+  await page.getByRole('button', { name: /Show answer/ }).click();
   // Only the two revalidation buttons — no four-grade row, no Hard.
   await expect(page.getByRole('button', { name: 'Correct', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Incorrect', exact: true })).toBeVisible();
@@ -54,10 +54,10 @@ test('[UI] revalidation session shows remaining count and completes', async ({ p
 
   await page.getByRole('button', { name: 'Correct', exact: true }).click();
   await expect(page.getByText('2 remaining')).toBeVisible();
-  await page.getByRole('button', { name: 'Flip' }).click();
+  await page.getByRole('button', { name: /Show answer/ }).click();
   await page.getByRole('button', { name: 'Correct', exact: true }).click();
   await expect(page.getByText('1 remaining')).toBeVisible();
-  await page.getByRole('button', { name: 'Flip' }).click();
+  await page.getByRole('button', { name: /Show answer/ }).click();
   await page.getByRole('button', { name: 'Incorrect', exact: true }).click();
 
   await expect(page.getByText('Revalidation complete')).toBeVisible();
