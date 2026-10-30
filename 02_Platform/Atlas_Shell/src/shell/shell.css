@@ -570,30 +570,34 @@
 .shell-app-icon--blue   { --tone-bg: #D8E4F5; }
 .shell-app-icon--teal   { --tone-bg: #D3EBE3; }
 
-/* Activity dot strip */
+/* Activity dot strip — dots shrink to fit the row instead of overflowing. */
 .shell-dots {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
   margin-top: 2px;
 }
 .shell-dots__group {
   display: inline-flex;
   gap: 3px;
+  min-width: 0;
   padding-right: 8px;
   border-right: 1px solid var(--md-sys-color-outline-variant);
 }
 .shell-dots__group:last-child { border-right: none; padding-right: 0; }
 .shell-dots__dot {
-  width: 7px;
-  height: 7px;
+  flex: 0 1 8px;
+  min-width: 3px;
+  aspect-ratio: 1;
   border-radius: 50%;
   background: var(--md-sys-color-surface-variant);
 }
 .shell-dots__dot--filled { background: var(--shell-dot-on, #3F8F63); }
-.shell-dots__dot--today { box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 3.5px var(--shell-dot-on, #3F8F63); }
+.shell-dots__dot--today { box-shadow: 0 0 0 1.5px #FFFFFF, 0 0 0 3px var(--shell-dot-on, #3F8F63); }
 @media (min-width: 600px) {
-  .shell-dots__dot { width: 9px; height: 9px; }
+  .shell-dots__dot { flex-basis: 10px; }
   .shell-dots__group { gap: 4px; }
 }
 
