@@ -78,7 +78,9 @@ def test_finish_removes_planned_rows_and_makes_session_finished(client, seed):
     assert rows(client.get("/api/workout/sessions/active")) == []
     listed = rows(client.get("/api/workout/sessions"))
     assert listed[0]["id"] == sid and listed[0]["status"] == "finished" and listed[0]["exercise_count"] == 1
-    assert client.post(f"/api/workout/sessions/{sid}/finish").status_code == 404
+    again = client.post(f"/api/workout/sessions/{sid}/finish")  # retry: idempotent, never rewards twice
+    assert again.status_code == 200 and again.json()["already_finished"] and again.json()["celebration"] is None
+    assert client.post("/api/workout/sessions/00000000-0000-0000-0000-000000000000/finish").status_code == 404
 
 
 def test_finish_with_nothing_performed_discards_session(client, seed):

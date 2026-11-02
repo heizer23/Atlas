@@ -14,6 +14,7 @@
  *   /workout/settings            → Settings view
  */
 
+import PerformanceView from "./PerformanceView";
 import { useState, useEffect } from "react";
 import { Routes, Route } from "react-router-dom";
 import SessionView from "./SessionView";
@@ -24,16 +25,6 @@ import { installFreezeLog } from "./freezeLog";
 import "./workout.css";
 
 // ── Placeholder views for Performance, Settings ──────────────────────
-
-function PerformanceView() {
-  return (
-    <div className="page">
-      <p className="type-body" style={{ color: "var(--md-sys-color-on-surface-variant)" }}>
-        Performance analytics coming soon.
-      </p>
-    </div>
-  );
-}
 
 function SettingsView() {
   const [hour, setHour] = useState(9);

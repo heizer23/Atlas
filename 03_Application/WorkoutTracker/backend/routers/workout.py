@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from backend import progress
 from backend.database import get_db
 from platform_errorhandling import api_error
 from platform_contracts import ColumnSchema, Dataset, DatasetMeta
@@ -91,7 +92,115 @@ class ExerciseDetails(BaseModel):
     comment:   str | None
 
 
+class ActivityDayCreate(BaseModel):
+    activity_date: str                   # ISO date; defaults to today when omitted
+    kind:          str                   # running | stretching | mobility
+
+
+# ── Progress records (celebration payload; see progress.py) ───────────────────
+
+class RankedStreak(BaseModel):
+    rank: int
+    start: str
+    end: str
+    length: int
+    current: bool
+
+
+class CurrentStreak(BaseModel):
+    length: int
+    rank: int | None
+    total: int
+    rank_year: int | None
+    total_year: int
+
+
+class MonthSummary(BaseModel):
+    year: int
+    month: int
+    day: int
+    count: int
+    last_year_count: int | None          # None = no data before this year, so no comparison
+    last_year_through: str
+    ahead: int | None
+
+
+class Snapshot(BaseModel):
+    today: str
+    years: list[int]
+    monthly: dict[str, list[int | None]]       # year -> 12 activity-day counts (None = future month)
+    frequency: dict[str, list[float | None]]   # current + previous year -> 12 average activity days / week
+    month: MonthSummary
+    today_counts: bool
+    ranking: list[RankedStreak]                # all streaks, rank 1 first
+    ranking_year: list[RankedStreak]           # streaks with activity in the current year
+    current: CurrentStreak
+
+
+class Celebration(BaseModel):
+    before: Snapshot
+    after: Snapshot
+    changed: bool                              # False => today already counted
+    note: str | None
+    crossed_champions: bool
+
+
+class CompletionResult(BaseModel):
+    """celebration is None when nothing is rewarded (backdated, discarded, or already finished)."""
+    celebration: Celebration | None = None
+    already_finished: bool = False
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+APP_TZ = zoneinfo.ZoneInfo("Europe/Berlin")
+
+# Light movement kinds, counted equally with strength sessions
+ACTIVITY_KINDS = ("running", "stretching", "mobility", "other")
+
+
+CALENDAR_PRECEDENCE = ("workout", "running", "other", "stretching", "mobility")
+
+
+def resolve_today(today: str | None) -> datetime.date:
+    """Time authority for "today": the client's local date (the phone knows the user's calendar day).
+
+    Accepted only within one day of the server's Europe/Berlin date; anything else (missing, malformed,
+    implausible) falls back to the server date, so a wrong client clock cannot rewrite history.
+    """
+    server = datetime.datetime.now(APP_TZ).date()
+    try:
+        d = datetime.date.fromisoformat(today) if today else server
+    except ValueError:
+        return server
+    return d if abs((d - server).days) <= 1 else server
+
+
+def activity_dates(cur: Any, exclude_session: str | None = None) -> set[datetime.date]:
+    """Distinct activity dates: finished strength sessions (legacy sessions without a session row count
+    as finished) plus lighter movement days. exclude_session builds the "before" state of a finish."""
+    cur.execute(
+        """
+        SELECT l.workout_date AS d
+        FROM workout.workout_log l
+        LEFT JOIN workout.workout_session s ON s.workout_id = l.workout_id
+        WHERE l.status = 'done'
+          AND COALESCE(s.status, 'finished') = 'finished'
+          AND (%s::uuid IS NULL OR l.workout_id <> %s::uuid)
+        UNION
+        SELECT activity_date FROM workout.activity_day
+        """,
+        (exclude_session, exclude_session),
+    )
+    return {r["d"] for r in cur.fetchall()}
+
+
+def completion_result(before: set[datetime.date], after: set[datetime.date],
+                      event_date: datetime.date, today: datetime.date) -> JSONResponse:
+    c = progress.celebration(before, after, event_date, today)
+    return JSONResponse(content=CompletionResult(celebration=Celebration.model_validate(c) if c else None)
+                        .model_dump(mode="json"))
+
 
 def dataset_response(dataset: Dataset) -> JSONResponse:
     return JSONResponse(content=dataset.model_dump(by_alias=True, mode="json"))
@@ -422,19 +531,27 @@ def start_session(body: SessionStart) -> JSONResponse:
 
 
 @router.post("/sessions/{session_id}/finish", response_model=None)
-def finish_session(session_id: str) -> JSONResponse:
+def finish_session(session_id: str, today: str | None = None) -> JSONResponse:
     """Finish the active session. Exercises still 'planned' were never performed and are removed.
 
-    If nothing was performed, the session is discarded entirely.
+    If nothing was performed, the session is discarded entirely (no celebration).
+    Returns CompletionResult. Idempotent: finishing an already finished session returns 200 with
+    already_finished=true and no celebration, so a retry can never reward twice.
+    Time basis: `today` (client local date, see resolve_today); defaults to the server's Europe/Berlin date.
+    The celebration compares activity days without this session (before) and with it (after).
     """
+    today_d = resolve_today(today)
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM workout.workout_session WHERE workout_id = %s AND status = 'active'",
+                "SELECT status, workout_date FROM workout.workout_session WHERE workout_id = %s FOR UPDATE",
                 (session_id,),
             )
-            if not cur.fetchone():
-                return api_error("NOT_FOUND", f"no active session {session_id}", status=404)
+            sess = cur.fetchone()
+            if not sess:
+                return api_error("NOT_FOUND", f"no session {session_id}", status=404)
+            if sess["status"] == "finished":
+                return JSONResponse(content=CompletionResult(already_finished=True).model_dump(mode="json"))
             cur.execute(
                 "DELETE FROM workout.workout_log WHERE workout_id = %s AND status = 'planned'",
                 (session_id,),
@@ -442,17 +559,156 @@ def finish_session(session_id: str) -> JSONResponse:
             cur.execute(
                 "SELECT 1 FROM workout.workout_log WHERE workout_id = %s LIMIT 1", (session_id,)
             )
-            if cur.fetchone():
+            kept = cur.fetchone()
+            if kept:
                 cur.execute(
                     "UPDATE workout.workout_session SET status = 'finished', finished_at = NOW() "
                     "WHERE workout_id = %s",
                     (session_id,),
                 )
+                before = activity_dates(cur, exclude_session=session_id)
+                after = activity_dates(cur)
             else:
                 cur.execute("DELETE FROM workout.workout_session WHERE workout_id = %s", (session_id,))
         conn.commit()
 
-    return dataset_response(_active_dataset([]))
+    if not kept:
+        return JSONResponse(content=CompletionResult().model_dump(mode="json"))
+    return completion_result(before, after, sess["workout_date"], today_d)
+
+
+# ── Light activity days (running / stretching / mobility) ─────────────────────
+
+@router.get("/activity-days", response_model=None)
+def list_activity_days(limit: int = 10) -> JSONResponse:
+    """Most recent lighter movement days, newest first. limit is clamped to 1..100; empty list when none."""
+    limit = max(1, min(limit, 100))
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT activity_date::text AS activity_date, kind FROM workout.activity_day "
+                "ORDER BY activity_date DESC, kind LIMIT %s",
+                (limit,),
+            )
+            rows = [{"id": f"{r['activity_date']}|{r['kind']}", **dict(r)} for r in cur.fetchall()]
+    return dataset_response(Dataset(
+        meta=DatasetMeta(object_type="workout_activity_day", label="Activity days",
+                         total=len(rows), page=1, page_size=len(rows) or 1),
+        **{"schema": [
+            ColumnSchema(key="activity_date", label="Date", type="date"),
+            ColumnSchema(key="kind", label="Kind", type="string"),
+        ]},
+        rows=rows,
+    ))
+
+
+@router.get("/progress", response_model=None)
+def progress_snapshot(today: str | None = None) -> JSONResponse:
+    """Current statistics (monthly race + streak ranking) as a Dataset with exactly one row = Snapshot.
+
+    Param: today = client local date (see resolve_today). Counts finished sessions and activity days only;
+    an empty history still yields one row (zero counts, empty rankings). Snapshot is not tabular, so it
+    travels as the row's fields (R-CON-BP-04: reads return Dataset).
+    """
+    today_d = resolve_today(today)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            snap = Snapshot.model_validate(progress.snapshot(activity_dates(cur), today_d)).model_dump(mode="json")
+    return dataset_response(Dataset(
+        meta=DatasetMeta(object_type="workout_progress", label="Progress", total=1, page=1, page_size=1),
+        **{"schema": [ColumnSchema(key="today", label="Today", type="date")]},
+        rows=[{"id": snap["today"], **snap}],
+    ))
+
+
+@router.get("/calendar", response_model=None)
+def year_calendar(year: int | None = None, today: str | None = None) -> JSONResponse:
+    """One row per day of `year` that has activity: date, kinds (list) and primary kind.
+
+    Params: year (default: the year of resolve_today(today)); today = client local date (see resolve_today).
+    Sources: finished strength sessions ('workout') + activity_day kinds. Ordering: date ascending.
+    Primary kind precedence for colouring: workout > running > other > stretching > mobility.
+    Empty year => zero rows (no zero-fill; the client draws the empty days).
+    """
+    year = year if year is not None else resolve_today(today).year
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT d::text AS date, ARRAY_AGG(DISTINCT kind) AS kinds FROM (
+                    SELECT l.workout_date AS d, 'workout' AS kind
+                    FROM workout.workout_log l
+                    LEFT JOIN workout.workout_session s ON s.workout_id = l.workout_id
+                    WHERE l.status = 'done' AND COALESCE(s.status, 'finished') = 'finished'
+                    UNION ALL
+                    SELECT activity_date, kind FROM workout.activity_day
+                ) x
+                WHERE EXTRACT(YEAR FROM d) = %s
+                GROUP BY d ORDER BY d
+                """,
+                (year,),
+            )
+            rows = []
+            for r in cur.fetchall():
+                kinds = sorted(r["kinds"], key=lambda k: CALENDAR_PRECEDENCE.index(k))
+                rows.append({"id": r["date"], "date": r["date"], "kinds": kinds, "primary": kinds[0]})
+    return dataset_response(Dataset(
+        meta=DatasetMeta(object_type="workout_calendar_day", label=f"Activity calendar {year}",
+                         total=len(rows), page=1, page_size=len(rows) or 1),
+        **{"schema": [
+            ColumnSchema(key="date", label="Date", type="date"),
+            ColumnSchema(key="primary", label="Kind", type="string"),
+        ]},
+        rows=rows,
+    ))
+
+
+@router.post("/activity-days", response_model=None)
+def log_activity_day(body: ActivityDayCreate, today: str | None = None) -> JSONResponse:
+    """Log a lighter movement day (counted equally with strength). Idempotent per (date, kind).
+
+    Returns CompletionResult; a duplicate or a day that already counts yields no change
+    (changed=false, "Today already counts."), and a non-today date yields no celebration.
+    """
+    if body.kind not in ACTIVITY_KINDS:
+        return api_error("VALIDATION_ERROR", f"kind must be one of {', '.join(ACTIVITY_KINDS)}")
+    today_d = resolve_today(today)
+    try:
+        day = datetime.date.fromisoformat(body.activity_date)
+    except ValueError:
+        return api_error("VALIDATION_ERROR", "activity_date must be an ISO date")
+    if day > today_d:
+        return api_error("VALIDATION_ERROR", "activity_date cannot be in the future")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            before = activity_dates(cur)
+            cur.execute(
+                "INSERT INTO workout.activity_day (activity_date, kind) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                (day, body.kind),
+            )
+            after = activity_dates(cur)
+        conn.commit()
+    return completion_result(before, after, day, today_d)
+
+
+@router.delete("/activity-days/{activity_date}/{kind}", response_model=None)
+def delete_activity_day(activity_date: str, kind: str) -> JSONResponse:
+    try:
+        datetime.date.fromisoformat(activity_date)
+    except ValueError:
+        return api_error("VALIDATION_ERROR", "activity_date must be an ISO date")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM workout.activity_day WHERE activity_date = %s AND kind = %s RETURNING 1",
+                (activity_date, kind),
+            )
+            deleted = cur.fetchone()
+        conn.commit()
+    if not deleted:
+        return api_error("NOT_FOUND", "activity day not found", status=404)
+    return JSONResponse(content={"deleted": True})
 
 
 @router.post("/sessions", response_model=None)

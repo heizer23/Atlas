@@ -55,7 +55,7 @@ def setup_schema(db_conn):
 @pytest.fixture(autouse=True)
 def clean_tables(db_conn):
     with db_conn.cursor() as cur:
-        cur.execute("truncate workout.workout_log, workout.workout_session restart identity")
+        cur.execute("truncate workout.workout_log, workout.workout_session, workout.activity_day restart identity")
     yield
 
 

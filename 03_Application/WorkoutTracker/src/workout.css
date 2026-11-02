@@ -97,3 +97,33 @@ body[data-app="workout"] .type-display {
     padding: 12px 12px 8px;
   }
 }
+
+/* ── Finish celebration (FinishModal): one-shot emphasis, motion-safe only ───── */
+@media (prefers-reduced-motion: no-preference) {
+  body[data-app="workout"] .wt-race-highlight { animation: wt-fade 500ms ease-out both; }
+  body[data-app="workout"] .wt-race-badge { animation: wt-pop 600ms cubic-bezier(.3,1.5,.5,1) both; }
+  body[data-app="workout"] .wt-race-badge--strong {
+    animation: wt-pop-strong 900ms cubic-bezier(.3,1.5,.5,1) both;
+    filter: drop-shadow(0 0 4px rgba(43, 95, 217, 0.55));
+  }
+  body[data-app="workout"] .wt-welcome { animation: wt-rise 500ms ease-out both; }
+}
+@keyframes wt-fade { from { opacity: 0; } to { opacity: 0.7; } }
+@keyframes wt-pop { from { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } to { transform: scale(1); opacity: 1; } }
+@keyframes wt-pop-strong {
+  from { transform: scale(0.4); opacity: 0; }
+  50% { transform: scale(1.4); opacity: 1; }
+  75% { transform: scale(1.1); }
+  to { transform: scale(1.2); opacity: 1; }
+}
+@keyframes wt-rise { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* Calendar: the day that was just added pops in once, with a short ring */
+@media (prefers-reduced-motion: no-preference) {
+  body[data-app="workout"] .wt-cell-pop { animation: wt-cell-pop 900ms cubic-bezier(.3,1.5,.5,1) both; position: relative; z-index: 1; }
+}
+@keyframes wt-cell-pop {
+  from { transform: scale(0.2); opacity: 0; box-shadow: 0 0 0 0 rgba(43, 139, 224, 0.6); }
+  50% { transform: scale(1.8); opacity: 1; box-shadow: 0 0 0 6px rgba(43, 139, 224, 0); }
+  to { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(43, 139, 224, 0); }
+}

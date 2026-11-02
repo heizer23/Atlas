@@ -14,6 +14,9 @@ import { apiFetch, isApiError } from "@platform-ui/api/client";
 import ErrorCard from "@platform-ui/components/ErrorCard";
 import type { ApiError, Dataset, Row } from "@platform-ui/api/types";
 import ExerciseLogView from "./ExerciseLogView";
+import ActivityDayCard from "./ActivityDayCard";
+import FinishModal from "./FinishModal";
+import type { Celebration, CompletionResult } from "./progressModel";
 import {
   ConfirmDialog,
   DeltaChip,
@@ -70,10 +73,12 @@ function ArchetypeChooser({
   onStarted,
   archetypes,
   archetypesError,
+  onCelebrate,
 }: {
   onStarted: (s: ActiveSession) => void;
   archetypes: Row[] | null;
   archetypesError: ApiError | null;
+  onCelebrate: (c: Celebration) => void;
 }) {
   const [startError, setStartError] = useState<ApiError | null>(null);
   const error = startError ?? archetypesError;
@@ -184,6 +189,7 @@ function ArchetypeChooser({
           Start
         </button>
       </form>
+      <ActivityDayCard today={localDate()} onCelebrate={onCelebrate} />
     </div>
   );
 }
@@ -264,8 +270,7 @@ const actionBtn: React.CSSProperties = {
 
 // ── Active session overview ───────────────────────────────────────────────────
 
-function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded: () => void }) {
-  const navigate = useNavigate();
+function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded: (finished?: { celebration: Celebration | null }) => void }) {
   const cached = activeCache.sessionId === session.id;
   const [exercises, setExercises] = useState<ExerciseRow[] | null>(cached ? activeCache.exercises : null);
   const [histories, setHistories] = useState<Record<string, HistoryRow[]>>(cached ? activeCache.histories : {});
@@ -330,7 +335,8 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
-    const res = await apiFetch<Dataset>(`/workout/sessions/${session.id}/finish`, { method: "POST" });
+    // `today` = this phone's calendar day (time authority for activity days, see resolve_today)
+    const res = await apiFetch<CompletionResult>(`/workout/sessions/${session.id}/finish?today=${localDate()}`, { method: "POST" });
     if (isApiError(res)) {
       setError(res);
       setBusy(false);
@@ -340,8 +346,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
     }
     writeOpen(null);
     invalidateLogCache();
-    onEnded();
-    navigate("/workout/log");
+    onEnded({ celebration: res.celebration });
   }
 
   async function discard() {
@@ -538,18 +543,48 @@ export default function SessionView() {
     if (active === null) clearActiveCache();
   }, [active]);
 
-  if (error) return <div className="page"><ErrorCard error={error} /></div>;
-  if (active === undefined) return <div className="page"><p className="type-body">Loading…</p></div>;
-  if (active === null) return <ArchetypeChooser onStarted={setActive} archetypes={archetypes} archetypesError={archetypesError} />;
-  return (
-    <ActiveOverview
-      session={active}
-      onEnded={() => {
-        setArchetypesCache(null); // a discarded workout may have been the only one of its split
-        setArchetypes(null);
-        loadArchetypes();
-        setActive(null);
+  // The reward modal lives here, above both states: finishing unmounts ActiveOverview.
+  const [reward, setReward] = useState<{ celebration: Celebration; title: string; goToLog: boolean } | null>(null);
+  const navigate = useNavigate();
+  const modal = reward && (
+    <FinishModal
+      celebration={reward.celebration}
+      title={reward.title}
+      onClose={() => {
+        setReward(null);
+        if (reward.goToLog) navigate("/workout/log");
       }}
     />
+  );
+
+  if (error) return <div className="page"><ErrorCard error={error} /></div>;
+  if (active === undefined) return <div className="page"><p className="type-body">Loading…</p></div>;
+  if (active === null)
+    return (
+      <>
+        <ArchetypeChooser
+          onStarted={setActive}
+          archetypes={archetypes}
+          archetypesError={archetypesError}
+          onCelebrate={(c) => setReward({ celebration: c, title: "Activity logged", goToLog: false })}
+        />
+        {modal}
+      </>
+    );
+  return (
+    <>
+      <ActiveOverview
+        session={active}
+        onEnded={(finished) => {
+          setArchetypesCache(null); // a discarded workout may have been the only one of its split
+          setArchetypes(null);
+          loadArchetypes();
+          setActive(null);
+          if (finished?.celebration) setReward({ celebration: finished.celebration, title: "Workout saved", goToLog: true });
+          else if (finished) navigate("/workout/log");
+        }}
+      />
+      {modal}
+    </>
   );
 }
