@@ -58,7 +58,13 @@ def create_ingredient(body: NewIngredientIn) -> JSONResponse:
 
 @router.get("/recipes/import-example", response_model=None)
 def import_example() -> JSONResponse:
-    return dataset_response("recipe_import_example", [{"example": recipe_import.EXAMPLE}], "Import example")
+    """Example built from the household's real articles (falls back to a name-only line if there are none)."""
+    try:
+        master_list = ing_mod.master_items()
+    except st.StorageError as e:
+        return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
+    return dataset_response("recipe_import_example", [{"example": recipe_import.make_example(master_list)}],
+                            "Import example")
 
 
 @router.post("/recipes/import/preview", response_model=None)

@@ -18,35 +18,43 @@ VERSION = 1
 KINDS = ("base", "derived", "favorite")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
-EXAMPLE: dict[str, Any] = {
-    "format": FORMAT,
-    "version": VERSION,
-    "_comment": "kind: base | derived | favorite. Ingredients: use 'item_id' from the exported ingredient master "
-                "when the article exists, otherwise leave it null (you assign or create the article during import). "
-                "'unit' must equal the article's base unit. A derived dish may reference a cooked base via "
-                "'base_recipe' (the exact recipe name) instead of item_id.",
-    "recipe": {
-        "name": "Beispiel: Linsensuppe",
-        "description": "Einfache Suppe aus roten Linsen.",
-        "kind": "favorite",
-        "servings": 4,
-        "yield_unit": "Portionen",
-        "prep_minutes": 10,
-        "cook_minutes": 25,
-        "shelf_life_days": 3,
-        "storage_location": "Kühlschrank",
-        "ingredients": [
-            {"item_id": None, "name": "Rote Linsen", "qty": 250, "unit": "g"},
-            {"item_id": None, "name": "Zwiebel", "qty": 1, "unit": "Stück"},
-            {"item_id": None, "name": "Gemüsebrühe", "qty": 800, "unit": "ml"},
-        ],
-        "steps": [
-            "Zwiebel würfeln und in etwas Öl anschwitzen.",
-            "Linsen und Brühe zugeben, 20 Minuten köcheln.",
-            "Pürieren und abschmecken.",
-        ],
-    },
-}
+_COMMENT = ("kind: base | derived | favorite. Ingredients: copy 'item_id', 'name' and 'unit' of existing articles from the "
+            "exported ingredient master; 'unit' must equal the article's base unit. For an ingredient without an article "
+            "leave 'item_id' null (you assign or create the article during import). A derived dish may reference a "
+            "cooked base via 'base_recipe' (the exact recipe name) instead of item_id.")
+
+
+def make_example(master_list: list[dict[str, Any]]) -> dict[str, Any]:
+    """Importable example. Uses up to two real articles of the household (id + name + unit, as in the master
+    export) and one new ingredient without article, so every field and both line kinds are demonstrated."""
+    real = sorted((i for i in master_list if i.get("unit")), key=lambda i: i["name"].lower())[:2]
+    lines: list[dict[str, Any]] = [
+        {"item_id": i["id"], "name": i["name"], "qty": 250 if n == 0 else 1, "unit": i["unit"]}
+        for n, i in enumerate(real)
+    ]
+    lines.append({"item_id": None, "name": "Gemüsebrühe (neu, noch kein Artikel)", "qty": 800, "unit": "ml"})
+    return {
+        "format": FORMAT,
+        "version": VERSION,
+        "_comment": _COMMENT,
+        "recipe": {
+            "name": "Beispiel: Einfache Suppe",
+            "description": "Beispielrezept mit Artikeln aus dem Bestand und einer neuen Zutat.",
+            "kind": "favorite",
+            "servings": 4,
+            "yield_unit": "Portionen",
+            "prep_minutes": 10,
+            "cook_minutes": 25,
+            "shelf_life_days": 3,
+            "storage_location": "Kühlschrank",
+            "ingredients": lines,
+            "steps": [
+                "Zutaten vorbereiten und in etwas Öl anschwitzen.",
+                "Mit Brühe aufgießen, 20 Minuten köcheln.",
+                "Pürieren und abschmecken.",
+            ],
+        },
+    }
 
 
 def _err(errors: list[dict[str, str]], path: str, msg: str) -> None:

@@ -62,7 +62,12 @@ def test_example_round_trips(client):
     ex = client.get(f"{K}/recipes/import-example").json()["rows"][0]["example"]
     p = preview(client, ex)
     assert p["ok"] and not p["errors"] and p["recipe"]["name"] == ex["recipe"]["name"]
-    assert p["unresolved"] == 3 and p["status_if_saved"] == "draft"
+    lines = ex["recipe"]["ingredients"]
+    master = {r["id"]: r for r in client.get(f"{K}/ingredients").json()["rows"]}
+    real = [l for l in lines if l["item_id"]]
+    assert len(real) == 2 and all(master[l["item_id"]]["name"] == l["name"] and master[l["item_id"]]["unit"] == l["unit"]
+                                  for l in real)
+    assert p["unresolved"] == 1 and p["status_if_saved"] == "draft"
     assert save(client, p).status_code == 201
 
 
