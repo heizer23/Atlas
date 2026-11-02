@@ -169,7 +169,7 @@ function PlanView() {
           {batches.map((b) => (
             <div key={b.id} className="kitchen-row spread">
               <span>{b.name}</span>
-              <span className="kitchen-muted">{num(b.quantity)} {b.unit}{b.expires_at ? ` · bis ${dayLabel(b.expires_at)}` : ''}</span>
+              <span className="kitchen-muted">{num(b.quantity)} {b.unit}{b.expires_at ? ` · until ${dayLabel(b.expires_at)}` : ''}</span>
             </div>
           ))}
         </div>
