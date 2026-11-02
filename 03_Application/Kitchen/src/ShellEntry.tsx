@@ -167,7 +167,7 @@ function PlanView() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { post, error: actionError, busy } = useAction();
-  const [days, setDays] = useState(readPref('days', '3'));
+  const [planDays, setPlanDays] = useState(readPref('days', '3'));
   const [cooks, setCooks] = useState(readPref('cooks', 'auto'));
   const [start, setStart] = useState(todayLocal());
 
@@ -217,7 +217,7 @@ function PlanView() {
       <div className="kitchen-card">
         <div className="kitchen-row">
           <label className="kitchen-row">Days
-            <select className="kitchen-input" value={days} onChange={(e) => { setDays(e.target.value); writePref('days', e.target.value); }}>
+            <select className="kitchen-input" value={planDays} onChange={(e) => { setPlanDays(e.target.value); writePref('days', e.target.value); }}>
               {[1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>{n}</option>)}
             </select></label>
           <label className="kitchen-row">From
@@ -230,7 +230,7 @@ function PlanView() {
         </div>
         <button className="kitchen-btn primary" disabled={busy || !start}
                 onClick={async () => {
-                  const body: Record<string, unknown> = { week_start: start, days: Number(days) };
+                  const body: Record<string, unknown> = { week_start: start, days: Number(planDays) };
                   if (cooks !== 'auto') body.cook_sessions = Number(cooks);
                   if (await post('/plans/suggest', body)) load();
                 }}>
