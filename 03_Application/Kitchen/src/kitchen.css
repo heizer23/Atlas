@@ -14,3 +14,10 @@
 .kitchen-input { min-height: 40px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); font-size: 14px; min-width: 0; }
 .kitchen-input.num { width: 84px; }
 .kitchen-textarea { min-height: 120px; width: 100%; box-sizing: border-box; }
+.kitchen-col { display: flex; flex-direction: column; gap: 8px; }
+.kitchen-left { text-align: left; }
+.kitchen-mono { font-family: ui-monospace, monospace; font-size: 13px; }
+.kitchen-chip.warn { background: #fdf0cc; color: #6b4b00; }
+.kitchen-line.open { border: 1px solid #e3c36a; }
+.kitchen-steps { white-space: pre-wrap; margin: 0; font-family: inherit; font-size: 14px; }
+@media (max-width: 480px) { .kitchen-input { flex: 1 1 120px; } }

@@ -6,6 +6,15 @@ import httpx
 ST = os.environ.get("STORAGETRACKER_URL", "http://atlas-storagetracker-test:8000") + "/api"
 
 
+def item_id(name):
+    rows = httpx.get(f"{ST}/items", params={"kind": "ingredient"}).json()["rows"]
+    return next(r["id"] for r in rows if r["name"].lower() == name.lower())
+
+
+def buy(client, name, qty):
+    return client.post("/api/kitchen/shopping/purchase", json={"item_id": item_id(name), "qty": qty})
+
+
 def stock(name, unit=None):
     rows = httpx.get(f"{ST}/items").json()["rows"]
     return sum(r["quantity"] or 0 for r in rows if r["name"].lower() == name.lower())
@@ -53,12 +62,11 @@ def test_full_flow(client):
     assert not shop["probably_have"]
 
     # 3 buy + confirm on-hand: lentils 300 g bought; onions "probably have" corrected
-    client.post("/api/kitchen/shopping/purchase", json={"name": "Rote Linsen", "unit": "g", "qty": 500})
-    client.post("/api/kitchen/shopping/stocktake", json={"name": "Zwiebel", "unit": "Stück", "qty": 6})
-    for n, u, q in [("Knoblauch", "Zehe", 10), ("Ingwer", "g", 100), ("Dosentomaten", "g", 800),
-                    ("Kokosmilch", "ml", 800), ("Currypulver", "EL", 10), ("Öl", "EL", 20),
-                    ("Hähnchenbrust", "g", 300), ("Spinat", "g", 400), ("Eier", "Stück", 6)]:
-        client.post("/api/kitchen/shopping/purchase", json={"name": n, "unit": u, "qty": q})
+    buy(client, "Rote Linsen", 500)
+    client.post("/api/kitchen/shopping/stocktake", json={"item_id": item_id("Zwiebel"), "qty": 6})
+    for n, q in [("Knoblauch", 10), ("Ingwer", 100), ("Dosentomaten", 800), ("Kokosmilch", 800),
+                 ("Currypulver", 10), ("Öl", 20), ("Hähnchenbrust", 300), ("Spinat", 400), ("Eier", 6)]:
+        buy(client, n, q)
     shop = client.get(f"/api/kitchen/plans/{pid}/shopping").json()["rows"][0]
     assert any(l["name"] == "Rote Linsen" for l in shop["probably_have"])
 
@@ -112,7 +120,7 @@ def test_skipped_meal_creates_no_movement(client):
     m = add_meal(client, pid, "Pfannkuchen", "2030-01-07")
     assert client.patch(f"/api/kitchen/meals/{m}", json={"status": "skipped"}).status_code == 200
     assert client.post(f"/api/kitchen/meals/{m}/eaten").status_code == 409
-    assert httpx.get(f"{ST}/items").json()["rows"] == []
+    assert all(r["quantity"] == 0 for r in httpx.get(f"{ST}/items").json()["rows"])
 
 
 def test_suggest_plan_shape(client):

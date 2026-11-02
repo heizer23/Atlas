@@ -14,6 +14,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import Skeleton from '@platform-ui/components/Skeleton';
+import { ImportView, IngredientLine, useMaster } from './RecipeImport';
+import type { Line } from './RecipeImport';
 import './kitchen.css';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,10 +25,10 @@ interface Dataset<T> { meta: { object_type: string; total: number }; rows: T[] }
 type RecipeKind = 'base' | 'derived' | 'favorite';
 type MealStatus = 'planned' | 'cooked' | 'eaten' | 'skipped';
 
-interface RecipeSummary { id: string; name: string; kind: RecipeKind; servings: number; yield_unit: string }
-interface Ingredient { name: string; qty: number; unit: string; base_recipe_id: string | null }
+interface RecipeSummary { id: string; name: string; kind: RecipeKind; status: 'draft' | 'active'; servings: number; yield_unit: string }
 interface Recipe extends RecipeSummary {
-  steps: string; shelf_life_days: number | null; storage_location: string | null; ingredients: Ingredient[];
+  description: string | null; prep_minutes: number | null; cook_minutes: number | null;
+  steps: string; shelf_life_days: number | null; storage_location: string | null; ingredients: Line[];
 }
 interface Meal {
   id: string; recipe_id: string | null; recipe_name: string | null; recipe_kind: RecipeKind | null;
@@ -34,9 +36,10 @@ interface Meal {
 }
 interface Plan { id: string; week_start: string; meals: Meal[] }
 interface Batch { id: string; name: string; quantity: number; unit: string; location: string | null; expires_at: string | null }
-interface ShopLine { name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
+interface ShopLine { item_id: string; name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
 interface Shopping {
   buy: ShopLine[]; probably_have: ShopLine[]; missing_bases: { name: string; needed: number; available: number }[];
+  draft_recipes: string[];
 }
 
 type Post = <T>(path: string, body?: unknown, method?: string) => Promise<T | null>;
@@ -147,7 +150,7 @@ function PlanView() {
       setPlan(p.rows[0]);
     } else setPlan(null);
     const r = await apiFetch<Dataset<RecipeSummary>>('/kitchen/recipes');
-    if (!isApiError(r)) setRecipes(r.rows);
+    if (!isApiError(r)) setRecipes(r.rows.filter((x) => x.status === 'active'));
     const b = await apiFetch<Dataset<Batch>>('/kitchen/batches');
     if (!isApiError(b)) setBatches(b.rows);
   }, []);
@@ -231,7 +234,7 @@ function BuyRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
         <span>{line.unit}</span>
         <button className="kitchen-btn primary" disabled={busy || !(Number(qty) > 0)}
                 onClick={async () => {
-                  if (await post('/shopping/purchase', { name: line.name, unit: line.unit, qty: Number(qty), idempotency_key: crypto.randomUUID?.() })) onDone();
+                  if (await post('/shopping/purchase', { item_id: line.item_id, qty: Number(qty), idempotency_key: crypto.randomUUID?.() })) onDone();
                 }}>Gekauft</button>
       </div>
       {error && <div className="kitchen-warn">{error}</div>}
@@ -252,7 +255,7 @@ function HaveRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
         <input className="kitchen-input num" type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
         <span>{line.unit} tatsächlich da</span>
         <button className="kitchen-btn" disabled={busy}
-                onClick={async () => { if (await post('/shopping/stocktake', { name: line.name, unit: line.unit, qty: Number(qty) })) onDone(); }}>
+                onClick={async () => { if (await post('/shopping/stocktake', { item_id: line.item_id, qty: Number(qty) })) onDone(); }}>
           Bestätigen
         </button>
       </div>
@@ -282,6 +285,9 @@ function ShoppingView() {
   return (
     <div className="kitchen-page">
       <h1 className="type-headline">Einkauf</h1>
+      {data.draft_recipes.length > 0 && (
+        <div className="kitchen-warn">Nicht berücksichtigt (Entwurf, Zutaten nicht zugeordnet): {data.draft_recipes.join(', ')}</div>
+      )}
       {data.missing_bases.map((b) => (
         <div key={b.name} className="kitchen-warn">
           Kochbasis „{b.name}" fehlt: benötigt {num(b.needed)}, verfügbar {num(b.available)} — im Plan eine Kochsession ergänzen.
@@ -289,31 +295,35 @@ function ShoppingView() {
       ))}
       <div className="kitchen-day">Einkaufen ({data.buy.length})</div>
       {data.buy.length === 0 && <p className="kitchen-muted">Nichts zu kaufen.</p>}
-      {data.buy.map((l) => <BuyRow key={`${l.name}-${l.unit}-${l.stock}`} line={l} onDone={load} />)}
+      {data.buy.map((l) => <BuyRow key={`${l.item_id}-${l.stock}`} line={l} onDone={load} />)}
       <div className="kitchen-day">Vermutlich vorhanden ({data.probably_have.length})</div>
-      {data.probably_have.map((l) => <HaveRow key={`${l.name}-${l.unit}-${l.stock}`} line={l} onDone={load} />)}
+      {data.probably_have.map((l) => <HaveRow key={`${l.item_id}-${l.stock}`} line={l} onDone={load} />)}
     </div>
   );
 }
 
 // ── Recipes view ──────────────────────────────────────────────────────────────
 
-const EMPTY: Recipe = { id: '', name: '', kind: 'favorite', servings: 2, yield_unit: 'Portionen', steps: '',
+const EMPTY: Recipe = { id: '', name: '', kind: 'favorite', status: 'draft', servings: 2, yield_unit: 'Portionen',
+                        description: null, prep_minutes: null, cook_minutes: null, steps: '',
                         shelf_life_days: null, storage_location: null, ingredients: [] };
 
 function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; bases: RecipeSummary[]; onSaved: () => void; onCancel: () => void }) {
   const { post, error, busy } = useAction();
+  const { master, add } = useMaster();
   const [r, setR] = useState<Recipe>(initial);
   const set = (patch: Partial<Recipe>) => setR({ ...r, ...patch });
-  const setIng = (i: number, patch: Partial<Ingredient>) =>
+  const setIng = (i: number, patch: Partial<Line>) =>
     set({ ingredients: r.ingredients.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+  const minutes = (v: string) => (v === '' ? null : Number(v));
 
   const save = async () => {
     const body = {
-      name: r.name, kind: r.kind, servings: r.servings, steps: r.steps,
-      shelf_life_days: r.shelf_life_days, storage_location: r.storage_location,
-      ingredients: r.ingredients.filter((i) => i.name.trim()).map((i) => ({
-        name: i.name, qty: Number(i.qty), unit: i.base_recipe_id ? 'Portionen' : i.unit, base_recipe_id: i.base_recipe_id,
+      name: r.name, kind: r.kind, servings: r.servings, description: r.description, prep_minutes: r.prep_minutes,
+      cook_minutes: r.cook_minutes, steps: r.steps, shelf_life_days: r.shelf_life_days, storage_location: r.storage_location,
+      ingredients: r.ingredients.filter((i) => i.name.trim() || i.item_id || i.base_recipe_id).map((i) => ({
+        name: i.name || i.item_name || '', qty: Number(i.qty), unit: i.base_recipe_id ? 'Portionen' : i.unit,
+        base_recipe_id: i.base_recipe_id, item_id: i.item_id,
       })),
     };
     const res = r.id ? await post(`/recipes/${r.id}`, body, 'PATCH') : await post('/recipes', body);
@@ -323,6 +333,7 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
   return (
     <div className="kitchen-card">
       <input className="kitchen-input" placeholder="Name" value={r.name} onChange={(e) => set({ name: e.target.value })} />
+      <input className="kitchen-input" placeholder="Beschreibung" value={r.description ?? ''} onChange={(e) => set({ description: e.target.value || null })} />
       <div className="kitchen-row">
         <select className="kitchen-input" value={r.kind} onChange={(e) => set({ kind: e.target.value as RecipeKind })}>
           <option value="base">Kochbasis</option>
@@ -332,37 +343,30 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
         <label className="kitchen-row">Portionen
           <input className="kitchen-input num" type="number" min="0.5" step="0.5" value={r.servings}
                  onChange={(e) => set({ servings: Number(e.target.value) })} /></label>
+        <label className="kitchen-row">Vorb. (min)
+          <input className="kitchen-input num" type="number" min="0" value={r.prep_minutes ?? ''} onChange={(e) => set({ prep_minutes: minutes(e.target.value) })} /></label>
+        <label className="kitchen-row">Kochen (min)
+          <input className="kitchen-input num" type="number" min="0" value={r.cook_minutes ?? ''} onChange={(e) => set({ cook_minutes: minutes(e.target.value) })} /></label>
         {r.kind === 'base' && (
           <label className="kitchen-row">Haltbar (Tage)
             <input className="kitchen-input num" type="number" min="0" value={r.shelf_life_days ?? ''}
-                   onChange={(e) => set({ shelf_life_days: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+                   onChange={(e) => set({ shelf_life_days: minutes(e.target.value) })} /></label>
         )}
       </div>
       <strong>Zutaten</strong>
       {r.ingredients.map((ing, i) => (
-        <div key={i} className="kitchen-row">
-          {ing.base_recipe_id ? (
-            <select className="kitchen-input" value={ing.base_recipe_id}
-                    onChange={(e) => setIng(i, { base_recipe_id: e.target.value, name: bases.find((b) => b.id === e.target.value)?.name ?? '' })}>
-              {bases.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          ) : (
-            <input className="kitchen-input" placeholder="Zutat" value={ing.name} onChange={(e) => setIng(i, { name: e.target.value })} />
-          )}
-          <input className="kitchen-input num" type="number" min="0" step="any" value={ing.qty} onChange={(e) => setIng(i, { qty: Number(e.target.value) })} />
-          {ing.base_recipe_id ? <span>Portionen</span> :
-            <input className="kitchen-input num" placeholder="Einheit" value={ing.unit} onChange={(e) => setIng(i, { unit: e.target.value })} />}
-          <button className="kitchen-btn" onClick={() => set({ ingredients: r.ingredients.filter((_, j) => j !== i) })}>×</button>
-        </div>
+        <IngredientLine key={i} line={ing} master={master} onChange={(p) => setIng(i, p)} onCreated={add}
+                        onRemove={() => set({ ingredients: r.ingredients.filter((_, j) => j !== i) })} />
       ))}
       <div className="kitchen-row">
-        <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: '', qty: 1, unit: 'g', base_recipe_id: null }] })}>+ Zutat</button>
+        <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: '', qty: 1, unit: 'g', item_id: null, base_recipe_id: null }] })}>+ Zutat</button>
         {bases.length > 0 && r.kind !== 'base' && (
-          <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: bases[0].name, qty: 2, unit: 'Portionen', base_recipe_id: bases[0].id }] })}>+ Kochbasis</button>
+          <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: bases[0].name, qty: 2, unit: 'Portionen', item_id: null, base_recipe_id: bases[0].id }] })}>+ Kochbasis</button>
         )}
       </div>
       <textarea className="kitchen-input kitchen-textarea" placeholder="Zubereitungsschritte" value={r.steps} onChange={(e) => set({ steps: e.target.value })} />
       {error && <div className="kitchen-warn">{error}</div>}
+      <span className="kitchen-muted">Rezepte mit nicht zugeordneten Zutaten werden als Entwurf gespeichert.</span>
       <div className="kitchen-row">
         <button className="kitchen-btn primary" disabled={busy || !r.name.trim()} onClick={save}>Speichern</button>
         <button className="kitchen-btn" onClick={onCancel}>Abbrechen</button>
@@ -374,6 +378,7 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
 function RecipesView() {
   const [rows, setRows] = useState<RecipeSummary[] | null>(null);
   const [editing, setEditing] = useState<Recipe | null>(null);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -390,6 +395,7 @@ function RecipesView() {
   };
 
   if (!rows) return <div className="kitchen-page"><Loading error={error} /></div>;
+  if (importing) return <ImportView onClose={() => setImporting(false)} onSaved={() => { setImporting(false); load(); }} />;
   if (editing) {
     return (
       <div className="kitchen-page">
@@ -402,13 +408,17 @@ function RecipesView() {
   return (
     <div className="kitchen-page">
       <h1 className="type-headline">Rezepte</h1>
-      <button className="kitchen-btn primary" onClick={() => setEditing(EMPTY)}>Neues Rezept</button>
+      <div className="kitchen-row">
+        <button className="kitchen-btn primary" onClick={() => setEditing(EMPTY)}>Neues Rezept</button>
+        <button className="kitchen-btn" onClick={() => setImporting(true)}>Importieren</button>
+      </div>
       {(['base', 'derived', 'favorite'] as RecipeKind[]).map((k) => (
         <React.Fragment key={k}>
           <div className="kitchen-day">{label[k]}</div>
           {rows.filter((r) => r.kind === k).map((r) => (
             <button key={r.id} className="kitchen-btn" style={{ textAlign: 'left' }} onClick={() => open(r.id)}>
               {r.name} <span className="kitchen-muted">· {num(r.servings)} {r.yield_unit}</span>
+              {r.status === 'draft' && <span className="kitchen-chip warn"> Entwurf</span>}
             </button>
           ))}
         </React.Fragment>

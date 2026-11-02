@@ -33,21 +33,26 @@ def list_items(**params: str) -> list[dict[str, Any]]:
         return _check(c.get("/items", params=params))["rows"]
 
 
+def get_item(item_id: str) -> dict[str, Any] | None:
+    with _client() as c:
+        r = c.get(f"/items/{item_id}")
+        if r.status_code == 404:
+            return None
+        return _check(r)["rows"][0]
+
+
 def find_ingredient(name: str, unit: str) -> dict[str, Any] | None:
-    """Stock item for an ingredient: name case-insensitive, unit equal (or item has no unit)."""
+    """Legacy lookup by name (case-insensitive) + unit; only used to migrate pre-1.1 recipes to article ids."""
     for it in list_items(kind="ingredient"):
         if it["name"].strip().lower() == name.strip().lower() and (it.get("unit") in (None, unit)):
             return it
     return None
 
 
-def ensure_ingredient(name: str, unit: str) -> dict[str, Any]:
-    it = find_ingredient(name, unit)
-    if it:
-        return it
+def create_ingredient(name: str, unit: str) -> dict[str, Any]:
+    """New article (stock 0). Callers must have the user's explicit confirmation."""
     with _client() as c:
-        body = {"name": name, "item_type": "consumable", "quantity": 0, "unit": unit,
-                "source_tags": ["kitchen"]}
+        body = {"name": name, "item_type": "consumable", "quantity": 0, "unit": unit, "source_tags": ["kitchen"]}
         return _check(c.post("/items", json=body))["rows"][0]
 
 

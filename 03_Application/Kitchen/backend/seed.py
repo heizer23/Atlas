@@ -51,3 +51,41 @@ def seed_recipes() -> None:
                 lines += [{"name": n, "qty": q, "unit": u} for n, q, u in ings]
                 save_ingredients(cur, rid, lines)
         conn.commit()
+
+
+def migrate_legacy_ingredients() -> None:
+    """One-time/idempotent: give recipe lines without article id (seed + pre-1.1 recipes) a StorageTracker
+    article id, then recompute every recipe's status.
+
+    Matching uses the legacy name+unit lookup against existing articles; if none exists the article is
+    created with stock 0 (this reproduces what Sprint 1 did implicitly at first booking). If StorageTracker is
+    unreachable nothing changes and the migration is retried on the next start.
+    Imports never use this path.
+    """
+    from backend import ingredients as ing_mod
+    from backend import storage_client as st
+    from backend.recipes_repo import recompute_status
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, name, unit from kitchen.recipe_ingredients "
+                        "where item_id is null and base_recipe_id is null")
+            todo = [dict(r) for r in cur.fetchall()]
+            try:
+                known = st.list_items(kind="ingredient")
+                for line in todo:
+                    item = next((i for i in known if ing_mod.norm(i["name"]) == ing_mod.norm(line["name"])
+                                 and i.get("unit") in (None, line["unit"])), None)
+                    if item is None:
+                        item = st.create_ingredient(line["name"], line["unit"])
+                        known.append(item)
+                    cur.execute("update kitchen.recipe_ingredients set item_id = %s where id = %s",
+                                (item["id"], line["id"]))
+                master = ing_mod.master_by_id()
+            except st.StorageError:
+                master = None  # keep stored statuses; retried on next start
+            if master is not None:
+                cur.execute("select id from kitchen.recipes")
+                for r in cur.fetchall():
+                    recompute_status(cur, str(r["id"]), master)
+        conn.commit()

@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from backend import ingredients as ing_mod
 from backend import storage_client as st
 from backend.common import berlin_today
 from backend.recipes_repo import load_recipe
@@ -18,6 +19,12 @@ from backend.recipes_repo import load_recipe
 
 class Conflict(Exception):
     pass
+
+
+def _require_bookable(recipe: dict[str, Any]) -> None:
+    """Draft recipes (unresolved articles) must never drive stock, shopping or planning."""
+    if recipe["status"] != "active":
+        raise Conflict(f"Recipe '{recipe['name']}' is a draft: assign all ingredients to articles first")
 
 
 def _book(cur: Any, meal_id: str, purpose: str, item_id: str, delta: float, key: str, reason: str) -> dict[str, Any]:
@@ -53,6 +60,7 @@ def cook(conn: Any, meal_id: str, produced_qty: float | None) -> dict[str, Any]:
             raise Conflict(f"Meal is {meal['status']}")
 
         recipe = load_recipe(cur, str(meal["recipe_id"]))
+        _require_bookable(recipe)
         produced = float(produced_qty if produced_qty is not None else meal["portions"])
         if produced <= 0:
             raise ValueError("produced_qty must be > 0")
@@ -60,8 +68,7 @@ def cook(conn: Any, meal_id: str, produced_qty: float | None) -> dict[str, Any]:
         rev = meal["revision"]
 
         for ing in recipe["ingredients"]:
-            item = st.ensure_ingredient(ing["name"], ing["unit"])
-            _book(cur, meal_id, "cook", item["id"], -float(ing["qty"]) * scale,
+            _book(cur, meal_id, "cook", str(ing["item_id"]), -float(ing["qty"]) * scale,
                   f"cook:{meal_id}:{rev}:{ing['id']}", f"cook {recipe['name']}")
 
         batch = st.find_batch_for_meal(meal_id)
@@ -107,6 +114,7 @@ def eat(conn: Any, meal_id: str, portions: float | None) -> dict[str, Any]:
         rev = meal["revision"]
         if meal["recipe_id"]:
             recipe = load_recipe(cur, str(meal["recipe_id"]))
+            _require_bookable(recipe)
             scale = eaten / float(recipe["servings"])
             for ing in recipe["ingredients"]:
                 need = float(ing["qty"]) * scale
@@ -122,8 +130,7 @@ def eat(conn: Any, meal_id: str, portions: float | None) -> dict[str, Any]:
                     if left > 1e-9:
                         shortfall.append({"name": ing["name"], "missing": round(left, 4)})
                 else:
-                    item = st.ensure_ingredient(ing["name"], ing["unit"])
-                    _book(cur, meal_id, "eat", item["id"], -need,
+                    _book(cur, meal_id, "eat", str(ing["item_id"]), -need,
                           f"eat:{meal_id}:{rev}:{ing['id']}", f"ate {recipe['name']}")
 
         cur.execute("insert into kitchen.consumption_events (meal_id, portions) values (%s, %s)", (meal_id, eaten))
@@ -163,22 +170,27 @@ def undo(conn: Any, meal_id: str) -> dict[str, Any]:
 # ── shopping ──────────────────────────────────────────────────────────────────
 
 def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
-    """Needs of all still-planned meals vs. StorageTracker stock.
+    """Needs of all still-planned meals vs. StorageTracker stock, keyed by article id.
 
-    buy:          shortfall per (ingredient, unit).
+    buy:          shortfall per article.
     probably_have: stock that covers (part of) the need; user confirms/corrects it.
     missing_bases: prepared bases required but neither stocked nor cooked in this plan.
+    draft_recipes: planned recipes skipped because they still have unresolved articles.
     """
+    master = ing_mod.master_by_id()
     with conn.cursor() as cur:
         cur.execute("select id, recipe_id, kind, portions from kitchen.planned_meals "
                     "where plan_id = %s and status = 'planned' and recipe_id is not null", (plan_id,))
         meals = [dict(m) for m in cur.fetchall()]
-        need: dict[tuple[str, str], float] = {}
-        display: dict[tuple[str, str], str] = {}
+        need: dict[str, dict[str, Any]] = {}
         base_need: dict[str, dict[str, Any]] = {}
         cooked_here: dict[str, float] = {}
+        drafts: set[str] = set()
         for m in meals:
             recipe = load_recipe(cur, str(m["recipe_id"]))
+            if recipe["status"] != "active":
+                drafts.add(recipe["name"])
+                continue
             scale = float(m["portions"]) / float(recipe["servings"])
             if m["kind"] == "cook":
                 cooked_here[str(recipe["id"])] = cooked_here.get(str(recipe["id"]), 0) + float(m["portions"])
@@ -188,31 +200,28 @@ def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
                     b = base_need.setdefault(str(ing["base_recipe_id"]), {"name": ing["name"], "need": 0.0})
                     b["need"] += q
                 else:
-                    key = (ing["name"].strip().lower(), ing["unit"].strip())
-                    need[key] = need.get(key, 0) + q
-                    display.setdefault(key, ing["name"])
-
-    stock: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for it in st.list_items(kind="ingredient"):
-        stock.setdefault((it["name"].strip().lower(), it.get("unit") or ""), []).append(it)
+                    line = need.setdefault(str(ing["item_id"]), {"unit": ing["unit"], "needed": 0.0})
+                    line["needed"] += q
 
     buy, have = [], []
-    for (name, unit), needed in sorted(need.items()):
-        items = stock.get((name, unit)) or stock.get((name, "")) or []
-        have_qty = sum(float(i["quantity"] or 0) for i in items)
-        line = {"name": display.get((name, unit), name), "unit": unit, "needed": round(needed, 4),
-                "stock": round(have_qty, 4), "item_id": items[0]["id"] if items else None}
-        if have_qty > 0:
-            have.append({**line, "covered": round(min(have_qty, needed), 4)})
-        if have_qty < needed - 1e-9:
-            buy.append({**line, "to_buy": round(needed - have_qty, 4)})
+    for item_id, n in sorted(need.items(), key=lambda kv: master.get(kv[0], {}).get("name", "").lower()):
+        item = master.get(item_id)
+        if item is None:
+            continue
+        stock = float(item["quantity"] or 0)
+        line = {"item_id": item_id, "name": item["name"], "unit": n["unit"], "needed": round(n["needed"], 4),
+                "stock": round(stock, 4)}
+        if stock > 0:
+            have.append({**line, "covered": round(min(stock, n["needed"]), 4)})
+        if stock < n["needed"] - 1e-9:
+            buy.append({**line, "to_buy": round(n["needed"] - stock, 4)})
 
     missing_bases = []
     for rid, b in base_need.items():
         avail = sum(float(x["quantity"]) for x in st.find_batches(rid)) + cooked_here.get(rid, 0)
         if avail + 1e-9 < b["need"]:
             missing_bases.append({"name": b["name"], "needed": round(b["need"], 4), "available": round(avail, 4)})
-    return {"buy": buy, "probably_have": have, "missing_bases": missing_bases}
+    return {"buy": buy, "probably_have": have, "missing_bases": missing_bases, "draft_recipes": sorted(drafts)}
 
 
 # ── plan suggestion ───────────────────────────────────────────────────────────
@@ -221,7 +230,7 @@ def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
     """7 dinners: `cook_sessions` base cooks (day 0 and day 3 by default), derived meals draw down the
     produced portions, favorites fill gaps, anything left is a flexible day (recipe null)."""
     with conn.cursor() as cur:
-        cur.execute("select * from kitchen.recipes order by name")
+        cur.execute("select * from kitchen.recipes where status = 'active' order by name")
         recipes = [dict(r) for r in cur.fetchall()]
         ing_by: dict[str, list[dict[str, Any]]] = {}
         cur.execute("select * from kitchen.recipe_ingredients where base_recipe_id is not null")

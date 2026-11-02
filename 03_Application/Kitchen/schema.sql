@@ -82,4 +82,21 @@ create table if not exists kitchen.meal_bookings (
 
 create index if not exists ix_meal_bookings_meal on kitchen.meal_bookings(meal_id);
 
+-- Sprint 1.1: ingredient identity = StorageTracker item id; recipe status; import metadata
+alter table kitchen.recipes add column if not exists description text;
+alter table kitchen.recipes add column if not exists prep_minutes integer check (prep_minutes is null or prep_minutes >= 0);
+alter table kitchen.recipes add column if not exists cook_minutes integer check (cook_minutes is null or cook_minutes >= 0);
+alter table kitchen.recipes add column if not exists status text not null default 'active';
+
+do $$
+begin
+    if not exists (select 1 from pg_constraint where conname = 'recipes_status_check') then
+        alter table kitchen.recipes add constraint recipes_status_check check (status in ('draft', 'active'));
+    end if;
+end $$;
+
+-- item_id: storagetracker.items.id (opaque cross-app reference, no FK by design).
+-- null + base_recipe_id null = unresolved line; name is a display label only.
+alter table kitchen.recipe_ingredients add column if not exists item_id uuid;
+
 commit;

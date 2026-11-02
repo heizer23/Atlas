@@ -64,12 +64,13 @@ def clean(db_conn):
     with db_conn.cursor() as cur:
         cur.execute("truncate kitchen.plans, kitchen.recipes cascade")
         cur.execute("truncate storagetracker.items cascade")
-    from backend.seed import seed_recipes
+    from backend.seed import migrate_legacy_ingredients, seed_recipes
     import backend.database as dbm
     if dbm._pool is None:
         dbm.DATABASE_URL = _build_url()
         dbm.init_pool()
     seed_recipes()
+    migrate_legacy_ingredients()
     yield
 
 

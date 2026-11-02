@@ -55,9 +55,8 @@ class EatIn(BaseModel):
 
 
 class StockLineIn(BaseModel):
-    name: str
-    unit: str
-    qty:  float = Field(ge=0)
+    item_id: str   # StorageTracker article id (stable identity); qty is in the article's base unit
+    qty:     float = Field(ge=0)
 
 
 def _plan_payload(cur: Any, plan_id: str) -> dict[str, Any] | None:
@@ -113,10 +112,13 @@ def add_meal(plan_id: str, body: MealIn) -> JSONResponse:
                 return api_error("NOT_FOUND", f"Plan {plan_id} not found", status=404)
             portions = body.portions
             if body.recipe_id:
-                cur.execute("select servings from kitchen.recipes where id = %s", (body.recipe_id,))
+                cur.execute("select servings, status from kitchen.recipes where id = %s", (body.recipe_id,))
                 rec = cur.fetchone()
                 if not rec:
                     return api_error("VALIDATION_ERROR", "recipe_id unknown")
+                if rec["status"] != "active":
+                    return api_error("CONFLICT", "Recipe is a draft: assign all ingredients to articles first",
+                                     status=409)
                 portions = portions or float(rec["servings"])
             cur.execute(
                 """insert into kitchen.planned_meals (plan_id, recipe_id, kind, day, slot, portions)
@@ -143,6 +145,14 @@ def patch_meal(meal_id: str, body: MealPatch) -> JSONResponse:
                 return api_error("NOT_FOUND", f"Meal {meal_id} not found", status=404)
             if cur_row["status"] != "planned":
                 return api_error("CONFLICT", f"Meal is {cur_row['status']}; undo first", status=409)
+            if body.recipe_id:
+                cur.execute("select status from kitchen.recipes where id = %s", (body.recipe_id,))
+                rec = cur.fetchone()
+                if not rec:
+                    return api_error("VALIDATION_ERROR", "recipe_id unknown")
+                if rec["status"] != "active":
+                    return api_error("CONFLICT", "Recipe is a draft: assign all ingredients to articles first",
+                                     status=409)
             sets, params = ["updated_at = now()"], []
             for f in ("day", "slot", "recipe_id", "portions", "status"):
                 if f in fields:
@@ -222,7 +232,9 @@ def shopping(plan_id: str) -> JSONResponse:
 def stocktake(body: StockLineIn) -> JSONResponse:
     """User confirms/corrects the real amount on hand: books the difference as a 'stocktake' movement."""
     try:
-        item = st.ensure_ingredient(body.name, body.unit)
+        item = st.get_item(body.item_id)
+        if not item:
+            return api_error("NOT_FOUND", f"Article {body.item_id} not found", status=404)
         delta = body.qty - float(item["quantity"] or 0)
         if abs(delta) > 1e-9:
             st.post_movement(item["id"], delta, "stocktake", f"stocktake:{uuid.uuid4()}")
@@ -241,7 +253,9 @@ def purchase(body: PurchaseIn) -> JSONResponse:
     if body.qty <= 0:
         return api_error("VALIDATION_ERROR", "qty must be > 0")
     try:
-        item = st.ensure_ingredient(body.name, body.unit)
+        item = st.get_item(body.item_id)
+        if not item:
+            return api_error("NOT_FOUND", f"Article {body.item_id} not found", status=404)
         res = st.post_movement(item["id"], body.qty, "purchase", body.idempotency_key or f"purchase:{uuid.uuid4()}")
     except st.StorageError as e:
         return api_error("STORAGE_UNAVAILABLE", str(e), status=502)

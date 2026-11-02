@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
-from backend.routers import plans, recipes
-from backend.seed import seed_recipes
+from backend.routers import importing, plans, recipes
+from backend.seed import migrate_legacy_ingredients, seed_recipes
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.performance import install_request_timing
@@ -27,6 +27,7 @@ app.add_middleware(
 
 install_exception_handlers(app)
 install_request_timing(app)
+app.include_router(importing.router, prefix="/api")
 app.include_router(recipes.router, prefix="/api")
 app.include_router(plans.router, prefix="/api")
 
@@ -41,6 +42,7 @@ def on_startup() -> None:
             init_schema()
             log.info("Seeding starter recipes (idempotent)...")
             seed_recipes()
+            migrate_legacy_ingredients()
             log.info("Ready.")
             return
         except Exception as exc:
