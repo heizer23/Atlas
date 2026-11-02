@@ -21,7 +21,7 @@ def master_items() -> list[dict[str, Any]]:
     return [i for i in st.list_items(kind="ingredient") if i.get("item_type") == "consumable"]
 
 
-def master_by_id() -> dict[str, dict[str, Any]]:
+def master_by_id() -> dict[int, dict[str, Any]]:
     return {i["id"]: i for i in master_items()}
 
 
@@ -34,19 +34,19 @@ def units_compatible(line_unit: str, item_unit: str | None) -> bool:
     return item_unit is None or norm(line_unit) == norm(item_unit)
 
 
-def line_status(line: dict[str, Any], master: dict[str, dict[str, Any]]) -> str:
+def line_status(line: dict[str, Any], master: dict[int, dict[str, Any]]) -> str:
     if line.get("base_recipe_id"):
         return "base"
     item_id = line.get("item_id")
     if not item_id:
         return "unresolved"
-    item = master.get(str(item_id))
+    item = master.get(int(item_id))
     if item is None:
         return "unknown_id"
     return "matched" if units_compatible(line["unit"], item.get("unit")) else "unit_mismatch"
 
 
-def recipe_status(lines: list[dict[str, Any]], master: dict[str, dict[str, Any]]) -> str:
+def recipe_status(lines: list[dict[str, Any]], master: dict[int, dict[str, Any]]) -> str:
     return "active" if lines and all(line_status(l, master) in ("base", "matched") for l in lines) else "draft"
 
 

@@ -189,13 +189,13 @@ def test_syntax_and_structure_errors(client):
                                     kind="bogus", servings=0))
     paths = {e["path"] for e in p["errors"]}
     assert {"recipe.kind", "recipe.servings", "recipe.ingredients[0].qty", "recipe.ingredients[1].unit"} <= paths
-    p = preview(client, recipe_json([{"item_id": "not-a-uuid", "qty": 1, "unit": "g", "name": "a"}]))
+    p = preview(client, recipe_json([{"item_id": "abc", "qty": 1, "unit": "g", "name": "a"}]))
     assert any(e["path"].endswith("item_id") for e in p["errors"])
 
 
 def test_unknown_id_and_unit_mismatch(client):
     a = new_article("Mehl", "g")
-    ghost = "11111111-1111-1111-1111-111111111111"
+    ghost = 999999
     p = preview(client, recipe_json([{"item_id": ghost, "name": "Geist", "qty": 1, "unit": "g"},
                                      {"item_id": a["id"], "qty": 1, "unit": "kg"}]))
     st_ = [l["line_status"] for l in p["recipe"]["ingredients"]]

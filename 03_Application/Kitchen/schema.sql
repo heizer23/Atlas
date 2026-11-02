@@ -59,7 +59,7 @@ create table if not exists kitchen.cook_events (
     id            uuid        primary key default gen_random_uuid(),
     meal_id       uuid        not null unique references kitchen.planned_meals(id) on delete cascade,
     produced_qty  numeric     not null,
-    batch_item_id uuid        not null,
+    batch_item_id integer     not null,
     created_at    timestamptz not null default now()
 );
 
@@ -75,7 +75,7 @@ create table if not exists kitchen.meal_bookings (
     id          uuid        primary key default gen_random_uuid(),
     meal_id     uuid        not null references kitchen.planned_meals(id) on delete cascade,
     purpose     text        not null check (purpose in ('cook', 'eat')),
-    item_id     uuid        not null,
+    item_id     integer     not null,
     movement_id uuid        not null unique,
     created_at  timestamptz not null default now()
 );
@@ -95,8 +95,24 @@ begin
     end if;
 end $$;
 
--- item_id: storagetracker.items.id (opaque cross-app reference, no FK by design).
+-- item_id: storagetracker.items.id = article number (opaque cross-app reference, no FK by design).
 -- null + base_recipe_id null = unresolved line; name is a display label only.
-alter table kitchen.recipe_ingredients add column if not exists item_id uuid;
+alter table kitchen.recipe_ingredients add column if not exists item_id integer;
+
+-- Article numbers are integers now (were storagetracker uuids). Databases still holding uuid references are
+-- converted without values; migrate_legacy_ingredients() re-resolves recipe lines by name+unit (deploy runs a
+-- precise remap first, see Sprint 1.2 notes).
+do $$
+declare r record;
+begin
+    for r in select * from (values ('recipe_ingredients', 'item_id'), ('meal_bookings', 'item_id'),
+                                   ('cook_events', 'batch_item_id')) v(t, c) loop
+        if (select data_type from information_schema.columns
+            where table_schema = 'kitchen' and table_name = r.t and column_name = r.c) = 'uuid' then
+            execute format('alter table kitchen.%I alter column %I drop not null', r.t, r.c);
+            execute format('alter table kitchen.%I alter column %I type integer using null', r.t, r.c);
+        end if;
+    end loop;
+end $$;
 
 commit;

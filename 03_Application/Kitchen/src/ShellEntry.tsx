@@ -36,7 +36,7 @@ interface Meal {
 }
 interface Plan { id: string; week_start: string; meals: Meal[] }
 interface Batch { id: string; name: string; quantity: number; unit: string; location: string | null; expires_at: string | null }
-interface ShopLine { item_id: string; name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
+interface ShopLine { item_id: number; name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
 interface Shopping {
   buy: ShopLine[]; probably_have: ShopLine[]; missing_bases: { name: string; needed: number; available: number }[];
   draft_recipes: string[];

@@ -33,7 +33,7 @@ def list_items(**params: str) -> list[dict[str, Any]]:
         return _check(c.get("/items", params=params))["rows"]
 
 
-def get_item(item_id: str) -> dict[str, Any] | None:
+def get_item(item_id: int) -> dict[str, Any] | None:
     with _client() as c:
         r = c.get(f"/items/{item_id}")
         if r.status_code == 404:
@@ -77,7 +77,7 @@ def create_batch(name: str, recipe_id: str, unit: str, location: str | None,
         return _check(c.post("/items", json=body))["rows"][0]
 
 
-def post_movement(item_id: str, delta: float, reason: str, key: str, ref: str | None = None) -> dict[str, Any]:
+def post_movement(item_id: int, delta: float, reason: str, key: str, ref: str | None = None) -> dict[str, Any]:
     with _client() as c:
         return _check(c.post(f"/items/{item_id}/movements",
                              json={"delta": delta, "reason": reason, "idempotency_key": key, "ref": ref}))

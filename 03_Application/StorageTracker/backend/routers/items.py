@@ -94,7 +94,6 @@ def _num(v: Decimal | float | int) -> int | float:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
-    d["id"] = str(d["id"])
     if isinstance(d.get("quantity"), Decimal):
         d["quantity"] = _num(d["quantity"])
     if d.get("expires_at"):
@@ -112,7 +111,6 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 def _history_row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     d["id"] = str(d["id"])
-    d["item_id"] = str(d["item_id"])
     if d.get("timestamp"):
         d["timestamp"] = d["timestamp"].isoformat()
     return d
@@ -130,7 +128,7 @@ def _apply_auto_transition(
 
 def _record_history(
     conn: Any,
-    item_id: str,
+    item_id: int,
     change_type: str,
     old_value: str | None,
     new_value: str | None,
@@ -149,7 +147,7 @@ def _record_history(
 
 def _ensure_open_shopping_task(
     conn: Any,
-    item_id: str,
+    item_id: int,
     source_tags: list[str],
 ) -> None:
     """
@@ -441,7 +439,7 @@ def create_item(body: ItemCreate) -> JSONResponse:
 
 
 @router.get("/{item_id}", response_model=None)
-def get_item(item_id: str) -> JSONResponse:
+def get_item(item_id: int) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -476,7 +474,7 @@ def get_item(item_id: str) -> JSONResponse:
 
 
 @router.patch("/{item_id}", response_model=None)
-def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
+def update_item(item_id: int, body: ItemUpdate) -> JSONResponse:
     set_fields = body.model_fields_set
 
     if not set_fields:
@@ -610,7 +608,7 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
 
 
 @router.delete("/{item_id}", response_model=None)
-def delete_item(item_id: str) -> JSONResponse:
+def delete_item(item_id: int) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -626,7 +624,7 @@ def delete_item(item_id: str) -> JSONResponse:
 
 
 @router.get("/{item_id}/history", response_model=None)
-def get_item_history(item_id: str) -> JSONResponse:
+def get_item_history(item_id: int) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             # Confirm item exists

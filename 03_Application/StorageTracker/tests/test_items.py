@@ -312,7 +312,7 @@ def test_full_history(client):
 
 def test_patch_not_found(client):
     r = client.patch(
-        "/api/items/00000000-0000-0000-0000-000000000000",
+        "/api/items/999999999",
         json={"state": "missing"},
     )
     assert r.status_code == 404
@@ -322,7 +322,7 @@ def test_patch_not_found(client):
 # ── TC-025: Not found on DELETE ───────────────────────────────────────────────
 
 def test_delete_not_found(client):
-    r = client.delete("/api/items/00000000-0000-0000-0000-000000000000")
+    r = client.delete("/api/items/999999999")
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "NOT_FOUND"
 

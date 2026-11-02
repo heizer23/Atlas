@@ -12,14 +12,14 @@ import { apiFetch, isApiError } from '@platform-ui/api/client';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface Article { id: string; name: string; unit: string | null; quantity?: number }
+export interface Article { id: number; name: string; unit: string | null; quantity?: number }
 
 export type LineStatus = 'base' | 'matched' | 'unit_mismatch' | 'unknown_id' | 'unresolved' | 'unknown_base';
 
 export interface Line {
-  name: string; qty: number; unit: string; item_id: string | null; base_recipe_id: string | null;
+  name: string; qty: number; unit: string; item_id: number | null; base_recipe_id: string | null;
   line_status?: LineStatus; item_name?: string | null; item_unit?: string | null;
-  suggestions?: { id: string; name: string; unit: string | null }[];
+  suggestions?: { id: number; name: string; unit: string | null }[];
 }
 
 interface PreviewRecipe {
@@ -104,7 +104,7 @@ function ArticleResolver({ line, master, onAssign, onCreated }: {
           {hits.length === 0 && <span className="kitchen-muted">Kein Artikel gefunden.</span>}
           {hits.map((a) => (
             <button key={a.id} className="kitchen-btn kitchen-left" onClick={() => onAssign(a)}>
-              {a.name} <span className="kitchen-muted">· {a.unit ?? 'ohne Einheit'}</span>
+              #{a.id} {a.name} <span className="kitchen-muted">· {a.unit ?? 'ohne Einheit'}</span>
             </button>
           ))}
         </div>
@@ -145,7 +145,7 @@ export function IngredientLine({ line, master, onChange, onCreated, onRemove }: 
   return (
     <div className={`kitchen-card kitchen-line${ok ? '' : ' open'}`}>
       <div className="kitchen-row spread">
-        <strong>{ok && article ? `✓ ${article.name}` : line.name || '—'}</strong>
+        <strong>{ok && article ? `✓ #${article.id} ${article.name}` : line.name || '—'}</strong>
         <span className="kitchen-row">
           {!ok && <span className="kitchen-chip warn">{STATUS_TEXT[status]}</span>}
           {onRemove && <button className="kitchen-btn" onClick={onRemove} aria-label="Zutat entfernen">×</button>}

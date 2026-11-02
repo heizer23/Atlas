@@ -26,6 +26,10 @@ storagetracker schema in the shared Atlas Postgres instance.
 Tables: storagetracker.items, storagetracker.item_history, storagetracker.shopping_tasks, storagetracker.stock_movements
 Schema initialized idempotently at startup from schema.sql.
 
+## Article number
+`items.id` is a single fortlaufende integer (identity, never reused), shown as `#id` in the UI and used by Kitchen as
+the article identity. Converted from uuid on 2026-11-02; `legacy_item_ids` keeps old uuid -> number. Test fixtures use 1000001+.
+
 ## Kitchen extension (stock ledger)
 - items: `quantity` numeric, `unit`, `expires_at`, `kind` (ingredient|batch), `recipe_ref` (opaque Kitchen recipe id).
 - `stock_movements` ledger: quantity = cached sum of applied deltas; delta clamped so quantity never < 0

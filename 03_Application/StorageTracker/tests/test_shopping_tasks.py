@@ -7,17 +7,17 @@ Fixture IDs are defined in tests/fixtures.sql.
 # ── Fixture ID constants ───────────────────────────────────────────────────────
 
 # Items
-STORED_ITEM_ID    = "f1000010-0000-0000-0000-000000000000"  # stored, source_tags=['Rewe']
-LOW_STOCK_ITEM_ID = "f1000011-0000-0000-0000-000000000000"  # low_stock, has open_task
-WATCH_ITEM_ID     = "f1000012-0000-0000-0000-000000000000"  # stored, no open task
-RESTOCK_MILK_ID   = "f1000013-0000-0000-0000-000000000000"  # low_stock, restock_qty=6, min=3
-LOW_RESTOCK_ID    = "f1000014-0000-0000-0000-000000000000"  # low_stock, restock_qty=4, min=5
-CABLE_ID          = "f1000015-0000-0000-0000-000000000000"  # out_of_stock, no restock_qty
-DISMISS_ITEM_ID   = "f1000016-0000-0000-0000-000000000000"  # low_stock, has dismiss_task
-CASCADE_ITEM_ID   = "f1000017-0000-0000-0000-000000000000"  # stored, has cascade_task
-NOTAG_ITEM_ID     = "f1000018-0000-0000-0000-000000000000"  # low_stock, source_tags=[]
-MULTI_TAG_ITEM_ID = "f1000019-0000-0000-0000-000000000000"  # low_stock, source_tags=['Rewe','Amazon']
-DELETE_ITEM_ID    = "f1000020-0000-0000-0000-000000000000"  # low_stock, has delete_task
+STORED_ITEM_ID    = 1000010  # stored, source_tags=['Rewe']
+LOW_STOCK_ITEM_ID = 1000011  # low_stock, has open_task
+WATCH_ITEM_ID     = 1000012  # stored, no open task
+RESTOCK_MILK_ID   = 1000013  # low_stock, restock_qty=6, min=3
+LOW_RESTOCK_ID    = 1000014  # low_stock, restock_qty=4, min=5
+CABLE_ID          = 1000015  # out_of_stock, no restock_qty
+DISMISS_ITEM_ID   = 1000016  # low_stock, has dismiss_task
+CASCADE_ITEM_ID   = 1000017  # stored, has cascade_task
+NOTAG_ITEM_ID     = 1000018  # low_stock, source_tags=[]
+MULTI_TAG_ITEM_ID = 1000019  # low_stock, source_tags=['Rewe','Amazon']
+DELETE_ITEM_ID    = 1000020  # low_stock, has delete_task
 
 # Tasks
 OPEN_TASK_ID        = "f2000001-0000-0000-0000-000000000000"  # open for LOW_STOCK_ITEM_ID

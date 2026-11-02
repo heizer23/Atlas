@@ -36,7 +36,7 @@ class MovementCreate(BaseModel):
 
 def _movement_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
-    for k in ("id", "item_id", "reverses_id"):
+    for k in ("id", "reverses_id"):
         if d.get(k) is not None:
             d[k] = str(d[k])
     for k in ("delta", "requested_delta"):
@@ -45,7 +45,7 @@ def _movement_to_dict(row: Any) -> dict[str, Any]:
     return d
 
 
-def _apply(conn: Any, item_id: str, delta: float, reason: str, ref: str | None,
+def _apply(conn: Any, item_id: int, delta: float, reason: str, ref: str | None,
            key: str | None, reverses_id: str | None) -> tuple[dict[str, Any], dict[str, Any], bool]:
     """Returns (movement, item_quantity_info, replayed). Caller commits."""
     with conn.cursor() as cur:
@@ -62,7 +62,7 @@ def _apply(conn: Any, item_id: str, delta: float, reason: str, ref: str | None,
             cur.execute(f"select {COLS} from storagetracker.stock_movements where idempotency_key = %s", (key,))
             existing = cur.fetchone()
             if existing:
-                if str(existing["item_id"]) != item_id:
+                if existing["item_id"] != item_id:
                     raise ValueError("idempotency_key already used for a different item")
                 return _movement_to_dict(existing), {"quantity": _num(item["quantity"] or 0)}, True
 
@@ -111,7 +111,7 @@ def _response(movement: dict, info: dict, replayed: bool) -> JSONResponse:
 
 
 @router.post("/items/{item_id}/movements", response_model=None)
-def create_movement(item_id: str, body: MovementCreate) -> JSONResponse:
+def create_movement(item_id: int, body: MovementCreate) -> JSONResponse:
     if not body.reason.strip():
         return api_error("VALIDATION_ERROR", "reason must not be empty")
     with get_db() as conn:
@@ -139,14 +139,14 @@ def reverse_movement(movement_id: str) -> JSONResponse:
             cur.execute("select id from storagetracker.stock_movements where reverses_id = %s", (movement_id,))
             if cur.fetchone():
                 return api_error("CONFLICT", "Movement already reversed", status=409)
-        result = _apply(conn, str(mv["item_id"]), -float(mv["delta"]), f"reverse:{mv['reason']}",
+        result = _apply(conn, mv["item_id"], -float(mv["delta"]), f"reverse:{mv['reason']}",
                         mv["ref"], None, movement_id)
         conn.commit()
     return _response(*result)
 
 
 @router.get("/items/{item_id}/movements", response_model=None)
-def list_movements(item_id: str) -> JSONResponse:
+def list_movements(item_id: int) -> JSONResponse:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("select id from storagetracker.items where id = %s", (item_id,))

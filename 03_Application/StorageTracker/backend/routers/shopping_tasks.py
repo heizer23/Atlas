@@ -20,7 +20,7 @@ VALID_CLOSE_STATUSES = {"done", "dismissed"}
 
 TASK_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="id",           label="ID",          type="string", sortable=False, filterable=False),
-    ColumnSchema(key="item_id",      label="Item ID",     type="string", sortable=False, filterable=False),
+    ColumnSchema(key="item_id",      label="Item ID",     type="number", sortable=False, filterable=False),
     ColumnSchema(key="item_name",    label="Item",        type="string", sortable=True,  filterable=False),
     ColumnSchema(key="status",       label="Status",      type="enum",   sortable=True,  filterable=True),
     ColumnSchema(key="source_tags",  label="Source Tags", type="string", sortable=False, filterable=False),
@@ -31,7 +31,7 @@ TASK_SCHEMA: list[ColumnSchema] = [
 
 BY_SOURCE_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="id",           label="ID",          type="string", sortable=False, filterable=False),
-    ColumnSchema(key="item_id",      label="Item ID",     type="string", sortable=False, filterable=False),
+    ColumnSchema(key="item_id",      label="Item ID",     type="number", sortable=False, filterable=False),
     ColumnSchema(key="item_name",    label="Item",        type="string", sortable=True,  filterable=False),
     ColumnSchema(key="status",       label="Status",      type="enum",   sortable=False, filterable=False),
     ColumnSchema(key="source_tags",  label="Source Tags", type="string", sortable=False, filterable=False),
@@ -44,7 +44,7 @@ BY_SOURCE_SCHEMA: list[ColumnSchema] = [
 # ── Request models ────────────────────────────────────────────────────────────
 
 class ShoppingTaskCreate(BaseModel):
-    item_id: str
+    item_id: int
     notes:   Optional[str] = None
 
 
@@ -57,7 +57,6 @@ class ShoppingTaskUpdate(BaseModel):
 def _task_row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     d["id"]      = str(d["id"])
-    d["item_id"] = str(d["item_id"])
     if d.get("created_at"):
         d["created_at"] = d["created_at"].isoformat()
     if d.get("completed_at"):
@@ -120,7 +119,7 @@ def _dataset_response(dataset: Dataset) -> JSONResponse:
 
 def _record_item_history(
     conn: Any,
-    item_id: str,
+    item_id: int,
     change_type: str,
     old_value: str | None,
     new_value: str | None,
@@ -299,7 +298,7 @@ def update_shopping_task(task_id: str, body: ShoppingTaskUpdate) -> JSONResponse
                     status=400,
                 )
 
-        item_id = str(task["item_id"])
+        item_id = task["item_id"]
 
         # Update task status and completed_at
         notes_update = ""

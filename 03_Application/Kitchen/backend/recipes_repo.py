@@ -28,7 +28,7 @@ def save_ingredients(cur: Any, recipe_id: str, ingredients: list[dict[str, Any]]
         )
 
 
-def recompute_status(cur: Any, recipe_id: str, master: dict[str, dict[str, Any]]) -> str:
+def recompute_status(cur: Any, recipe_id: str, master: dict[int, dict[str, Any]]) -> str:
     """Set recipes.status from the lines: active iff all lines are base/matched (see ingredients.py)."""
     from backend.ingredients import recipe_status
     cur.execute(f"select {ING_COLS} from kitchen.recipe_ingredients where recipe_id = %s", (recipe_id,))
@@ -37,12 +37,12 @@ def recompute_status(cur: Any, recipe_id: str, master: dict[str, dict[str, Any]]
     return status
 
 
-def annotate_lines(recipe: dict[str, Any], master: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def annotate_lines(recipe: dict[str, Any], master: dict[int, dict[str, Any]]) -> dict[str, Any]:
     """Add live per-line status and the article's current name/unit (names may change; ids do not)."""
     from backend.ingredients import line_status
     for ing in recipe["ingredients"]:
         ing["line_status"] = line_status(ing, master)
-        item = master.get(str(ing["item_id"])) if ing.get("item_id") else None
+        item = master.get(int(ing["item_id"])) if ing.get("item_id") else None
         ing["item_name"] = item["name"] if item else None
         ing["item_unit"] = item.get("unit") if item else None
     return recipe

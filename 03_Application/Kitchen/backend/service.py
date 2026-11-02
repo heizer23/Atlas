@@ -27,7 +27,7 @@ def _require_bookable(recipe: dict[str, Any]) -> None:
         raise Conflict(f"Recipe '{recipe['name']}' is a draft: assign all ingredients to articles first")
 
 
-def _book(cur: Any, meal_id: str, purpose: str, item_id: str, delta: float, key: str, reason: str) -> dict[str, Any]:
+def _book(cur: Any, meal_id: str, purpose: str, item_id: int, delta: float, key: str, reason: str) -> dict[str, Any]:
     res = st.post_movement(item_id, delta, reason, key, ref=f"meal:{meal_id}")
     cur.execute(
         """insert into kitchen.meal_bookings (meal_id, purpose, item_id, movement_id)
@@ -55,7 +55,7 @@ def cook(conn: Any, meal_id: str, produced_qty: float | None) -> dict[str, Any]:
         if meal["status"] == "cooked":
             cur.execute("select * from kitchen.cook_events where meal_id = %s", (meal_id,))
             ev = dict(cur.fetchone())
-            return {"replayed": True, "produced_qty": ev["produced_qty"], "batch_item_id": str(ev["batch_item_id"])}
+            return {"replayed": True, "produced_qty": ev["produced_qty"], "batch_item_id": ev["batch_item_id"]}
         if meal["status"] != "planned":
             raise Conflict(f"Meal is {meal['status']}")
 
@@ -68,7 +68,7 @@ def cook(conn: Any, meal_id: str, produced_qty: float | None) -> dict[str, Any]:
         rev = meal["revision"]
 
         for ing in recipe["ingredients"]:
-            _book(cur, meal_id, "cook", str(ing["item_id"]), -float(ing["qty"]) * scale,
+            _book(cur, meal_id, "cook", ing["item_id"], -float(ing["qty"]) * scale,
                   f"cook:{meal_id}:{rev}:{ing['id']}", f"cook {recipe['name']}")
 
         batch = st.find_batch_for_meal(meal_id)
@@ -130,7 +130,7 @@ def eat(conn: Any, meal_id: str, portions: float | None) -> dict[str, Any]:
                     if left > 1e-9:
                         shortfall.append({"name": ing["name"], "missing": round(left, 4)})
                 else:
-                    _book(cur, meal_id, "eat", str(ing["item_id"]), -need,
+                    _book(cur, meal_id, "eat", ing["item_id"], -need,
                           f"eat:{meal_id}:{rev}:{ing['id']}", f"ate {recipe['name']}")
 
         cur.execute("insert into kitchen.consumption_events (meal_id, portions) values (%s, %s)", (meal_id, eaten))
@@ -151,7 +151,7 @@ def undo(conn: Any, meal_id: str) -> dict[str, Any]:
         if meal["status"] == "cooked":
             cur.execute("select batch_item_id, produced_qty from kitchen.cook_events where meal_id = %s", (meal_id,))
             ev = cur.fetchone()
-            batch = next((b for b in st.list_items(kind="batch") if b["id"] == str(ev["batch_item_id"])), None)
+            batch = next((b for b in st.list_items(kind="batch") if b["id"] == ev["batch_item_id"]), None)
             if batch and float(batch["quantity"] or 0) + 1e-9 < float(ev["produced_qty"]):
                 raise Conflict("Batch was already (partly) consumed; undo the meals that used it first")
         cur.execute("select movement_id from kitchen.meal_bookings where meal_id = %s order by created_at desc",
@@ -182,7 +182,7 @@ def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
         cur.execute("select id, recipe_id, kind, portions from kitchen.planned_meals "
                     "where plan_id = %s and status = 'planned' and recipe_id is not null", (plan_id,))
         meals = [dict(m) for m in cur.fetchall()]
-        need: dict[str, dict[str, Any]] = {}
+        need: dict[int, dict[str, Any]] = {}
         base_need: dict[str, dict[str, Any]] = {}
         cooked_here: dict[str, float] = {}
         drafts: set[str] = set()
@@ -200,7 +200,7 @@ def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
                     b = base_need.setdefault(str(ing["base_recipe_id"]), {"name": ing["name"], "need": 0.0})
                     b["need"] += q
                 else:
-                    line = need.setdefault(str(ing["item_id"]), {"unit": ing["unit"], "needed": 0.0})
+                    line = need.setdefault(ing["item_id"], {"unit": ing["unit"], "needed": 0.0})
                     line["needed"] += q
 
     buy, have = [], []

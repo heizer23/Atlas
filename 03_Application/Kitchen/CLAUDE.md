@@ -22,11 +22,12 @@ Vision and scope: `Sprint01_Core/00_draft.md`.
 
 ## Ingredient identity (Sprint 1.1)
 - StorageTracker items (`kind=ingredient`, `item_type=consumable`) are the article master; recipe lines store
-  `recipe_ingredients.item_id` (opaque ref, no FK). `name` on a line is only a display label; the live article name wins.
+  `recipe_ingredients.item_id` = the article number (single fortlaufende integer, opaque ref, no FK). `name` on a line is only a display label; the live article name wins.
 - Line status: `base` | `matched` | `unit_mismatch` | `unknown_id` | `unresolved` (`backend/ingredients.py`).
   Units are never converted: line unit must equal the article's base unit (article without unit accepts any).
 - `recipes.status`: `active` iff every line is base/matched, else `draft`. Recomputed on every save and at startup.
   Drafts are excluded from plan suggestion, add/swap meal (409), shopping (reported as `draft_recipes`), cook/eat (409).
+- Imports/exports use `item_id` as integer; ChatGPT gets the full list as `existing_skus` in the example JSON.
 - Unknown article ids are rejected on save (400); unit mismatches and unresolved lines save as draft.
 - Import (`backend/recipe_import.py`, format `atlas.kitchen.recipe` v1): `POST /recipes/import/preview` is read-only
   (parse, validate, match ids, suggestions = exact/substring name lookup only). The UI saves via `POST /recipes`.

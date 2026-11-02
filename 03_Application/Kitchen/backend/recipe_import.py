@@ -7,7 +7,6 @@ user-resolved) article ids, which re-validates. Import never creates articles or
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from backend import ingredients as ing_mod
@@ -16,11 +15,10 @@ FORMAT = "atlas.kitchen.recipe"
 MASTER_FORMAT = "atlas.kitchen.ingredient_master"
 VERSION = 1
 KINDS = ("base", "derived", "favorite")
-_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 _COMMENT = ("kind: base | derived | favorite. 'existing_skus' lists ALL articles that already exist (reference data, "
             "ignored on import). For every ingredient that matches an existing SKU copy its 'item_id', 'name' and 'unit' "
-            "into the recipe line ('unit' must equal the SKU's unit; set 'qty' in that unit). Never invent an item_id. "
+            "into the recipe line ('unit' must equal the SKU's unit; set 'qty' in that unit). Never invent an item_id (article numbers are integers). "
             "For an ingredient with no matching SKU leave 'item_id' null and use a clear name (the user assigns or "
             "creates the article during import). A derived dish may reference a cooked base via 'base_recipe' "
             "(the exact recipe name) instead of item_id.")
@@ -150,10 +148,10 @@ def parse_recipe(text: str, base_recipes: dict[str, dict[str, Any]]) -> tuple[di
             _err(errors, f"{lp}.qty", "required number > 0")
         base_name = ln.get("base_recipe")
         item_id = ln.get("item_id")
-        if item_id is not None and (not isinstance(item_id, str) or not _UUID.match(item_id)):
-            _err(errors, f"{lp}.item_id", "must be an article id (UUID) or null")
+        if item_id is not None and (not isinstance(item_id, int) or isinstance(item_id, bool) or item_id < 1):
+            _err(errors, f"{lp}.item_id", "must be an article number (positive integer) or null")
             item_id = None
-        line: dict[str, Any] = {"qty": qty, "item_id": item_id.lower() if item_id else None, "base_recipe_id": None}
+        line: dict[str, Any] = {"qty": qty, "item_id": item_id, "base_recipe_id": None}
         if base_name is not None:
             base = base_recipes.get(ing_mod.norm(str(base_name)))
             line["name"] = str(base_name).strip()

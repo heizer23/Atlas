@@ -55,7 +55,7 @@ class EatIn(BaseModel):
 
 
 class StockLineIn(BaseModel):
-    item_id: str   # StorageTracker article id (stable identity); qty is in the article's base unit
+    item_id: int   # StorageTracker article number (stable identity); qty is in the article's base unit
     qty:     float = Field(ge=0)
 
 

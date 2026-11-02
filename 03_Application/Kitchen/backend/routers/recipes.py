@@ -23,7 +23,7 @@ class IngredientIn(BaseModel):
     qty:            float = Field(gt=0)
     unit:           str
     base_recipe_id: str | None = None
-    item_id:        str | None = None   # StorageTracker article id; null = unresolved (recipe stays draft)
+    item_id:        int | None = None   # StorageTracker article number; null = unresolved (recipe stays draft)
 
 
 class RecipeIn(BaseModel):

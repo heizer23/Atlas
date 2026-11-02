@@ -85,4 +85,4 @@ def test_fractional_quantity_roundtrip(client):
 
 
 def test_unknown_item_404(client):
-    assert mv(client, "00000000-0000-0000-0000-000000000000", 1).status_code == 404
+    assert mv(client, 999999999, 1).status_code == 404

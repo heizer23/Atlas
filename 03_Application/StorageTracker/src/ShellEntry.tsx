@@ -20,7 +20,7 @@ import type { Row, ApiError } from '@platform-ui/api/types';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ItemRow extends Row {
-  id:           string;
+  id:           number;
   name:         string;
   item_type:    string;
   state:        string;
@@ -36,7 +36,7 @@ interface ItemRow extends Row {
 
 interface HistoryRow extends Row {
   id:          string;
-  item_id:     string;
+  item_id:     number;
   timestamp:   string;
   change_type: string;
   old_value:   string | null;
@@ -51,7 +51,7 @@ interface ItemsDataset {
 
 interface ShoppingTaskRow extends Row {
   id:           string;
-  item_id:      string;
+  item_id:      number;
   item_name:    string;
   status:       string;
   source_tags:  string[];
@@ -180,8 +180,8 @@ function ItemCard({
 }: {
   item: ItemRow;
   onEdit: (item: ItemRow) => void;
-  onDelete: (id: string) => void;
-  onNavigate: (id: string) => void;
+  onDelete: (id: number) => void;
+  onNavigate: (id: number) => void;
 }) {
   return (
     <div style={{
@@ -203,6 +203,7 @@ function ItemCard({
           >
             {item.name}
           </span>
+          <span style={{ fontSize: 12, color: '#888' }} title="Article number">#{item.id}</span>
           <StateBadge state={item.state} />
           <span style={{ fontSize: 12, color: '#888' }}>{TYPE_LABEL[item.item_type] ?? item.item_type}</span>
           {SHOPPING_STATES.has(item.state) && (
@@ -433,7 +434,7 @@ function ItemListView({
   const [editItem, setEditItem]   = useState<ItemRow | null>(null);
   const [creating, setCreating]   = useState(false);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: number) => {
     if (!confirm('Delete this item?')) return;
     await apiFetch(`/items/${id}`, { method: 'DELETE' });
     reload();
@@ -462,7 +463,7 @@ function ItemListView({
           item={item}
           onEdit={setEditItem}
           onDelete={handleDelete}
-          onNavigate={id => navigate(`/items/${id}`)}
+          onNavigate={(id: number) => navigate(`/items/${id}`)}
         />
       ))}
 
@@ -603,7 +604,7 @@ function ItemDetailView() {
       <button onClick={() => navigate('/items')} style={{ ...btnStyle, marginBottom: 12 }}>← Back</button>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
-        <h2 style={{ margin: 0 }}>{item.name}</h2>
+        <h2 style={{ margin: 0 }}>{item.name} <span style={{ fontSize: 14, color: '#888', fontWeight: 400 }}>#{item.id}</span></h2>
         <StateBadge state={item.state} />
         <span style={{ fontSize: 13, color: '#888' }}>{TYPE_LABEL[item.item_type] ?? item.item_type}</span>
       </div>
