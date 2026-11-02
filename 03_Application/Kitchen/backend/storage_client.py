@@ -56,11 +56,22 @@ def create_ingredient(name: str, unit: str) -> dict[str, Any]:
         return _check(c.post("/items", json=body))["rows"][0]
 
 
-def find_batches(recipe_id: str, only_available: bool = True) -> list[dict[str, Any]]:
+def is_expired(batch: dict[str, Any], today: str) -> bool:
+    """expires_at is the last good day (ISO strings compare chronologically)."""
+    return bool(batch.get("expires_at")) and batch["expires_at"] < today
+
+
+def find_batches(recipe_id: str, only_available: bool = True, include_expired: bool = False) -> list[dict[str, Any]]:
+    """Batches of a base recipe, earliest expiry first (no date last), then oldest.
+    Expired batches are excluded unless include_expired: they must be confirmed/discarded, never auto-consumed."""
+    from backend.common import berlin_today
+    today = berlin_today().isoformat()
     rows = [i for i in list_items(kind="batch") if i.get("recipe_ref") == recipe_id]
     if only_available:
         rows = [i for i in rows if (i["quantity"] or 0) > 0]
-    return sorted(rows, key=lambda i: i["created_at"])
+    if not include_expired:
+        rows = [i for i in rows if not is_expired(i, today)]
+    return sorted(rows, key=lambda i: (i.get("expires_at") or "9999-12-31", i["created_at"]))
 
 
 def find_batch_for_meal(meal_id: str) -> dict[str, Any] | None:

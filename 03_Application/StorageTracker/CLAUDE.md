@@ -37,3 +37,9 @@ the article identity. Converted from uuid on 2026-11-02 (mapping table dropped a
   `POST /api/movements/{id}/reverse` once per movement. Absolute PATCH of quantity writes a `patch` correction movement.
 - `kind='batch'` skips the low-stock auto transition and shopping tasks.
 - Known pre-existing failures: test_list_items_no_filter / test_list_items_state_filter (fixtures.sql grew to 20 items in Sprint 2).
+
+## Expiry
+`items.expires_at` (date, last good day). `expiry_status` is derived on read from the server date (Europe/Berlin):
+`expired` (< today), `expiring_soon` (<= today + 2 days), only for quantity > 0. `GET /api/items/views/expiring` lists both,
+earliest first. UI: banner on All Items, `/items/expiring` view, Discard button on expired items = `expired` ledger movement
+(key `expired:<id>:<expires_at>`, confirmation dialog first, reversible). Nothing is removed automatically.

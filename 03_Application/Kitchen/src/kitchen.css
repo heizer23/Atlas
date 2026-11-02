@@ -21,3 +21,4 @@
 .kitchen-line.open { border: 1px solid #e3c36a; }
 .kitchen-steps { white-space: pre-wrap; margin: 0; font-family: inherit; font-size: 14px; }
 @media (max-width: 480px) { .kitchen-input { flex: 1 1 120px; } }
+.kitchen-chip.expired { background: #fee2e2; color: #991b1b; }

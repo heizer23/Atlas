@@ -86,3 +86,65 @@ def test_fractional_quantity_roundtrip(client):
 
 def test_unknown_item_404(client):
     assert mv(client, 999999999, 1).status_code == 404
+
+
+# ── Expiry (derived status, view, confirmed discard via ledger) ───────────────
+
+def _expiring_item(client, name, days_from_today, qty=3, **kw):
+    from datetime import date, timedelta
+    from backend.routers.items import berlin_today
+    d = berlin_today() + timedelta(days=days_from_today)
+    r = client.post("/api/items", json={"name": name, "item_type": "consumable", "kind": "batch",
+                                        "quantity": qty, "unit": "portions", "expires_at": d.isoformat(), **kw})
+    assert r.status_code == 200, r.text
+    return r.json()["rows"][0]
+
+
+def test_expiry_status_derived(client):
+    expired = _expiring_item(client, "Old dal", -1)
+    soon = _expiring_item(client, "Soon dal", 2)
+    fresh = _expiring_item(client, "Fresh dal", 3)
+    today = _expiring_item(client, "Today dal", 0)
+    assert expired["expiry_status"] == "expired"
+    assert soon["expiry_status"] == "expiring_soon"
+    assert today["expiry_status"] == "expiring_soon"  # expires_at is the last good day
+    assert fresh["expiry_status"] is None
+
+
+def test_expiry_status_ignores_empty_stock(client):
+    item = _expiring_item(client, "Eaten dal", -5, qty=0)
+    assert item["expiry_status"] is None
+
+
+def test_expiring_view_orders_and_filters(client):
+    _expiring_item(client, "B soon", 1)
+    _expiring_item(client, "A expired", -3)
+    _expiring_item(client, "C later", 10)
+    _expiring_item(client, "D empty", -1, qty=0)
+    rows = client.get("/api/items/views/expiring").json()["rows"]
+    assert [r["name"] for r in rows] == ["A expired", "B soon"]
+
+
+def test_confirmed_discard_via_ledger_is_reversible(client):
+    from backend.routers.items import berlin_today
+    item = _expiring_item(client, "Bad dal", -1, qty=2)
+    key = f"expired:{item['id']}:{item['expires_at']}"
+    r = client.post(f"/api/items/{item['id']}/movements",
+                    json={"delta": -item["quantity"], "reason": "expired", "idempotency_key": key})
+    assert r.status_code == 201 and r.json()["quantity"] == 0
+    again = client.post(f"/api/items/{item['id']}/movements",
+                        json={"delta": -item["quantity"], "reason": "expired", "idempotency_key": key})
+    assert again.status_code == 200 and again.json()["replayed"] is True
+    row = client.get(f"/api/items/{item['id']}").json()["rows"][0]
+    assert row["quantity"] == 0 and row["expiry_status"] is None
+    assert client.get("/api/items/views/expiring").json()["rows"] == []
+    client.post(f"/api/movements/{r.json()['movement']['id']}/reverse")
+    assert client.get(f"/api/items/{item['id']}").json()["rows"][0]["expiry_status"] == "expired"
+
+
+def test_expires_at_can_be_set_and_cleared_by_patch(client):
+    item = _expiring_item(client, "Patchable", 10)
+    r = client.patch(f"/api/items/{item['id']}", json={"expires_at": None})
+    assert r.json()["rows"][0]["expires_at"] is None
+    r = client.patch(f"/api/items/{item['id']}", json={"expires_at": "2031-01-01"})
+    assert r.json()["rows"][0]["expires_at"] == "2031-01-01"

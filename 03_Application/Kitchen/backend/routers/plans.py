@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter
@@ -59,13 +59,55 @@ class StockLineIn(BaseModel):
     qty:     float = Field(ge=0)
 
 
+def _expiry_warnings(cur: Any, meals: list[dict[str, Any]]) -> None:
+    """Set meal['expiry_warning'] when a planned meal needs a cooked base that is no longer good on its day.
+
+    A base is fine on day D if some stocked batch has expires_at >= D, or a still-planned cooking session of that
+    base on/before D yields portions that keep until D (cook day + shelf_life_days). Otherwise: warn if stock or
+    a planned cook exists but would be expired; stay silent if there is simply no base at all (shopping reports
+    that as missing_bases)."""
+    for m in meals:
+        m["expiry_warning"] = None
+    try:
+        batches = [b for b in st.list_items(kind="batch") if (b["quantity"] or 0) > 0]
+    except st.StorageError:
+        return
+    cur.execute("select recipe_id, base_recipe_id, name from kitchen.recipe_ingredients where base_recipe_id is not null")
+    bases_of: dict[str, list[tuple[str, str]]] = {}
+    for r in cur.fetchall():
+        bases_of.setdefault(str(r["recipe_id"]), []).append((str(r["base_recipe_id"]), r["name"]))
+    cur.execute("select id, shelf_life_days from kitchen.recipes")
+    shelf = {str(r["id"]): r["shelf_life_days"] for r in cur.fetchall()}
+    for m in meals:
+        if m["kind"] != "meal" or m["status"] != "planned" or not m["recipe_id"]:
+            continue
+        day = m["day"]
+        for base_id, name in bases_of.get(str(m["recipe_id"]), []):
+            stock = [b for b in batches if b.get("recipe_ref") == base_id]
+            cooks = [c for c in meals if c["kind"] == "cook" and c["status"] == "planned"
+                     and str(c["recipe_id"]) == base_id and c["day"] <= day]
+            def cook_exp(c: dict[str, Any]) -> Any:
+                return None if shelf.get(base_id) is None else c["day"] + timedelta(days=shelf[base_id])
+            if any(not b.get("expires_at") or b["expires_at"] >= day.isoformat() for b in stock):
+                continue
+            if any(cook_exp(c) is None or cook_exp(c) >= day for c in cooks):
+                continue
+            if cooks:
+                m["expiry_warning"] = f"{name} cooked on {cooks[-1]['day']} keeps until {cook_exp(cooks[-1])}, before this meal"
+            elif stock:
+                m["expiry_warning"] = f"{name} in stock expires {max(b['expires_at'] for b in stock)}, before this meal"
+            break
+
+
 def _plan_payload(cur: Any, plan_id: str) -> dict[str, Any] | None:
     cur.execute("select id, week_start from kitchen.plans where id = %s", (plan_id,))
     p = cur.fetchone()
     if not p:
         return None
     cur.execute(MEAL_SELECT + " where m.plan_id = %s order by m.day, m.slot, m.created_at", (plan_id,))
-    return {"id": str(p["id"]), "week_start": p["week_start"], "meals": [dict(m) for m in cur.fetchall()]}
+    meals = [dict(m) for m in cur.fetchall()]
+    _expiry_warnings(cur, meals)
+    return {"id": str(p["id"]), "week_start": p["week_start"], "meals": meals}
 
 
 def _meal_row(cur: Any, meal_id: str) -> dict[str, Any] | None:
@@ -268,8 +310,27 @@ def batches() -> JSONResponse:
     """Prepared batches with remaining portions (read from StorageTracker, the stock authority)."""
     try:
         rows = [{"id": b["id"], "name": b["name"], "recipe_id": b.get("recipe_ref"), "quantity": b["quantity"],
-                 "unit": b.get("unit"), "location": b.get("location"), "expires_at": b.get("expires_at")}
-                for b in st.list_items(kind="batch") if (b["quantity"] or 0) > 0]
+                 "unit": b.get("unit"), "location": b.get("location"), "expires_at": b.get("expires_at"),
+                 "expiry_status": b.get("expiry_status")}
+                for b in sorted(st.list_items(kind="batch"), key=lambda b: (b.get("expires_at") or "9999-12-31"))
+                if (b["quantity"] or 0) > 0]
     except st.StorageError as e:
         return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
     return dataset_response("batch", rows, "Batches")
+
+
+@router.post("/batches/{item_id}/discard", response_model=None)
+def discard_expired_batch(item_id: int) -> JSONResponse:
+    """User-confirmed removal of an EXPIRED batch: books -quantity as an 'expired' ledger movement (reversible).
+    Same idempotency key as the StorageTracker UI, so confirming in both places cannot double-book."""
+    try:
+        item = st.get_item(item_id)
+        if not item or item.get("kind") != "batch":
+            return api_error("NOT_FOUND", f"Batch {item_id} not found", status=404)
+        if item.get("expiry_status") != "expired":
+            return api_error("CONFLICT", "Only expired batches can be discarded here", status=409)
+        res = st.post_movement(item_id, -float(item["quantity"]), "expired", f"expired:{item_id}:{item['expires_at']}")
+    except st.StorageError as e:
+        return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
+    return JSONResponse(status_code=200, content={"item_id": item_id, "quantity": res["quantity"],
+                                                  "replayed": res["replayed"]})

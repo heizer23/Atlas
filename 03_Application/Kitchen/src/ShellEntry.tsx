@@ -32,10 +32,13 @@ interface Recipe extends RecipeSummary {
 }
 interface Meal {
   id: string; recipe_id: string | null; recipe_name: string | null; recipe_kind: RecipeKind | null;
-  kind: 'cook' | 'meal'; day: string; portions: number; status: MealStatus;
+  kind: 'cook' | 'meal'; day: string; portions: number; status: MealStatus; expiry_warning: string | null;
 }
 interface Plan { id: string; week_start: string; meals: Meal[] }
-interface Batch { id: string; name: string; quantity: number; unit: string; location: string | null; expires_at: string | null }
+interface Batch {
+  id: number; name: string; quantity: number; unit: string; location: string | null; expires_at: string | null;
+  expiry_status: 'expired' | 'expiring_soon' | null;
+}
 interface ShopLine { item_id: number; name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
 interface Shopping {
   buy: ShopLine[]; probably_have: ShopLine[]; missing_bases: { name: string; needed: number; available: number }[];
@@ -77,11 +80,20 @@ function MealCard({ meal, recipes, onChanged }: { meal: Meal; recipes: RecipeSum
   const [moving, setMoving] = useState(false);
   const [newDay, setNewDay] = useState(meal.day);
   const [swap, setSwap] = useState(meal.recipe_id ?? '');
+  const [info, setInfo] = useState<string | null>(null);
   const planned = meal.status === 'planned';
   const isCook = meal.kind === 'cook';
 
   const run = async (path: string, body?: unknown, method?: string) => {
-    if (await post(path, body, method)) { setMoving(false); onChanged(); }
+    const res = await post<{ shortfall?: { name: string; missing: number; expired_in_stock: number }[] }>(path, body, method);
+    if (!res) return;
+    setMoving(false);
+    const short = res.shortfall?.[0];
+    if (short) {
+      setInfo(`Not enough ${short.name} in stock (missing ${num(short.missing)})` +
+        (short.expired_in_stock > 0 ? ` — ${num(short.expired_in_stock)} expired portions were not used; discard them to confirm.` : '.'));
+    } else setInfo(null);
+    onChanged();
   };
 
   return (
@@ -91,6 +103,8 @@ function MealCard({ meal, recipes, onChanged }: { meal: Meal; recipes: RecipeSum
         <span className="kitchen-chip">{isCook ? 'Cook' : 'Eat'} · {meal.status}</span>
       </div>
       {meal.recipe_id && <span className="kitchen-muted">{num(meal.portions)} portions</span>}
+      {meal.expiry_warning && planned && <div className="kitchen-warn">⚠ {meal.expiry_warning}</div>}
+      {info && <div className="kitchen-warn">{info}</div>}
       {error && <div className="kitchen-warn">{error}</div>}
 
       {planned && meal.recipe_id && (
@@ -169,7 +183,17 @@ function PlanView() {
           {batches.map((b) => (
             <div key={b.id} className="kitchen-row spread">
               <span>{b.name}</span>
-              <span className="kitchen-muted">{num(b.quantity)} {b.unit}{b.expires_at ? ` · until ${dayLabel(b.expires_at)}` : ''}</span>
+              <span className="kitchen-row">
+                <span className="kitchen-muted">{num(b.quantity)} {b.unit}{b.expires_at ? ` · until ${dayLabel(b.expires_at)}` : ''}</span>
+                {b.expiry_status === 'expired' && <span className="kitchen-chip expired">Expired</span>}
+                {b.expiry_status === 'expiring_soon' && <span className="kitchen-chip warn">Expires soon</span>}
+                {b.expiry_status === 'expired' && (
+                  <button className="kitchen-btn" disabled={busy} onClick={async () => {
+                    if (!confirm(`Discard ${num(b.quantity)} ${b.unit} ${b.name} (expired ${b.expires_at})? It is removed from stock; reversible in StorageTracker history.`)) return;
+                    if (await post(`/batches/${b.id}/discard`)) load();
+                  }}>Discard</button>
+                )}
+              </span>
             </div>
           ))}
         </div>

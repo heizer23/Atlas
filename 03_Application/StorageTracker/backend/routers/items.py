@@ -1,7 +1,8 @@
 import json as _json
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -22,6 +23,17 @@ VALID_STATES = {
 VALID_ITEM_TYPES = {"consumable", "object", "pending_action"}
 VALID_KINDS = {"ingredient", "batch"}
 
+# Expiry (R-CON-AL-06 time authority: server clock, Europe/Berlin calendar day).
+# expires_at is the last day the item is still fine: expired = expires_at < today,
+# expiring_soon = expires_at <= today + EXPIRY_SOON_DAYS. Derived on read, never stored; only for quantity > 0.
+BERLIN = ZoneInfo("Europe/Berlin")
+EXPIRY_SOON_DAYS = 2
+
+
+def berlin_today() -> date:
+    return datetime.now(BERLIN).date()
+
+
 # States that trigger auto shopping task creation
 SHOPPING_TRIGGER_STATES = {"low_stock", "out_of_stock"}
 
@@ -38,6 +50,7 @@ ITEM_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="unit",             label="Unit",            type="string", sortable=False, filterable=False),
     ColumnSchema(key="expires_at",       label="Expires",         type="date",   sortable=True,  filterable=False),
     ColumnSchema(key="kind",             label="Kind",            type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="expiry_status",    label="Expiry",          type="enum",   sortable=False, filterable=False),
     ColumnSchema(key="recipe_ref",       label="Recipe Ref",      type="string", sortable=False, filterable=False),
     ColumnSchema(key="source_tags",      label="Source Tags",     type="string", sortable=False, filterable=False),
     ColumnSchema(key="notes",            label="Notes",           type="string", sortable=False, filterable=False, detail_visible=True),
@@ -86,6 +99,17 @@ class ItemUpdate(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _expiry_status(expires_at: date | None, quantity: Any) -> str | None:
+    if expires_at is None or not quantity or float(quantity) <= 0:
+        return None
+    today = berlin_today()
+    if expires_at < today:
+        return "expired"
+    if expires_at <= today + timedelta(days=EXPIRY_SOON_DAYS):
+        return "expiring_soon"
+    return None
+
+
 def _num(v: Decimal | float | int) -> int | float:
     """Render integral numerics as int so existing integer clients see no change."""
     f = float(v)
@@ -96,6 +120,7 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     if isinstance(d.get("quantity"), Decimal):
         d["quantity"] = _num(d["quantity"])
+    d["expiry_status"] = _expiry_status(d.get("expires_at"), d.get("quantity"))
     if d.get("expires_at"):
         d["expires_at"] = d["expires_at"].isoformat()
     if d.get("created_at"):
@@ -268,6 +293,27 @@ def view_recycling() -> JSONResponse:
                 where state = 'marked_for_recycling'
                 order by name asc
                 """,
+            )
+            rows = [_row_to_dict(r) for r in cur.fetchall()]
+    return _dataset_response(_items_dataset(rows, total=len(rows)))
+
+
+@router.get("/views/expiring", response_model=None)
+def view_expiring() -> JSONResponse:
+    """Items with stock whose expires_at is in the past or within EXPIRY_SOON_DAYS; earliest first."""
+    limit = berlin_today() + timedelta(days=EXPIRY_SOON_DAYS)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id, name, item_type, state, location, notes, source_tags,
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
+                from storagetracker.items
+                where expires_at is not null and expires_at <= %s and quantity > 0
+                order by expires_at asc, name asc
+                """,
+                (limit,),
             )
             rows = [_row_to_dict(r) for r in cur.fetchall()]
     return _dataset_response(_items_dataset(rows, total=len(rows)))

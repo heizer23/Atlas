@@ -38,6 +38,16 @@ Vision and scope: `Sprint01_Core/00_draft.md`.
   lines (existing article by name+unit, else create with stock 0), then status recompute. Not used by imports.
 - Purchase / stocktake endpoints take `item_id`, not names.
 
+## Expiry
+- Batch `expires_at` = cook day + recipe `shelf_life_days` (last good day, Berlin calendar). Status is derived by
+  StorageTracker on read (`expired` / `expiring_soon` = within 2 days), never stored; only for quantity > 0.
+- Eating consumes the earliest-expiring non-expired batch first and NEVER auto-consumes expired ones: the shortfall
+  response reports `expired_in_stock`. Expired batches are only removed by a user-confirmed discard
+  (`POST /batches/{item_id}/discard` or the StorageTracker UI), which books an `expired` ledger movement
+  (key `expired:<item>:<date>`, shared by both UIs, reversible).
+- Plan suggestion tracks portion lots with expiry (stock + planned cooks) and only places a base meal on days the base is good.
+  `expiry_warning` on a planned meal = its base is expired/expires before that day and no planned cook covers it.
+
 ## Ports / schema
 Host port 8028 (127.0.0.1) -> container 8000. Schema `kitchen`, from `schema.sql` at startup (idempotent).
 Recipes are NOT seeded at startup; `backend/seed.py` is test fixture data only (tests/conftest.py).

@@ -29,6 +29,9 @@ interface ItemRow extends Row {
   source_tags:  string[];
   quantity:     number | null;
   min_quantity: number | null;
+  unit:         string | null;
+  expires_at:   string | null;
+  expiry_status: 'expired' | 'expiring_soon' | null;
   created_at:   string;
   updated_at:   string;
   history?:     HistoryRow[];
@@ -76,6 +79,8 @@ interface FormState {
   quantity:         string;
   min_quantity:     string;
   restock_quantity: string;
+  unit:             string;
+  expires_at:       string;   // YYYY-MM-DD or ''
 }
 
 const EMPTY_FORM: FormState = {
@@ -88,6 +93,8 @@ const EMPTY_FORM: FormState = {
   quantity:         '',
   min_quantity:     '',
   restock_quantity: '',
+  unit:             '',
+  expires_at:       '',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -168,6 +175,66 @@ function Chip({
   );
 }
 
+// ── Expiry ────────────────────────────────────────────────────────────────────
+// Status is derived by the backend (server date, Europe/Berlin): expires_at is the last good day.
+// Discarding is always an explicit confirmation and books a reversible 'expired' ledger movement.
+
+const EXPIRY_STYLE: Record<string, React.CSSProperties> = {
+  expired:       { background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' },
+  expiring_soon: { background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' },
+};
+
+function ExpiryLine({ item }: { item: ItemRow }) {
+  const label = item.expiry_status === 'expired' ? 'EXPIRED' : item.expiry_status === 'expiring_soon' ? 'Expires soon' : null;
+  return (
+    <div style={{ fontSize: 13, color: '#555', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      Best before: {item.expires_at}
+      {label && (
+        <span style={{ ...EXPIRY_STYLE[item.expiry_status as string], fontSize: 11, padding: '1px 6px', borderRadius: 10, fontWeight: 600 }}>
+          {label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function DiscardButton({ item, onDone }: { item: ItemRow; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const discard = async () => {
+    const what = `${item.quantity ?? ''}${item.unit ? ' ' + item.unit : ''} ${item.name}`.trim();
+    if (!confirm(`Discard ${what} (expired ${item.expires_at})? This removes it from stock; it can be reversed in the item history.`)) return;
+    setBusy(true);
+    await apiFetch(`/items/${item.id}/movements`, {
+      method: 'POST',
+      body: JSON.stringify({
+        delta: -(item.quantity ?? 0), reason: 'expired',
+        idempotency_key: `expired:${item.id}:${item.expires_at}`,
+      }),
+    });
+    setBusy(false);
+    onDone();
+  };
+  return (
+    <button onClick={discard} disabled={busy} style={{ ...btnStyle, ...EXPIRY_STYLE.expired }}>Discard</button>
+  );
+}
+
+function ExpiryBanner() {
+  const navigate = useNavigate();
+  const { items } = useItems('/items/views/expiring', []);
+  if (items.length === 0) return null;
+  const expired = items.filter((i) => i.expiry_status === 'expired').length;
+  return (
+    <div
+      onClick={() => navigate('/items/expiring')}
+      style={{ ...EXPIRY_STYLE[expired ? 'expired' : 'expiring_soon'], padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
+    >
+      {expired > 0 ? `${expired} expired` : ''}{expired > 0 && items.length > expired ? ' · ' : ''}
+      {items.length > expired ? `${items.length - expired} expiring soon` : ''} — review
+    </div>
+  );
+}
+
 // ── Item row card ─────────────────────────────────────────────────────────────
 
 const SHOPPING_STATES = new Set(['low_stock', 'out_of_stock']);
@@ -177,11 +244,13 @@ function ItemCard({
   onEdit,
   onDelete,
   onNavigate,
+  onChanged,
 }: {
   item: ItemRow;
   onEdit: (item: ItemRow) => void;
   onDelete: (id: number) => void;
   onNavigate: (id: number) => void;
+  onChanged: () => void;
 }) {
   return (
     <div style={{
@@ -222,9 +291,10 @@ function ItemCard({
         )}
         {item.item_type === 'consumable' && item.quantity !== null && (
           <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-            Qty: {item.quantity}{item.min_quantity !== null ? ` / min ${item.min_quantity}` : ''}
+            Qty: {item.quantity}{item.unit ? ` ${item.unit}` : ''}{item.min_quantity !== null ? ` / min ${item.min_quantity}` : ''}
           </div>
         )}
+        {item.expires_at && <ExpiryLine item={item} />}
         {item.source_tags && item.source_tags.length > 0 && (
           <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>
             Buy at: {item.source_tags.join(', ')}
@@ -232,6 +302,7 @@ function ItemCard({
         )}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {item.expiry_status === 'expired' && <DiscardButton item={item} onDone={onChanged} />}
         <button onClick={() => onEdit(item)} style={btnStyle}>Edit</button>
         <button onClick={() => onDelete(item.id)} style={{ ...btnStyle, color: 'var(--md-sys-color-error)' }}>Del</button>
       </div>
@@ -273,6 +344,8 @@ function ItemFormModal({
           restock_quantity: (initial as any).restock_quantity !== null && (initial as any).restock_quantity !== undefined
             ? String((initial as any).restock_quantity)
             : '',
+          unit:             initial.unit ?? '',
+          expires_at:       initial.expires_at ?? '',
         }
       : { ...EMPTY_FORM },
   );
@@ -299,10 +372,13 @@ function ItemFormModal({
     };
 
     if (form.item_type === 'consumable') {
-      body.quantity         = form.quantity !== '' ? parseInt(form.quantity, 10) : null;
+      body.quantity         = form.quantity !== '' ? parseFloat(form.quantity) : null;
       body.min_quantity     = form.min_quantity !== '' ? parseInt(form.min_quantity, 10) : null;
       body.restock_quantity = form.restock_quantity !== '' ? parseInt(form.restock_quantity, 10) : null;
+      body.unit             = form.unit.trim() || null;
     }
+    // explicit null clears the date (PATCH null vs omit); new items send null too
+    body.expires_at = form.expires_at || null;
 
     const url    = initial ? `/items/${initial.id}` : '/items';
     const method = initial ? 'PATCH' : 'POST';
@@ -349,11 +425,19 @@ function ItemFormModal({
             Location
             <input value={form.location} onChange={set('location')} style={inputStyle} />
           </label>
+          <label style={labelStyle}>
+            Best before / expires
+            <input type="date" value={form.expires_at} onChange={set('expires_at')} style={inputStyle} />
+          </label>
           {form.item_type === 'consumable' && (
             <>
               <label style={labelStyle}>
                 Quantity
-                <input type="number" min={0} value={form.quantity} onChange={set('quantity')} style={inputStyle} />
+                <input type="number" min={0} step="any" value={form.quantity} onChange={set('quantity')} style={inputStyle} />
+              </label>
+              <label style={labelStyle}>
+                Unit
+                <input value={form.unit} onChange={set('unit')} placeholder="g, ml, piece, portions…" style={inputStyle} />
               </label>
               <label style={labelStyle}>
                 Min Quantity
@@ -422,6 +506,7 @@ function ItemListView({
   error,
   reload,
   extraHeaderContent,
+  topContent,
 }: {
   title: string;
   items: ItemRow[];
@@ -429,6 +514,7 @@ function ItemListView({
   error: string | null;
   reload: () => void;
   extraHeaderContent?: React.ReactNode;
+  topContent?: React.ReactNode;
 }) {
   const navigate = useNavigate();
   const [editItem, setEditItem]   = useState<ItemRow | null>(null);
@@ -452,6 +538,7 @@ function ItemListView({
         </div>
       </div>
 
+      {topContent && <div style={{ marginBottom: 12 }}>{topContent}</div>}
       {loading && <Skeleton />}
       {error && <ErrorCard message={error} />}
       {!loading && !error && items.length === 0 && (
@@ -464,6 +551,7 @@ function ItemListView({
           onEdit={setEditItem}
           onDelete={handleDelete}
           onNavigate={(id: number) => navigate(`/items/${id}`)}
+          onChanged={reload}
         />
       ))}
 
@@ -504,6 +592,7 @@ function AllItemsView() {
   return (
     <ItemListView
       title="All Items"
+      topContent={<ExpiryBanner />}
       items={items}
       loading={loading}
       error={error}
@@ -518,6 +607,13 @@ function AllItemsView() {
 function LowStockView() {
   const { items, loading, error, reload } = useItems('/items/views/low_stock', []);
   return <ItemListView title="Low Stock" items={items} loading={loading} error={error} reload={reload} />;
+}
+
+// ── Expiring View ─────────────────────────────────────────────────────────────
+
+function ExpiringView() {
+  const { items, loading, error, reload } = useItems('/items/views/expiring', []);
+  return <ItemListView title="Expired &amp; expiring soon" items={items} loading={loading} error={error} reload={reload} />;
 }
 
 // ── Important Items View ──────────────────────────────────────────────────────
@@ -613,11 +709,14 @@ function ItemDetailView() {
 
       {item.item_type === 'consumable' && (
         <div style={{ marginBottom: 6 }}>
-          Quantity: <strong>{item.quantity ?? '—'}</strong>
+          Quantity: <strong>{item.quantity ?? '—'}{item.unit ? ` ${item.unit}` : ''}</strong>
           {item.min_quantity !== null && <> / Min: <strong>{item.min_quantity}</strong></>}
           {itemAny.restock_quantity != null && <> / Restock: <strong>{itemAny.restock_quantity}</strong></>}
         </div>
       )}
+
+      {item.expires_at && <ExpiryLine item={item} />}
+      {item.expiry_status === 'expired' && <div style={{ margin: '6px 0' }}><DiscardButton item={item} onDone={load} /></div>}
 
       {item.source_tags && item.source_tags.length > 0 && (
         <div style={{ marginBottom: 6 }}>Buy at: {item.source_tags.join(', ')}</div>
@@ -833,6 +932,7 @@ export default function StorageTrackerApp() {
       <Route path="/low-stock"  element={<LowStockView />} />
       <Route path="/important"  element={<ImportantItemsView />} />
       <Route path="/recycling"  element={<RecyclingView />} />
+      <Route path="/expiring"   element={<ExpiringView />} />
       <Route path="/shopping"   element={<ShoppingListView />} />
       <Route path="/:id"        element={<ItemDetailView />} />
     </Routes>

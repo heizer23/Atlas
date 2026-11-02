@@ -128,7 +128,10 @@ def eat(conn: Any, meal_id: str, portions: float | None) -> dict[str, Any]:
                         if left <= 1e-9:
                             break
                     if left > 1e-9:
-                        shortfall.append({"name": ing["name"], "missing": round(left, 4)})
+                        blocked = sum(float(b["quantity"]) for b in st.find_batches(
+                            str(ing["base_recipe_id"]), include_expired=True) if st.is_expired(b, berlin_today().isoformat()))
+                        shortfall.append({"name": ing["name"], "missing": round(left, 4),
+                                          "expired_in_stock": round(blocked, 4)})
                 else:
                     _book(cur, meal_id, "eat", ing["item_id"], -need,
                           f"eat:{meal_id}:{rev}:{ing['id']}", f"ate {recipe['name']}")
@@ -238,10 +241,28 @@ def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
             ing_by.setdefault(str(i["recipe_id"]), []).append(dict(i))
 
         bases = [r for r in recipes if r["kind"] == "base"]
-        stocked = {str(r["id"]): sum(float(b["quantity"]) for b in st.find_batches(str(r["id"]))) for r in bases}
+        # lots per base: portions with their last good day (None = no date). Stock lots come from
+        # unexpired batches; cooks planned below add lots expiring day + shelf_life_days.
+        lots: dict[str, list[dict[str, Any]]] = {}
+        for r in bases:
+            lots[str(r["id"])] = [
+                {"exp": date.fromisoformat(b["expires_at"]) if b.get("expires_at") else None, "qty": float(b["quantity"])}
+                for b in st.find_batches(str(r["id"]))]
+        stocked = {rid: sum(l["qty"] for l in ls) for rid, ls in lots.items()}
         bases.sort(key=lambda r: (stocked[str(r["id"])], r["name"]))
         chosen = bases[:cook_sessions]
-        avail = {str(r["id"]): stocked[str(r["id"])] for r in bases}
+
+        def avail_on(base_id: str, d: date) -> float:
+            return sum(l["qty"] for l in lots.get(base_id, []) if l["exp"] is None or l["exp"] >= d)
+
+        def consume(base_id: str, qty: float, d: date) -> None:
+            for l in sorted((l for l in lots[base_id] if l["exp"] is None or l["exp"] >= d),
+                            key=lambda l: (l["exp"] is None, l["exp"] or date.max)):
+                take = min(qty, l["qty"])
+                l["qty"] -= take
+                qty -= take
+                if qty <= 1e-9:
+                    return
 
         cook_days = [0, 3, 5][:len(chosen)]
         derived = [r for r in recipes if r["kind"] == "derived"]
@@ -261,17 +282,21 @@ def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
             for base, cd in zip(chosen, cook_days):
                 if cd == day:
                     add(base, "cook", day, float(base["servings"]))
-                    avail[str(base["id"])] += float(base["servings"])
+                    shelf = base["shelf_life_days"]
+                    lots[str(base["id"])].append({
+                        "exp": week_start + timedelta(days=day + shelf) if shelf is not None else None,
+                        "qty": float(base["servings"])})
             pick = None
+            meal_day = week_start + timedelta(days=day)
             for d in derived:
                 needs = ing_by.get(str(d["id"]), [])
                 if needs and str(d["id"]) not in used and all(
-                        avail.get(str(n["base_recipe_id"]), 0) >= float(n["qty"]) for n in needs):
+                        avail_on(str(n["base_recipe_id"]), meal_day) >= float(n["qty"]) for n in needs):
                     pick = d
                     break
             if pick:
                 for n in ing_by[str(pick["id"])]:
-                    avail[str(n["base_recipe_id"])] -= float(n["qty"])
+                    consume(str(n["base_recipe_id"]), float(n["qty"]), meal_day)
                 used.add(str(pick["id"]))
                 add(pick, "meal", day, float(pick["servings"]))
             elif favorites and day in (2, 5):
