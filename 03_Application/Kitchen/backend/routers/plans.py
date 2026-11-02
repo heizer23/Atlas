@@ -26,8 +26,9 @@ MEAL_SELECT = """
 
 
 class SuggestIn(BaseModel):
-    week_start:    date | None = None
-    cook_sessions: int = Field(default=2, ge=0, le=3)
+    week_start:    date | None = None            # first day of the plan (despite the name); default: today (Berlin)
+    days:          int = Field(default=7, ge=1, le=7)
+    cook_sessions: int | None = Field(default=None, ge=0, le=3)   # default: 1 for <= 4 days, else 2
 
 
 class MealIn(BaseModel):
@@ -100,14 +101,14 @@ def _expiry_warnings(cur: Any, meals: list[dict[str, Any]]) -> None:
 
 
 def _plan_payload(cur: Any, plan_id: str) -> dict[str, Any] | None:
-    cur.execute("select id, week_start from kitchen.plans where id = %s", (plan_id,))
+    cur.execute("select id, week_start, days from kitchen.plans where id = %s", (plan_id,))
     p = cur.fetchone()
     if not p:
         return None
     cur.execute(MEAL_SELECT + " where m.plan_id = %s order by m.day, m.slot, m.created_at", (plan_id,))
     meals = [dict(m) for m in cur.fetchall()]
     _expiry_warnings(cur, meals)
-    return {"id": str(p["id"]), "week_start": p["week_start"], "meals": meals}
+    return {"id": str(p["id"]), "week_start": p["week_start"], "days": p["days"], "meals": meals}
 
 
 def _meal_row(cur: Any, meal_id: str) -> dict[str, Any] | None:
@@ -119,7 +120,7 @@ def _meal_row(cur: Any, meal_id: str) -> dict[str, Any] | None:
 @router.get("/plans", response_model=None)
 def list_plans() -> JSONResponse:
     with get_db() as conn, conn.cursor() as cur:
-        cur.execute("select id, week_start from kitchen.plans order by week_start desc, created_at desc limit 20")
+        cur.execute("select id, week_start, days from kitchen.plans order by created_at desc limit 20")
         rows = [dict(r) for r in cur.fetchall()]
     return dataset_response("plan", rows, "Plans")
 
@@ -135,9 +136,9 @@ def get_plan(plan_id: str) -> JSONResponse:
 
 @router.post("/plans/suggest", response_model=None)
 def suggest(body: SuggestIn) -> JSONResponse:
-    start = body.week_start or service.next_monday(berlin_today())
+    start = body.week_start or berlin_today()
     with get_db() as conn:
-        plan_id = service.suggest_plan(conn, start, body.cook_sessions)
+        plan_id = service.suggest_plan(conn, start, body.cook_sessions, body.days)
         with conn.cursor() as cur:
             p = _plan_payload(cur, plan_id)
     return dataset_response("plan", [p], "Plan", status=201)

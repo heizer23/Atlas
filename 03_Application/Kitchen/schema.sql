@@ -117,4 +117,7 @@ end $$;
 
 alter table kitchen.recipes alter column yield_unit set default 'portions';
 
+-- Plans cover 1-7 days from week_start (the first day; name kept for compatibility).
+alter table kitchen.plans add column if not exists days integer not null default 7 check (days between 1 and 7);
+
 commit;

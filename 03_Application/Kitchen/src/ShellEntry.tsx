@@ -2,7 +2,7 @@
  * Kitchen ShellEntry — Sprint 01
  *
  * Views:
- *   /kitchen            -> PlanView      (week plan, cook / eat / move / undo, batches)
+ *   /kitchen            -> PlanView      (meal plan of 1-7 days, cook / eat / move / undo, batches)
  *   /kitchen/shopping   -> ShoppingView  (buy list + "probably have" check)
  *   /kitchen/recipes    -> RecipesView   (list, create, edit)
  *
@@ -34,7 +34,7 @@ interface Meal {
   id: string; recipe_id: string | null; recipe_name: string | null; recipe_kind: RecipeKind | null;
   kind: 'cook' | 'meal'; day: string; portions: number; status: MealStatus; expiry_warning: string | null;
 }
-interface Plan { id: string; week_start: string; meals: Meal[] }
+interface Plan { id: string; week_start: string; days: number; meals: Meal[] }
 interface Batch {
   id: number; name: string; quantity: number; unit: string; location: string | null; expires_at: string | null;
   expiry_status: 'expired' | 'expiring_soon' | null;
@@ -54,6 +54,19 @@ function dayLabel(iso: string): string {
 }
 
 function num(v: number): string { return String(Math.round(v * 100) / 100); }
+
+function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function readPref(key: string, fallback: string): string {
+  try { return localStorage.getItem(`kitchen.${key}`) ?? fallback; } catch { return fallback; }
+}
+
+function writePref(key: string, value: string): void {
+  try { localStorage.setItem(`kitchen.${key}`, value); } catch { /* per-viewer convenience only */ }
+}
 
 function useAction(): { post: Post; error: string | null; busy: boolean } {
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +167,9 @@ function PlanView() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { post, error: actionError, busy } = useAction();
+  const [days, setDays] = useState(readPref('days', '3'));
+  const [cooks, setCooks] = useState(readPref('cooks', 'auto'));
+  const [start, setStart] = useState(todayLocal());
 
   const load = useCallback(async () => {
     const list = await apiFetch<Dataset<{ id: string }>>('/kitchen/plans');
@@ -176,7 +192,7 @@ function PlanView() {
   const days = plan ? Array.from(new Set(plan.meals.map((m) => m.day))) : [];
   return (
     <div className="kitchen-page">
-      <h1 className="type-headline">Week plan</h1>
+      <h1 className="type-headline">Meal plan{plan ? ` · ${plan.days} day${plan.days === 1 ? '' : 's'}` : ''}</h1>
       {batches.length > 0 && (
         <div className="kitchen-card">
           <strong>Cooked bases in stock</strong>
@@ -198,10 +214,29 @@ function PlanView() {
           ))}
         </div>
       )}
-      <button className="kitchen-btn primary" disabled={busy}
-              onClick={async () => { if (await post('/plans/suggest', {})) load(); }}>
-        {plan ? 'Suggest new week plan' : 'Suggest week plan'}
-      </button>
+      <div className="kitchen-card">
+        <div className="kitchen-row">
+          <label className="kitchen-row">Days
+            <select className="kitchen-input" value={days} onChange={(e) => { setDays(e.target.value); writePref('days', e.target.value); }}>
+              {[1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select></label>
+          <label className="kitchen-row">From
+            <input className="kitchen-input" type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
+          <label className="kitchen-row">Cooking sessions
+            <select className="kitchen-input" value={cooks} onChange={(e) => { setCooks(e.target.value); writePref('cooks', e.target.value); }}>
+              <option value="auto">Auto</option>
+              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select></label>
+        </div>
+        <button className="kitchen-btn primary" disabled={busy || !start}
+                onClick={async () => {
+                  const body: Record<string, unknown> = { week_start: start, days: Number(days) };
+                  if (cooks !== 'auto') body.cook_sessions = Number(cooks);
+                  if (await post('/plans/suggest', body)) load();
+                }}>
+          {plan ? 'Suggest new plan' : 'Suggest plan'}
+        </button>
+      </div>
       {(actionError || error) && <div className="kitchen-warn">{actionError ?? error}</div>}
       {days.map((d) => (
         <React.Fragment key={d}>
@@ -304,7 +339,7 @@ function ShoppingView() {
   useEffect(() => { load(); }, [load]);
 
   if (data === undefined) return <div className="kitchen-page"><Loading error={error} /></div>;
-  if (data === null) return <div className="kitchen-page"><p className="kitchen-muted">No week plan yet.</p></div>;
+  if (data === null) return <div className="kitchen-page"><p className="kitchen-muted">No plan yet.</p></div>;
 
   return (
     <div className="kitchen-page">

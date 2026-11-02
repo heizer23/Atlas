@@ -141,3 +141,48 @@ def test_recipe_crud(client):
     r = client.patch(f"/api/kitchen/recipes/{rid}", json={"steps": "kochen"})
     assert r.json()["rows"][0]["steps"] == "kochen" and len(r.json()["rows"][0]["ingredients"]) == 1
     assert client.delete(f"/api/kitchen/recipes/{rid}").status_code == 200
+
+
+def _suggest(client, days, **kw):
+    r = client.post("/api/kitchen/plans/suggest", json={"week_start": "2030-02-04", "days": days, **kw})
+    assert r.status_code == 201, r.text
+    return r.json()["rows"][0]
+
+
+def test_plan_length_one_to_seven_days(client):
+    from datetime import date, timedelta
+    start = date(2030, 2, 4)
+    for days in range(1, 8):
+        plan = _suggest(client, days)
+        assert plan["days"] == days
+        meals = [m for m in plan["meals"] if m["kind"] == "meal"]
+        cooks = [m for m in plan["meals"] if m["kind"] == "cook"]
+        assert len(meals) == days                                  # one dinner per day
+        allowed = {(start + timedelta(days=i)).isoformat() for i in range(days)}
+        assert {m["day"] for m in plan["meals"]} == allowed or {m["day"] for m in plan["meals"]} <= allowed
+        assert len(cooks) == (1 if days <= 4 else 2)               # auto: one cook for a short shopping round
+        shop = client.get(f"/api/kitchen/plans/{plan['id']}/shopping").json()["rows"][0]
+        assert shop["missing_bases"] == []                         # derived meals only use portions that exist
+
+
+def test_three_day_plan_cooks_once_and_uses_the_batch(client):
+    plan = _suggest(client, 3)
+    cooks = [m for m in plan["meals"] if m["kind"] == "cook"]
+    derived = [m for m in plan["meals"] if m["recipe_name"] and m["recipe_name"].startswith("Dal with")]
+    assert len(cooks) == 1 and cooks[0]["day"] == "2030-02-04"
+    assert len(derived) >= 1
+    assert all(m["day"] <= "2030-02-06" for m in plan["meals"])
+
+
+def test_cook_sessions_override_and_validation(client):
+    assert sum(1 for m in _suggest(client, 5, cook_sessions=1)["meals"] if m["kind"] == "cook") == 1
+    assert sum(1 for m in _suggest(client, 2, cook_sessions=2)["meals"] if m["kind"] == "cook") == 1  # 2nd cook day is outside
+    for bad in (0, 8):
+        r = client.post("/api/kitchen/plans/suggest", json={"week_start": "2030-02-04", "days": bad})
+        assert r.status_code in (400, 422)
+
+
+def test_default_plan_starts_today(client):
+    from backend.common import berlin_today
+    r = client.post("/api/kitchen/plans/suggest", json={"days": 3}).json()["rows"][0]
+    assert r["week_start"] == berlin_today().isoformat()

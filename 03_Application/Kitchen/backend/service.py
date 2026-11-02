@@ -229,9 +229,22 @@ def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
 
 # ── plan suggestion ───────────────────────────────────────────────────────────
 
-def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
-    """7 dinners: `cook_sessions` base cooks (day 0 and day 3 by default), derived meals draw down the
-    produced portions, favorites fill gaps, anything left is a flexible day (recipe null)."""
+COOK_DAYS = (0, 3, 5)  # day offsets of the 1st, 2nd, 3rd cooking session
+
+
+def default_cook_sessions(days: int) -> int:
+    """Short plans (<= 4 days, e.g. one shopping round) get one big cook; longer plans two."""
+    return 1 if days <= 4 else 2
+
+
+def suggest_plan(conn: Any, week_start: date, cook_sessions: int | None = None, days: int = 7) -> str:
+    """`days` (1-7) dinners starting at `week_start`: `cook_sessions` base cooks (on COOK_DAYS that fall inside
+    the plan), derived meals draw down the portions that are still good on their day, favorites fill gaps,
+    anything left is a flexible day (recipe null). Portions left over stay in stock for the next plan."""
+    if not 1 <= days <= 7:
+        raise ValueError("days must be between 1 and 7")
+    if cook_sessions is None:
+        cook_sessions = default_cook_sessions(days)
     with conn.cursor() as cur:
         cur.execute("select * from kitchen.recipes where status = 'active' order by name")
         recipes = [dict(r) for r in cur.fetchall()]
@@ -264,10 +277,10 @@ def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
                 if qty <= 1e-9:
                     return
 
-        cook_days = [0, 3, 5][:len(chosen)]
+        cook_days = [d for d in COOK_DAYS if d < days][:len(chosen)]
         derived = [r for r in recipes if r["kind"] == "derived"]
         favorites = [r for r in recipes if r["kind"] == "favorite"]
-        cur.execute("insert into kitchen.plans (week_start) values (%s) returning id", (week_start,))
+        cur.execute("insert into kitchen.plans (week_start, days) values (%s, %s) returning id", (week_start, days))
         plan_id = str(cur.fetchone()["id"])
 
         def add(recipe: dict | None, kind: str, day: int, portions: float) -> None:
@@ -278,7 +291,7 @@ def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
 
         used: set[str] = set()
         fav_i = 0
-        for day in range(7):
+        for day in range(days):
             for base, cd in zip(chosen, cook_days):
                 if cd == day:
                     add(base, "cook", day, float(base["servings"]))
@@ -308,6 +321,3 @@ def suggest_plan(conn: Any, week_start: date, cook_sessions: int) -> str:
     return plan_id
 
 
-def next_monday(today: date) -> date:
-    """Today if Monday, else the coming Monday."""
-    return today + timedelta(days=(7 - today.weekday()) % 7)

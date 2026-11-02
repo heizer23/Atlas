@@ -38,6 +38,12 @@ Vision and scope: `Sprint01_Core/00_draft.md`.
   lines (existing article by name+unit, else create with stock 0), then status recompute. Not used by imports.
 - Purchase / stocktake endpoints take `item_id`, not names.
 
+## Plan length
+`POST /plans/suggest {week_start?, days (1-7, default 7), cook_sessions?}`. `week_start` is the first day (default today, Berlin);
+the column name is historical. `cook_sessions` default: 1 for <= 4 days, else 2; cooking days are day 0/3/5 offsets that fall inside
+the plan. One dinner per day. Leftover portions stay in stock for the next plan. UI remembers days/cooks in localStorage (default 3 days).
+`GET /plans` lists newest-created first; the UI and shopping list use the newest plan.
+
 ## Expiry
 - Batch `expires_at` = cook day + recipe `shelf_life_days` (last good day, Berlin calendar). Status is derived by
   StorageTracker on read (`expired` / `expiring_soon` = within 2 days), never stored; only for quantity > 0.
