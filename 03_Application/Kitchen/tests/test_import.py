@@ -89,7 +89,7 @@ def test_known_ids_import_active(client):
 def test_unknown_assign_create_activate(client):
     garam = new_article("Garam Masala", "g")
     p = preview(client, recipe_json([{"name": "garam masala", "qty": 2, "unit": "g"},
-                                     {"name": "Frischer Ginger", "qty": 20, "unit": "g"}]))
+                                     {"name": "Fresh ginger", "qty": 20, "unit": "g"}]))
     assert p["unresolved"] == 2
     assert p["recipe"]["ingredients"][0]["suggestions"][0]["id"] == garam["id"]  # exact name, case-insensitive
     # draft save keeps the recipe out of planning
@@ -101,7 +101,7 @@ def test_unknown_assign_create_activate(client):
     assert r.status_code == 409
     # explicit create of the second article (never automatic)
     n_before = len(items())
-    c = client.post(f"{K}/ingredients", json={"name": "Frischer Ginger", "unit": "g"})
+    c = client.post(f"{K}/ingredients", json={"name": "Fresh ginger", "unit": "g"})
     assert c.status_code == 201 and len(items()) == n_before + 1
     assert c.json()["rows"][0]["quantity"] == 0
     assert client.post(f"{K}/ingredients", json={"name": "fresh  ginger", "unit": "g"}).status_code == 409
