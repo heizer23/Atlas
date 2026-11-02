@@ -121,3 +121,15 @@ def test_progress_snapshot_is_one_row_dataset(client, seed):
     seed(A, YESTERDAY, "Pull", [("Row", 30, [10], None)])
     row = client.get(f"/api/workout/progress?today={TODAY}").json()["rows"][0]
     assert row["current"]["length"] == 1 and row["today"] == TODAY
+
+
+def test_imported_days_count_but_are_not_listed_or_double_counted(client, seed, db_conn):
+    seed(A, YESTERDAY, "Pull", [("Row", 30, [10], None)])
+    with db_conn.cursor() as cur:
+        cur.execute("insert into workout.activity_day (activity_date, kind, source) values (%s,'workout','import'), (%s,'running','import')",
+                    (YESTERDAY, LAST_WEEK))
+    assert client.get("/api/workout/activity-days").json()["rows"] == []          # not in the recent list
+    row = client.get(f"/api/workout/progress?today={TODAY}").json()["rows"][0]
+    assert row["month"]["count"] >= 0 and sum(row["ranking"][i]["length"] for i in range(len(row["ranking"]))) == 2  # YESTERDAY once + LAST_WEEK
+    cal = {r["date"]: r for r in client.get(f"/api/workout/calendar?year={TODAY[:4]}").json()["rows"]}
+    assert cal[YESTERDAY]["kinds"] == ["workout"] and cal[LAST_WEEK]["primary"] == "running"

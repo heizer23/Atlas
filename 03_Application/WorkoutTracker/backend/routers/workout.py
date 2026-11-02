@@ -581,13 +581,13 @@ def finish_session(session_id: str, today: str | None = None) -> JSONResponse:
 
 @router.get("/activity-days", response_model=None)
 def list_activity_days(limit: int = 10) -> JSONResponse:
-    """Most recent lighter movement days, newest first. limit is clamped to 1..100; empty list when none."""
+    """Most recent hand-logged lighter movement days (imports excluded), newest first. limit is clamped to 1..100; empty list when none."""
     limit = max(1, min(limit, 100))
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT activity_date::text AS activity_date, kind FROM workout.activity_day "
-                "ORDER BY activity_date DESC, kind LIMIT %s",
+                "WHERE source = 'manual' ORDER BY activity_date DESC, kind LIMIT %s",
                 (limit,),
             )
             rows = [{"id": f"{r['activity_date']}|{r['kind']}", **dict(r)} for r in cur.fetchall()]
