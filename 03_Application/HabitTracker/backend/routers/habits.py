@@ -31,6 +31,9 @@ HABIT_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="name",            label="Name",           type="string", sortable=True,  filterable=True),
     ColumnSchema(key="description",     label="Description",    type="string", sortable=False, filterable=True),
     ColumnSchema(key="default_checked", label="Default",        type="boolean"),
+    ColumnSchema(key="kind",            label="Kind",           type="string"),
+    ColumnSchema(key="unit",            label="Unit",           type="string"),
+    ColumnSchema(key="increment",       label="Increment",      type="number"),
     ColumnSchema(key="display_order",   label="Order",          type="number", sortable=True),
     ColumnSchema(key="active_from",     label="Active From",    type="date",   sortable=True),
     ColumnSchema(key="end_date",        label="Archived (end)", type="date",   sortable=True),
@@ -50,6 +53,9 @@ class HabitCreate(BaseModel):
     description:     str | None = None
     default_checked: bool | None = None
     active_from:     str | None = None
+    kind:            str | None = None
+    unit:            str | None = None
+    increment:       int | None = None
 
 
 class HabitUpdate(BaseModel):
@@ -58,6 +64,9 @@ class HabitUpdate(BaseModel):
     default_checked: bool | None = None
     active_from:     str | None = None
     end_date:        str | None = None
+    kind:            str | None = None
+    unit:            str | None = None
+    increment:       int | None = None
 
 
 class ReorderBody(BaseModel):
@@ -123,20 +132,29 @@ def create_habit(body: HabitCreate) -> JSONResponse:
     if active_from is None:
         return api_error("VALIDATION_ERROR", "active_from must be a valid YYYY-MM-DD date", status=400)
 
+    kind = body.kind or "binary"
+    if kind not in ("binary", "quantity"):
+        return api_error("VALIDATION_ERROR", "kind must be 'binary' or 'quantity'", status=400)
+    increment = 1 if body.increment is None else body.increment
+    if increment < 1:
+        return api_error("VALIDATION_ERROR", "increment must be at least 1", status=400)
+    unit = (body.unit or "").strip() or None
+
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 insert into habittracker.habits
-                    (name, description, default_checked, display_order, active_from)
+                    (name, description, default_checked, display_order, active_from, kind, unit, increment)
                 values (
                     %s, %s, %s,
                     coalesce((select max(display_order) from habittracker.habits), -1) + 1,
-                    %s
+                    %s, %s, %s, %s
                 )
                 returning *
                 """,
-                (body.name, body.description, bool(body.default_checked), active_from),
+                (body.name, body.description, bool(body.default_checked), active_from,
+                 kind, unit if kind == "quantity" else None, increment if kind == "quantity" else 1),
             )
             row = cur.fetchone()
         conn.commit()
@@ -232,6 +250,19 @@ def update_habit(habit_id: str, body: HabitUpdate) -> JSONResponse:
                 if parsed is None:
                     return api_error("VALIDATION_ERROR", "end_date must be a valid YYYY-MM-DD date", status=400)
                 updates["end_date"] = parsed
+
+        if "kind" in fields_set:
+            if body.kind not in ("binary", "quantity"):
+                return api_error("VALIDATION_ERROR", "kind must be 'binary' or 'quantity'", status=400)
+            updates["kind"] = body.kind
+
+        if "unit" in fields_set:
+            updates["unit"] = (body.unit or "").strip() or None
+
+        if "increment" in fields_set:
+            if body.increment is None or body.increment < 1:
+                return api_error("VALIDATION_ERROR", "increment must be at least 1", status=400)
+            updates["increment"] = body.increment
 
         effective_active_from = updates.get("active_from", existing["active_from"])
         effective_end_date = updates["end_date"] if "end_date" in updates else existing["end_date"]

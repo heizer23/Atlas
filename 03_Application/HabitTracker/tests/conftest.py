@@ -95,7 +95,7 @@ def app():
 
 
 @pytest.fixture
-def client(app):
+def client(app, db_conn):
     """Starlette TestClient — synchronous, no running server needed.
 
     Entering the TestClient context fires the FastAPI startup event, which
@@ -105,4 +105,9 @@ def client(app):
     """
     from starlette.testclient import TestClient
     with TestClient(app, raise_server_exceptions=True) as c:
+        # Startup also seeds the two linked habits (seed_linked_habits); drop
+        # them so every test starts from exactly fixtures.sql. Tests that need
+        # linked habits create their own.
+        with db_conn.cursor() as cur:
+            cur.execute("delete from habittracker.habits where source is not null")
         yield c

@@ -101,3 +101,22 @@ Follow the same patterns as StorageTracker / StoryReader (03_Application):
 - platform_contracts for Dataset responses on GET endpoints
 - platform_errorhandling for api_error and middleware
 - Atlas Shell registration via src/shellConfig.ts (mobilePrimaryNav primary target)
+
+## Everyday tracking (added after Sprint01)
+`/habittracker` (Today) is now one-tap logging, not the evening review. Habits have
+`kind` (`binary`|`quantity`), `unit`, `increment`. Each tap is a `habit_entries` row
+(`backend/routers/tracking.py`); undo deletes the newest row of that day; binary is
+idempotent per day. A habit is "done" on a day if it has an entry OR a legacy
+`habit_results.checked` row, so old review history still feeds the 28-day dots and the
+launcher (`GET /history`). The evening review (`/review/:date`) and Reports are unchanged,
+reachable from a link under Today and from Reports.
+
+## Linked habits (EssayCards)
+`habits.source` (`essaycards_flashcards` | `essaycards_oral`) marks a habit whose done-ness is
+read from EssayCards, never logged here (POST/DELETE entries → 400). Pattern: the owning app
+exposes a small read-only endpoint (`EssayCards GET /api/essaycards/activity`, per-day booleans,
+Berlin days); Habits fetches it over atlas-net via `backend/essaycards_activity.py` (`ESSAYCARDS_URL`)
+and merges it in `tracking.py` (`/today`, `/history`). EssayCards down → linked habits show
+not-done; Habits keeps working. `seed_linked_habits()` inserts each once at startup with
+`active_from` = first EssayCards activity day. Oral = guided session, section/essay exam, or recall
+review; flashcard = a `review_events` row. Card-exploration discussions are not counted.

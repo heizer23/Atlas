@@ -78,4 +78,38 @@ create table if not exists habittracker.habit_results (
 -- get_review_view / compute_report — the unique constraint above already
 -- provides this leading-column index, so no separate index is added here.
 
+-- Everyday-tracking sprint: habit kind + tap log.
+-- kind 'binary' = done / not done today; 'quantity' = accumulates `increment`
+-- per tap, shown with `unit`. Existing habits become binary.
+alter table habittracker.habits add column if not exists kind text not null default 'binary';
+alter table habittracker.habits add column if not exists unit text;
+alter table habittracker.habits add column if not exists increment integer not null default 1;
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_habits_kind') then
+        alter table habittracker.habits add constraint ck_habits_kind check (kind in ('binary', 'quantity'));
+        alter table habittracker.habits add constraint ck_habits_increment check (increment > 0);
+    end if;
+end $$;
+
+-- Linked habits: source names an EssayCards activity kind; done-ness is read from
+-- EssayCards (never logged here). null = manual habit.
+alter table habittracker.habits add column if not exists source text;
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_habits_source') then
+        alter table habittracker.habits add constraint ck_habits_source
+            check (source is null or source in ('essaycards_flashcards', 'essaycards_oral'));
+    end if;
+end $$;
+
+-- One row per tap. Today's quantity = sum(amount); undo = delete the newest row.
+-- Independent of the legacy daily_reviews/habit_results tables, which stay as history.
+create table if not exists habittracker.habit_entries (
+    id          uuid        primary key default gen_random_uuid(),
+    habit_id    uuid        not null references habittracker.habits(id),
+    entry_date  date        not null,
+    amount      integer     not null check (amount > 0),
+    created_at  timestamptz not null default now()
+);
+create index if not exists ix_habit_entries_date on habittracker.habit_entries (entry_date, habit_id);
+
 commit;

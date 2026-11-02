@@ -604,6 +604,10 @@
 .shell-dots__group:only-child { flex: 0 1 auto; justify-content: flex-start; gap: 6px; }
 .shell-dots__group:only-child .shell-dots__dot { flex: 0 0 12px; }
 
+/* Stacked rows (Habits): one row per group, fixed height so an empty row keeps its place. */
+.shell-dots--stacked { flex-direction: column; align-items: stretch; gap: 4px; }
+.shell-dots--stacked .shell-dots__group { flex: none; min-height: 12px; border-right: none; padding-right: 0; }
+
 /* ─── ShellNotFound ──────────────────────────────────────────────────────────── */
 
 .shell-not-found {

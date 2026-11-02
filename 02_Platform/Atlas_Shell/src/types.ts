@@ -78,6 +78,8 @@ export interface LauncherSummary {
   meta?: string;
   /** Optional activity strip: groups of dots (e.g. one group per week), oldest first. */
   dots?: LauncherDot[][];
+  /** Render dot groups as stacked rows (oldest on top) instead of side by side. */
+  dotsStacked?: boolean;
   /** Optional short list under the status line (max 3 rendered). */
   items?: Array<{ label: string; when?: string }>;
   /** Optional trailing note under the list, e.g. "+ 2 more upcoming". */

@@ -100,3 +100,34 @@ def seed_starter_habits() -> None:
                         (name, display_order, today),
                     )
         conn.commit()
+
+
+# Linked habits (source -> display name). Done-ness comes from EssayCards.
+LINKED_HABITS: tuple[tuple[str, str], ...] = (
+    ("essaycards_flashcards", "Flashcards"),
+    ("essaycards_oral", "Oral practice"),
+)
+
+
+def seed_linked_habits() -> None:
+    """Insert each linked habit once (by source, even if later archived or
+    renamed). active_from = first day EssayCards has such activity, so real
+    history is shown; today if EssayCards is unreachable or has none."""
+    from backend import essaycards_activity
+
+    today = berlin_today()
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            for source, name in LINKED_HABITS:
+                cur.execute("select 1 from habittracker.habits where source = %s", (source,))
+                if cur.fetchone():
+                    continue
+                first = essaycards_activity.first_day(source) or today
+                cur.execute(
+                    """
+                    insert into habittracker.habits (name, display_order, active_from, source)
+                    values (%s, coalesce((select max(display_order) from habittracker.habits), -1) + 1, %s, %s)
+                    """,
+                    (name, first, source),
+                )
+        conn.commit()

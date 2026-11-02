@@ -2,7 +2,7 @@
  * HabitTracker ShellEntry — Sprint 01
  *
  * Views:
- *   /habittracker                     -> DailyReviewView (today)
+ *   /habittracker                     -> TodayView (one-tap logging + 28-day dots)
  *   /habittracker/review/:date        -> DailyReviewView (explicit date)
  *   /habittracker/habits              -> HabitDefinitionsView
  *   /habittracker/reports             -> ReportsView
@@ -48,10 +48,29 @@ interface HabitRow extends Row {
   name: string;
   description: string | null;
   default_checked: boolean;
+  kind: HabitKind;
+  unit: string | null;
+  increment: number;
+  source: string | null;
   display_order: number;
   active_from: string;
   end_date: string | null;
 }
+
+type HabitKind = 'binary' | 'quantity';
+
+interface TodayHabit {
+  habit_id: string;
+  name: string;
+  kind: HabitKind;
+  linked: boolean;
+  unit: string | null;
+  increment: number;
+  total: number;
+  done: boolean;
+}
+
+interface HistoryDay { date: string; done: number; tracked: number }
 
 type CellState = 'completed' | 'not_completed' | 'not_active' | 'unreviewed';
 
@@ -287,7 +306,157 @@ function DailyReviewView() {
   );
 }
 
+// ── Today View (one-tap logging) ─────────────────────────────────────────────
+
+const HEAT_DAYS = 28;
+
+function HeatmapStrip({ days, today }: { days: HistoryDay[]; today: string }) {
+  return (
+    <div
+      style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, maxWidth: 260, marginBottom: 18 }}
+      aria-label="Last 28 days"
+    >
+      {days.map(d => {
+        const ratio = d.tracked > 0 ? d.done / d.tracked : 0;
+        return (
+          <div
+            key={d.date}
+            title={`${d.date}: ${d.done} / ${d.tracked}`}
+            style={{
+              aspectRatio: '1 / 1', borderRadius: '50%',
+              background: ratio > 0 ? `rgba(42, 122, 59, ${0.25 + 0.75 * ratio})` : '#e6e6e6',
+              outline: d.date === today ? '2px solid #14161A' : 'none', outlineOffset: 1,
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function TodayView() {
+  const navigate = useNavigate();
+  const date = todayISO();
+  const [habits, setHabits] = useState<TodayHabit[]>([]);
+  const [history, setHistory] = useState<HistoryDay[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    const res = await apiFetch<{ days: HistoryDay[] }>(`/habittracker/history?days=${HEAT_DAYS}&end=${date}`);
+    if (!isApiError(res)) setHistory(res.days);
+  }, [date]);
+
+  useEffect(() => {
+    (async () => {
+      const res = await apiFetch<{ habits: TodayHabit[] }>(`/habittracker/today?date=${date}`);
+      setLoading(false);
+      if (isApiError(res)) { setError(res.error.message); return; }
+      setHabits(res.habits);
+    })();
+    loadHistory();
+  }, [date, loadHistory]);
+
+  // Server returns the new day total; replace it locally so rapid taps stay consistent.
+  const applyTotal = (habitId: string, total: number) =>
+    setHabits(prev => prev.map(h => (h.habit_id === habitId ? { ...h, total, done: total > 0 } : h)));
+
+  const log = async (h: TodayHabit) => {
+    // Binary tap on a done habit undoes it; quantity taps always add.
+    const undo = h.kind === 'binary' && h.done;
+    const res = await apiFetch<{ total: number }>(
+      undo ? `/habittracker/habits/${h.habit_id}/entries/last?date=${date}` : `/habittracker/habits/${h.habit_id}/entries`,
+      undo ? { method: 'DELETE' } : { method: 'POST', body: JSON.stringify({ date }) },
+    );
+    if (isApiError(res)) { setError(res.error.message); return; }
+    applyTotal(h.habit_id, res.total);
+    loadHistory();
+  };
+
+  const undoLast = async (h: TodayHabit) => {
+    const res = await apiFetch<{ total: number }>(
+      `/habittracker/habits/${h.habit_id}/entries/last?date=${date}`, { method: 'DELETE' });
+    if (isApiError(res)) { setError(res.error.message); return; }
+    applyTotal(h.habit_id, res.total);
+    loadHistory();
+  };
+
+  const tapStyle = (done: boolean): React.CSSProperties => ({
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+    padding: '14px 16px', borderRadius: 10, cursor: 'pointer', fontSize: 16, textAlign: 'left',
+    border: `1px solid ${done ? '#2a7a3b' : '#e0e0e0'}`,
+    background: done ? '#dcf3df' : '#fff', color: '#14161A',
+  });
+
+  return (
+    <div style={pageStyle}>
+      {history.length > 0 && <HeatmapStrip days={history} today={date} />}
+      {loading && <Skeleton />}
+      {error && <ErrorCard message={error} />}
+      {!loading && habits.length === 0 && !error && (
+        <div style={{ color: '#888', fontSize: 14 }}>No active habits. Add one under Habits.</div>
+      )}
+      {habits.map(h => (
+        <div key={h.habit_id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <button style={{ ...tapStyle(h.done), cursor: h.linked ? 'default' : 'pointer' }}
+                  onClick={() => { if (!h.linked) log(h); }}>
+            <span style={{ fontWeight: 600 }}>{h.name}</span>
+            {h.kind === 'binary' || h.linked ? (
+              <span style={{ fontSize: 20 }}>{h.done ? '✓' : '○'}</span>
+            ) : (
+              <span style={{ color: '#555' }}>
+                {h.total} {h.unit ?? ''} <strong style={{ color: '#2a7a3b' }}>+{h.increment}</strong>
+              </span>
+            )}
+          </button>
+          {h.kind === 'quantity' && (
+            <button
+              style={{ ...btnStyle, padding: '0 14px' }}
+              onClick={() => undoLast(h)}
+              disabled={h.total === 0}
+              aria-label={`Undo last ${h.name}`}
+            >
+              ↩
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        style={{ ...btnStyle, border: 'none', background: 'none', color: '#777', fontSize: 13, marginTop: 8 }}
+        onClick={() => navigate(`/habittracker/review/${date}`)}
+      >
+        Evening review for today ›
+      </button>
+    </div>
+  );
+}
+
 // ── Habit Definitions View ───────────────────────────────────────────────────
+
+function KindFields({ kind, unit, increment, onKind, onUnit, onIncrement }: {
+  kind: HabitKind; unit: string; increment: string;
+  onKind: (k: HabitKind) => void; onUnit: (u: string) => void; onIncrement: (i: string) => void;
+}) {
+  const inputStyle = { padding: 4, borderRadius: 6, border: '1px solid #ccc' };
+  return (
+    <>
+      <select value={kind} onChange={e => onKind(e.target.value as HabitKind)} style={inputStyle}>
+        <option value="binary">Done / not done</option>
+        <option value="quantity">Counted</option>
+      </select>
+      {kind === 'quantity' && (
+        <>
+          <input value={unit} onChange={e => onUnit(e.target.value)} placeholder="unit (reps, min)"
+                 style={{ ...inputStyle, width: 110 }} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            +<input type="number" min={1} value={increment} onChange={e => onIncrement(e.target.value)}
+                    style={{ ...inputStyle, width: 60 }} />per tap
+          </label>
+        </>
+      )}
+    </>
+  );
+}
 
 function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: HabitRow) => void }) {
   const [name, setName] = useState(habit.name);
@@ -295,6 +464,9 @@ function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: Habi
   const [defaultChecked, setDefaultChecked] = useState(habit.default_checked);
   const [activeFrom, setActiveFrom] = useState(habit.active_from);
   const [endDate, setEndDate] = useState(habit.end_date ?? '');
+  const [kind, setKind] = useState<HabitKind>(habit.kind);
+  const [unit, setUnit] = useState(habit.unit ?? '');
+  const [increment, setIncrement] = useState(String(habit.increment));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -318,6 +490,11 @@ function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: Habi
       description: description.trim() === '' ? null : description,
       default_checked: defaultChecked,
       active_from: activeFrom,
+      ...(habit.source ? {} : {
+        kind,
+        unit: kind === 'quantity' ? unit : null,
+        increment: kind === 'quantity' ? Number(increment) || 1 : 1,
+      }),
     });
   };
 
@@ -356,6 +533,10 @@ function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: Habi
           <input type="date" value={activeFrom} onChange={e => setActiveFrom(e.target.value)}
                  style={{ padding: 4, borderRadius: 6, border: '1px solid #ccc' }} />
         </label>
+        {habit.source ? <span style={{ color: '#777' }}>Tracked automatically from EssayCards</span> : (
+          <KindFields kind={kind} unit={unit} increment={increment}
+                      onKind={setKind} onUnit={setUnit} onIncrement={setIncrement} />
+        )}
         {archived && <span style={{ color: '#999' }}>Archived (end date {endDate})</span>}
       </div>
       {error && <div style={{ color: '#b3261e', fontSize: 12, marginBottom: 8 }}>{error}</div>}
@@ -373,6 +554,9 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [activeFrom, setActiveFrom] = useState(todayISO());
+  const [kind, setKind] = useState<HabitKind>('binary');
+  const [unit, setUnit] = useState('');
+  const [increment, setIncrement] = useState('1');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -386,6 +570,9 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
         description: description.trim() === '' ? undefined : description,
         default_checked: false,
         active_from: activeFrom,
+        kind,
+        unit,
+        increment: Number(increment) || 1,
       }),
     });
     setSaving(false);
@@ -405,6 +592,10 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
                style={{ flex: '2 1 220px', padding: 6, borderRadius: 6, border: '1px solid #ccc' }} />
         <input type="date" value={activeFrom} onChange={e => setActiveFrom(e.target.value)}
                style={{ padding: 6, borderRadius: 6, border: '1px solid #ccc' }} />
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8, fontSize: 13 }}>
+        <KindFields kind={kind} unit={unit} increment={increment}
+                    onKind={setKind} onUnit={setUnit} onIncrement={setIncrement} />
       </div>
       {error && <div style={{ color: '#b3261e', fontSize: 12, marginBottom: 8 }}>{error}</div>}
       <button style={primaryBtnStyle} onClick={submit} disabled={saving || !name.trim()}>Add habit</button>
@@ -452,7 +643,7 @@ function HabitDefinitionsView() {
 
   return (
     <div style={pageStyle}>
-      <h2 style={{ margin: '0 0 12px' }}>Habit Definitions</h2>
+      <h2 style={{ margin: '0 0 12px' }}>Habits</h2>
       {loading && <Skeleton />}
       {error && <ErrorCard message={error} />}
       {reorderError && <ErrorCard message={reorderError} />}
@@ -614,7 +805,7 @@ function ReportsView() {
 export default function HabitTrackerApp() {
   return (
     <Routes>
-      <Route path="/" element={<DailyReviewView />} />
+      <Route path="/" element={<TodayView />} />
       <Route path="/review/:date" element={<DailyReviewView />} />
       <Route path="/habits" element={<HabitDefinitionsView />} />
       <Route path="/reports" element={<ReportsView />} />

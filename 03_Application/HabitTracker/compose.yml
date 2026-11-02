@@ -13,6 +13,7 @@ services:
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
+      ESSAYCARDS_URL:    http://atlas-essaycards:8000
     volumes:
       - ${DATA_ROOT}/habittracker/logs:/app/logs
     networks:

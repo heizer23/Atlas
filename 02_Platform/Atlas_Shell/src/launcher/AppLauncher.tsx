@@ -17,9 +17,9 @@ import type { AppConfig, LauncherDot, LauncherSummary } from '../types';
 import { LineBullet } from './LineBullet';
 import { sortByRecency } from '../shell/recency';
 
-function DotStrip({ groups }: { groups: LauncherDot[][] }): JSX.Element {
+function DotStrip({ groups, stacked }: { groups: LauncherDot[][]; stacked?: boolean }): JSX.Element {
   return (
-    <div className="shell-dots" aria-hidden="true">
+    <div className={'shell-dots' + (stacked ? ' shell-dots--stacked' : '')} aria-hidden="true">
       {groups.map((group, g) => (
         <span key={g} className="shell-dots__group">
           {group.map((dot, i) => (
@@ -43,11 +43,13 @@ function SummaryBlock({ summary }: { summary: LauncherSummary }): JSX.Element {
   const items = (summary.items ?? []).slice(0, 3);
   return (
     <>
-      <span className="shell-app-entry__line">
-        {summary.line}
-        {summary.meta ? <span className="shell-app-entry__meta"> · {summary.meta}</span> : null}
-      </span>
-      {summary.dots && summary.dots.length > 0 ? <DotStrip groups={summary.dots} /> : null}
+      {summary.line || summary.meta ? (
+        <span className="shell-app-entry__line">
+          {summary.line}
+          {summary.meta ? <span className="shell-app-entry__meta"> · {summary.meta}</span> : null}
+        </span>
+      ) : null}
+      {summary.dots && summary.dots.length > 0 ? <DotStrip groups={summary.dots} stacked={summary.dotsStacked} /> : null}
       {items.length > 0 ? (
         <ul className="shell-app-entry__items">
           {items.map((item, i) => (
