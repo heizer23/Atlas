@@ -166,4 +166,16 @@ create index if not exists ix_shopping_tasks_item_id
 create index if not exists ix_stock_movements_item_ts
     on storagetracker.stock_movements(item_id, created_at desc);
 
+-- Kitchen batch management: production date, archive flag (depleted batches leave active inventory, history stays),
+-- and freeze / thaw / expiry events in the item history.
+alter table storagetracker.items add column if not exists produced_at date;
+alter table storagetracker.items add column if not exists archived_at timestamptz;
+
+create index if not exists ix_items_archived on storagetracker.items(archived_at) where archived_at is not null;
+
+alter table storagetracker.item_history drop constraint if exists item_history_change_type_check;
+alter table storagetracker.item_history add constraint item_history_change_type_check
+    check (change_type in ('created', 'state_change', 'location_change', 'quantity_change',
+                           'expiry_change', 'freeze', 'thaw'));
+
 commit;

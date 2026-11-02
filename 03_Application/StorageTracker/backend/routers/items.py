@@ -50,6 +50,8 @@ ITEM_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="unit",             label="Unit",            type="string", sortable=False, filterable=False),
     ColumnSchema(key="expires_at",       label="Expires",         type="date",   sortable=True,  filterable=False),
     ColumnSchema(key="kind",             label="Kind",            type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="produced_at",      label="Produced",        type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="archived_at",      label="Archived",        type="date",   sortable=True,  filterable=False),
     ColumnSchema(key="expiry_status",    label="Expiry",          type="enum",   sortable=False, filterable=False),
     ColumnSchema(key="recipe_ref",       label="Recipe Ref",      type="string", sortable=False, filterable=False),
     ColumnSchema(key="source_tags",      label="Source Tags",     type="string", sortable=False, filterable=False),
@@ -82,6 +84,7 @@ class ItemCreate(BaseModel):
     expires_at:       date | None = None
     kind:             str = "ingredient"
     recipe_ref:       str | None = None
+    produced_at:      date | None = None
 
 
 class ItemUpdate(BaseModel):
@@ -94,6 +97,7 @@ class ItemUpdate(BaseModel):
     unit:             str | None = None
     expires_at:       date | None = None
     recipe_ref:       str | None = None
+    produced_at:      date | None = None
     notes:            str | None = None
     source_tags:      list[str] | None = None
 
@@ -123,6 +127,10 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     d["expiry_status"] = _expiry_status(d.get("expires_at"), d.get("quantity"))
     if d.get("expires_at"):
         d["expires_at"] = d["expires_at"].isoformat()
+    if d.get("produced_at"):
+        d["produced_at"] = d["produced_at"].isoformat()
+    if d.get("archived_at"):
+        d["archived_at"] = d["archived_at"].isoformat()
     if d.get("created_at"):
         d["created_at"] = d["created_at"].isoformat()
     if d.get("updated_at"):
@@ -270,9 +278,9 @@ def view_low_stock() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items
-                where state in ('low_stock', 'out_of_stock')
+                where state in ('low_stock', 'out_of_stock') and archived_at is null
                 order by name asc
                 """,
             )
@@ -288,9 +296,9 @@ def view_recycling() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items
-                where state = 'marked_for_recycling'
+                where state = 'marked_for_recycling' and archived_at is null
                 order by name asc
                 """,
             )
@@ -308,9 +316,9 @@ def view_expiring() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items
-                where expires_at is not null and expires_at <= %s and quantity > 0
+                where expires_at is not null and expires_at <= %s and quantity > 0 and archived_at is null
                 order by expires_at asc, name asc
                 """,
                 (limit,),
@@ -327,9 +335,9 @@ def view_important() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items
-                where item_type = 'object'
+                where item_type = 'object' and archived_at is null
                 order by name asc
                 """,
             )
@@ -348,11 +356,12 @@ def view_search(q: str = "") -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items
-                where lower(name)     like %s
+                where archived_at is null
+                  and (lower(name)     like %s
                    or lower(location) like %s
-                   or lower(notes)    like %s
+                   or lower(notes)    like %s)
                 order by name asc
                 """,
                 (pattern, pattern, pattern),
@@ -370,7 +379,11 @@ def list_items(
     location:   str | None = None,
     source_tag: str | None = None,
     kind:       str | None = None,
+    archived:   str = "exclude",
 ) -> JSONResponse:
+    """archived: exclude (default, active inventory) | include | only. Archived = depleted batches kept for history."""
+    if archived not in ("exclude", "include", "only"):
+        return api_error("INVALID_FILTER", "archived must be one of: exclude, include, only")
     if state and state not in VALID_STATES:
         return api_error("INVALID_FILTER", f"state must be one of: {', '.join(sorted(VALID_STATES))}")
     if item_type and item_type not in VALID_ITEM_TYPES:
@@ -396,6 +409,10 @@ def list_items(
     if source_tag:
         conditions.append("source_tags @> %s::jsonb")
         params.append(f'["{source_tag}"]')
+    if archived == "exclude":
+        conditions.append("archived_at is null")
+    elif archived == "only":
+        conditions.append("archived_at is not null")
 
     where = ("where " + " and ".join(conditions)) if conditions else ""
 
@@ -407,7 +424,7 @@ def list_items(
                 f"""
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items {where}
                 order by created_at desc
                 """,
@@ -449,11 +466,11 @@ def create_item(body: ItemCreate) -> JSONResponse:
                 insert into storagetracker.items
                     (name, item_type, state, location, notes, source_tags,
                      quantity, min_quantity, restock_quantity,
-                     unit, expires_at, kind, recipe_ref)
-                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
+                     unit, expires_at, kind, recipe_ref, produced_at)
+                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning id, name, item_type, state, location, notes, source_tags,
                           quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                          created_at, updated_at
+                          produced_at, archived_at, created_at, updated_at
                 """,
                 (
                     body.name.strip(),
@@ -469,6 +486,7 @@ def create_item(body: ItemCreate) -> JSONResponse:
                     body.expires_at,
                     body.kind,
                     body.recipe_ref,
+                    body.produced_at,
                 ),
             )
             row = _row_to_dict(cur.fetchone())
@@ -492,7 +510,7 @@ def get_item(item_id: int) -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -547,7 +565,7 @@ def update_item(item_id: int, body: ItemUpdate) -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       created_at, updated_at
+                       produced_at, archived_at, created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -584,7 +602,7 @@ def update_item(item_id: int, body: ItemUpdate) -> JSONResponse:
                 where id = %s
                 returning id, name, item_type, state, location, notes, source_tags,
                           quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                          created_at, updated_at
+                          produced_at, archived_at, created_at, updated_at
                 """,
                 params,
             )

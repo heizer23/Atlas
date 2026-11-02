@@ -25,7 +25,8 @@ export interface Line {
 interface PreviewRecipe {
   name: string; kind: 'base' | 'derived' | 'favorite'; servings: number; yield_unit: string;
   description: string | null; prep_minutes: number | null; cook_minutes: number | null;
-  shelf_life_days: number | null; storage_location: string | null; steps: string; ingredients: Line[];
+  shelf_life_days: number | null; freezer_shelf_life_days: number | null; thawed_shelf_life_days: number | null;
+  storage_location: string | null; steps: string; ingredients: Line[];
 }
 
 interface Preview {
@@ -227,6 +228,7 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
     const body = {
       name: rec.name, kind: rec.kind, servings: rec.servings, description: rec.description,
       prep_minutes: rec.prep_minutes, cook_minutes: rec.cook_minutes, shelf_life_days: rec.shelf_life_days,
+      freezer_shelf_life_days: rec.freezer_shelf_life_days, thawed_shelf_life_days: rec.thawed_shelf_life_days,
       storage_location: rec.storage_location, steps: rec.steps,
       ingredients: rec.ingredients.map((l) => ({
         name: l.name || l.item_name || '', qty: l.qty, unit: l.unit, item_id: l.item_id, base_recipe_id: l.base_recipe_id,
@@ -270,6 +272,7 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
               {rec.kind === 'base' ? 'Cooked base' : rec.kind === 'derived' ? 'Derived dish' : 'Favorite'} · {rec.servings} {rec.yield_unit}
               {rec.prep_minutes !== null ? ` · Prep ${rec.prep_minutes} min` : ''}
               {rec.cook_minutes !== null ? ` · Cook ${rec.cook_minutes} min` : ''}
+              {rec.kind === 'base' ? ` · Fridge ${rec.shelf_life_days ?? '—'} d · Freezer ${rec.freezer_shelf_life_days ?? '—'} d` : ''}
             </span>
             {rec.description && <span>{rec.description}</span>}
             {preview.name_exists && (

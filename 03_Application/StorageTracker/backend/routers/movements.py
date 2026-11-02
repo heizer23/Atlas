@@ -89,9 +89,16 @@ def _apply(conn: Any, item_id: int, delta: float, reason: str, ref: str | None,
                 state = auto
             elif state == "low_stock":
                 state = "stored"
+        # depleted batches leave active inventory (history stays); a reversal that restores stock reactivates them
         cur.execute(
-            "update storagetracker.items set quantity = %s, state = %s, updated_at = now() where id = %s",
-            (new_q, state, item_id),
+            """
+            update storagetracker.items
+            set quantity = %s, state = %s, updated_at = now(),
+                archived_at = case when kind = 'batch' and %s = 0 then coalesce(archived_at, now())
+                                   when kind = 'batch' then null else archived_at end
+            where id = %s
+            """,
+            (new_q, state, new_q, item_id),
         )
     if applied != 0:
         _record_history(conn, item_id, "quantity_change", str(_num(old_q)), str(_num(new_q)), notes=reason)

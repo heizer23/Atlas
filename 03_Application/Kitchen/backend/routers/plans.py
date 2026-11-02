@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -18,7 +18,8 @@ router = APIRouter(prefix="/kitchen", tags=["plans"])
 
 MEAL_SELECT = """
     select m.id, m.plan_id, m.recipe_id, r.name as recipe_name, r.kind as recipe_kind,
-           m.kind, m.day, m.slot, m.portions, m.status, c.produced_qty, c.batch_item_id
+           m.kind, m.day, m.slot, m.portions, m.status, c.produced_qty, c.batch_item_id,
+           r.servings as recipe_servings, r.shelf_life_days, r.freezer_shelf_life_days, r.thawed_shelf_life_days
     from kitchen.planned_meals m
     left join kitchen.recipes r on r.id = m.recipe_id
     left join kitchen.cook_events c on c.meal_id = m.id
@@ -47,12 +48,30 @@ class MealPatch(BaseModel):
     status:    str | None = None  # only 'skipped' (from planned)
 
 
+class AllocationIn(BaseModel):
+    location:        Literal["fridge", "freezer"]
+    qty:             float = Field(gt=0)
+    shelf_life_days: int | None = Field(default=None, ge=0)   # overrides the recipe default for this batch
+
+
 class CookIn(BaseModel):
-    produced_qty: float | None = Field(default=None, gt=0)
+    produced_qty:        float | None = Field(default=None, gt=0)
+    allocations:         list[AllocationIn] | None = None     # None = all in the fridge (legacy behaviour)
+    remember_shelf_life: bool = False                         # store given days as recipe default if it has none
 
 
 class EatIn(BaseModel):
     portions: float | None = Field(default=None, gt=0)
+    batch_id: int | None = None                               # prefer this ready batch (article number of the batch)
+
+
+class FreezeThawIn(BaseModel):
+    expires_at: date                                          # explicit best-before date, never implicit
+
+
+class ConsumeIn(BaseModel):
+    qty:             float = Field(gt=0)
+    idempotency_key: str | None = None
 
 
 class StockLineIn(BaseModel):
@@ -60,7 +79,7 @@ class StockLineIn(BaseModel):
     qty:     float = Field(ge=0)
 
 
-def _expiry_warnings(cur: Any, meals: list[dict[str, Any]]) -> None:
+def _expiry_warnings(cur: Any, meals: list[dict[str, Any]], all_batches: list[dict[str, Any]] | None) -> None:
     """Set meal['expiry_warning'] when a planned meal needs a cooked base that is no longer good on its day.
 
     A base is fine on day D if some stocked batch has expires_at >= D, or a still-planned cooking session of that
@@ -69,10 +88,9 @@ def _expiry_warnings(cur: Any, meals: list[dict[str, Any]]) -> None:
     that as missing_bases)."""
     for m in meals:
         m["expiry_warning"] = None
-    try:
-        batches = [b for b in st.list_items(kind="batch") if (b["quantity"] or 0) > 0]
-    except st.StorageError:
+    if all_batches is None:
         return
+    batches = [b for b in all_batches if (b["quantity"] or 0) > 0 and st.storage_of(b) == "fridge"]
     cur.execute("select recipe_id, base_recipe_id, name from kitchen.recipe_ingredients where base_recipe_id is not null")
     bases_of: dict[str, list[tuple[str, str]]] = {}
     for r in cur.fetchall():
@@ -100,6 +118,40 @@ def _expiry_warnings(cur: Any, meals: list[dict[str, Any]]) -> None:
             break
 
 
+def _base_availability(cur: Any, meals: list[dict[str, Any]], all_batches: list[dict[str, Any]] | None) -> None:
+    """meal['bases'] for planned meals that use cooked bases, one entry per base:
+    ready (fridge, not expired) / will_be_cooked (a planned cook covers it) / needs_thaw (only frozen portions
+    would complete it) / missing (no prepared portions in stock). Raw-ingredient fallback is a later enhancement."""
+    for m in meals:
+        m["bases"] = []
+    if all_batches is None:
+        return
+    today = berlin_today().isoformat()
+    cur.execute("select recipe_id, base_recipe_id, name, qty from kitchen.recipe_ingredients "
+                "where base_recipe_id is not null")
+    lines: dict[str, list[dict[str, Any]]] = {}
+    for r in cur.fetchall():
+        lines.setdefault(str(r["recipe_id"]), []).append(dict(r))
+    for m in meals:
+        if m["kind"] != "meal" or m["status"] != "planned" or not m["recipe_id"]:
+            continue
+        scale = float(m["portions"]) / float(m["recipe_servings"])
+        for ln in lines.get(str(m["recipe_id"]), []):
+            base_id = str(ln["base_recipe_id"])
+            mine = [b for b in all_batches if b.get("recipe_ref") == base_id and (b["quantity"] or 0) > 0
+                    and not st.is_expired(b, today)]
+            ready = sum(float(b["quantity"]) for b in mine if st.storage_of(b) == "fridge")
+            frozen = sum(float(b["quantity"]) for b in mine if st.storage_of(b) == "freezer")
+            planned = sum(float(c["portions"]) for c in meals if c["kind"] == "cook" and c["status"] == "planned"
+                          and str(c["recipe_id"]) == base_id and c["day"] <= m["day"])
+            needed = float(ln["qty"]) * scale
+            status = ("ready" if ready + 1e-9 >= needed else
+                      "will_be_cooked" if ready + planned + 1e-9 >= needed else
+                      "needs_thaw" if ready + planned + frozen + 1e-9 >= needed and frozen > 0 else "missing")
+            m["bases"].append({"base_recipe_id": base_id, "name": ln["name"], "needed": round(needed, 4), "ready": round(ready, 4),
+                               "frozen": round(frozen, 4), "planned_cook": round(planned, 4), "status": status})
+
+
 def _plan_payload(cur: Any, plan_id: str) -> dict[str, Any] | None:
     cur.execute("select id, week_start, days from kitchen.plans where id = %s", (plan_id,))
     p = cur.fetchone()
@@ -107,7 +159,12 @@ def _plan_payload(cur: Any, plan_id: str) -> dict[str, Any] | None:
         return None
     cur.execute(MEAL_SELECT + " where m.plan_id = %s order by m.day, m.slot, m.created_at", (plan_id,))
     meals = [dict(m) for m in cur.fetchall()]
-    _expiry_warnings(cur, meals)
+    try:
+        all_batches = st.list_items(kind="batch")
+    except st.StorageError:
+        all_batches = None
+    _expiry_warnings(cur, meals, all_batches)
+    _base_availability(cur, meals, all_batches)
     return {"id": str(p["id"]), "week_start": p["week_start"], "days": p["days"], "meals": meals}
 
 
@@ -229,6 +286,9 @@ def _run(fn) -> JSONResponse:
         except service.Conflict as e:
             conn.rollback()
             return api_error("CONFLICT", str(e), status=409)
+        except service.ShelfLifeRequired as e:
+            conn.rollback()
+            return api_error("SHELF_LIFE_REQUIRED", str(e), status=422)
         except ValueError as e:
             conn.rollback()
             return api_error("VALIDATION_ERROR", str(e))
@@ -242,12 +302,15 @@ def _run(fn) -> JSONResponse:
 
 @router.post("/meals/{meal_id}/cooked", response_model=None)
 def cooked(meal_id: str, body: CookIn | None = None) -> JSONResponse:
-    return _run(lambda c: {**service.cook(c, meal_id, body.produced_qty if body else None), "meal_id": meal_id})
+    allocations = [a.model_dump() for a in body.allocations] if body and body.allocations is not None else None
+    return _run(lambda c: {**service.cook(c, meal_id, body.produced_qty if body else None, allocations,
+                                          bool(body and body.remember_shelf_life)), "meal_id": meal_id})
 
 
 @router.post("/meals/{meal_id}/eaten", response_model=None)
 def eaten(meal_id: str, body: EatIn | None = None) -> JSONResponse:
-    return _run(lambda c: {**service.eat(c, meal_id, body.portions if body else None), "meal_id": meal_id})
+    return _run(lambda c: {**service.eat(c, meal_id, body.portions if body else None,
+                                         body.batch_id if body else None), "meal_id": meal_id})
 
 
 @router.post("/meals/{meal_id}/undo", response_model=None)
@@ -306,18 +369,85 @@ def purchase(body: PurchaseIn) -> JSONResponse:
                                                   "replayed": res["replayed"]})
 
 
+def _batch_row(b: dict[str, Any], recipes: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    r = recipes.get(b.get("recipe_ref") or "", {})
+    today = berlin_today()
+
+    def plus(days: int | None) -> str | None:
+        return (today + timedelta(days=days)).isoformat() if days is not None else None
+
+    storage = st.storage_of(b)
+    return {"id": b["id"], "name": b["name"], "recipe_id": b.get("recipe_ref"), "quantity": b["quantity"],
+            "unit": b.get("unit"), "location": b.get("location"), "storage": storage,
+            "expires_at": b.get("expires_at"), "expiry_status": b.get("expiry_status"),
+            "produced_at": b.get("produced_at"),
+            # policy-derived suggestions for the explicit freeze / thaw date (the user confirms or edits them)
+            "suggested_freeze_expires_at": plus(r.get("freezer_shelf_life_days")) if storage == "fridge" else None,
+            "suggested_thaw_expires_at": plus(r.get("thawed_shelf_life_days")) if storage == "freezer" else None}
+
+
 @router.get("/batches", response_model=None)
 def batches() -> JSONResponse:
-    """Prepared batches with remaining portions (read from StorageTracker, the stock authority)."""
+    """Prepared batches with remaining portions (read from StorageTracker, the stock authority).
+    Active inventory only: depleted batches are archived there and stay available in its history."""
     try:
-        rows = [{"id": b["id"], "name": b["name"], "recipe_id": b.get("recipe_ref"), "quantity": b["quantity"],
-                 "unit": b.get("unit"), "location": b.get("location"), "expires_at": b.get("expires_at"),
-                 "expiry_status": b.get("expiry_status")}
-                for b in sorted(st.list_items(kind="batch"), key=lambda b: (b.get("expires_at") or "9999-12-31"))
-                if (b["quantity"] or 0) > 0]
+        items = [b for b in st.list_items(kind="batch") if (b["quantity"] or 0) > 0]
     except st.StorageError as e:
         return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
+    with get_db() as conn, conn.cursor() as cur:
+        cur.execute("select id, freezer_shelf_life_days, thawed_shelf_life_days from kitchen.recipes")
+        recipes = {str(r["id"]): dict(r) for r in cur.fetchall()}
+    rows = [_batch_row(b, recipes) for b in sorted(items, key=lambda b: (b.get("expires_at") or "9999-12-31"))]
     return dataset_response("batch", rows, "Batches")
+
+
+def _relocate(item_id: int, event: str, body: FreezeThawIn) -> JSONResponse:
+    """freeze: fridge -> freezer, thaw: freezer -> fridge; always with the user's explicit best-before date."""
+    try:
+        item = st.get_item(item_id)
+        if not item or item.get("kind") != "batch":
+            return api_error("NOT_FOUND", f"Batch {item_id} not found", status=404)
+        want_from = "fridge" if event == "freeze" else "freezer"
+        if st.storage_of(item) != want_from:
+            return api_error("CONFLICT", f"Batch is already in the {st.storage_of(item)}", status=409)
+        if st.is_expired(item, berlin_today().isoformat()):
+            return api_error("CONFLICT", "Batch is expired: discard it instead", status=409)
+        row = st.relocate(item_id, st.location_label("freezer" if event == "freeze" else "fridge"), event,
+                          body.expires_at.isoformat())
+    except st.StorageError as e:
+        return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
+    return dataset_response("batch", [{"id": row["id"], "location": row["location"], "storage": st.storage_of(row),
+                                       "expires_at": row["expires_at"], "quantity": row["quantity"]}], "Batch")
+
+
+@router.post("/batches/{item_id}/freeze", response_model=None)
+def freeze_batch(item_id: int, body: FreezeThawIn) -> JSONResponse:
+    return _relocate(item_id, "freeze", body)
+
+
+@router.post("/batches/{item_id}/thaw", response_model=None)
+def thaw_batch(item_id: int, body: FreezeThawIn) -> JSONResponse:
+    return _relocate(item_id, "thaw", body)
+
+
+@router.post("/batches/{item_id}/consume", response_model=None)
+def consume_batch(item_id: int, body: ConsumeIn) -> JSONResponse:
+    """Take portions from one specific batch without a planned meal (leftovers, a snack, ...)."""
+    try:
+        item = st.get_item(item_id)
+        if not item or item.get("kind") != "batch":
+            return api_error("NOT_FOUND", f"Batch {item_id} not found", status=404)
+        if st.storage_of(item) == "freezer":
+            return api_error("CONFLICT", "Batch is frozen: thaw it first", status=409)
+        if st.is_expired(item, berlin_today().isoformat()):
+            return api_error("CONFLICT", "Batch is expired: discard it instead", status=409)
+        if body.qty > float(item["quantity"] or 0) + 1e-9:
+            return api_error("CONFLICT", f"Only {item['quantity']} left in this batch", status=409)
+        res = st.post_movement(item_id, -body.qty, "consumed", body.idempotency_key or f"consume:{uuid.uuid4()}")
+    except st.StorageError as e:
+        return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
+    return JSONResponse(status_code=200, content={"item_id": item_id, "quantity": res["quantity"],
+                                                  "replayed": res["replayed"]})
 
 
 @router.post("/batches/{item_id}/discard", response_model=None)

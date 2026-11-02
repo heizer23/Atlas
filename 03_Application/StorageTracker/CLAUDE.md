@@ -43,3 +43,9 @@ the article identity. Converted from uuid on 2026-11-02 (mapping table dropped a
 `expired` (< today), `expiring_soon` (<= today + 2 days), only for quantity > 0. `GET /api/items/views/expiring` lists both,
 earliest first. UI: banner on All Items, `/items/expiring` view, Discard button on expired items = `expired` ledger movement
 (key `expired:<id>:<expires_at>`, confirmation dialog first, reversible). Nothing is removed automatically.
+
+## Batch lifecycle
+`items.produced_at` (cooking date), `items.archived_at` (depleted, out of active inventory; rows + history stay). Batches are archived
+automatically when a movement brings them to 0 and reactivated by a reversal; `GET /items` hides archived by default (`archived=include|only`).
+`POST /items/{id}/relocate {location, event: move|freeze|thaw, expires_at}` writes `freeze` / `thaw` / `location_change` plus `expiry_change`
+history rows; freeze/thaw REQUIRE an explicit non-past `expires_at` (shelf life is never reset implicitly). `POST /items/{id}/archive|unarchive`.

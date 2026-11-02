@@ -32,6 +32,9 @@ interface ItemRow extends Row {
   unit:         string | null;
   expires_at:   string | null;
   expiry_status: 'expired' | 'expiring_soon' | null;
+  produced_at:  string | null;
+  archived_at:  string | null;
+  kind:         'ingredient' | 'batch';
   created_at:   string;
   updated_at:   string;
   history?:     HistoryRow[];
@@ -294,6 +297,7 @@ function ItemCard({
             Qty: {item.quantity}{item.unit ? ` ${item.unit}` : ''}{item.min_quantity !== null ? ` / min ${item.min_quantity}` : ''}
           </div>
         )}
+        {item.produced_at && <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>Produced: {item.produced_at}</div>}
         {item.expires_at && <ExpiryLine item={item} />}
         {item.source_tags && item.source_tags.length > 0 && (
           <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>
@@ -570,13 +574,15 @@ function ItemListView({
 function AllItemsView() {
   const [stateFilter, setStateFilter]   = useState<string | null>(null);
   const [typeFilter, setTypeFilter]     = useState<string | null>(null);
+  const [archivedOnly, setArchivedOnly] = useState(false);
 
   const params = new URLSearchParams();
   if (stateFilter) params.set('state', stateFilter);
   if (typeFilter)  params.set('item_type', typeFilter);
+  if (archivedOnly) params.set('archived', 'only');
   const url = `/items?${params.toString()}`;
 
-  const { items, loading, error, reload } = useItems(url, [stateFilter, typeFilter]);
+  const { items, loading, error, reload } = useItems(url, [stateFilter, typeFilter, archivedOnly]);
 
   const header = (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -586,6 +592,7 @@ function AllItemsView() {
       {ALL_TYPES.map(t => (
         <Chip key={t} label={TYPE_LABEL[t]} active={typeFilter === t} onClick={() => setTypeFilter(typeFilter === t ? null : t)} />
       ))}
+      <Chip label="Archived (depleted batches)" active={archivedOnly} onClick={() => setArchivedOnly(!archivedOnly)} />
     </div>
   );
 
@@ -715,6 +722,8 @@ function ItemDetailView() {
         </div>
       )}
 
+      {item.produced_at && <div style={{ marginBottom: 6 }}>Produced: <strong>{item.produced_at}</strong></div>}
+      {item.archived_at && <div style={{ marginBottom: 6, color: '#777' }}>Archived (depleted) — history kept</div>}
       {item.expires_at && <ExpiryLine item={item} />}
       {item.expiry_status === 'expired' && <div style={{ margin: '6px 0' }}><DiscardButton item={item} onDone={load} /></div>}
 

@@ -120,4 +120,26 @@ alter table kitchen.recipes alter column yield_unit set default 'portions';
 -- Plans cover 1-7 days from week_start (the first day; name kept for compatibility).
 alter table kitchen.plans add column if not exists days integer not null default 7 check (days between 1 and 7);
 
+-- Cooked batch management: freezer shelf life + thawing policy per recipe; one cooking can yield several batches.
+alter table kitchen.recipes add column if not exists freezer_shelf_life_days integer
+    check (freezer_shelf_life_days is null or freezer_shelf_life_days >= 0);
+-- thawed_shelf_life_days = thawing policy: days a thawed batch stays good (prefills the thaw date; user confirms)
+alter table kitchen.recipes add column if not exists thawed_shelf_life_days integer
+    check (thawed_shelf_life_days is null or thawed_shelf_life_days >= 0);
+
+-- Batches produced by one cooking (initial allocation); item_id = StorageTracker batch item (article number).
+create table if not exists kitchen.cook_batches (
+    id       uuid    primary key default gen_random_uuid(),
+    meal_id  uuid    not null references kitchen.planned_meals(id) on delete cascade,
+    item_id  integer not null,
+    location text    not null check (location in ('fridge', 'freezer')),
+    qty      numeric not null check (qty > 0),
+    unique (meal_id, location)
+);
+
+alter table kitchen.cook_events alter column batch_item_id drop not null;   -- legacy single-batch column
+insert into kitchen.cook_batches (meal_id, item_id, location, qty)
+    select meal_id, batch_item_id, 'fridge', produced_qty from kitchen.cook_events
+    where batch_item_id is not null on conflict do nothing;
+
 commit;

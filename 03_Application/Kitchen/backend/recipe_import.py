@@ -22,7 +22,8 @@ _COMMENT = ("kind: base | derived | favorite. 'existing_skus' lists ALL articles
             "For an ingredient with no matching SKU leave 'item_id' null and use a clear name (the user assigns or "
             "creates the article during import). A derived dish may reference a cooked base via 'base_recipe' "
             "(the exact recipe name) instead of item_id. For kind 'base' (food cooked in bulk and stored) ALWAYS set "
-            "'shelf_life_days' (see the note next to that field).")
+            "'shelf_life_days' (see the note next to that field), and for bases that freeze well also "
+            "'freezer_shelf_life_days' and 'thawed_shelf_life_days'.")
 
 
 def sku_list(master_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -60,6 +61,14 @@ def make_example(master_list: list[dict[str, Any]]) -> dict[str, Any]:
                                 "Without a value the batch never expires, so always provide a realistic one for bases. "
                                 "Ignored for derived and favorite recipes.",
             "shelf_life_days": 3,
+            "_freezer_shelf_life_days": "Only for kind 'base': days the batch stays good in the freezer (e.g. 60-90 for "
+                                        "dal, curry, stew, bolognese). When cooking, the user splits the portions between "
+                                        "fridge and freezer; frozen portions need this value (it is asked for if missing).",
+            "freezer_shelf_life_days": 60,
+            "_thawed_shelf_life_days": "Only for kind 'base': days a thawed batch stays good in the fridge (usually 1-2). "
+                                       "Thawing never resets shelf life silently; this value only pre-fills the new "
+                                       "best-before date, which the user confirms.",
+            "thawed_shelf_life_days": 2,
             "storage_location": "Fridge",
             "ingredients": lines,
             "steps": [
@@ -130,7 +139,8 @@ def parse_recipe(text: str, base_recipes: dict[str, dict[str, Any]]) -> tuple[di
     yield_unit = _opt_str(rec, "yield_unit", errors, p) or "portions"
     description = _opt_str(rec, "description", errors, p)
     storage = _opt_str(rec, "storage_location", errors, p)
-    prep, cook, shelf = (_opt_int(rec, k, errors, p) for k in ("prep_minutes", "cook_minutes", "shelf_life_days"))
+    prep, cook, shelf, freezer, thawed = (_opt_int(rec, k, errors, p) for k in (
+        "prep_minutes", "cook_minutes", "shelf_life_days", "freezer_shelf_life_days", "thawed_shelf_life_days"))
 
     steps_raw = rec.get("steps", [])
     if isinstance(steps_raw, str):
@@ -187,6 +197,7 @@ def parse_recipe(text: str, base_recipes: dict[str, dict[str, Any]]) -> tuple[di
     return {
         "name": name.strip(), "kind": kind, "servings": servings, "yield_unit": yield_unit,
         "description": description, "prep_minutes": prep, "cook_minutes": cook, "shelf_life_days": shelf,
+        "freezer_shelf_life_days": freezer, "thawed_shelf_life_days": thawed,
         "storage_location": storage, "steps": "\n".join(s.strip() for s in steps_raw if s.strip()),
         "ingredients": lines,
     }, []

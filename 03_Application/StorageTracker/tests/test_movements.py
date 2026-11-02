@@ -148,3 +148,77 @@ def test_expires_at_can_be_set_and_cleared_by_patch(client):
     assert r.json()["rows"][0]["expires_at"] is None
     r = client.patch(f"/api/items/{item['id']}", json={"expires_at": "2031-01-01"})
     assert r.json()["rows"][0]["expires_at"] == "2031-01-01"
+
+
+# ── Batch lifecycle: relocate (freeze/thaw), archive ───────────────────────────
+
+def _batch(client, name="Dal", qty=4, **kw):
+    r = client.post("/api/items", json={"name": name, "item_type": "consumable", "kind": "batch", "quantity": qty,
+                                        "unit": "portions", "location": "Fridge", **kw})
+    assert r.status_code == 200, r.text
+    return r.json()["rows"][0]
+
+
+def _future(days):
+    from datetime import timedelta
+    from backend.routers.items import berlin_today
+    return (berlin_today() + timedelta(days=days)).isoformat()
+
+
+def test_freeze_requires_explicit_future_date_and_records_events(client):
+    b = _batch(client, expires_at=_future(3))
+    url = f"/api/items/{b['id']}/relocate"
+    assert client.post(url, json={"location": "Freezer", "event": "freeze"}).status_code == 400
+    assert client.post(url, json={"location": "Freezer", "event": "freeze", "expires_at": "2000-01-01"}).status_code == 400
+    r = client.post(url, json={"location": "Freezer", "event": "freeze", "expires_at": _future(90)})
+    assert r.status_code == 200
+    row = r.json()["rows"][0]
+    assert row["location"] == "Freezer" and row["expires_at"] == _future(90)
+    hist = client.get(f"/api/items/{b['id']}/history").json()["rows"]
+    types = [h["change_type"] for h in hist]
+    assert "freeze" in types and "expiry_change" in types
+    freeze = next(h for h in hist if h["change_type"] == "freeze")
+    assert (freeze["old_value"], freeze["new_value"]) == ("Fridge", "Freezer")
+
+
+def test_thaw_sets_new_date_without_touching_quantity(client):
+    b = _batch(client, location="Freezer", expires_at=_future(60))
+    r = client.post(f"/api/items/{b['id']}/relocate", json={"location": "Fridge", "event": "thaw", "expires_at": _future(2)})
+    row = r.json()["rows"][0]
+    assert row["location"] == "Fridge" and row["expires_at"] == _future(2) and row["quantity"] == 4
+    assert [h["change_type"] for h in client.get(f"/api/items/{b['id']}/history").json()["rows"]].count("thaw") == 1
+
+
+def test_freeze_empty_batch_conflict_and_unknown_event(client):
+    b = _batch(client, qty=0)
+    assert client.post(f"/api/items/{b['id']}/relocate",
+                       json={"location": "Freezer", "event": "freeze", "expires_at": _future(5)}).status_code == 409
+    assert client.post(f"/api/items/{b['id']}/relocate", json={"location": "x", "event": "melt"}).status_code == 400
+
+
+def test_depleted_batch_is_archived_and_reactivated_by_reversal(client):
+    b = _batch(client, qty=2)
+    r = client.post(f"/api/items/{b['id']}/movements", json={"delta": -2, "reason": "eat"})
+    active = [i["id"] for i in client.get("/api/items?kind=batch").json()["rows"]]
+    assert b["id"] not in active
+    only = [i["id"] for i in client.get("/api/items?kind=batch&archived=only").json()["rows"]]
+    assert b["id"] in only
+    assert client.get(f"/api/items/{b['id']}").json()["rows"][0]["archived_at"] is not None  # history stays reachable
+    assert client.get(f"/api/items/{b['id']}/movements").json()["total"] == 1
+    client.post(f"/api/movements/{r.json()['movement']['id']}/reverse")
+    assert b["id"] in [i["id"] for i in client.get("/api/items?kind=batch").json()["rows"]]
+    assert client.get(f"/api/items/{b['id']}").json()["rows"][0]["archived_at"] is None
+
+
+def test_manual_archive_only_when_depleted(client):
+    b = _batch(client, qty=1)
+    assert client.post(f"/api/items/{b['id']}/archive").status_code == 409
+    client.post(f"/api/items/{b['id']}/movements", json={"delta": -1, "reason": "eat"})
+    assert client.post(f"/api/items/{b['id']}/unarchive").status_code == 200
+    assert client.post(f"/api/items/{b['id']}/archive").status_code == 200
+
+
+def test_ingredients_never_auto_archived(client):
+    r = client.post("/api/items", json={"name": "Salt", "item_type": "consumable", "quantity": 1, "unit": "g"}).json()["rows"][0]
+    client.post(f"/api/items/{r['id']}/movements", json={"delta": -1, "reason": "use"})
+    assert client.get(f"/api/items/{r['id']}").json()["rows"][0]["archived_at"] is None

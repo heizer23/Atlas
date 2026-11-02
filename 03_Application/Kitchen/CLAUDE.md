@@ -38,6 +38,28 @@ Vision and scope: `Sprint01_Core/00_draft.md`.
   lines (existing article by name+unit, else create with stock 0), then status recompute. Not used by imports.
 - Purchase / stocktake endpoints take `item_id`, not names.
 
+## Cooked batches (fridge / freezer)
+- Cooking (`POST /meals/{id}/cooked {produced_qty, allocations:[{location: fridge|freezer, qty, shelf_life_days?}], remember_shelf_life}`)
+  produces ONE batch item per allocated location (same article = `recipe_ref`, same cooking = tag `meal:<id>`, `produced_at` = cooking day),
+  each with its own `expires_at` = cooking day + shelf life. Every portion must be allocated exactly once (400 otherwise, nothing booked).
+  No allocations = all in the fridge (legacy). Fridge shelf life = `shelf_life_days` (empty = no best-before, as before);
+  freezer shelf life = `freezer_shelf_life_days`, REQUIRED (422 `SHELF_LIFE_REQUIRED`, never an implicit indefinite life);
+  `remember_shelf_life` stores given days as the recipe default only where it had none.
+- `cook_batches` links a cooking to its batches (used for undo; undo is refused while a batch is partly consumed).
+- Location = `Fridge` / `Freezer` text on the StorageTracker item (`st.storage_of`: anything not 'freezer' is ready to use).
+- Freeze (`POST /batches/{id}/freeze`) / thaw (`/thaw`) need an explicit `expires_at`; StorageTracker records `freeze`/`thaw`/`expiry_change`
+  history events. `suggested_freeze_expires_at` / `suggested_thaw_expires_at` in `GET /batches` come from `freezer_shelf_life_days` /
+  `thawed_shelf_life_days` (thawing policy) and only pre-fill the UI. Whole batches move; no partial split.
+- `POST /batches/{id}/consume {qty}` takes portions from one batch; `POST /meals/{id}/eaten {batch_id}` prefers a specific ready batch.
+  Frozen batches are never auto-used (409 when chosen; shortfall reports `frozen_in_stock`). Raw ingredients of a base are booked only at
+  cooking, never again when a derived dish consumes the base.
+- Availability per planned meal (`bases[]` in the plan payload): `ready` / `will_be_cooked` / `needs_thaw` / `missing`.
+  The planner only counts ready (fridge) portions; frozen ones show as `needs_thaw`.
+- Depleted batches are archived automatically by StorageTracker (history stays, `archived=only` lists them).
+- Out of scope here: units/conversions, inventory policies, nutrition snapshots (no nutrition data exists yet), partial freezing.
+- UI tests: `tests/ui/cook_allocation.spec.ts` (Playwright, mobile viewport, stubbed API):
+  `docker exec -w /repo/02_Platform/Atlas_Shell atlas-playwright npx playwright test cook_allocation`.
+
 ## Plan length
 `POST /plans/suggest {week_start?, days (1-7, default 7), cook_sessions?}`. `week_start` is the first day (default today, Berlin);
 the column name is historical. `cook_sessions` default: 1 for <= 4 days, else 2; cooking days are day 0/3/5 offsets that fall inside

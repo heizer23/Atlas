@@ -73,6 +73,8 @@ def test_example_round_trips(client):
     assert p["unresolved"] == 1 and p["status_if_saved"] == "draft"
     assert "shelf_life_days" in ex["_comment"] and "never expires" in ex["recipe"]["_shelf_life_days"]
     assert p["recipe"]["shelf_life_days"] == ex["recipe"]["shelf_life_days"]
+    assert p["recipe"]["freezer_shelf_life_days"] == ex["recipe"]["freezer_shelf_life_days"] == 60
+    assert p["recipe"]["thawed_shelf_life_days"] == 2 and "freezer" in ex["recipe"]["_freezer_shelf_life_days"]
     assert save(client, p).status_code == 201
 
 

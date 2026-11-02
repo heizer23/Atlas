@@ -15,6 +15,9 @@ import { Routes, Route } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import Skeleton from '@platform-ui/components/Skeleton';
 import { ImportView, IngredientLine, useMaster } from './RecipeImport';
+import { BaseChips, BatchRow, CookDialog } from './Batches';
+import type { Batch, BaseInfo } from './Batches';
+import { dayLabel, num, readPref, todayLocal, useAction, writePref } from './common';
 import type { Line } from './RecipeImport';
 import './kitchen.css';
 
@@ -28,57 +31,20 @@ type MealStatus = 'planned' | 'cooked' | 'eaten' | 'skipped';
 interface RecipeSummary { id: string; name: string; kind: RecipeKind; status: 'draft' | 'active'; servings: number; yield_unit: string }
 interface Recipe extends RecipeSummary {
   description: string | null; prep_minutes: number | null; cook_minutes: number | null;
-  steps: string; shelf_life_days: number | null; storage_location: string | null; ingredients: Line[];
+  steps: string; shelf_life_days: number | null; freezer_shelf_life_days: number | null;
+  thawed_shelf_life_days: number | null; storage_location: string | null; ingredients: Line[];
 }
 interface Meal {
   id: string; recipe_id: string | null; recipe_name: string | null; recipe_kind: RecipeKind | null;
   kind: 'cook' | 'meal'; day: string; portions: number; status: MealStatus; expiry_warning: string | null;
+  shelf_life_days: number | null; freezer_shelf_life_days: number | null; thawed_shelf_life_days: number | null;
+  bases: BaseInfo[];
 }
 interface Plan { id: string; week_start: string; days: number; meals: Meal[] }
-interface Batch {
-  id: number; name: string; quantity: number; unit: string; location: string | null; expires_at: string | null;
-  expiry_status: 'expired' | 'expiring_soon' | null;
-}
 interface ShopLine { item_id: number; name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
 interface Shopping {
-  buy: ShopLine[]; probably_have: ShopLine[]; missing_bases: { name: string; needed: number; available: number }[];
+  buy: ShopLine[]; probably_have: ShopLine[]; missing_bases: { name: string; needed: number; available: number; frozen: number }[];
   draft_recipes: string[];
-}
-
-type Post = <T>(path: string, body?: unknown, method?: string) => Promise<T | null>;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function dayLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit' });
-}
-
-function num(v: number): string { return String(Math.round(v * 100) / 100); }
-
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function readPref(key: string, fallback: string): string {
-  try { return localStorage.getItem(`kitchen.${key}`) ?? fallback; } catch { return fallback; }
-}
-
-function writePref(key: string, value: string): void {
-  try { localStorage.setItem(`kitchen.${key}`, value); } catch { /* per-viewer convenience only */ }
-}
-
-function useAction(): { post: Post; error: string | null; busy: boolean } {
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const post: Post = useCallback(async (path, body, method = 'POST') => {
-    setBusy(true); setError(null);
-    const res = await apiFetch<any>(`/kitchen${path}`, { method, body: body === undefined ? undefined : JSON.stringify(body) });
-    setBusy(false);
-    if (isApiError(res)) { setError(res.error.message); return null; }
-    return res;
-  }, []);
-  return { post, error, busy };
 }
 
 function Loading({ error }: { error: string | null }) {
@@ -87,24 +53,29 @@ function Loading({ error }: { error: string | null }) {
 
 // ── Plan view ─────────────────────────────────────────────────────────────────
 
-function MealCard({ meal, recipes, onChanged }: { meal: Meal; recipes: RecipeSummary[]; onChanged: () => void }) {
+function MealCard({ meal, recipes, batches, onChanged }: { meal: Meal; recipes: RecipeSummary[]; batches: Batch[]; onChanged: () => void }) {
   const { post, error, busy } = useAction();
   const [qty, setQty] = useState<string>(String(meal.portions));
   const [moving, setMoving] = useState(false);
   const [newDay, setNewDay] = useState(meal.day);
   const [swap, setSwap] = useState(meal.recipe_id ?? '');
   const [info, setInfo] = useState<string | null>(null);
+  const [cooking, setCooking] = useState(false);
+  const [batchId, setBatchId] = useState('');
   const planned = meal.status === 'planned';
   const isCook = meal.kind === 'cook';
+  const baseIds = new Set(meal.bases.map((b) => b.base_recipe_id));
+  const usable = batches.filter((b) => b.recipe_id && baseIds.has(b.recipe_id) && b.storage === 'fridge' && b.expiry_status !== 'expired');
 
   const run = async (path: string, body?: unknown, method?: string) => {
-    const res = await post<{ shortfall?: { name: string; missing: number; expired_in_stock: number }[] }>(path, body, method);
+    const res = await post<{ shortfall?: { name: string; missing: number; expired_in_stock: number; frozen_in_stock: number }[] }>(path, body, method);
     if (!res) return;
     setMoving(false);
     const short = res.shortfall?.[0];
     if (short) {
-      setInfo(`Not enough ${short.name} in stock (missing ${num(short.missing)})` +
-        (short.expired_in_stock > 0 ? ` — ${num(short.expired_in_stock)} expired portions were not used; discard them to confirm.` : '.'));
+      setInfo(`Not enough ${short.name} ready to use (missing ${num(short.missing)})` +
+        (short.frozen_in_stock > 0 ? ` — ${num(short.frozen_in_stock)} portions are in the freezer: thaw them first.` : '') +
+        (short.expired_in_stock > 0 ? ` — ${num(short.expired_in_stock)} expired portions were not used; discard them to confirm.` : ''));
     } else setInfo(null);
     onChanged();
   };
@@ -116,20 +87,39 @@ function MealCard({ meal, recipes, onChanged }: { meal: Meal; recipes: RecipeSum
         <span className="kitchen-chip">{isCook ? 'Cook' : 'Eat'} · {meal.status}</span>
       </div>
       {meal.recipe_id && <span className="kitchen-muted">{num(meal.portions)} portions</span>}
+      {planned && <BaseChips bases={meal.bases} />}
       {meal.expiry_warning && planned && <div className="kitchen-warn">⚠ {meal.expiry_warning}</div>}
       {info && <div className="kitchen-warn">{info}</div>}
       {error && <div className="kitchen-warn">{error}</div>}
 
+      {planned && meal.recipe_id && !isCook && usable.length > 0 && (
+        <select className="kitchen-input" value={batchId} onChange={(e) => setBatchId(e.target.value)} aria-label="Use batch">
+          <option value="">Batch: automatic (earliest best-before first)</option>
+          {usable.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name} · {num(b.quantity)} {b.unit}{b.expires_at ? ` · until ${dayLabel(b.expires_at)}` : ''}
+            </option>
+          ))}
+        </select>
+      )}
       {planned && meal.recipe_id && (
         <div className="kitchen-row">
-          <input className="kitchen-input num" type="number" min="0.5" step="0.5" value={qty}
-                 onChange={(e) => setQty(e.target.value)} aria-label="Portions" />
+          {!isCook && (
+            <input className="kitchen-input num" type="number" min="0.5" step="0.5" value={qty}
+                   onChange={(e) => setQty(e.target.value)} aria-label="Portions" />
+          )}
           <button className="kitchen-btn primary" disabled={busy}
-                  onClick={() => run(`/meals/${meal.id}/${isCook ? 'cooked' : 'eaten'}`,
-                                     isCook ? { produced_qty: Number(qty) } : { portions: Number(qty) })}>
-            {isCook ? 'Cooked' : 'Eaten'}
+                  onClick={() => isCook ? setCooking(true)
+                    : run(`/meals/${meal.id}/eaten`, { portions: Number(qty), ...(batchId ? { batch_id: Number(batchId) } : {}) })}>
+            {isCook ? 'Cooked…' : 'Eaten'}
           </button>
         </div>
+      )}
+      {cooking && (
+        <CookDialog
+          meal={{ id: meal.id, recipe_name: meal.recipe_name ?? '', portions: meal.portions,
+                  shelf_life_days: meal.shelf_life_days, freezer_shelf_life_days: meal.freezer_shelf_life_days }}
+          onClose={() => setCooking(false)} onSaved={() => { setCooking(false); onChanged(); }} />
       )}
       {planned && !meal.recipe_id && (
         <button className="kitchen-btn" disabled={busy}
@@ -196,22 +186,7 @@ function PlanView() {
       {batches.length > 0 && (
         <div className="kitchen-card">
           <strong>Cooked bases in stock</strong>
-          {batches.map((b) => (
-            <div key={b.id} className="kitchen-row spread">
-              <span>{b.name}</span>
-              <span className="kitchen-row">
-                <span className="kitchen-muted">{num(b.quantity)} {b.unit}{b.expires_at ? ` · until ${dayLabel(b.expires_at)}` : ''}</span>
-                {b.expiry_status === 'expired' && <span className="kitchen-chip expired">Expired</span>}
-                {b.expiry_status === 'expiring_soon' && <span className="kitchen-chip warn">Expires soon</span>}
-                {b.expiry_status === 'expired' && (
-                  <button className="kitchen-btn" disabled={busy} onClick={async () => {
-                    if (!confirm(`Discard ${num(b.quantity)} ${b.unit} ${b.name} (expired ${b.expires_at})? It is removed from stock; reversible in StorageTracker history.`)) return;
-                    if (await post(`/batches/${b.id}/discard`)) load();
-                  }}>Discard</button>
-                )}
-              </span>
-            </div>
-          ))}
+          {batches.map((b) => <BatchRow key={b.id} batch={b} onChanged={load} />)}
         </div>
       )}
       <div className="kitchen-card">
@@ -242,7 +217,7 @@ function PlanView() {
         <React.Fragment key={d}>
           <div className="kitchen-day">{dayLabel(d)}</div>
           {plan!.meals.filter((m) => m.day === d).map((m) => (
-            <MealCard key={`${m.id}-${m.status}-${m.day}`} meal={m} recipes={recipes} onChanged={load} />
+            <MealCard key={`${m.id}-${m.status}-${m.day}`} meal={m} recipes={recipes} batches={batches} onChanged={load} />
           ))}
         </React.Fragment>
       ))}
@@ -349,7 +324,7 @@ function ShoppingView() {
       )}
       {data.missing_bases.map((b) => (
         <div key={b.name} className="kitchen-warn">
-          Cooked base "{b.name}" is missing: need {num(b.needed)}, available {num(b.available)} — add a cooking session to the plan.
+          Cooked base "{b.name}" is missing: need {num(b.needed)}, ready {num(b.available)}{b.frozen > 0 ? ` (${num(b.frozen)} in the freezer — thaw it)` : ''} — add a cooking session to the plan.
         </div>
       ))}
       <div className="kitchen-day">To buy ({data.buy.length})</div>
@@ -365,7 +340,8 @@ function ShoppingView() {
 
 const EMPTY: Recipe = { id: '', name: '', kind: 'favorite', status: 'draft', servings: 2, yield_unit: 'portions',
                         description: null, prep_minutes: null, cook_minutes: null, steps: '',
-                        shelf_life_days: null, storage_location: null, ingredients: [] };
+                        shelf_life_days: null, freezer_shelf_life_days: null, thawed_shelf_life_days: null,
+                        storage_location: null, ingredients: [] };
 
 function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; bases: RecipeSummary[]; onSaved: () => void; onCancel: () => void }) {
   const { post, error, busy } = useAction();
@@ -379,7 +355,8 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
   const save = async () => {
     const body = {
       name: r.name, kind: r.kind, servings: r.servings, description: r.description, prep_minutes: r.prep_minutes,
-      cook_minutes: r.cook_minutes, steps: r.steps, shelf_life_days: r.shelf_life_days, storage_location: r.storage_location,
+      cook_minutes: r.cook_minutes, steps: r.steps, shelf_life_days: r.shelf_life_days,
+      freezer_shelf_life_days: r.freezer_shelf_life_days, thawed_shelf_life_days: r.thawed_shelf_life_days, storage_location: r.storage_location,
       ingredients: r.ingredients.filter((i) => i.name.trim() || i.item_id || i.base_recipe_id).map((i) => ({
         name: i.name || i.item_name || '', qty: Number(i.qty), unit: i.base_recipe_id ? 'portions' : i.unit,
         base_recipe_id: i.base_recipe_id, item_id: i.item_id,
@@ -407,9 +384,17 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
         <label className="kitchen-row">Cook (min)
           <input className="kitchen-input num" type="number" min="0" value={r.cook_minutes ?? ''} onChange={(e) => set({ cook_minutes: minutes(e.target.value) })} /></label>
         {r.kind === 'base' && (
-          <label className="kitchen-row">Shelf life (days)
-            <input className="kitchen-input num" type="number" min="0" value={r.shelf_life_days ?? ''}
-                   onChange={(e) => set({ shelf_life_days: minutes(e.target.value) })} /></label>
+          <>
+            <label className="kitchen-row">Fridge shelf life (days)
+              <input className="kitchen-input num" type="number" min="0" value={r.shelf_life_days ?? ''}
+                     onChange={(e) => set({ shelf_life_days: minutes(e.target.value) })} /></label>
+            <label className="kitchen-row">Freezer shelf life (days)
+              <input className="kitchen-input num" type="number" min="0" value={r.freezer_shelf_life_days ?? ''}
+                     onChange={(e) => set({ freezer_shelf_life_days: minutes(e.target.value) })} /></label>
+            <label className="kitchen-row">Thawed shelf life (days)
+              <input className="kitchen-input num" type="number" min="0" value={r.thawed_shelf_life_days ?? ''}
+                     onChange={(e) => set({ thawed_shelf_life_days: minutes(e.target.value) })} /></label>
+          </>
         )}
       </div>
       <strong>Ingredients</strong>

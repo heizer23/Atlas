@@ -34,7 +34,9 @@ class RecipeIn(BaseModel):
     prep_minutes:     int | None = Field(default=None, ge=0)
     cook_minutes:     int | None = Field(default=None, ge=0)
     steps:            str = ""
-    shelf_life_days:  int | None = None
+    shelf_life_days:  int | None = Field(default=None, ge=0)            # refrigerated
+    freezer_shelf_life_days: int | None = Field(default=None, ge=0)     # frozen
+    thawed_shelf_life_days:  int | None = Field(default=None, ge=0)     # thawing policy
     storage_location: str | None = None
     ingredients:      list[IngredientIn] = []
 
@@ -47,7 +49,9 @@ class RecipePatch(BaseModel):
     prep_minutes:     int | None = Field(default=None, ge=0)
     cook_minutes:     int | None = Field(default=None, ge=0)
     steps:            str | None = None
-    shelf_life_days:  int | None = None
+    shelf_life_days:  int | None = Field(default=None, ge=0)
+    freezer_shelf_life_days: int | None = Field(default=None, ge=0)
+    thawed_shelf_life_days:  int | None = Field(default=None, ge=0)
     storage_location: str | None = None
     ingredients:      list[IngredientIn] | None = None
 
@@ -76,7 +80,8 @@ def _check_items(ingredients: list[IngredientIn] | None) -> tuple[dict[str, Any]
 
 
 def _list_row(r: dict[str, Any]) -> dict[str, Any]:
-    return {k: r[k] for k in ("id", "name", "kind", "status", "servings", "yield_unit", "shelf_life_days")}
+    return {k: r[k] for k in ("id", "name", "kind", "status", "servings", "yield_unit", "shelf_life_days",
+                                  "freezer_shelf_life_days", "thawed_shelf_life_days")}
 
 
 @router.get("/recipes", response_model=None)
@@ -119,10 +124,12 @@ def create_recipe(body: RecipeIn) -> JSONResponse:
                 return api_error("CONFLICT", "A recipe with this name exists", status=409)
             cur.execute(
                 """insert into kitchen.recipes (name, kind, servings, description, prep_minutes, cook_minutes,
-                                               steps, shelf_life_days, storage_location, status)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft') returning id""",
+                                               steps, shelf_life_days, freezer_shelf_life_days,
+                                               thawed_shelf_life_days, storage_location, status)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft') returning id""",
                 (body.name.strip(), body.kind, body.servings, body.description, body.prep_minutes,
-                 body.cook_minutes, body.steps, body.shelf_life_days, body.storage_location),
+                 body.cook_minutes, body.steps, body.shelf_life_days, body.freezer_shelf_life_days,
+                 body.thawed_shelf_life_days, body.storage_location),
             )
             rid = str(cur.fetchone()["id"])
             save_ingredients(cur, rid, [i.model_dump() for i in body.ingredients])
@@ -148,7 +155,7 @@ def update_recipe(recipe_id: str, body: RecipePatch) -> JSONResponse:
                 return api_error("NOT_FOUND", f"Recipe {recipe_id} not found", status=404)
             sets, params = ["updated_at = now()"], []
             for f in ("name", "kind", "servings", "description", "prep_minutes", "cook_minutes", "steps",
-                      "shelf_life_days", "storage_location"):
+                      "shelf_life_days", "freezer_shelf_life_days", "thawed_shelf_life_days", "storage_location"):
                 if f in fields:
                     val = getattr(body, f)
                     if val is None and f in ("name", "kind", "servings", "steps"):
