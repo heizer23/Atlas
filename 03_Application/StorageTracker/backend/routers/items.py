@@ -1,4 +1,6 @@
 import json as _json
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter
@@ -18,6 +20,7 @@ VALID_STATES = {
     "marked_for_recycling", "missing", "lent_out",
 }
 VALID_ITEM_TYPES = {"consumable", "object", "pending_action"}
+VALID_KINDS = {"ingredient", "batch"}
 
 # States that trigger auto shopping task creation
 SHOPPING_TRIGGER_STATES = {"low_stock", "out_of_stock"}
@@ -32,6 +35,10 @@ ITEM_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="quantity",         label="Qty",             type="number", sortable=True,  filterable=False),
     ColumnSchema(key="min_quantity",     label="Min Qty",         type="number", sortable=False, filterable=False),
     ColumnSchema(key="restock_quantity", label="Restock Qty",     type="number", sortable=False, filterable=False),
+    ColumnSchema(key="unit",             label="Unit",            type="string", sortable=False, filterable=False),
+    ColumnSchema(key="expires_at",       label="Expires",         type="date",   sortable=True,  filterable=False),
+    ColumnSchema(key="kind",             label="Kind",            type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="recipe_ref",       label="Recipe Ref",      type="string", sortable=False, filterable=False),
     ColumnSchema(key="source_tags",      label="Source Tags",     type="string", sortable=False, filterable=False),
     ColumnSchema(key="notes",            label="Notes",           type="string", sortable=False, filterable=False, detail_visible=True),
     ColumnSchema(key="created_at",       label="Created",         type="date",   sortable=True,  filterable=False),
@@ -55,26 +62,43 @@ class ItemCreate(BaseModel):
     location:         str | None = None
     notes:            str | None = None
     source_tags:      list[str] = []
-    quantity:         int | None = None
+    quantity:         float | None = None
     min_quantity:     int | None = None
     restock_quantity: int | None = None
+    unit:             str | None = None
+    expires_at:       date | None = None
+    kind:             str = "ingredient"
+    recipe_ref:       str | None = None
 
 
 class ItemUpdate(BaseModel):
     name:             str | None = None
     state:            str | None = None
     location:         str | None = None
-    quantity:         int | None = None
+    quantity:         float | None = None
     min_quantity:     int | None = None
     restock_quantity: int | None = None
+    unit:             str | None = None
+    expires_at:       date | None = None
+    recipe_ref:       str | None = None
     notes:            str | None = None
     source_tags:      list[str] | None = None
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _num(v: Decimal | float | int) -> int | float:
+    """Render integral numerics as int so existing integer clients see no change."""
+    f = float(v)
+    return int(f) if f.is_integer() else f
+
+
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     d["id"] = str(d["id"])
+    if isinstance(d.get("quantity"), Decimal):
+        d["quantity"] = _num(d["quantity"])
+    if d.get("expires_at"):
+        d["expires_at"] = d["expires_at"].isoformat()
     if d.get("created_at"):
         d["created_at"] = d["created_at"].isoformat()
     if d.get("updated_at"):
@@ -95,7 +119,7 @@ def _history_row_to_dict(row: Any) -> dict[str, Any]:
 
 
 def _apply_auto_transition(
-    quantity: int | None,
+    quantity: Any,
     min_quantity: int | None,
 ) -> str | None:
     """Return 'low_stock' if auto-transition applies, else None."""
@@ -222,7 +246,8 @@ def view_low_stock() -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items
                 where state in ('low_stock', 'out_of_stock')
                 order by name asc
@@ -239,7 +264,8 @@ def view_recycling() -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items
                 where state = 'marked_for_recycling'
                 order by name asc
@@ -256,7 +282,8 @@ def view_important() -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items
                 where item_type = 'object'
                 order by name asc
@@ -276,7 +303,8 @@ def view_search(q: str = "") -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items
                 where lower(name)     like %s
                    or lower(location) like %s
@@ -297,6 +325,7 @@ def list_items(
     item_type:  str | None = None,
     location:   str | None = None,
     source_tag: str | None = None,
+    kind:       str | None = None,
 ) -> JSONResponse:
     if state and state not in VALID_STATES:
         return api_error("INVALID_FILTER", f"state must be one of: {', '.join(sorted(VALID_STATES))}")
@@ -315,6 +344,11 @@ def list_items(
     if location:
         conditions.append("location = %s")
         params.append(location)
+    if kind:
+        if kind not in VALID_KINDS:
+            return api_error("INVALID_FILTER", f"kind must be one of: {', '.join(sorted(VALID_KINDS))}")
+        conditions.append("kind = %s")
+        params.append(kind)
     if source_tag:
         conditions.append("source_tags @> %s::jsonb")
         params.append(f'["{source_tag}"]')
@@ -328,7 +362,8 @@ def list_items(
             cur.execute(
                 f"""
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items {where}
                 order by created_at desc
                 """,
@@ -348,6 +383,8 @@ def create_item(body: ItemCreate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"item_type must be one of: {', '.join(sorted(VALID_ITEM_TYPES))}")
     if body.state not in VALID_STATES:
         return api_error("VALIDATION_ERROR", f"state must be one of: {', '.join(sorted(VALID_STATES))}")
+    if body.kind not in VALID_KINDS:
+        return api_error("VALIDATION_ERROR", f"kind must be one of: {', '.join(sorted(VALID_KINDS))}")
     if body.quantity is not None and body.quantity < 0:
         return api_error("VALIDATION_ERROR", "quantity must be >= 0")
     if body.min_quantity is not None and body.min_quantity < 0:
@@ -357,7 +394,7 @@ def create_item(body: ItemCreate) -> JSONResponse:
 
     # Auto-transition: only apply if caller left state at default 'stored'
     state = body.state
-    auto = _apply_auto_transition(body.quantity, body.min_quantity)
+    auto = _apply_auto_transition(body.quantity, body.min_quantity) if body.kind != "batch" else None
     if auto and state == "stored":
         state = auto
 
@@ -367,10 +404,12 @@ def create_item(body: ItemCreate) -> JSONResponse:
                 """
                 insert into storagetracker.items
                     (name, item_type, state, location, notes, source_tags,
-                     quantity, min_quantity, restock_quantity)
-                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                     quantity, min_quantity, restock_quantity,
+                     unit, expires_at, kind, recipe_ref)
+                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
                 returning id, name, item_type, state, location, notes, source_tags,
-                          quantity, min_quantity, restock_quantity, created_at, updated_at
+                          quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                          created_at, updated_at
                 """,
                 (
                     body.name.strip(),
@@ -382,6 +421,10 @@ def create_item(body: ItemCreate) -> JSONResponse:
                     body.quantity,
                     body.min_quantity,
                     body.restock_quantity,
+                    body.unit,
+                    body.expires_at,
+                    body.kind,
+                    body.recipe_ref,
                 ),
             )
             row = _row_to_dict(cur.fetchone())
@@ -389,7 +432,7 @@ def create_item(body: ItemCreate) -> JSONResponse:
             _record_history(conn, item_id, "created", None, state)
 
         # Auto-create shopping task if item is low/out of stock
-        if state in SHOPPING_TRIGGER_STATES:
+        if state in SHOPPING_TRIGGER_STATES and body.kind != "batch":
             _ensure_open_shopping_task(conn, item_id, row["source_tags"])
 
         conn.commit()
@@ -404,7 +447,8 @@ def get_item(item_id: str) -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -458,7 +502,8 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
             cur.execute(
                 """
                 select id, name, item_type, state, location, notes, source_tags,
-                       quantity, min_quantity, restock_quantity, created_at, updated_at
+                       quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                       created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -494,7 +539,8 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
                 set {set_clause}
                 where id = %s
                 returning id, name, item_type, state, location, notes, source_tags,
-                          quantity, min_quantity, restock_quantity, created_at, updated_at
+                          quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
+                          created_at, updated_at
                 """,
                 params,
             )
@@ -505,7 +551,8 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
 
         # Auto-transition: apply if quantity or min_quantity changed AND caller did not set state
         caller_set_state = "state" in set_fields
-        if not caller_set_state and ("quantity" in set_fields or "min_quantity" in set_fields):
+        if (not caller_set_state and current["kind"] != "batch"
+                and ("quantity" in set_fields or "min_quantity" in set_fields)):
             auto = _apply_auto_transition(updated["quantity"], updated["min_quantity"])
             if auto:
                 with conn.cursor() as cur:
@@ -532,13 +579,25 @@ def update_item(item_id: str, body: ItemUpdate) -> JSONResponse:
                 _record_history(conn, item_id, "location_change", old_l, new_l)
 
         if "quantity" in set_fields:
-            old_q = str(current["quantity"]) if current["quantity"] is not None else None
-            new_q = str(body.quantity) if body.quantity is not None else None
+            old_q = str(_num(current["quantity"])) if current["quantity"] is not None else None
+            new_q = str(_num(body.quantity)) if body.quantity is not None else None
             if old_q != new_q:
                 _record_history(conn, item_id, "quantity_change", old_q, new_q)
+                # keep ledger sum == quantity: absolute PATCH is a correction movement
+                with conn.cursor() as cur:
+                    delta = (body.quantity or 0) - float(current["quantity"] or 0)
+                    if delta:
+                        cur.execute(
+                            """
+                            insert into storagetracker.stock_movements
+                                (item_id, delta, requested_delta, reason)
+                            values (%s, %s, %s, 'patch')
+                            """,
+                            (item_id, delta, delta),
+                        )
 
         # Auto-create shopping task if final state is low/out of stock
-        if final_state in SHOPPING_TRIGGER_STATES:
+        if final_state in SHOPPING_TRIGGER_STATES and current["kind"] != "batch":
             source_tags = updated.get("source_tags") or []
             if isinstance(source_tags, str):
                 import json as _json2

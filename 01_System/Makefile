@@ -412,6 +412,32 @@ essaycards-schema:
 # endregion
 
 
+# region --- Application: Kitchen
+KITCHEN_DIR=../03_Application/Kitchen
+
+KITCHEN_COMPOSE=docker compose \
+	-f $(KITCHEN_DIR)/compose.yml \
+	$(ENV_FILES)
+
+kitchen-build:
+	$(KITCHEN_COMPOSE) build kitchen
+
+kitchen-up:
+	$(KITCHEN_COMPOSE) up -d kitchen
+
+kitchen-down:
+	$(KITCHEN_COMPOSE) down
+
+kitchen-logs:
+	$(KITCHEN_COMPOSE) logs -f kitchen
+
+kitchen-reboot:
+	$(KITCHEN_COMPOSE) down
+	$(KITCHEN_COMPOSE) up -d kitchen
+
+# endregion
+
+
 # region --- Application: StoryReader
 STORYREADER_DIR=../03_Application/StoryReader
 
@@ -756,6 +782,7 @@ net-connect:
 	@docker network connect atlas-net atlas-essaycards        2>/dev/null || true
 	@docker network connect atlas-net atlas-claudeconsole     2>/dev/null || true
 	@docker network connect atlas-net atlas-storyreader       2>/dev/null || true
+	@docker network connect atlas-net atlas-kitchen           2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -790,6 +817,7 @@ up:
 	$(MAKE) essaycards-build essaycards-up
 	$(MAKE) storyreader-schema
 	$(MAKE) storyreader-build storyreader-up
+	$(MAKE) kitchen-build    kitchen-up
 	$(MAKE) console-schema
 	$(MAKE) console-build    console-up
 	$(MAKE) cloudflared-up

@@ -1,0 +1,16 @@
+/* Kitchen — layout only; colours come from the shell's design tokens. */
+.kitchen-page { padding: 16px; max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.kitchen-card { background: var(--md-sys-color-surface-variant); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.kitchen-card.done { opacity: 0.65; }
+.kitchen-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kitchen-row.spread { justify-content: space-between; }
+.kitchen-day { font-weight: 600; color: var(--md-sys-color-on-surface-variant); margin-top: 8px; }
+.kitchen-chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-surface); }
+.kitchen-muted { color: var(--md-sys-color-on-surface-variant); font-size: 13px; }
+.kitchen-warn { background: #fdf0cc; color: #6b4b00; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.kitchen-btn { min-height: 40px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); font-size: 14px; cursor: pointer; }
+.kitchen-btn.primary { background: var(--md-sys-color-primary); border-color: var(--md-sys-color-primary); color: #fff; font-weight: 600; }
+.kitchen-btn:disabled { opacity: 0.5; cursor: default; }
+.kitchen-input { min-height: 40px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); font-size: 14px; min-width: 0; }
+.kitchen-input.num { width: 84px; }
+.kitchen-textarea { min-height: 120px; width: 100%; box-sizing: border-box; }

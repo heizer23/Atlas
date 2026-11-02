@@ -56,6 +56,7 @@ export default defineConfig({
       '/api/claudeconsole':    { target: 'http://localhost:8025', changeOrigin: true },
       '/api/storyreader':    { target: 'http://localhost:8026', changeOrigin: true },
       '/api/habittracker':   { target: 'http://localhost:8027', changeOrigin: true },
+      '/api/kitchen':        { target: 'http://localhost:8028', changeOrigin: true },
     },
   },
   test: {

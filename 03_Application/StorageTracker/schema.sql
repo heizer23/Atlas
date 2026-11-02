@@ -69,4 +69,43 @@ create index if not exists ix_shopping_tasks_status
 create index if not exists ix_shopping_tasks_item_id
     on storagetracker.shopping_tasks(item_id);
 
+-- Kitchen Sprint01: units, batches, stock-movement ledger
+do $$
+begin
+    if (select data_type from information_schema.columns
+        where table_schema = 'storagetracker' and table_name = 'items'
+          and column_name = 'quantity') = 'integer' then
+        alter table storagetracker.items alter column quantity type numeric;
+    end if;
+end $$;
+
+alter table storagetracker.items add column if not exists unit text;
+alter table storagetracker.items add column if not exists expires_at date;
+alter table storagetracker.items add column if not exists recipe_ref text;
+alter table storagetracker.items add column if not exists kind text not null default 'ingredient';
+
+do $$
+begin
+    if not exists (select 1 from pg_constraint where conname = 'items_kind_check') then
+        alter table storagetracker.items
+            add constraint items_kind_check check (kind in ('ingredient', 'batch'));
+    end if;
+end $$;
+
+-- quantity is the cached sum of applied deltas; delta = applied (clamped) change
+create table if not exists storagetracker.stock_movements (
+    id              uuid        primary key default gen_random_uuid(),
+    item_id         uuid        not null references storagetracker.items(id) on delete cascade,
+    delta           numeric     not null,
+    requested_delta numeric     not null,
+    reason          text        not null,
+    ref             text,
+    idempotency_key text        unique,
+    reverses_id     uuid        unique references storagetracker.stock_movements(id),
+    created_at      timestamptz not null default now()
+);
+
+create index if not exists ix_stock_movements_item_ts
+    on storagetracker.stock_movements(item_id, created_at desc);
+
 commit;
