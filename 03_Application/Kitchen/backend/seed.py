@@ -7,26 +7,26 @@ from backend.recipes_repo import save_ingredients
 
 # (name, kind, servings, shelf_life_days, location, steps, ingredients[(name, qty, unit)], bases[(base name, portions)])
 SEED = [
-    ("Dal", "base", 6, 4, "Kühlschrank",
-     "Zwiebel, Knoblauch, Ingwer in Öl anschwitzen. Curry zugeben. Linsen, Tomaten, Kokosmilch und 600 ml Wasser dazu, 25 Min köcheln.",
-     [("Rote Linsen", 300, "g"), ("Zwiebel", 2, "Stück"), ("Knoblauch", 4, "Zehe"), ("Ingwer", 30, "g"),
-      ("Dosentomaten", 400, "g"), ("Kokosmilch", 400, "ml"), ("Currypulver", 2, "EL"), ("Öl", 2, "EL")], []),
-    ("Vegetarische Bolognese", "base", 6, 4, "Kühlschrank",
-     "Zwiebel, Karotten, Sellerie anbraten. Tomatenmark, Linsen, passierte Tomaten und 300 ml Wasser, 30 Min köcheln.",
-     [("Braune Linsen", 200, "g"), ("Zwiebel", 2, "Stück"), ("Karotte", 3, "Stück"), ("Sellerie", 2, "Stange"),
-      ("Passierte Tomaten", 700, "g"), ("Tomatenmark", 2, "EL"), ("Öl", 2, "EL")], []),
-    ("Dal mit Hähnchen und Spinat", "derived", 2, None, None,
-     "Hähnchen in Streifen braten, Spinat zugeben, Dal erhitzen und unterheben.",
-     [("Hähnchenbrust", 300, "g"), ("Spinat", 200, "g")], [("Dal", 2)]),
-    ("Dal mit Eiern und Spinat", "derived", 2, None, None,
-     "Eier hart kochen, Spinat im Dal zusammenfallen lassen, Eier halbieren und darauf servieren.",
-     [("Eier", 4, "Stück"), ("Spinat", 200, "g")], [("Dal", 2)]),
+    ("Dal", "base", 6, 4, "Fridge",
+     "Sauté onion, garlic and ginger in oil. Add curry powder. Add lentils, tomatoes, coconut milk and 600 ml water, simmer 25 min.",
+     [("Red lentils", 300, "g"), ("Onion", 2, "piece"), ("Garlic", 4, "clove"), ("Ginger", 30, "g"),
+      ("Canned tomatoes", 400, "g"), ("Coconut milk", 400, "ml"), ("Curry powder", 2, "tbsp"), ("Olive oil", 2, "tbsp")], []),
+    ("Vegetarian Bolognese", "base", 6, 4, "Fridge",
+     "Fry onion, carrots and celery. Add tomato paste, lentils, passata and 300 ml water, simmer 30 min.",
+     [("Brown lentils", 200, "g"), ("Onion", 2, "piece"), ("Carrot", 3, "piece"), ("Celery", 2, "stalk"),
+      ("Passata", 700, "g"), ("Tomato paste", 2, "tbsp"), ("Olive oil", 2, "tbsp")], []),
+    ("Dal with Chicken and Spinach", "derived", 2, None, None,
+     "Fry chicken strips, add spinach, heat the dal and fold in.",
+     [("Chicken breast", 300, "g"), ("Spinach", 200, "g")], [("Dal", 2)]),
+    ("Dal with Eggs and Spinach", "derived", 2, None, None,
+     "Hard-boil eggs, wilt spinach into the dal, halve the eggs and serve on top.",
+     [("Eggs", 4, "piece"), ("Spinach", 200, "g")], [("Dal", 2)]),
     ("Spaghetti Bolognese", "derived", 2, None, None,
-     "Spaghetti kochen, Bolognese erhitzen.",
-     [("Spaghetti", 200, "g")], [("Vegetarische Bolognese", 2)]),
-    ("Pfannkuchen", "favorite", 2, None, None,
-     "Teig rühren, 10 Min ruhen lassen, in Butter ausbacken.",
-     [("Eier", 3, "Stück"), ("Mehl", 150, "g"), ("Milch", 300, "ml")], []),
+     "Cook spaghetti, heat the bolognese.",
+     [("Spaghetti", 200, "g")], [("Vegetarian Bolognese", 2)]),
+    ("Pancakes", "favorite", 2, None, None,
+     "Mix the batter, rest 10 min, fry in butter.",
+     [("Eggs", 3, "piece"), ("Flour", 150, "g"), ("Milk", 300, "ml")], []),
 ]
 
 
@@ -47,7 +47,7 @@ def seed_recipes() -> None:
                 )
                 rid = str(cur.fetchone()["id"])
                 ids[name] = rid
-                lines = [{"name": base, "qty": q, "unit": "Portionen", "base_recipe_id": ids[base]}
+                lines = [{"name": base, "qty": q, "unit": "portions", "base_recipe_id": ids[base]}
                          for base, q in bases]
                 lines += [{"name": n, "qty": q, "unit": u} for n, q, u in ings]
                 save_ingredients(cur, rid, lines)

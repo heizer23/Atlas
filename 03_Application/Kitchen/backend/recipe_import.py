@@ -39,27 +39,27 @@ def make_example(master_list: list[dict[str, Any]]) -> dict[str, Any]:
         {"item_id": i["id"], "name": i["name"], "qty": 250 if n == 0 else 1, "unit": i["unit"]}
         for n, i in enumerate(real)
     ]
-    lines.append({"item_id": None, "name": "Gemüsebrühe (neu, noch kein Artikel)", "qty": 800, "unit": "ml"})
+    lines.append({"item_id": None, "name": "Vegetable stock (new, no article yet)", "qty": 800, "unit": "ml"})
     return {
         "format": FORMAT,
         "version": VERSION,
         "_comment": _COMMENT,
         "existing_skus": sku_list(master_list),
         "recipe": {
-            "name": "Beispiel: Einfache Suppe",
-            "description": "Beispielrezept mit Artikeln aus dem Bestand und einer neuen Zutat.",
+            "name": "Example: Simple soup",
+            "description": "Example recipe using articles from the inventory and one new ingredient.",
             "kind": "favorite",
             "servings": 4,
-            "yield_unit": "Portionen",
+            "yield_unit": "portions",
             "prep_minutes": 10,
             "cook_minutes": 25,
             "shelf_life_days": 3,
-            "storage_location": "Kühlschrank",
+            "storage_location": "Fridge",
             "ingredients": lines,
             "steps": [
-                "Zutaten vorbereiten und in etwas Öl anschwitzen.",
-                "Mit Brühe aufgießen, 20 Minuten köcheln.",
-                "Pürieren und abschmecken.",
+                "Prepare the ingredients and sauté them in a little oil.",
+                "Add stock and simmer for 20 minutes.",
+                "Blend and season to taste.",
             ],
         },
     }
@@ -121,7 +121,7 @@ def parse_recipe(text: str, base_recipes: dict[str, dict[str, Any]]) -> tuple[di
     servings = rec.get("servings")
     if not _is_num(servings) or servings <= 0:
         _err(errors, f"{p}.servings", "required number > 0")
-    yield_unit = _opt_str(rec, "yield_unit", errors, p) or "Portionen"
+    yield_unit = _opt_str(rec, "yield_unit", errors, p) or "portions"
     description = _opt_str(rec, "description", errors, p)
     storage = _opt_str(rec, "storage_location", errors, p)
     prep, cook, shelf = (_opt_int(rec, k, errors, p) for k in ("prep_minutes", "cook_minutes", "shelf_life_days"))
@@ -155,7 +155,7 @@ def parse_recipe(text: str, base_recipes: dict[str, dict[str, Any]]) -> tuple[di
         if base_name is not None:
             base = base_recipes.get(ing_mod.norm(str(base_name)))
             line["name"] = str(base_name).strip()
-            line["unit"] = base["yield_unit"] if base else "Portionen"
+            line["unit"] = base["yield_unit"] if base else "portions"
             line["item_id"] = None
             if base:
                 line["base_recipe_id"] = base["id"]

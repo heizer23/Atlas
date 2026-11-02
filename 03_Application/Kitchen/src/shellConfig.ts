@@ -10,8 +10,8 @@ import { AppRegistry } from '@atlas/shell';
 
 const nav = [
   { id: 'kitchen-plan',     label: 'Plan',     path: '/kitchen',          order: 1 },
-  { id: 'kitchen-shopping', label: 'Einkauf',  path: '/kitchen/shopping', order: 2 },
-  { id: 'kitchen-recipes',  label: 'Rezepte',  path: '/kitchen/recipes',  order: 3 },
+  { id: 'kitchen-shopping', label: 'Shopping', path: '/kitchen/shopping', order: 2 },
+  { id: 'kitchen-recipes',  label: 'Recipes', path: '/kitchen/recipes',  order: 3 },
 ];
 
 AppRegistry.register({

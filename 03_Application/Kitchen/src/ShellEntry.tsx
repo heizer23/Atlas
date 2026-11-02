@@ -47,7 +47,7 @@ type Post = <T>(path: string, body?: unknown, method?: string) => Promise<T | nu
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function dayLabel(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit' });
 }
 
 function num(v: number): string { return String(Math.round(v * 100) / 100); }
@@ -87,48 +87,48 @@ function MealCard({ meal, recipes, onChanged }: { meal: Meal; recipes: RecipeSum
   return (
     <div className={`kitchen-card${planned ? '' : ' done'}`}>
       <div className="kitchen-row spread">
-        <strong>{meal.recipe_name ?? 'Flexibler Tag'}</strong>
-        <span className="kitchen-chip">{isCook ? 'Kochen' : 'Essen'} · {meal.status}</span>
+        <strong>{meal.recipe_name ?? 'Flexible day'}</strong>
+        <span className="kitchen-chip">{isCook ? 'Cook' : 'Eat'} · {meal.status}</span>
       </div>
-      {meal.recipe_id && <span className="kitchen-muted">{num(meal.portions)} Portionen</span>}
+      {meal.recipe_id && <span className="kitchen-muted">{num(meal.portions)} portions</span>}
       {error && <div className="kitchen-warn">{error}</div>}
 
       {planned && meal.recipe_id && (
         <div className="kitchen-row">
           <input className="kitchen-input num" type="number" min="0.5" step="0.5" value={qty}
-                 onChange={(e) => setQty(e.target.value)} aria-label="Portionen" />
+                 onChange={(e) => setQty(e.target.value)} aria-label="Portions" />
           <button className="kitchen-btn primary" disabled={busy}
                   onClick={() => run(`/meals/${meal.id}/${isCook ? 'cooked' : 'eaten'}`,
                                      isCook ? { produced_qty: Number(qty) } : { portions: Number(qty) })}>
-            {isCook ? 'Gekocht' : 'Gegessen'}
+            {isCook ? 'Cooked' : 'Eaten'}
           </button>
         </div>
       )}
       {planned && !meal.recipe_id && (
         <button className="kitchen-btn" disabled={busy}
-                onClick={() => run(`/meals/${meal.id}/eaten`)}>Gegessen (ohne Buchung)</button>
+                onClick={() => run(`/meals/${meal.id}/eaten`)}>Eaten (no booking)</button>
       )}
       {planned && (
         <div className="kitchen-row">
-          <button className="kitchen-btn" onClick={() => setMoving(!moving)}>Verschieben / Tauschen</button>
+          <button className="kitchen-btn" onClick={() => setMoving(!moving)}>Move / swap</button>
           <button className="kitchen-btn" disabled={busy}
-                  onClick={() => run(`/meals/${meal.id}`, { status: 'skipped' }, 'PATCH')}>Überspringen</button>
+                  onClick={() => run(`/meals/${meal.id}`, { status: 'skipped' }, 'PATCH')}>Skip</button>
         </div>
       )}
       {planned && moving && (
         <div className="kitchen-row">
           <input className="kitchen-input" type="date" value={newDay} onChange={(e) => setNewDay(e.target.value)} />
           <select className="kitchen-input" value={swap} onChange={(e) => setSwap(e.target.value)}>
-            <option value="">Flexibler Tag</option>
+            <option value="">Flexible day</option>
             {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
           <button className="kitchen-btn primary" disabled={busy}
-                  onClick={() => run(`/meals/${meal.id}`, { day: newDay, recipe_id: swap || null }, 'PATCH')}>Speichern</button>
+                  onClick={() => run(`/meals/${meal.id}`, { day: newDay, recipe_id: swap || null }, 'PATCH')}>Save</button>
         </div>
       )}
       {(meal.status === 'cooked' || meal.status === 'eaten') && (
         <button className="kitchen-btn" disabled={busy}
-                onClick={() => run(`/meals/${meal.id}/undo`)}>Rückgängig</button>
+                onClick={() => run(`/meals/${meal.id}/undo`)}>Undo</button>
       )}
     </div>
   );
@@ -162,10 +162,10 @@ function PlanView() {
   const days = plan ? Array.from(new Set(plan.meals.map((m) => m.day))) : [];
   return (
     <div className="kitchen-page">
-      <h1 className="type-headline">Wochenplan</h1>
+      <h1 className="type-headline">Week plan</h1>
       {batches.length > 0 && (
         <div className="kitchen-card">
-          <strong>Vorrat Kochbasen</strong>
+          <strong>Cooked bases in stock</strong>
           {batches.map((b) => (
             <div key={b.id} className="kitchen-row spread">
               <span>{b.name}</span>
@@ -176,7 +176,7 @@ function PlanView() {
       )}
       <button className="kitchen-btn primary" disabled={busy}
               onClick={async () => { if (await post('/plans/suggest', {})) load(); }}>
-        {plan ? 'Neuen Wochenplan vorschlagen' : 'Wochenplan vorschlagen'}
+        {plan ? 'Suggest new week plan' : 'Suggest week plan'}
       </button>
       {(actionError || error) && <div className="kitchen-warn">{actionError ?? error}</div>}
       {days.map((d) => (
@@ -199,10 +199,10 @@ function AddMeal({ planId, recipes, weekStart, onAdded }: { planId: string; reci
   const recipe = recipes.find((r) => r.id === recipeId);
   return (
     <div className="kitchen-card">
-      <strong>Gericht hinzufügen</strong>
+      <strong>Add meal</strong>
       <div className="kitchen-row">
         <select className="kitchen-input" value={recipeId} onChange={(e) => setRecipeId(e.target.value)}>
-          <option value="">Rezept wählen…</option>
+          <option value="">Choose recipe…</option>
           {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
         <input className="kitchen-input" type="date" value={day} onChange={(e) => setDay(e.target.value)} />
@@ -211,7 +211,7 @@ function AddMeal({ planId, recipes, weekStart, onAdded }: { planId: string; reci
                   if (await post(`/plans/${planId}/meals`, { recipe_id: recipeId, day, kind: recipe!.kind === 'base' ? 'cook' : 'meal' })) {
                     setRecipeId(''); onAdded();
                   }
-                }}>Hinzufügen</button>
+                }}>Add</button>
       </div>
       {error && <div className="kitchen-warn">{error}</div>}
     </div>
@@ -227,7 +227,7 @@ function BuyRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
     <div className="kitchen-card">
       <div className="kitchen-row spread">
         <strong>{line.name}</strong>
-        <span className="kitchen-muted">brauche {num(line.needed)} {line.unit}, da {num(line.stock)}</span>
+        <span className="kitchen-muted">need {num(line.needed)} {line.unit}, have {num(line.stock)}</span>
       </div>
       <div className="kitchen-row">
         <input className="kitchen-input num" type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
@@ -235,7 +235,7 @@ function BuyRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
         <button className="kitchen-btn primary" disabled={busy || !(Number(qty) > 0)}
                 onClick={async () => {
                   if (await post('/shopping/purchase', { item_id: line.item_id, qty: Number(qty), idempotency_key: crypto.randomUUID?.() })) onDone();
-                }}>Gekauft</button>
+                }}>Bought</button>
       </div>
       {error && <div className="kitchen-warn">{error}</div>}
     </div>
@@ -249,14 +249,14 @@ function HaveRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
     <div className="kitchen-card">
       <div className="kitchen-row spread">
         <strong>{line.name}</strong>
-        <span className="kitchen-muted">brauche {num(line.needed)} {line.unit} · Bestand {num(line.stock)}</span>
+        <span className="kitchen-muted">need {num(line.needed)} {line.unit} · stock {num(line.stock)}</span>
       </div>
       <div className="kitchen-row">
         <input className="kitchen-input num" type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
-        <span>{line.unit} tatsächlich da</span>
+        <span>{line.unit} actually on hand</span>
         <button className="kitchen-btn" disabled={busy}
                 onClick={async () => { if (await post('/shopping/stocktake', { item_id: line.item_id, qty: Number(qty) })) onDone(); }}>
-          Bestätigen
+          Confirm
         </button>
       </div>
       {error && <div className="kitchen-warn">{error}</div>}
@@ -280,23 +280,23 @@ function ShoppingView() {
   useEffect(() => { load(); }, [load]);
 
   if (data === undefined) return <div className="kitchen-page"><Loading error={error} /></div>;
-  if (data === null) return <div className="kitchen-page"><p className="kitchen-muted">Noch kein Wochenplan.</p></div>;
+  if (data === null) return <div className="kitchen-page"><p className="kitchen-muted">No week plan yet.</p></div>;
 
   return (
     <div className="kitchen-page">
-      <h1 className="type-headline">Einkauf</h1>
+      <h1 className="type-headline">Shopping</h1>
       {data.draft_recipes.length > 0 && (
-        <div className="kitchen-warn">Nicht berücksichtigt (Entwurf, Zutaten nicht zugeordnet): {data.draft_recipes.join(', ')}</div>
+        <div className="kitchen-warn">Not included (draft, ingredients not assigned): {data.draft_recipes.join(', ')}</div>
       )}
       {data.missing_bases.map((b) => (
         <div key={b.name} className="kitchen-warn">
-          Kochbasis „{b.name}" fehlt: benötigt {num(b.needed)}, verfügbar {num(b.available)} — im Plan eine Kochsession ergänzen.
+          Cooked base "{b.name}" is missing: need {num(b.needed)}, available {num(b.available)} — add a cooking session to the plan.
         </div>
       ))}
-      <div className="kitchen-day">Einkaufen ({data.buy.length})</div>
-      {data.buy.length === 0 && <p className="kitchen-muted">Nichts zu kaufen.</p>}
+      <div className="kitchen-day">To buy ({data.buy.length})</div>
+      {data.buy.length === 0 && <p className="kitchen-muted">Nothing to buy.</p>}
       {data.buy.map((l) => <BuyRow key={`${l.item_id}-${l.stock}`} line={l} onDone={load} />)}
-      <div className="kitchen-day">Vermutlich vorhanden ({data.probably_have.length})</div>
+      <div className="kitchen-day">Probably on hand ({data.probably_have.length})</div>
       {data.probably_have.map((l) => <HaveRow key={`${l.item_id}-${l.stock}`} line={l} onDone={load} />)}
     </div>
   );
@@ -304,7 +304,7 @@ function ShoppingView() {
 
 // ── Recipes view ──────────────────────────────────────────────────────────────
 
-const EMPTY: Recipe = { id: '', name: '', kind: 'favorite', status: 'draft', servings: 2, yield_unit: 'Portionen',
+const EMPTY: Recipe = { id: '', name: '', kind: 'favorite', status: 'draft', servings: 2, yield_unit: 'portions',
                         description: null, prep_minutes: null, cook_minutes: null, steps: '',
                         shelf_life_days: null, storage_location: null, ingredients: [] };
 
@@ -322,7 +322,7 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
       name: r.name, kind: r.kind, servings: r.servings, description: r.description, prep_minutes: r.prep_minutes,
       cook_minutes: r.cook_minutes, steps: r.steps, shelf_life_days: r.shelf_life_days, storage_location: r.storage_location,
       ingredients: r.ingredients.filter((i) => i.name.trim() || i.item_id || i.base_recipe_id).map((i) => ({
-        name: i.name || i.item_name || '', qty: Number(i.qty), unit: i.base_recipe_id ? 'Portionen' : i.unit,
+        name: i.name || i.item_name || '', qty: Number(i.qty), unit: i.base_recipe_id ? 'portions' : i.unit,
         base_recipe_id: i.base_recipe_id, item_id: i.item_id,
       })),
     };
@@ -333,43 +333,43 @@ function RecipeForm({ initial, bases, onSaved, onCancel }: { initial: Recipe; ba
   return (
     <div className="kitchen-card">
       <input className="kitchen-input" placeholder="Name" value={r.name} onChange={(e) => set({ name: e.target.value })} />
-      <input className="kitchen-input" placeholder="Beschreibung" value={r.description ?? ''} onChange={(e) => set({ description: e.target.value || null })} />
+      <input className="kitchen-input" placeholder="Description" value={r.description ?? ''} onChange={(e) => set({ description: e.target.value || null })} />
       <div className="kitchen-row">
         <select className="kitchen-input" value={r.kind} onChange={(e) => set({ kind: e.target.value as RecipeKind })}>
-          <option value="base">Kochbasis</option>
-          <option value="derived">Abgeleitetes Gericht</option>
-          <option value="favorite">Favorit</option>
+          <option value="base">Cooked base</option>
+          <option value="derived">Derived dish</option>
+          <option value="favorite">Favorite</option>
         </select>
-        <label className="kitchen-row">Portionen
+        <label className="kitchen-row">Servings
           <input className="kitchen-input num" type="number" min="0.5" step="0.5" value={r.servings}
                  onChange={(e) => set({ servings: Number(e.target.value) })} /></label>
-        <label className="kitchen-row">Vorb. (min)
+        <label className="kitchen-row">Prep (min)
           <input className="kitchen-input num" type="number" min="0" value={r.prep_minutes ?? ''} onChange={(e) => set({ prep_minutes: minutes(e.target.value) })} /></label>
-        <label className="kitchen-row">Kochen (min)
+        <label className="kitchen-row">Cook (min)
           <input className="kitchen-input num" type="number" min="0" value={r.cook_minutes ?? ''} onChange={(e) => set({ cook_minutes: minutes(e.target.value) })} /></label>
         {r.kind === 'base' && (
-          <label className="kitchen-row">Haltbar (Tage)
+          <label className="kitchen-row">Shelf life (days)
             <input className="kitchen-input num" type="number" min="0" value={r.shelf_life_days ?? ''}
                    onChange={(e) => set({ shelf_life_days: minutes(e.target.value) })} /></label>
         )}
       </div>
-      <strong>Zutaten</strong>
+      <strong>Ingredients</strong>
       {r.ingredients.map((ing, i) => (
         <IngredientLine key={i} line={ing} master={master} onChange={(p) => setIng(i, p)} onCreated={add}
                         onRemove={() => set({ ingredients: r.ingredients.filter((_, j) => j !== i) })} />
       ))}
       <div className="kitchen-row">
-        <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: '', qty: 1, unit: 'g', item_id: null, base_recipe_id: null }] })}>+ Zutat</button>
+        <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: '', qty: 1, unit: 'g', item_id: null, base_recipe_id: null }] })}>+ Ingredient</button>
         {bases.length > 0 && r.kind !== 'base' && (
-          <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: bases[0].name, qty: 2, unit: 'Portionen', item_id: null, base_recipe_id: bases[0].id }] })}>+ Kochbasis</button>
+          <button className="kitchen-btn" onClick={() => set({ ingredients: [...r.ingredients, { name: bases[0].name, qty: 2, unit: 'portions', item_id: null, base_recipe_id: bases[0].id }] })}>+ Cooked base</button>
         )}
       </div>
-      <textarea className="kitchen-input kitchen-textarea" placeholder="Zubereitungsschritte" value={r.steps} onChange={(e) => set({ steps: e.target.value })} />
+      <textarea className="kitchen-input kitchen-textarea" placeholder="Preparation steps" value={r.steps} onChange={(e) => set({ steps: e.target.value })} />
       {error && <div className="kitchen-warn">{error}</div>}
-      <span className="kitchen-muted">Rezepte mit nicht zugeordneten Zutaten werden als Entwurf gespeichert.</span>
+      <span className="kitchen-muted">Recipes with unassigned ingredients are saved as drafts.</span>
       <div className="kitchen-row">
-        <button className="kitchen-btn primary" disabled={busy || !r.name.trim()} onClick={save}>Speichern</button>
-        <button className="kitchen-btn" onClick={onCancel}>Abbrechen</button>
+        <button className="kitchen-btn primary" disabled={busy || !r.name.trim()} onClick={save}>Save</button>
+        <button className="kitchen-btn" onClick={onCancel}>Cancel</button>
       </div>
     </div>
   );
@@ -404,13 +404,13 @@ function RecipesView() {
       </div>
     );
   }
-  const label: Record<RecipeKind, string> = { base: 'Kochbasen', derived: 'Abgeleitete Gerichte', favorite: 'Favoriten' };
+  const label: Record<RecipeKind, string> = { base: 'Cooked bases', derived: 'Derived dishes', favorite: 'Favorites' };
   return (
     <div className="kitchen-page">
-      <h1 className="type-headline">Rezepte</h1>
+      <h1 className="type-headline">Recipes</h1>
       <div className="kitchen-row">
-        <button className="kitchen-btn primary" onClick={() => setEditing(EMPTY)}>Neues Rezept</button>
-        <button className="kitchen-btn" onClick={() => setImporting(true)}>Importieren</button>
+        <button className="kitchen-btn primary" onClick={() => setEditing(EMPTY)}>New recipe</button>
+        <button className="kitchen-btn" onClick={() => setImporting(true)}>Import</button>
       </div>
       {(['base', 'derived', 'favorite'] as RecipeKind[]).map((k) => (
         <React.Fragment key={k}>
@@ -418,7 +418,7 @@ function RecipesView() {
           {rows.filter((r) => r.kind === k).map((r) => (
             <button key={r.id} className="kitchen-btn" style={{ textAlign: 'left' }} onClick={() => open(r.id)}>
               {r.name} <span className="kitchen-muted">· {num(r.servings)} {r.yield_unit}</span>
-              {r.status === 'draft' && <span className="kitchen-chip warn"> Entwurf</span>}
+              {r.status === 'draft' && <span className="kitchen-chip warn"> Draft</span>}
             </button>
           ))}
         </React.Fragment>

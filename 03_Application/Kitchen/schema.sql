@@ -8,7 +8,7 @@ create table if not exists kitchen.recipes (
     name            text        not null unique,
     kind            text        not null check (kind in ('base', 'derived', 'favorite')),
     servings        numeric     not null default 1 check (servings > 0),
-    yield_unit      text        not null default 'Portionen',
+    yield_unit      text        not null default 'portions',
     steps           text        not null default '',
     shelf_life_days integer     check (shelf_life_days is null or shelf_life_days >= 0),
     storage_location text,
@@ -114,5 +114,7 @@ begin
         end if;
     end loop;
 end $$;
+
+alter table kitchen.recipes alter column yield_unit set default 'portions';
 
 commit;

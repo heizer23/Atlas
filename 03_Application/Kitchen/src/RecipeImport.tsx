@@ -35,8 +35,8 @@ interface Preview {
 
 interface Dataset<T> { rows: T[] }
 
-const CLIPBOARD_WRITE_DENIED = 'Zwischenablage nicht verfügbar — Browser-Berechtigung prüfen.';
-const CLIPBOARD_READ_DENIED = 'Zwischenablage nicht lesbar — Berechtigung prüfen oder manuell ins Feld einfügen (Strg/Cmd+V).';
+const CLIPBOARD_WRITE_DENIED = 'Clipboard not available — check the browser permission.';
+const CLIPBOARD_READ_DENIED = 'Could not read the clipboard — check the permission or paste manually into the box below (Ctrl/Cmd+V).';
 
 async function writeClipboard(text: string): Promise<string | null> {
   try { await navigator.clipboard.writeText(text); return null; } catch { return CLIPBOARD_WRITE_DENIED; }
@@ -95,29 +95,29 @@ function ArticleResolver({ line, master, onAssign, onCreated }: {
   return (
     <div className="kitchen-col">
       <div className="kitchen-row">
-        <button className="kitchen-btn" onClick={() => setMode(mode === 'assign' ? null : 'assign')}>Artikel zuordnen</button>
-        <button className="kitchen-btn" onClick={() => setMode(mode === 'create' ? null : 'create')}>Neu anlegen</button>
+        <button className="kitchen-btn" onClick={() => setMode(mode === 'assign' ? null : 'assign')}>Assign article</button>
+        <button className="kitchen-btn" onClick={() => setMode(mode === 'create' ? null : 'create')}>Create new</button>
       </div>
       {mode === 'assign' && (
         <div className="kitchen-col">
-          <input className="kitchen-input" placeholder="Artikel suchen…" value={query} onChange={(e) => setQuery(e.target.value)} />
-          {hits.length === 0 && <span className="kitchen-muted">Kein Artikel gefunden.</span>}
+          <input className="kitchen-input" placeholder="Search articles…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          {hits.length === 0 && <span className="kitchen-muted">No article found.</span>}
           {hits.map((a) => (
             <button key={a.id} className="kitchen-btn kitchen-left" onClick={() => onAssign(a)}>
-              #{a.id} {a.name} <span className="kitchen-muted">· {a.unit ?? 'ohne Einheit'}</span>
+              #{a.id} {a.name} <span className="kitchen-muted">· {a.unit ?? 'no unit'}</span>
             </button>
           ))}
         </div>
       )}
       {mode === 'create' && (
         <div className="kitchen-col">
-          <input className="kitchen-input" value={name} onChange={(e) => setName(e.target.value)} aria-label="Artikelname" />
+          <input className="kitchen-input" value={name} onChange={(e) => setName(e.target.value)} aria-label="Article name" />
           <div className="kitchen-row">
             <input className="kitchen-input num" value={unit} onChange={(e) => setUnit(e.target.value)} aria-label="Basiseinheit" />
-            <span className="kitchen-muted">Basiseinheit · Bestand 0</span>
+            <span className="kitchen-muted">Base unit · stock 0</span>
           </div>
           <button className="kitchen-btn primary" disabled={busy || !name.trim() || !unit.trim()} onClick={create}>
-            Anlegen &amp; zuordnen
+            Create &amp; assign
           </button>
           {error && <div className="kitchen-warn">{error}</div>}
         </div>
@@ -129,8 +129,8 @@ function ArticleResolver({ line, master, onAssign, onCreated }: {
 // ── One ingredient line (import preview and recipe form) ──────────────────────
 
 const STATUS_TEXT: Record<LineStatus, string> = {
-  base: 'Kochbasis', matched: '', unit_mismatch: 'Einheit passt nicht', unknown_id: 'Artikel-ID unbekannt',
-  unresolved: 'Nicht zugeordnet', unknown_base: 'Kochbasis unbekannt',
+  base: 'Cooked base', matched: '', unit_mismatch: 'Unit mismatch', unknown_id: 'Unknown article number',
+  unresolved: 'Not assigned', unknown_base: 'Unknown base recipe',
 };
 
 export function IngredientLine({ line, master, onChange, onCreated, onRemove }: {
@@ -148,21 +148,21 @@ export function IngredientLine({ line, master, onChange, onCreated, onRemove }: 
         <strong>{ok && article ? `✓ #${article.id} ${article.name}` : line.name || '—'}</strong>
         <span className="kitchen-row">
           {!ok && <span className="kitchen-chip warn">{STATUS_TEXT[status]}</span>}
-          {onRemove && <button className="kitchen-btn" onClick={onRemove} aria-label="Zutat entfernen">×</button>}
+          {onRemove && <button className="kitchen-btn" onClick={onRemove} aria-label="Remove ingredient">×</button>}
         </span>
       </div>
       <div className="kitchen-row">
         <input className="kitchen-input num" type="number" min="0" step="any" value={line.qty}
-               onChange={(e) => onChange({ qty: Number(e.target.value) })} aria-label="Menge" />
+               onChange={(e) => onChange({ qty: Number(e.target.value) })} aria-label="Quantity" />
         {line.base_recipe_id ? <span>{line.unit}</span> :
-          <input className="kitchen-input num" value={line.unit} onChange={(e) => onChange({ unit: e.target.value })} aria-label="Einheit" />}
+          <input className="kitchen-input num" value={line.unit} onChange={(e) => onChange({ unit: e.target.value })} aria-label="Unit" />}
         {status === 'unit_mismatch' && article && (
-          <span className="kitchen-muted">Artikel „{article.name}" nutzt {article.unit} — Menge/Einheit anpassen, es wird nicht umgerechnet.</span>
+          <span className="kitchen-muted">Article "{article.name}" uses {article.unit} — adjust quantity/unit, nothing is converted.</span>
         )}
       </div>
       {article && !line.base_recipe_id && (
         <button className="kitchen-btn kitchen-left" onClick={() => onChange({ item_id: null, item_name: null, item_unit: null })}>
-          Zuordnung ändern
+          Change assignment
         </button>
       )}
       {(status === 'unresolved' || status === 'unknown_id' || status === 'unknown_base') && !line.base_recipe_id && (
@@ -186,7 +186,7 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
   const copyExample = async () => {
     const res = await apiFetch<Dataset<{ example: unknown }>>('/kitchen/recipes/import-example');
     if (isApiError(res)) { setMsg(res.error.message); return; }
-    setMsg((await writeClipboard(JSON.stringify(res.rows[0].example, null, 2))) ?? 'Beispiel-JSON kopiert.');
+    setMsg((await writeClipboard(JSON.stringify(res.rows[0].example, null, 2))) ?? 'Example JSON copied.');
   };
 
   const copyMaster = async () => {
@@ -196,7 +196,7 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
       format: 'atlas.kitchen.ingredient_master', version: 1,
       items: res.rows.map((a) => ({ item_id: a.id, name: a.name, unit: a.unit })),
     };
-    setMsg((await writeClipboard(JSON.stringify(payload, null, 2))) ?? `Zutatenstamm kopiert (${res.rows.length} Artikel).`);
+    setMsg((await writeClipboard(JSON.stringify(payload, null, 2))) ?? `Ingredient master copied (${res.rows.length} articles).`);
   };
 
   const check = async (raw: string) => {
@@ -241,23 +241,23 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
   return (
     <div className="kitchen-page">
       <div className="kitchen-row spread">
-        <h1 className="type-headline">Rezept importieren</h1>
-        <button className="kitchen-btn" onClick={onClose}>Schließen</button>
+        <h1 className="type-headline">Import recipe</h1>
+        <button className="kitchen-btn" onClick={onClose}>Close</button>
       </div>
       <div className="kitchen-row">
-        <button className="kitchen-btn" onClick={copyExample}>Beispiel-JSON kopieren</button>
-        <button className="kitchen-btn" onClick={copyMaster}>Zutatenstamm kopieren</button>
-        <button className="kitchen-btn primary" disabled={busy} onClick={paste}>Aus Zwischenablage importieren</button>
+        <button className="kitchen-btn" onClick={copyExample}>Copy example JSON</button>
+        <button className="kitchen-btn" onClick={copyMaster}>Copy ingredient master</button>
+        <button className="kitchen-btn primary" disabled={busy} onClick={paste}>Import from clipboard</button>
       </div>
       {msg && <div className="kitchen-muted">{msg}</div>}
       <textarea className="kitchen-input kitchen-textarea kitchen-mono" value={text} rows={6}
-                placeholder="Oder Rezept-JSON hier einfügen…" onChange={(e) => setText(e.target.value)} />
-      <button className="kitchen-btn" disabled={busy || !text.trim()} onClick={() => check(text)}>Prüfen</button>
+                placeholder="Or paste recipe JSON here…" onChange={(e) => setText(e.target.value)} />
+      <button className="kitchen-btn" disabled={busy || !text.trim()} onClick={() => check(text)}>Check</button>
       {error && <div className="kitchen-warn">{error}</div>}
 
       {preview && !preview.ok && (
         <div className="kitchen-warn">
-          <strong>Import nicht möglich:</strong>
+          <strong>Import not possible:</strong>
           {preview.errors.map((e, i) => <div key={i}><code>{e.path}</code>: {e.message}</div>)}
         </div>
       )}
@@ -265,26 +265,26 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
       {rec && preview?.ok && (
         <>
           <div className="kitchen-card">
-            <input className="kitchen-input" value={rec.name} onChange={(e) => setRec({ ...rec, name: e.target.value })} aria-label="Rezeptname" />
+            <input className="kitchen-input" value={rec.name} onChange={(e) => setRec({ ...rec, name: e.target.value })} aria-label="Recipe name" />
             <span className="kitchen-muted">
-              {rec.kind === 'base' ? 'Kochbasis' : rec.kind === 'derived' ? 'Abgeleitetes Gericht' : 'Favorit'} · {rec.servings} {rec.yield_unit}
-              {rec.prep_minutes !== null ? ` · Vorbereitung ${rec.prep_minutes} min` : ''}
-              {rec.cook_minutes !== null ? ` · Kochen ${rec.cook_minutes} min` : ''}
+              {rec.kind === 'base' ? 'Cooked base' : rec.kind === 'derived' ? 'Derived dish' : 'Favorite'} · {rec.servings} {rec.yield_unit}
+              {rec.prep_minutes !== null ? ` · Prep ${rec.prep_minutes} min` : ''}
+              {rec.cook_minutes !== null ? ` · Cook ${rec.cook_minutes} min` : ''}
             </span>
             {rec.description && <span>{rec.description}</span>}
             {preview.name_exists && (
-              <div className="kitchen-warn">Ein Rezept mit diesem Namen existiert bereits — es wird nicht überschrieben. Name ändern, um als neues Rezept zu speichern.</div>
+              <div className="kitchen-warn">A recipe with this name already exists — it will not be overwritten. Change the name to save it as a new recipe.</div>
             )}
           </div>
-          <div className="kitchen-day">Zutaten ({rec.ingredients.length - open} zugeordnet, {open} offen)</div>
+          <div className="kitchen-day">Ingredients ({rec.ingredients.length - open} assigned, {open} open)</div>
           {rec.ingredients.map((l, i) => (
             <IngredientLine key={i} line={l} master={master} onChange={(p) => setLine(i, p)} onCreated={add} />
           ))}
-          {rec.steps && (<><div className="kitchen-day">Schritte</div><pre className="kitchen-steps">{rec.steps}</pre></>)}
+          {rec.steps && (<><div className="kitchen-day">Steps</div><pre className="kitchen-steps">{rec.steps}</pre></>)}
           <button className="kitchen-btn primary" disabled={busy || !rec.name.trim()} onClick={save}>
-            {open === 0 ? 'Speichern (aktiv)' : `Als Entwurf speichern (${open} offen)`}
+            {open === 0 ? 'Save (active)' : `Save as draft (${open} open)`}
           </button>
-          {open > 0 && <span className="kitchen-muted">Entwürfe werden nicht für Plan, Einkauf und Buchungen verwendet.</span>}
+          {open > 0 && <span className="kitchen-muted">Drafts are not used for planning, shopping or stock bookings.</span>}
         </>
       )}
     </div>

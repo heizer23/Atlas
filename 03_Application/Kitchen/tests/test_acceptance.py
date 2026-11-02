@@ -49,43 +49,43 @@ def test_full_flow(client):
     # 1 plan with Dal + Bolognese as bases, derived meals
     pid = new_plan(client)
     cook_dal = add_meal(client, pid, "Dal", "2030-01-07", "cook")
-    add_meal(client, pid, "Vegetarische Bolognese", "2030-01-08", "cook")
-    m_eggs = add_meal(client, pid, "Dal mit Eiern und Spinat", "2030-01-09")
-    m_chicken = add_meal(client, pid, "Dal mit Hähnchen und Spinat", "2030-01-10")
+    add_meal(client, pid, "Vegetarian Bolognese", "2030-01-08", "cook")
+    m_eggs = add_meal(client, pid, "Dal with Eggs and Spinach", "2030-01-09")
+    m_chicken = add_meal(client, pid, "Dal with Chicken and Spinach", "2030-01-10")
     m_moved = add_meal(client, pid, "Spaghetti Bolognese", "2030-01-11")
 
-    # 2 consolidated shopping list; Spinat (2 meals) summed, bases not shopped
+    # 2 consolidated shopping list; Spinach (2 meals) summed, bases not shopped
     shop = client.get(f"/api/kitchen/plans/{pid}/shopping").json()["rows"][0]
-    spinat = next(l for l in shop["buy"] if l["name"] == "Spinat")
+    spinat = next(l for l in shop["buy"] if l["name"] == "Spinach")
     assert spinat["to_buy"] == 400
     assert shop["missing_bases"] == []
     assert not shop["probably_have"]
 
     # 3 buy + confirm on-hand: lentils 300 g bought; onions "probably have" corrected
-    buy(client, "Rote Linsen", 500)
-    client.post("/api/kitchen/shopping/stocktake", json={"item_id": item_id("Zwiebel"), "qty": 6})
-    for n, q in [("Knoblauch", 10), ("Ingwer", 100), ("Dosentomaten", 800), ("Kokosmilch", 800),
-                 ("Currypulver", 10), ("Öl", 20), ("Hähnchenbrust", 300), ("Spinat", 400), ("Eier", 6)]:
+    buy(client, "Red lentils", 500)
+    client.post("/api/kitchen/shopping/stocktake", json={"item_id": item_id("Onion"), "qty": 6})
+    for n, q in [("Garlic", 10), ("Ginger", 100), ("Canned tomatoes", 800), ("Coconut milk", 800),
+                 ("Curry powder", 10), ("Olive oil", 20), ("Chicken breast", 300), ("Spinach", 400), ("Eggs", 6)]:
         buy(client, n, q)
     shop = client.get(f"/api/kitchen/plans/{pid}/shopping").json()["rows"][0]
-    assert any(l["name"] == "Rote Linsen" for l in shop["probably_have"])
+    assert any(l["name"] == "Red lentils" for l in shop["probably_have"])
 
     # 4/5 cook 6 portions Dal -> batch, raw ingredients backflushed
     r = client.post(f"/api/kitchen/meals/{cook_dal}/cooked", json={"produced_qty": 6})
     assert r.status_code == 200, r.text
-    assert stock("Rote Linsen") == 200 and stock("Zwiebel") == 4 and stock("Kokosmilch") == 400
+    assert stock("Red lentils") == 200 and stock("Onion") == 4 and stock("Coconut milk") == 400
     b = batches()
-    assert len(b) == 1 and b[0]["quantity"] == 6 and b[0]["unit"] == "Portionen"
+    assert len(b) == 1 and b[0]["quantity"] == 6 and b[0]["unit"] == "portions"
 
     # repeat confirm: no double booking
     r2 = client.post(f"/api/kitchen/meals/{cook_dal}/cooked", json={"produced_qty": 6})
     assert r2.json()["replayed"] is True
-    assert stock("Rote Linsen") == 200 and batches()[0]["quantity"] == 6
+    assert stock("Red lentils") == 200 and batches()[0]["quantity"] == 6
 
     # 6/7 eat eggs and chicken Dal
     assert client.post(f"/api/kitchen/meals/{m_eggs}/eaten").status_code == 200
     assert client.post(f"/api/kitchen/meals/{m_chicken}/eaten").status_code == 200
-    assert stock("Eier") == 2 and stock("Hähnchenbrust") == 0 and stock("Spinat") == 0
+    assert stock("Eggs") == 2 and stock("Chicken breast") == 0 and stock("Spinach") == 0
     # repeat eat: still no double booking
     client.post(f"/api/kitchen/meals/{m_eggs}/eaten")
     # 8 two portions remain
@@ -104,7 +104,7 @@ def test_full_flow(client):
 def test_undo_eat_restores_batch(client):
     pid = new_plan(client)
     cook = add_meal(client, pid, "Dal", "2030-01-07", "cook")
-    eat = add_meal(client, pid, "Dal mit Eiern und Spinat", "2030-01-08")
+    eat = add_meal(client, pid, "Dal with Eggs and Spinach", "2030-01-08")
     client.post(f"/api/kitchen/meals/{cook}/cooked")
     client.post(f"/api/kitchen/meals/{eat}/eaten")
     assert batches()[0]["quantity"] == 4
@@ -117,7 +117,7 @@ def test_undo_eat_restores_batch(client):
 
 def test_skipped_meal_creates_no_movement(client):
     pid = new_plan(client)
-    m = add_meal(client, pid, "Pfannkuchen", "2030-01-07")
+    m = add_meal(client, pid, "Pancakes", "2030-01-07")
     assert client.patch(f"/api/kitchen/meals/{m}", json={"status": "skipped"}).status_code == 200
     assert client.post(f"/api/kitchen/meals/{m}/eaten").status_code == 409
     assert all(r["quantity"] == 0 for r in httpx.get(f"{ST}/items").json()["rows"])
