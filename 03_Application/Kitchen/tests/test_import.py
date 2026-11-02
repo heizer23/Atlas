@@ -64,6 +64,9 @@ def test_example_round_trips(client):
     assert p["ok"] and not p["errors"] and p["recipe"]["name"] == ex["recipe"]["name"]
     lines = ex["recipe"]["ingredients"]
     master = {r["id"]: r for r in client.get(f"{K}/ingredients").json()["rows"]}
+    skus = ex["existing_skus"]  # full list for ChatGPT, incl. zero stock, no batches
+    assert {s_["item_id"] for s_ in skus} == set(master) and len(skus) == len(master)
+    assert all(set(s_) == {"item_id", "name", "unit"} and s_["name"] == master[s_["item_id"]]["name"] for s_ in skus)
     real = [l for l in lines if l["item_id"]]
     assert len(real) == 2 and all(master[l["item_id"]]["name"] == l["name"] and master[l["item_id"]]["unit"] == l["unit"]
                                   for l in real)

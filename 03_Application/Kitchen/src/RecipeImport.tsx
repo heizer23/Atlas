@@ -194,7 +194,7 @@ export function ImportView({ onClose, onSaved }: { onClose: () => void; onSaved:
     if (isApiError(res)) { setMsg(res.error.message); return; }
     const payload = {
       format: 'atlas.kitchen.ingredient_master', version: 1,
-      items: res.rows.map((a) => ({ id: a.id, name: a.name, unit: a.unit })),
+      items: res.rows.map((a) => ({ item_id: a.id, name: a.name, unit: a.unit })),
     };
     setMsg((await writeClipboard(JSON.stringify(payload, null, 2))) ?? `Zutatenstamm kopiert (${res.rows.length} Artikel).`);
   };

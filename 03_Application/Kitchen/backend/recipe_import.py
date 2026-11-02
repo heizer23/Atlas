@@ -18,15 +18,24 @@ VERSION = 1
 KINDS = ("base", "derived", "favorite")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
-_COMMENT = ("kind: base | derived | favorite. Ingredients: copy 'item_id', 'name' and 'unit' of existing articles from the "
-            "exported ingredient master; 'unit' must equal the article's base unit. For an ingredient without an article "
-            "leave 'item_id' null (you assign or create the article during import). A derived dish may reference a "
-            "cooked base via 'base_recipe' (the exact recipe name) instead of item_id.")
+_COMMENT = ("kind: base | derived | favorite. 'existing_skus' lists ALL articles that already exist (reference data, "
+            "ignored on import). For every ingredient that matches an existing SKU copy its 'item_id', 'name' and 'unit' "
+            "into the recipe line ('unit' must equal the SKU's unit; set 'qty' in that unit). Never invent an item_id. "
+            "For an ingredient with no matching SKU leave 'item_id' null and use a clear name (the user assigns or "
+            "creates the article during import). A derived dish may reference a cooked base via 'base_recipe' "
+            "(the exact recipe name) instead of item_id.")
+
+
+def sku_list(master_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Article master in export shape: item_id + name + base unit, zero stock included."""
+    return [{"item_id": i["id"], "name": i["name"], "unit": i.get("unit")}
+            for i in sorted(master_list, key=lambda i: i["name"].lower())]
 
 
 def make_example(master_list: list[dict[str, Any]]) -> dict[str, Any]:
-    """Importable example. Uses up to two real articles of the household (id + name + unit, as in the master
-    export) and one new ingredient without article, so every field and both line kinds are demonstrated."""
+    """Importable example for handing to ChatGPT: carries the household's FULL article list as `existing_skus`
+    (ignored by the importer), plus a sample recipe that uses up to two of them and one new ingredient without
+    article, so every field and both line kinds are demonstrated."""
     real = sorted((i for i in master_list if i.get("unit")), key=lambda i: i["name"].lower())[:2]
     lines: list[dict[str, Any]] = [
         {"item_id": i["id"], "name": i["name"], "qty": 250 if n == 0 else 1, "unit": i["unit"]}
@@ -37,6 +46,7 @@ def make_example(master_list: list[dict[str, Any]]) -> dict[str, Any]:
         "format": FORMAT,
         "version": VERSION,
         "_comment": _COMMENT,
+        "existing_skus": sku_list(master_list),
         "recipe": {
             "name": "Beispiel: Einfache Suppe",
             "description": "Beispielrezept mit Artikeln aus dem Bestand und einer neuen Zutat.",
