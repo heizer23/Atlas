@@ -71,6 +71,8 @@ def test_example_round_trips(client):
     assert len(real) == 2 and all(master[l["item_id"]]["name"] == l["name"] and master[l["item_id"]]["unit"] == l["unit"]
                                   for l in real)
     assert p["unresolved"] == 1 and p["status_if_saved"] == "draft"
+    assert "shelf_life_days" in ex["_comment"] and "never expires" in ex["recipe"]["_shelf_life_days"]
+    assert p["recipe"]["shelf_life_days"] == ex["recipe"]["shelf_life_days"]
     assert save(client, p).status_code == 201
 
 

@@ -21,7 +21,8 @@ _COMMENT = ("kind: base | derived | favorite. 'existing_skus' lists ALL articles
             "into the recipe line ('unit' must equal the SKU's unit; set 'qty' in that unit). Never invent an item_id (article numbers are integers). "
             "For an ingredient with no matching SKU leave 'item_id' null and use a clear name (the user assigns or "
             "creates the article during import). A derived dish may reference a cooked base via 'base_recipe' "
-            "(the exact recipe name) instead of item_id.")
+            "(the exact recipe name) instead of item_id. For kind 'base' (food cooked in bulk and stored) ALWAYS set "
+            "'shelf_life_days' (see the note next to that field).")
 
 
 def sku_list(master_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -53,6 +54,11 @@ def make_example(master_list: list[dict[str, Any]]) -> dict[str, Any]:
             "yield_unit": "portions",
             "prep_minutes": 10,
             "cook_minutes": 25,
+            "_shelf_life_days": "Only used for kind 'base': how many days the cooked batch stays good (e.g. 3-4 for "
+                                "dal, curry, stew, bolognese; 2 for rice or fish dishes). Kitchen sets the batch's "
+                                "best-before date to cook day + this value and flags it as expired afterwards. "
+                                "Without a value the batch never expires, so always provide a realistic one for bases. "
+                                "Ignored for derived and favorite recipes.",
             "shelf_life_days": 3,
             "storage_location": "Fridge",
             "ingredients": lines,
