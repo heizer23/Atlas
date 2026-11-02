@@ -1,4 +1,5 @@
-"""Initial recipe library (idempotent by name)."""
+"""Sample recipe library (idempotent by name). NOT run at startup since the production test data was cleared
+(2026-11-02); recipes come from the import. Used by tests/conftest.py as fixture data."""
 from __future__ import annotations
 
 from backend.database import get_db

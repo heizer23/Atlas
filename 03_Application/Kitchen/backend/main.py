@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
 from backend.routers import importing, plans, recipes
-from backend.seed import migrate_legacy_ingredients, seed_recipes
+from backend.seed import migrate_legacy_ingredients
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.performance import install_request_timing
@@ -40,8 +40,6 @@ def on_startup() -> None:
             init_pool()
             log.info("Running schema init...")
             init_schema()
-            log.info("Seeding starter recipes (idempotent)...")
-            seed_recipes()
             migrate_legacy_ingredients()
             log.info("Ready.")
             return

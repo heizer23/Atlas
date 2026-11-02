@@ -28,7 +28,7 @@ Schema initialized idempotently at startup from schema.sql.
 
 ## Article number
 `items.id` is a single fortlaufende integer (identity, never reused), shown as `#id` in the UI and used by Kitchen as
-the article identity. Converted from uuid on 2026-11-02; `legacy_item_ids` keeps old uuid -> number. Test fixtures use 1000001+.
+the article identity. Converted from uuid on 2026-11-02 (mapping table dropped afterwards). Test fixtures use 1000001+.
 
 ## Kitchen extension (stock ledger)
 - items: `quantity` numeric, `unit`, `expires_at`, `kind` (ingredient|batch), `recipe_ref` (opaque Kitchen recipe id).

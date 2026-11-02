@@ -40,7 +40,7 @@ Vision and scope: `Sprint01_Core/00_draft.md`.
 
 ## Ports / schema
 Host port 8028 (127.0.0.1) -> container 8000. Schema `kitchen`, from `schema.sql` at startup (idempotent).
-Recipes are seeded at startup by name (`backend/seed.py`).
+Recipes are NOT seeded at startup; `backend/seed.py` is test fixture data only (tests/conftest.py).
 
 ## Tests
 `atlas-kitchen-test` (compose.yml in this folder). Needs a StorageTracker instance on `atlas_test`:

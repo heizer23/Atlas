@@ -110,7 +110,8 @@ create index if not exists ix_stock_movements_item_ts
 
 -- Kitchen 1.1+: items.id becomes a single fortlaufende article number (SKU), replacing the uuid.
 -- One-time conversion (runs only while items.id is still uuid). Numbering: created_at, name, old id.
--- legacy_item_ids keeps old uuid -> new number for audit and for one-off remapping of references held elsewhere.
+-- legacy_item_ids (old uuid -> new number) was created for one-off remapping and dropped after use; the conversion
+-- only runs while items.id is still uuid, so the table is never recreated.
 do $$
 declare
     start_n bigint;
