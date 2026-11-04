@@ -169,3 +169,35 @@ def get_history(days: int = 28, end: str | None = None) -> JSONResponse:
             rows = [{"date": r["day"].isoformat(), "done": int(r["done"]), "tracked": int(r["tracked"])}
                     for r in cur.fetchall()]
     return JSONResponse({"days": rows})
+
+
+@router.get("/habit-history", response_model=None)
+def get_habit_history(days: int = 28, end: str | None = None) -> JSONResponse:
+    """Per habit, per day: 1 done, 0 open, null outside the habit's active window."""
+    end_day = _parse(end)
+    if end_day is None or not 1 <= days <= MAX_HISTORY_DAYS:
+        return api_error("VALIDATION_ERROR", f"end must be YYYY-MM-DD and days 1..{MAX_HISTORY_DAYS}", status=400)
+    start = end_day - timedelta(days=days - 1)
+    linked = {k: sorted(v) for k, v in essaycards_activity.done_days(start, end_day).items()}
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select h.id::text as habit_id, d::date as day,
+                  (h.active_from <= d::date and (h.end_date is null or d::date <= h.end_date)) as active,
+                  (exists (select 1 from habittracker.habit_entries e
+                           where e.habit_id = h.id and e.entry_date = d::date)
+                   or exists (select 1 from habittracker.habit_results r
+                              where r.habit_id = h.id and r.review_date = d::date and r.checked)
+                   or (h.source = 'essaycards_flashcards' and d::date = any(%s::date[]))
+                   or (h.source = 'essaycards_oral' and d::date = any(%s::date[]))) as done
+                from habittracker.habits h
+                cross join generate_series(%s::date, %s::date, interval '1 day') d
+                order by h.id, d
+                """,
+                (linked["essaycards_flashcards"], linked["essaycards_oral"], start, end_day),
+            )
+            out: dict[str, list] = {}
+            for r in cur.fetchall():
+                out.setdefault(r["habit_id"], []).append(None if not r["active"] else (1 if r["done"] else 0))
+    return JSONResponse({"end": end_day.isoformat(), "days": days, "habits": out})

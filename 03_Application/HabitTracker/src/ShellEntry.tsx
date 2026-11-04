@@ -4,7 +4,8 @@
  * Views:
  *   /habittracker                     -> TodayView (one-tap logging + 28-day dots)
  *   /habittracker/review/:date        -> DailyReviewView (explicit date)
- *   /habittracker/habits              -> HabitDefinitionsView
+ *   /habittracker/habits              -> HabitDefinitionsView (cards, 28-day dots)
+ *   /habittracker/habits/:id          -> HabitDetailView (editor)
  *   /habittracker/reports             -> ReportsView
  *
  * Daily Review's debounced-draft-save / immediate-confirm / flush-on-unmount
@@ -310,22 +311,24 @@ function DailyReviewView() {
 
 const HEAT_DAYS = 28;
 
-function HeatmapStrip({ days, today }: { days: HistoryDay[]; today: string }) {
+function HeatmapStrip({ days, selected, onSelect }: { days: HistoryDay[]; selected: string; onSelect: (d: string) => void }) {
   return (
     <div
-      style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, maxWidth: 260, marginBottom: 18 }}
+      style={{ display: 'grid', gridTemplateColumns: "repeat(7, 1fr)", gap: 8, width: '100%', marginBottom: 18 }}
       aria-label="Last 28 days"
     >
       {days.map(d => {
         const ratio = d.tracked > 0 ? d.done / d.tracked : 0;
         return (
-          <div
+          <button
             key={d.date}
             title={`${d.date}: ${d.done} / ${d.tracked}`}
+            aria-label={`Open ${d.date}`}
+            onClick={() => onSelect(d.date)}
             style={{
-              aspectRatio: '1 / 1', borderRadius: '50%',
+              aspectRatio: '1 / 1', borderRadius: '50%', padding: 0, border: 'none', cursor: 'pointer', minWidth: 0,
               background: ratio > 0 ? `rgba(42, 122, 59, ${0.25 + 0.75 * ratio})` : '#e6e6e6',
-              outline: d.date === today ? '2px solid #14161A' : 'none', outlineOffset: 1,
+              outline: d.date === selected ? '2px solid #14161A' : 'none', outlineOffset: 1,
             }}
           />
         );
@@ -336,16 +339,18 @@ function HeatmapStrip({ days, today }: { days: HistoryDay[]; today: string }) {
 
 function TodayView() {
   const navigate = useNavigate();
-  const date = todayISO();
+  const { date: dateParam } = useParams<{ date?: string }>();
+  const realToday = todayISO();
+  const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : realToday;
   const [habits, setHabits] = useState<TodayHabit[]>([]);
   const [history, setHistory] = useState<HistoryDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
-    const res = await apiFetch<{ days: HistoryDay[] }>(`/habittracker/history?days=${HEAT_DAYS}&end=${date}`);
+    const res = await apiFetch<{ days: HistoryDay[] }>(`/habittracker/history?days=${HEAT_DAYS}&end=${realToday}`);
     if (!isApiError(res)) setHistory(res.days);
-  }, [date]);
+  }, [realToday]);
 
   useEffect(() => {
     (async () => {
@@ -390,7 +395,16 @@ function TodayView() {
 
   return (
     <div style={pageStyle}>
-      {history.length > 0 && <HeatmapStrip days={history} today={date} />}
+      {history.length > 0 && (
+        <HeatmapStrip days={history} selected={date}
+                      onSelect={d => navigate(d === realToday ? '/habittracker' : `/habittracker/day/${d}`)} />
+      )}
+      {date !== realToday && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <strong>{new Date(date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</strong>
+          <button style={btnStyle} onClick={() => navigate('/habittracker')}>Back to today</button>
+        </div>
+      )}
       {loading && <Skeleton />}
       {error && <ErrorCard message={error} />}
       {!loading && habits.length === 0 && !error && (
@@ -603,11 +617,66 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
   );
 }
 
+const CARD_DAYS = 28;
+
+/** One dot per day in a single full-width line (oldest first). null = outside the habit's active window. */
+function StreakDots({ cells }: { cells: (number | null)[] }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cells.length}, 1fr)`, gap: 3, width: '100%' }} aria-hidden="true">
+      {cells.map((c, i) => (
+        <span
+          key={i}
+          style={{
+            aspectRatio: '1 / 1', borderRadius: '50%',
+            background: c === 1 ? '#2a7a3b' : c === 0 ? '#e3e3e3' : 'transparent',
+            outline: i === cells.length - 1 ? '2px solid #14161A' : 'none', outlineOffset: 1,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function useHabitHistory(): Record<string, (number | null)[]> {
+  const [hist, setHist] = useState<Record<string, (number | null)[]>>({});
+  useEffect(() => {
+    (async () => {
+      const res = await apiFetch<{ habits: Record<string, (number | null)[]> }>(
+        `/habittracker/habit-history?days=${CARD_DAYS}&end=${todayISO()}`);
+      if (!isApiError(res)) setHist(res.habits);
+    })();
+  }, []);
+  return hist;
+}
+
+function HabitCard({ habit, cells, onClick, archived }: {
+  habit: HabitRow; cells: (number | null)[]; onClick: () => void; archived?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'stretch', textAlign: 'left',
+        padding: 14, borderRadius: 12, border: '1px solid #e0e0e0', background: '#fff',
+        color: '#14161A', cursor: 'pointer', opacity: archived ? 0.6 : 1,
+      }}
+    >
+      <span style={{ fontWeight: 600, fontSize: 15 }}>{habit.name}</span>
+      <StreakDots cells={cells.length ? cells : Array(CARD_DAYS).fill(null)} />
+    </button>
+  );
+}
+
 function HabitDefinitionsView() {
+  const navigate = useNavigate();
+  const hist = useHabitHistory();
   const [habits, setHabits] = useState<HabitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [ordering, setOrdering] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -619,19 +688,18 @@ function HabitDefinitionsView() {
 
   useEffect(() => { load(); }, [load]);
 
-  const replaceHabit = (updated: HabitRow) => {
-    setHabits(prev => prev.map(h => h.id === updated.id ? updated : h));
-  };
+  const today = todayISO();
+  const isArchived = (h: HabitRow) => !!h.end_date && h.end_date < today;
+  const active = habits.filter(h => !isArchived(h));
+  const archived = habits.filter(isArchived);
 
-  const addHabit = (created: HabitRow) => {
-    setHabits(prev => [...prev, created]);
-  };
-
-  const move = async (index: number, delta: number) => {
+  const move = async (id: string, delta: number) => {
+    const index = active.findIndex(h => h.id === id);
     const target = index + delta;
-    if (target < 0 || target >= habits.length) return;
-    const next = [...habits];
-    [next[index], next[target]] = [next[target], next[index]];
+    if (target < 0 || target >= active.length) return;
+    const nextActive = [...active];
+    [nextActive[index], nextActive[target]] = [nextActive[target], nextActive[index]];
+    const next = [...nextActive, ...archived];
     setHabits(next);
     setReorderError(null);
     const res = await apiFetch('/habittracker/habits/reorder', {
@@ -641,27 +709,95 @@ function HabitDefinitionsView() {
     if (isApiError(res)) { setReorderError(res.error.message); load(); }
   };
 
+  const gridStyle: React.CSSProperties = {
+    display: 'grid', gridTemplateColumns: '1fr', gap: 10,
+  };
+
   return (
     <div style={pageStyle}>
-      <h2 style={{ margin: '0 0 12px' }}>Habits</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Habits</h2>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={btnStyle} onClick={() => setOrdering(o => !o)}>{ordering ? 'Done' : 'Edit order'}</button>
+          <button style={btnStyle} onClick={() => setAdding(a => !a)}>{adding ? 'Cancel' : '+ Add habit'}</button>
+        </div>
+      </div>
       {loading && <Skeleton />}
       {error && <ErrorCard message={error} />}
       {reorderError && <ErrorCard message={reorderError} />}
 
       {!loading && !error && (
         <>
-          <AddHabitForm onCreated={addHabit} />
-          {habits.map((h, i) => (
-            <div key={h.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 14 }}>
-                <button style={{ ...btnStyle, padding: '2px 8px' }} onClick={() => move(i, -1)} disabled={i === 0}>↑</button>
-                <button style={{ ...btnStyle, padding: '2px 8px' }} onClick={() => move(i, 1)} disabled={i === habits.length - 1}>↓</button>
+          {adding && (
+            <AddHabitForm onCreated={h => { setHabits(prev => [...prev.filter(x => !isArchived(x)), h, ...prev.filter(isArchived)]); setAdding(false); }} />
+          )}
+          <div style={gridStyle}>
+            {active.map((h, i) => (
+              <div key={h.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <HabitCard habit={h} cells={hist[h.id] ?? []} onClick={() => navigate(`/habittracker/habits/${h.id}`)} />
+                {ordering && (
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                    <button style={{ ...btnStyle, padding: '2px 12px' }} onClick={() => move(h.id, -1)} disabled={i === 0}>↑</button>
+                    <button style={{ ...btnStyle, padding: '2px 12px' }} onClick={() => move(h.id, 1)} disabled={i === active.length - 1}>↓</button>
+                  </div>
+                )}
               </div>
-              <div style={{ flex: 1 }}>
-                <HabitRowEditor habit={h} onSaved={replaceHabit} />
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
+          {archived.length > 0 && (
+            <>
+              <button
+                style={{ ...btnStyle, border: 'none', background: 'none', color: '#777', fontSize: 13, margin: '16px 0 8px' }}
+                onClick={() => setShowArchived(v => !v)}
+              >
+                {showArchived ? '▾' : '▸'} Archived ({archived.length})
+              </button>
+              {showArchived && (
+                <div style={gridStyle}>
+                  {archived.map(h => (
+                    <HabitCard key={h.id} habit={h} archived cells={hist[h.id] ?? []}
+                               onClick={() => navigate(`/habittracker/habits/${h.id}`)} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function HabitDetailView() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const hist = useHabitHistory();
+  const [habit, setHabit] = useState<HabitRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const res = await apiFetch<Dataset<HabitRow>>('/habittracker/habits');
+      setLoading(false);
+      if (isApiError(res)) { setError(res.error.message); return; }
+      const h = res.rows.find(r => r.id === id);
+      if (h) setHabit(h); else setError('Habit not found');
+    })();
+  }, [id]);
+
+  return (
+    <div style={pageStyle}>
+      <button style={{ ...btnStyle, border: 'none', background: 'none', color: '#777', padding: 0, marginBottom: 8 }}
+              onClick={() => navigate('/habittracker/habits')}>‹ Habits</button>
+      {loading && <Skeleton />}
+      {error && <ErrorCard message={error} />}
+      {habit && (
+        <>
+          <div style={{ margin: '4px 0 16px' }}>
+            <StreakDots cells={hist[habit.id] ?? Array(CARD_DAYS).fill(null)} />
+          </div>
+          <HabitRowEditor habit={habit} onSaved={setHabit} />
         </>
       )}
     </div>
@@ -806,8 +942,10 @@ export default function HabitTrackerApp() {
   return (
     <Routes>
       <Route path="/" element={<TodayView />} />
+      <Route path="/day/:date" element={<TodayView />} />
       <Route path="/review/:date" element={<DailyReviewView />} />
       <Route path="/habits" element={<HabitDefinitionsView />} />
+      <Route path="/habits/:id" element={<HabitDetailView />} />
       <Route path="/reports" element={<ReportsView />} />
     </Routes>
   );
