@@ -34,6 +34,8 @@ HABIT_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="kind",            label="Kind",           type="string"),
     ColumnSchema(key="unit",            label="Unit",           type="string"),
     ColumnSchema(key="increment",       label="Increment",      type="number"),
+    ColumnSchema(key="category_id",     label="Category",       type="string", filterable=True),
+    ColumnSchema(key="priority",        label="Priority",       type="number", sortable=True, filterable=True),
     ColumnSchema(key="display_order",   label="Order",          type="number", sortable=True),
     ColumnSchema(key="active_from",     label="Active From",    type="date",   sortable=True),
     ColumnSchema(key="end_date",        label="Archived (end)", type="date",   sortable=True),
@@ -56,6 +58,8 @@ class HabitCreate(BaseModel):
     kind:            str | None = None
     unit:            str | None = None
     increment:       int | None = None
+    category_id:     str | None = None
+    priority:        int | None = None
 
 
 class HabitUpdate(BaseModel):
@@ -67,6 +71,8 @@ class HabitUpdate(BaseModel):
     kind:            str | None = None
     unit:            str | None = None
     increment:       int | None = None
+    category_id:     str | None = None
+    priority:        int | None = None
 
 
 class ReorderBody(BaseModel):
@@ -87,6 +93,8 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     _row_to_dict convention."""
     d = dict(row)
     d["id"] = str(d["id"])
+    if d.get("category_id") is not None:
+        d["category_id"] = str(d["category_id"])
     if d.get("active_from") is not None:
         d["active_from"] = d["active_from"].isoformat()
     if d.get("end_date") is not None:
@@ -96,6 +104,23 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     if d.get("updated_at") is not None:
         d["updated_at"] = d["updated_at"].isoformat()
     return d
+
+
+def _check_category_priority(cur, category_id: str | None, priority: int | None) -> str | None:
+    """Return an error message if the (non-null) category / priority does not exist."""
+    if category_id is not None:
+        try:
+            cur.execute("select 1 from habittracker.habit_categories where id = %s", (category_id,))
+        except Exception:
+            cur.connection.rollback()
+            return "category_id must be a valid category id"
+        if not cur.fetchone():
+            return "category_id does not exist"
+    if priority is not None:
+        cur.execute("select 1 from habittracker.habit_priorities where level = %s", (priority,))
+        if not cur.fetchone():
+            return "priority must be an existing priority level"
+    return None
 
 
 def _dataset_response(dataset: Dataset, status: int = 200) -> JSONResponse:
@@ -142,19 +167,24 @@ def create_habit(body: HabitCreate) -> JSONResponse:
 
     with get_db() as conn:
         with conn.cursor() as cur:
+            problem = _check_category_priority(cur, body.category_id, body.priority)
+            if problem:
+                return api_error("VALIDATION_ERROR", problem, status=400)
             cur.execute(
                 """
                 insert into habittracker.habits
-                    (name, description, default_checked, display_order, active_from, kind, unit, increment)
+                    (name, description, default_checked, display_order, active_from, kind, unit, increment,
+                     category_id, priority)
                 values (
                     %s, %s, %s,
                     coalesce((select max(display_order) from habittracker.habits), -1) + 1,
-                    %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s
                 )
                 returning *
                 """,
                 (body.name, body.description, bool(body.default_checked), active_from,
-                 kind, unit if kind == "quantity" else None, increment if kind == "quantity" else 1),
+                 kind, unit if kind == "quantity" else None, increment if kind == "quantity" else 1,
+                 body.category_id, body.priority),
             )
             row = cur.fetchone()
         conn.commit()
@@ -263,6 +293,17 @@ def update_habit(habit_id: str, body: HabitUpdate) -> JSONResponse:
             if body.increment is None or body.increment < 1:
                 return api_error("VALIDATION_ERROR", "increment must be at least 1", status=400)
             updates["increment"] = body.increment
+
+        # Explicit null clears category / priority (legacy "uncategorised"); omitted leaves it.
+        if "category_id" in fields_set:
+            updates["category_id"] = body.category_id
+        if "priority" in fields_set:
+            updates["priority"] = body.priority
+        if "category_id" in updates or "priority" in updates:
+            with conn.cursor() as cur:
+                problem = _check_category_priority(cur, updates.get("category_id"), updates.get("priority"))
+            if problem:
+                return api_error("VALIDATION_ERROR", problem, status=400)
 
         effective_active_from = updates.get("active_from", existing["active_from"])
         effective_end_date = updates["end_date"] if "end_date" in updates else existing["end_date"]

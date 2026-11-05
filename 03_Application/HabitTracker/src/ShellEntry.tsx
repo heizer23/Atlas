@@ -53,6 +53,8 @@ interface HabitRow extends Row {
   unit: string | null;
   increment: number;
   source: string | null;
+  category_id: string | null;
+  priority: number | null;
   display_order: number;
   active_from: string;
   end_date: string | null;
@@ -69,7 +71,12 @@ interface TodayHabit {
   increment: number;
   total: number;
   done: boolean;
+  category_id: string | null;
+  priority: number | null;
 }
+
+interface CategoryInfo { id: string; name: string; kind: string; level?: number | null }
+interface PriorityInfo { level: number; label: string; description?: string | null }
 
 interface HistoryDay { date: string; done: number; tracked: number }
 
@@ -133,6 +140,100 @@ function todayISO(): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+const PIP_ON = '#2a7a3b';
+const PIP_OFF = '#dcdcdc';
+
+/** Three small dots; `filled` of them are lit. Used for habit priority and category level. */
+function Pips({ filled, label }: { filled: number; label: string }) {
+  return (
+    <span role="img" aria-label={label} title={label} style={{ display: 'inline-flex', gap: 3 }}>
+      {[1, 2, 3].map(i => (
+        <span key={i} style={{ width: 7, height: 7, borderRadius: '50%', background: i <= filled ? PIP_ON : PIP_OFF }} />
+      ))}
+    </span>
+  );
+}
+
+function priorityLabel(priority: number | null, priorities: PriorityInfo[]): string {
+  if (!priority) return 'No priority';
+  const p = priorities.find(x => x.level === priority);
+  return `Level ${priority}${p ? ` — ${p.label}` : ''}`;
+}
+
+function useCategories(): { categories: CategoryInfo[]; priorities: PriorityInfo[] } {
+  const [state, setState] = useState<{ categories: CategoryInfo[]; priorities: PriorityInfo[] }>({ categories: [], priorities: [] });
+  useEffect(() => {
+    (async () => {
+      const res = await apiFetch<{ rows: CategoryInfo[]; priorities: PriorityInfo[] }>('/habittracker/categories');
+      if (!isApiError(res)) setState({ categories: res.rows, priorities: res.priorities });
+    })();
+  }, []);
+  return state;
+}
+
+/** Filter chips: "All" plus one per category. value null = all. */
+function CategoryFilter({ categories, value, onChange }: {
+  categories: CategoryInfo[]; value: string | null; onChange: (id: string | null) => void;
+}) {
+  if (categories.length === 0) return null;
+  const chip = (active: boolean): React.CSSProperties => ({
+    padding: '5px 12px', borderRadius: 999, fontSize: 13, cursor: 'pointer',
+    border: `1px solid ${active ? '#14161A' : '#d6d6d6'}`,
+    background: active ? '#14161A' : '#fff', color: active ? '#fff' : '#14161A',
+  });
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+      <button style={chip(value === null)} onClick={() => onChange(null)}>All</button>
+      {categories.map(c => (
+        <button key={c.id} style={chip(value === c.id)} onClick={() => onChange(c.id)}>{c.name}</button>
+      ))}
+    </div>
+  );
+}
+
+/** Group items by category in category display order; uncategorised items last under "Other". */
+function groupByCategory<T extends { category_id: string | null }>(
+  items: T[], categories: CategoryInfo[], filter: string | null,
+): { category: CategoryInfo | null; items: T[] }[] {
+  const groups = categories.map(c => ({ category: c as CategoryInfo | null, items: items.filter(i => i.category_id === c.id) }));
+  const known = new Set(categories.map(c => c.id));
+  groups.push({ category: null, items: items.filter(i => !i.category_id || !known.has(i.category_id)) });
+  return groups.filter(g => g.items.length > 0 && (filter === null || g.category?.id === filter));
+}
+
+function GroupHeader({ name, level, showLevel }: { name: string; level?: number | null; showLevel?: boolean }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '16px 0 8px' }}>
+      <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: '#555' }}>{name}</span>
+      {showLevel && level !== undefined && level !== null && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#555' }}>
+          {level === 0 ? 'none yet' : `Level ${level}`}
+          <Pips filled={level} label={`${name} level ${level} of 3 today`} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CategoryPriorityFields({ categories, priorities, categoryId, priority, onCategory, onPriority }: {
+  categories: CategoryInfo[]; priorities: PriorityInfo[];
+  categoryId: string; priority: string; onCategory: (v: string) => void; onPriority: (v: string) => void;
+}) {
+  const inputStyle = { padding: 4, borderRadius: 6, border: '1px solid #ccc' };
+  return (
+    <>
+      <select value={categoryId} onChange={e => onCategory(e.target.value)} style={inputStyle} aria-label="Category">
+        <option value="">No category</option>
+        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <select value={priority} onChange={e => onPriority(e.target.value)} style={inputStyle} aria-label="Priority">
+        <option value="">No priority</option>
+        {priorities.map(p => <option key={p.level} value={p.level}>{`${p.level} — ${p.label}`}</option>)}
+      </select>
+    </>
+  );
 }
 
 function DayStatusBadge({ status }: { status: DayStatus }) {
@@ -343,24 +444,39 @@ function TodayView() {
   const realToday = todayISO();
   const date = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : realToday;
   const [habits, setHabits] = useState<TodayHabit[]>([]);
+  const [categories, setCategories] = useState<CategoryInfo[]>([]);
+  const [priorities, setPriorities] = useState<PriorityInfo[]>([]);
+  const [filter, setFilter] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Day-level levels (category headers) come with /today; refetched after each tap.
+  const loadDay = useCallback(async () => {
+    const res = await apiFetch<{ habits: TodayHabit[]; categories: CategoryInfo[]; priorities: PriorityInfo[] }>(
+      `/habittracker/today?date=${date}`);
+    setLoading(false);
+    if (isApiError(res)) { setError(res.error.message); return; }
+    setHabits(res.habits);
+    setCategories(res.categories);
+    setPriorities(res.priorities);
+  }, [date]);
+
+  // Unfiltered: done/tracked ratio. One category: that category's level (0..3) as intensity.
   const loadHistory = useCallback(async () => {
+    if (filter) {
+      const res = await apiFetch<{ dates: string[]; categories: { levels: (number | null)[] }[] }>(
+        `/habittracker/category-progress?days=${HEAT_DAYS}&end=${realToday}&category_id=${filter}`);
+      if (isApiError(res) || !res.categories[0]) return;
+      setHistory(res.dates.map((d, i) => ({ date: d, done: res.categories[0].levels[i] ?? 0, tracked: 3 })));
+      return;
+    }
     const res = await apiFetch<{ days: HistoryDay[] }>(`/habittracker/history?days=${HEAT_DAYS}&end=${realToday}`);
     if (!isApiError(res)) setHistory(res.days);
-  }, [realToday]);
+  }, [realToday, filter]);
 
-  useEffect(() => {
-    (async () => {
-      const res = await apiFetch<{ habits: TodayHabit[] }>(`/habittracker/today?date=${date}`);
-      setLoading(false);
-      if (isApiError(res)) { setError(res.error.message); return; }
-      setHabits(res.habits);
-    })();
-    loadHistory();
-  }, [date, loadHistory]);
+  useEffect(() => { loadDay(); }, [loadDay]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // Server returns the new day total; replace it locally so rapid taps stay consistent.
   const applyTotal = (habitId: string, total: number) =>
@@ -376,6 +492,7 @@ function TodayView() {
     if (isApiError(res)) { setError(res.error.message); return; }
     applyTotal(h.habit_id, res.total);
     loadHistory();
+    loadDay();
   };
 
   const undoLast = async (h: TodayHabit) => {
@@ -384,6 +501,7 @@ function TodayView() {
     if (isApiError(res)) { setError(res.error.message); return; }
     applyTotal(h.habit_id, res.total);
     loadHistory();
+    loadDay();
   };
 
   const tapStyle = (done: boolean): React.CSSProperties => ({
@@ -410,11 +528,20 @@ function TodayView() {
       {!loading && habits.length === 0 && !error && (
         <div style={{ color: '#888', fontSize: 14 }}>No active habits. Add one under Habits.</div>
       )}
-      {habits.map(h => (
+      <CategoryFilter categories={categories} value={filter} onChange={setFilter} />
+      {groupByCategory(habits.map(h => ({ ...h, category_id: h.category_id })), categories, filter).map(g => (
+        <div key={g.category?.id ?? 'other'}>
+          {categories.length > 0 && (
+            <GroupHeader name={g.category?.name ?? 'Other'} level={g.category?.level} showLevel />
+          )}
+      {g.items.map(h => (
         <div key={h.habit_id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <button style={{ ...tapStyle(h.done), cursor: h.linked ? 'default' : 'pointer' }}
                   onClick={() => { if (!h.linked) log(h); }}>
-            <span style={{ fontWeight: 600 }}>{h.name}</span>
+            <span style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {h.name}
+              {h.priority && <Pips filled={h.priority} label={priorityLabel(h.priority, priorities)} />}
+            </span>
             {h.kind === 'binary' || h.linked ? (
               <span style={{ fontSize: 20 }}>{h.done ? '✓' : '○'}</span>
             ) : (
@@ -433,6 +560,8 @@ function TodayView() {
               ↩
             </button>
           )}
+        </div>
+      ))}
         </div>
       ))}
       <button
@@ -473,6 +602,9 @@ function KindFields({ kind, unit, increment, onKind, onUnit, onIncrement }: {
 }
 
 function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: HabitRow) => void }) {
+  const { categories, priorities } = useCategories();
+  const [categoryId, setCategoryId] = useState(habit.category_id ?? '');
+  const [priority, setPriority] = useState(habit.priority ? String(habit.priority) : '');
   const [name, setName] = useState(habit.name);
   const [description, setDescription] = useState(habit.description ?? '');
   const [defaultChecked, setDefaultChecked] = useState(habit.default_checked);
@@ -504,6 +636,9 @@ function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: Habi
       description: description.trim() === '' ? null : description,
       default_checked: defaultChecked,
       active_from: activeFrom,
+      // Empty select = explicit null (clears), never omission (R-CON-AL-04/05).
+      category_id: categoryId === '' ? null : categoryId,
+      priority: priority === '' ? null : Number(priority),
       ...(habit.source ? {} : {
         kind,
         unit: kind === 'quantity' ? unit : null,
@@ -551,6 +686,9 @@ function HabitRowEditor({ habit, onSaved }: { habit: HabitRow; onSaved: (h: Habi
           <KindFields kind={kind} unit={unit} increment={increment}
                       onKind={setKind} onUnit={setUnit} onIncrement={setIncrement} />
         )}
+        <CategoryPriorityFields categories={categories} priorities={priorities}
+                                categoryId={categoryId} priority={priority}
+                                onCategory={setCategoryId} onPriority={setPriority} />
         {archived && <span style={{ color: '#999' }}>Archived (end date {endDate})</span>}
       </div>
       {error && <div style={{ color: '#b3261e', fontSize: 12, marginBottom: 8 }}>{error}</div>}
@@ -571,6 +709,9 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
   const [kind, setKind] = useState<HabitKind>('binary');
   const [unit, setUnit] = useState('');
   const [increment, setIncrement] = useState('1');
+  const { categories, priorities } = useCategories();
+  const [categoryId, setCategoryId] = useState('');
+  const [priority, setPriority] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -587,6 +728,8 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
         kind,
         unit,
         increment: Number(increment) || 1,
+        category_id: categoryId === '' ? null : categoryId,
+        priority: priority === '' ? null : Number(priority),
       }),
     });
     setSaving(false);
@@ -610,6 +753,9 @@ function AddHabitForm({ onCreated }: { onCreated: (h: HabitRow) => void }) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8, fontSize: 13 }}>
         <KindFields kind={kind} unit={unit} increment={increment}
                     onKind={setKind} onUnit={setUnit} onIncrement={setIncrement} />
+        <CategoryPriorityFields categories={categories} priorities={priorities}
+                                categoryId={categoryId} priority={priority}
+                                onCategory={setCategoryId} onPriority={setPriority} />
       </div>
       {error && <div style={{ color: '#b3261e', fontSize: 12, marginBottom: 8 }}>{error}</div>}
       <button style={primaryBtnStyle} onClick={submit} disabled={saving || !name.trim()}>Add habit</button>
@@ -649,8 +795,8 @@ function useHabitHistory(): Record<string, (number | null)[]> {
   return hist;
 }
 
-function HabitCard({ habit, cells, onClick, archived }: {
-  habit: HabitRow; cells: (number | null)[]; onClick: () => void; archived?: boolean;
+function HabitCard({ habit, cells, onClick, archived, priorities }: {
+  habit: HabitRow; cells: (number | null)[]; onClick: () => void; archived?: boolean; priorities: PriorityInfo[];
 }) {
   return (
     <button
@@ -661,7 +807,10 @@ function HabitCard({ habit, cells, onClick, archived }: {
         color: '#14161A', cursor: 'pointer', opacity: archived ? 0.6 : 1,
       }}
     >
-      <span style={{ fontWeight: 600, fontSize: 15 }}>{habit.name}</span>
+      <span style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {habit.name}
+        {habit.priority && <Pips filled={habit.priority} label={priorityLabel(habit.priority, priorities)} />}
+      </span>
       <StreakDots cells={cells.length ? cells : Array(CARD_DAYS).fill(null)} />
     </button>
   );
@@ -670,6 +819,8 @@ function HabitCard({ habit, cells, onClick, archived }: {
 function HabitDefinitionsView() {
   const navigate = useNavigate();
   const hist = useHabitHistory();
+  const { categories, priorities } = useCategories();
+  const [filter, setFilter] = useState<string | null>(null);
   const [habits, setHabits] = useState<HabitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -731,19 +882,29 @@ function HabitDefinitionsView() {
           {adding && (
             <AddHabitForm onCreated={h => { setHabits(prev => [...prev.filter(x => !isArchived(x)), h, ...prev.filter(isArchived)]); setAdding(false); }} />
           )}
-          <div style={gridStyle}>
-            {active.map((h, i) => (
-              <div key={h.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <HabitCard habit={h} cells={hist[h.id] ?? []} onClick={() => navigate(`/habittracker/habits/${h.id}`)} />
-                {ordering && (
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                    <button style={{ ...btnStyle, padding: '2px 12px' }} onClick={() => move(h.id, -1)} disabled={i === 0}>↑</button>
-                    <button style={{ ...btnStyle, padding: '2px 12px' }} onClick={() => move(h.id, 1)} disabled={i === active.length - 1}>↓</button>
-                  </div>
-                )}
+          <CategoryFilter categories={categories} value={filter} onChange={setFilter} />
+          {groupByCategory(active.map(h => h), categories.map(c => c), filter).map(g => (
+            <div key={g.category?.id ?? 'other'}>
+              {categories.length > 0 && <GroupHeader name={g.category?.name ?? 'Other'} />}
+              <div style={gridStyle}>
+                {g.items.map(h => {
+                  const i = active.findIndex(x => x.id === h.id);
+                  return (
+                    <div key={h.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <HabitCard habit={h} priorities={priorities} cells={hist[h.id] ?? []}
+                                 onClick={() => navigate(`/habittracker/habits/${h.id}`)} />
+                      {ordering && (
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                          <button style={{ ...btnStyle, padding: '2px 12px' }} onClick={() => move(h.id, -1)} disabled={i === 0}>↑</button>
+                          <button style={{ ...btnStyle, padding: '2px 12px' }} onClick={() => move(h.id, 1)} disabled={i === active.length - 1}>↓</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
           {archived.length > 0 && (
             <>
               <button
@@ -755,7 +916,7 @@ function HabitDefinitionsView() {
               {showArchived && (
                 <div style={gridStyle}>
                   {archived.map(h => (
-                    <HabitCard key={h.id} habit={h} archived cells={hist[h.id] ?? []}
+                    <HabitCard key={h.id} habit={h} archived priorities={priorities} cells={hist[h.id] ?? []}
                                onClick={() => navigate(`/habittracker/habits/${h.id}`)} />
                   ))}
                 </div>

@@ -5,8 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.database import init_pool, init_schema, seed_linked_habits, seed_starter_habits
-from backend.routers import habits, reports, reviews, tracking
+from backend.database import init_pool, init_schema, seed_categories, seed_linked_habits, seed_starter_habits
+from backend.routers import categories, habits, reports, reviews, tracking
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
 from platform_errorhandling.performance import install_request_timing
@@ -30,6 +30,7 @@ app.include_router(habits.router, prefix="/api")
 app.include_router(reviews.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(tracking.router, prefix="/api")
+app.include_router(categories.router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -43,6 +44,7 @@ def on_startup() -> None:
             log.info("Seeding starter habits (idempotent)...")
             seed_starter_habits()
             seed_linked_habits()
+            seed_categories()
             log.info("Ready.")
             return
         except Exception as exc:

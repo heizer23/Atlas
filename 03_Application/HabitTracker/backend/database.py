@@ -131,3 +131,66 @@ def seed_linked_habits() -> None:
                     (name, first, source),
                 )
         conn.commit()
+
+
+# ── Categories & priorities seed ──────────────────────────────────────────────
+
+_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("Body", "achievement"),
+    ("Mind", "achievement"),
+    ("Organization", "achievement"),
+    ("Discipline", "discipline"),
+)
+
+_PRIORITIES: tuple[tuple[int, str, str], ...] = (
+    (1, "Small", "Something is better than nothing"),
+    (2, "Meaningful", "A worthwhile activity or achievement"),
+    (3, "Major", "One of the important goals for the day"),
+)
+
+# One-time starting mapping for habits that existed before categories (matched by name /
+# source). Starting suggestions only — editable in the app. Habits not listed stay uncategorised.
+_LEGACY_MAPPING: dict[str, tuple[str, int]] = {
+    "Worked out": ("Body", 3),
+    "Wallangel": ("Body", 1),
+    "Measured blood pressure": ("Body", 1),
+    "Flashcards": ("Mind", 1),
+    "Oral practice": ("Mind", 3),
+    "Reviewed EssayCards": ("Mind", 2),
+    "No sweets": ("Discipline", 1),
+    "No vaping": ("Discipline", 2),
+    "No Alc": ("Discipline", 2),
+}
+
+
+def seed_categories() -> None:
+    """Seed priorities and the four initial categories once (idempotent by table-emptiness, so
+    later renames/deletions never trigger a reseed). On that first run only, map existing
+    uncategorised habits to categories/priorities via _LEGACY_MAPPING."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from habittracker.habit_priorities")
+            if cur.fetchone()["n"] == 0:
+                for level, label, description in _PRIORITIES:
+                    cur.execute(
+                        "insert into habittracker.habit_priorities (level, label, description) values (%s, %s, %s)",
+                        (level, label, description),
+                    )
+            cur.execute("select count(*) as n from habittracker.habit_categories")
+            if cur.fetchone()["n"] == 0:
+                for order, (name, kind) in enumerate(_CATEGORIES):
+                    cur.execute(
+                        "insert into habittracker.habit_categories (name, kind, display_order) values (%s, %s, %s)",
+                        (name, kind, order),
+                    )
+                for habit_name, (cat, level) in _LEGACY_MAPPING.items():
+                    cur.execute(
+                        """
+                        update habittracker.habits
+                        set category_id = (select id from habittracker.habit_categories where name = %s),
+                            priority = %s
+                        where name = %s and category_id is null
+                        """,
+                        (cat, level, habit_name),
+                    )
+        conn.commit()

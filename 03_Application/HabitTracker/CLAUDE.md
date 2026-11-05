@@ -120,3 +120,20 @@ and merges it in `tracking.py` (`/today`, `/history`). EssayCards down → linke
 not-done; Habits keeps working. `seed_linked_habits()` inserts each once at startup with
 `active_from` = first EssayCards activity day. Oral = guided session, section/essay exam, or recall
 review; flashcard = a `review_events` row. Card-exploration discussions are not counted.
+
+## Categories & priorities
+`habit_categories` (name, `kind` achievement|discipline, display_order) and `habit_priorities`
+(level 1..3, editable label) are plain data; `habits.category_id` / `habits.priority` are nullable
+(null = legacy/uncategorised: shown under "Other", ignored by category progress). Config API:
+`/categories` (GET/POST/PATCH), `/priorities/{level}` (PATCH); habits take `category_id`/`priority`
+on POST/PATCH (explicit null clears). Seeded once by `seed_categories()` (table-empty guard), which on
+that first run also maps existing habits via `_LEGACY_MAPPING`.
+
+**Category level** (`backend/category_progress.py`, derived on read, never stored): highest priority
+among the category's *done, active* habits; 0 = none done; null = no habit active. Completion stays
+with the habit (entry / linked source / legacy checked), priority only ranks. Available as
+`categories[].level` in `GET /today` and per-day in `GET /category-progress?days=&end=&category_id=`
+(launcher/history-ready). `GET /history` takes `category_id` to filter. Done-ness for history views
+has one definition: `tracking._habit_day_matrix`. Discipline: only explicit done signals count (no
+inference from absence); `_discipline_level` is the extension point. No overall/weighted score.
+Levels use the *current* category/priority mapping, so editing a priority re-grades past days.

@@ -112,4 +112,28 @@ create table if not exists habittracker.habit_entries (
 );
 create index if not exists ix_habit_entries_date on habittracker.habit_entries (entry_date, habit_id);
 
+-- Categories & priorities sprint. Both are plain data (editable), not code.
+-- kind 'achievement' = an active task completed; 'discipline' = abstaining from something.
+-- Level calculation is dispatched on kind in backend/category_progress.py.
+create table if not exists habittracker.habit_categories (
+    id             uuid        primary key default gen_random_uuid(),
+    name           text        not null check (name <> ''),
+    kind           text        not null default 'achievement' check (kind in ('achievement', 'discipline')),
+    display_order  integer     not null default 0,
+    created_at     timestamptz not null default now(),
+    constraint uq_habit_categories_name unique (name)
+);
+
+-- Contribution levels (1 = small .. 3 = major). Labels are editable; the level number is the rank.
+create table if not exists habittracker.habit_priorities (
+    level        smallint primary key check (level >= 1),
+    label        text     not null,
+    description  text
+);
+
+-- null = legacy / uncategorised habit (excluded from category progress, shown ungrouped).
+alter table habittracker.habits add column if not exists category_id uuid references habittracker.habit_categories(id);
+alter table habittracker.habits add column if not exists priority smallint references habittracker.habit_priorities(level);
+create index if not exists ix_habits_category on habittracker.habits (category_id);
+
 commit;
