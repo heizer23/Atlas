@@ -194,3 +194,21 @@ def seed_categories() -> None:
                         (cat, level, habit_name),
                     )
         conn.commit()
+
+
+_SYMBOL_LAYER_BY_NAME = {"Body": "body", "Mind": "mind", "Organization": "organization", "Discipline": "discipline"}
+
+
+def seed_symbol_layers() -> None:
+    """Give the four initial categories their symbol layer once (only where still null, matched by
+    their original names) so renaming a category later never breaks the symbol."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            for name, layer in _SYMBOL_LAYER_BY_NAME.items():
+                cur.execute(
+                    "update habittracker.habit_categories set symbol_layer = %s "
+                    "where name = %s and symbol_layer is null "
+                    "and not exists (select 1 from habittracker.habit_categories where symbol_layer = %s)",
+                    (layer, name, layer),
+                )
+        conn.commit()

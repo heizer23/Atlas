@@ -19,6 +19,7 @@ import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
 import type { Row } from '@platform-ui/api/types';
+import HabitSymbol, { SYMBOL_LAYERS, type SymbolLayer, type SymbolLevels } from './HabitSymbol';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -75,10 +76,11 @@ interface TodayHabit {
   priority: number | null;
 }
 
-interface CategoryInfo { id: string; name: string; kind: string; level?: number | null }
+interface CategoryInfo { id: string; name: string; kind: string; symbol_layer?: SymbolLayer | null; level?: number | null }
 interface PriorityInfo { level: number; label: string; description?: string | null }
 
-interface HistoryDay { date: string; done: number; tracked: number }
+/** One day of the overview: level per symbol layer. */
+interface SymbolDay { date: string; levels: SymbolLevels }
 
 type CellState = 'completed' | 'not_completed' | 'not_active' | 'unreviewed';
 
@@ -173,10 +175,11 @@ function useCategories(): { categories: CategoryInfo[]; priorities: PriorityInfo
   return state;
 }
 
-/** Filter chips: "All" plus one per category. value null = all. */
+/** Filter chips: "All" plus one per category; several can be on at once. Empty selection = all. */
 function CategoryFilter({ categories, value, onChange }: {
-  categories: CategoryInfo[]; value: string | null; onChange: (id: string | null) => void;
+  categories: CategoryInfo[]; value: string[]; onChange: (ids: string[]) => void;
 }) {
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter(v => v !== id) : [...value, id]);
   if (categories.length === 0) return null;
   const chip = (active: boolean): React.CSSProperties => ({
     padding: '5px 12px', borderRadius: 999, fontSize: 13, cursor: 'pointer',
@@ -185,9 +188,9 @@ function CategoryFilter({ categories, value, onChange }: {
   });
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-      <button style={chip(value === null)} onClick={() => onChange(null)}>All</button>
+      <button style={chip(value.length === 0)} onClick={() => onChange([])}>All</button>
       {categories.map(c => (
-        <button key={c.id} style={chip(value === c.id)} onClick={() => onChange(c.id)}>{c.name}</button>
+        <button key={c.id} style={chip(value.includes(c.id))} onClick={() => toggle(c.id)}>{c.name}</button>
       ))}
     </div>
   );
@@ -195,12 +198,12 @@ function CategoryFilter({ categories, value, onChange }: {
 
 /** Group items by category in category display order; uncategorised items last under "Other". */
 function groupByCategory<T extends { category_id: string | null }>(
-  items: T[], categories: CategoryInfo[], filter: string | null,
+  items: T[], categories: CategoryInfo[], filter: string[],
 ): { category: CategoryInfo | null; items: T[] }[] {
   const groups = categories.map(c => ({ category: c as CategoryInfo | null, items: items.filter(i => i.category_id === c.id) }));
   const known = new Set(categories.map(c => c.id));
   groups.push({ category: null, items: items.filter(i => !i.category_id || !known.has(i.category_id)) });
-  return groups.filter(g => g.items.length > 0 && (filter === null || g.category?.id === filter));
+  return groups.filter(g => g.items.length > 0 && (filter.length === 0 || (g.category !== null && filter.includes(g.category.id))));
 }
 
 function GroupHeader({ name, level, showLevel }: { name: string; level?: number | null; showLevel?: boolean }) {
@@ -412,28 +415,42 @@ function DailyReviewView() {
 
 const HEAT_DAYS = 28;
 
-function HeatmapStrip({ days, selected, onSelect }: { days: HistoryDay[]; selected: string; onSelect: (d: string) => void }) {
+/** Layers to draw for the current category selection (empty selection = all four). */
+function visibleLayers(categories: CategoryInfo[], filter: string[]): SymbolLayer[] {
+  if (filter.length === 0) return SYMBOL_LAYERS;
+  return categories.filter(c => filter.includes(c.id) && c.symbol_layer).map(c => c.symbol_layer as SymbolLayer);
+}
+
+/** Dark panel, 7 columns, oldest first. Cell size/spacing is independent of which layers are visible. */
+function HeatmapStrip({ days, selected, visible, onSelect }: {
+  days: SymbolDay[]; selected: string; visible: SymbolLayer[]; onSelect: (d: string) => void;
+}) {
   return (
     <div
-      style={{ display: 'grid', gridTemplateColumns: "repeat(7, 1fr)", gap: 8, width: '100%', marginBottom: 18 }}
+      style={{
+        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px 6px', width: '100%',
+        boxSizing: 'border-box', padding: '14px 10px', marginBottom: 18, borderRadius: 14, background: '#171B22',
+      }}
       aria-label="Last 28 days"
     >
-      {days.map(d => {
-        const ratio = d.tracked > 0 ? d.done / d.tracked : 0;
-        return (
-          <button
-            key={d.date}
-            title={`${d.date}: ${d.done} / ${d.tracked}`}
-            aria-label={`Open ${d.date}`}
-            onClick={() => onSelect(d.date)}
-            style={{
-              aspectRatio: '1 / 1', borderRadius: '50%', padding: 0, border: 'none', cursor: 'pointer', minWidth: 0,
-              background: ratio > 0 ? `rgba(42, 122, 59, ${0.25 + 0.75 * ratio})` : '#e6e6e6',
-              outline: d.date === selected ? '2px solid #14161A' : 'none', outlineOffset: 1,
-            }}
-          />
-        );
-      })}
+      {days.map(d => (
+        <button
+          key={d.date}
+          aria-label={`Open ${d.date}`}
+          onClick={() => onSelect(d.date)}
+          style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, minWidth: 0, padding: 0,
+            border: 'none', background: 'none', cursor: 'pointer',
+          }}
+        >
+          <div style={{ width: '100%', aspectRatio: '1 / 1', borderRadius: '50%', boxSizing: 'border-box',
+                        boxShadow: d.date === selected ? '0 0 0 2px #E8E4DA' : 'none' }}>
+            <HabitSymbol levels={d.levels} visible={visible} size="100%"
+                         title={`${d.date}: ${visible.map(l => `${l} ${d.levels[l] ?? 0}`).join(', ')}`} />
+          </div>
+          <span style={{ fontSize: 10, color: d.date === selected ? '#E8E4DA' : '#7B8491' }}>{d.date.slice(8, 10)}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -446,8 +463,8 @@ function TodayView() {
   const [habits, setHabits] = useState<TodayHabit[]>([]);
   const [categories, setCategories] = useState<CategoryInfo[]>([]);
   const [priorities, setPriorities] = useState<PriorityInfo[]>([]);
-  const [filter, setFilter] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryDay[]>([]);
+  const [filter, setFilter] = useState<string[]>([]);
+  const [history, setHistory] = useState<SymbolDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -462,18 +479,17 @@ function TodayView() {
     setPriorities(res.priorities);
   }, [date]);
 
-  // Unfiltered: done/tracked ratio. One category: that category's level (0..3) as intensity.
+  // Levels for every category always (the filter only decides which layers are drawn).
   const loadHistory = useCallback(async () => {
-    if (filter) {
-      const res = await apiFetch<{ dates: string[]; categories: { levels: (number | null)[] }[] }>(
-        `/habittracker/category-progress?days=${HEAT_DAYS}&end=${realToday}&category_id=${filter}`);
-      if (isApiError(res) || !res.categories[0]) return;
-      setHistory(res.dates.map((d, i) => ({ date: d, done: res.categories[0].levels[i] ?? 0, tracked: 3 })));
-      return;
-    }
-    const res = await apiFetch<{ days: HistoryDay[] }>(`/habittracker/history?days=${HEAT_DAYS}&end=${realToday}`);
-    if (!isApiError(res)) setHistory(res.days);
-  }, [realToday, filter]);
+    const res = await apiFetch<{ dates: string[]; categories: { symbol_layer: SymbolLayer | null; levels: (number | null)[] }[] }>(
+      `/habittracker/category-progress?days=${HEAT_DAYS}&end=${realToday}`);
+    if (isApiError(res)) return;
+    setHistory(res.dates.map((d, i) => {
+      const levels: SymbolLevels = {};
+      for (const c of res.categories) if (c.symbol_layer) levels[c.symbol_layer] = c.levels[i] ?? 0;
+      return { date: d, levels };
+    }));
+  }, [realToday]);
 
   useEffect(() => { loadDay(); }, [loadDay]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
@@ -513,8 +529,9 @@ function TodayView() {
 
   return (
     <div style={pageStyle}>
+      <CategoryFilter categories={categories} value={filter} onChange={setFilter} />
       {history.length > 0 && (
-        <HeatmapStrip days={history} selected={date}
+        <HeatmapStrip days={history} selected={date} visible={visibleLayers(categories, filter)}
                       onSelect={d => navigate(d === realToday ? '/habittracker' : `/habittracker/day/${d}`)} />
       )}
       {date !== realToday && (
@@ -528,7 +545,6 @@ function TodayView() {
       {!loading && habits.length === 0 && !error && (
         <div style={{ color: '#888', fontSize: 14 }}>No active habits. Add one under Habits.</div>
       )}
-      <CategoryFilter categories={categories} value={filter} onChange={setFilter} />
       {groupByCategory(habits.map(h => ({ ...h, category_id: h.category_id })), categories, filter).map(g => (
         <div key={g.category?.id ?? 'other'}>
           {categories.length > 0 && (
@@ -820,7 +836,7 @@ function HabitDefinitionsView() {
   const navigate = useNavigate();
   const hist = useHabitHistory();
   const { categories, priorities } = useCategories();
-  const [filter, setFilter] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string[]>([]);
   const [habits, setHabits] = useState<HabitRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

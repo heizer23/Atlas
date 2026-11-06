@@ -134,6 +134,10 @@ create table if not exists habittracker.habit_priorities (
 -- null = legacy / uncategorised habit (excluded from category progress, shown ungrouped).
 alter table habittracker.habits add column if not exists category_id uuid references habittracker.habit_categories(id);
 alter table habittracker.habits add column if not exists priority smallint references habittracker.habit_priorities(level);
+-- Which layer of the daily symbol (HabitSymbol) this category draws. Stable key, independent of
+-- the display name. null = not drawn.
+alter table habittracker.habit_categories add column if not exists symbol_layer text
+    check (symbol_layer is null or symbol_layer in ('body', 'mind', 'organization', 'discipline'));
 create index if not exists ix_habits_category on habittracker.habits (category_id);
 
 commit;

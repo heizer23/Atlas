@@ -122,7 +122,9 @@ def test_history_category_filter(client, body):
     assert (days[0]["done"], days[0]["tracked"]) == (1, 1)
 
 
-def test_category_crud_validation(client):
+def test_category_crud_validation(client, db_conn):
+    with db_conn.cursor() as cur:
+        cur.execute("delete from habittracker.habit_categories where name in ('TestRename', 'TestRename2')")
     assert client.post(f"{BASE}/categories", json={"name": ""}).status_code == 400
     assert client.post(f"{BASE}/categories", json={"name": "X", "kind": "bogus"}).status_code == 400
     c = _cat(client, "TestRename")
@@ -140,3 +142,11 @@ def test_discipline_counts_only_explicit_done():
     assert category_levels(cats, [{"category_id": "d", "priority": 2, "done": True},
                                   {"category_id": "d", "priority": 3, "done": False}])["d"] == 2
     assert category_levels(cats, [])["d"] is None
+
+
+def test_symbol_layers_are_stable_keys(client):
+    data = client.get(f"{BASE}/categories").json()["rows"]
+    layers = {c["name"]: c["symbol_layer"] for c in data if c["name"] in ("Body", "Mind", "Organization", "Discipline")}
+    assert layers == {"Body": "body", "Mind": "mind", "Organization": "organization", "Discipline": "discipline"}
+    prog = client.get(f"{BASE}/category-progress", params={"days": 2, "end": DAY}).json()["categories"]
+    assert {"body", "mind", "organization", "discipline"} <= {c["symbol_layer"] for c in prog}

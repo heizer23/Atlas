@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.database import init_pool, init_schema, seed_categories, seed_linked_habits, seed_starter_habits
+from backend.database import init_pool, init_schema, seed_categories, seed_linked_habits, seed_symbol_layers, seed_starter_habits
 from backend.routers import categories, habits, reports, reviews, tracking
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
@@ -45,6 +45,7 @@ def on_startup() -> None:
             seed_starter_habits()
             seed_linked_habits()
             seed_categories()
+            seed_symbol_layers()
             log.info("Ready.")
             return
         except Exception as exc:

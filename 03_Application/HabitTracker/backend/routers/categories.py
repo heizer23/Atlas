@@ -28,6 +28,7 @@ KINDS = ("achievement", "discipline")
 CATEGORY_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="name",          label="Name",  type="string", sortable=True),
     ColumnSchema(key="kind",          label="Kind",  type="string"),
+    ColumnSchema(key="symbol_layer",  label="Symbol layer", type="string"),
     ColumnSchema(key="display_order", label="Order", type="number", sortable=True),
 ]
 

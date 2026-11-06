@@ -46,7 +46,7 @@ def _parse(value: str | None) -> date | None:
 
 
 def _categories(cur) -> list[dict]:
-    cur.execute("select id::text as id, name, kind from habittracker.habit_categories order by display_order, name")
+    cur.execute("select id::text as id, name, kind, symbol_layer from habittracker.habit_categories order by display_order, name")
     return [dict(r) for r in cur.fetchall()]
 
 
