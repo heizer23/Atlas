@@ -178,4 +178,25 @@ alter table storagetracker.item_history add constraint item_history_change_type_
     check (change_type in ('created', 'state_change', 'location_change', 'quantity_change',
                            'expiry_change', 'freeze', 'thaw'));
 
+-- Inventory management: per-article stock management type + category.
+-- QUANTITY (default) = ledger-based counting. KANBAN = no quantity bookkeeping; items.state is the manual
+-- status (stored = In Stock, low_stock = Low, out_of_stock = Out) and low/out feed the shopping list.
+alter table storagetracker.items add column if not exists stock_management_type text not null default 'QUANTITY';
+alter table storagetracker.items add column if not exists category text not null default 'Other';
+
+do $$
+begin
+    if not exists (select 1 from pg_constraint where conname = 'items_stock_management_type_check') then
+        alter table storagetracker.items
+            add constraint items_stock_management_type_check check (stock_management_type in ('QUANTITY', 'KANBAN'));
+    end if;
+    if not exists (select 1 from pg_constraint where conname = 'items_category_check') then
+        alter table storagetracker.items
+            add constraint items_category_check check (category in (
+                'Vegetables & Fruit', 'Meat & Fish', 'Dairy', 'Dry Goods', 'Spices', 'Frozen', 'Beverages', 'Other'));
+    end if;
+end $$;
+
+create index if not exists ix_items_category on storagetracker.items(category);
+
 commit;

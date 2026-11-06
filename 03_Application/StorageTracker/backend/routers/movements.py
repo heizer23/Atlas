@@ -5,6 +5,7 @@ Contract (Kitchen Sprint01):
 - A movement never drives quantity below 0: delta is clamped, requested_delta keeps the ask.
 - idempotency_key makes POST safe to repeat: the original movement is returned (200, replayed=true).
 - reverse posts the negated applied delta; a movement can be reversed once.
+- stock_management_type='KANBAN' items are never deducted: movements are recorded with delta 0.
 - kind='batch' items skip the low-stock auto transition and shopping tasks.
 """
 import json as _json
@@ -50,7 +51,7 @@ def _apply(conn: Any, item_id: int, delta: float, reason: str, ref: str | None,
     """Returns (movement, item_quantity_info, replayed). Caller commits."""
     with conn.cursor() as cur:
         cur.execute(
-            "select id, state, kind, quantity, min_quantity, source_tags "
+            "select id, state, kind, stock_management_type, quantity, min_quantity, source_tags "
             "from storagetracker.items where id = %s for update",
             (item_id,),
         )
@@ -68,7 +69,10 @@ def _apply(conn: Any, item_id: int, delta: float, reason: str, ref: str | None,
 
         old_q = Decimal(item["quantity"] or 0)
         requested = Decimal(str(delta))
-        applied = max(requested, -old_q)
+        # KANBAN articles are never deducted: the movement is still recorded (idempotency, undo, audit) with delta 0
+        # and requested_delta keeps the ask; the manual status in items.state stays untouched.
+        kanban = item["stock_management_type"] == "KANBAN"
+        applied = Decimal(0) if kanban else max(requested, -old_q)
         new_q = old_q + applied
 
         cur.execute(
@@ -83,7 +87,7 @@ def _apply(conn: Any, item_id: int, delta: float, reason: str, ref: str | None,
         movement = _movement_to_dict(cur.fetchone())
 
         state = item["state"]
-        if item["kind"] != "batch":
+        if item["kind"] != "batch" and not kanban:
             auto = _apply_auto_transition(new_q, item["min_quantity"])
             if auto:
                 state = auto
@@ -104,7 +108,7 @@ def _apply(conn: Any, item_id: int, delta: float, reason: str, ref: str | None,
         _record_history(conn, item_id, "quantity_change", str(_num(old_q)), str(_num(new_q)), notes=reason)
     if state != item["state"]:
         _record_history(conn, item_id, "state_change", item["state"], state)
-    if state in SHOPPING_TRIGGER_STATES and item["kind"] != "batch":
+    if state in SHOPPING_TRIGGER_STATES and item["kind"] != "batch" and not kanban:
         tags = item["source_tags"] or []
         _ensure_open_shopping_task(conn, item_id, tags if isinstance(tags, list) else _json.loads(tags))
     return movement, {"quantity": _num(new_q)}, False

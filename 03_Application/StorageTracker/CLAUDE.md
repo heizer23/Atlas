@@ -49,3 +49,12 @@ earliest first. UI: banner on All Items, `/items/expiring` view, Discard button 
 automatically when a movement brings them to 0 and reactivated by a reversal; `GET /items` hides archived by default (`archived=include|only`).
 `POST /items/{id}/relocate {location, event: move|freeze|thaw, expires_at}` writes `freeze` / `thaw` / `location_change` plus `expiry_change`
 history rows; freeze/thaw REQUIRE an explicit non-past `expires_at` (shelf life is never reset implicitly). `POST /items/{id}/archive|unarchive`.
+
+## Stock management type & categories
+- `items.stock_management_type` QUANTITY (default, ledger) | KANBAN. Kanban reuses `items.state` as the manual status
+  (stored = In Stock, low_stock = Low, out_of_stock = Out); Low/Out create the open shopping task, task `done` resets to `stored` (no quantity touched).
+  Movements on Kanban articles are recorded with `delta` 0 (`requested_delta` keeps the ask) so Kitchen idempotency/undo work; no quantity auto-transition.
+  Kitchen `compute_shopping` skips Kanban articles. Batches cannot be Kanban.
+- `items.category` (Vegetables & Fruit, Meat & Fish, Dairy, Dry Goods, Spices, Frozen, Beverages, Other; default Other). `GET /items?category=&stock_management_type=`.
+  UI: category chips + grouped list on All Items; Kanban status chips on the card.
+- Shopping list = open `shopping_tasks`; "Copy as text" button (flat or by store; clipboard, share sheet fallback).

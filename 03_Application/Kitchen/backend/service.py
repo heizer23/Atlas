@@ -297,8 +297,8 @@ def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
     buy, have = [], []
     for item_id, n in sorted(need.items(), key=lambda kv: master.get(kv[0], {}).get("name", "").lower()):
         item = master.get(item_id)
-        if item is None:
-            continue
+        if item is None or item.get("stock_management_type") == "KANBAN":
+            continue   # Kanban articles carry no quantity; Low / Out reach the StorageTracker shopping list via their status
         stock = float(item["quantity"] or 0)
         line = {"item_id": item_id, "name": item["name"], "unit": n["unit"], "needed": round(n["needed"], 4),
                 "stock": round(stock, 4)}

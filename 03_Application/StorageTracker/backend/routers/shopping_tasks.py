@@ -323,14 +323,14 @@ def update_shopping_task(task_id: str, body: ShoppingTaskUpdate) -> JSONResponse
         if body.status == "done":
             with conn.cursor() as cur:
                 cur.execute(
-                    "select id, state, quantity, min_quantity, restock_quantity from storagetracker.items where id = %s",
+                    "select id, state, quantity, min_quantity, restock_quantity, stock_management_type from storagetracker.items where id = %s",
                     (item_id,),
                 )
                 item = dict(cur.fetchone())
 
             old_state = item["state"]
 
-            if item["restock_quantity"] is not None:
+            if item["restock_quantity"] is not None and item["stock_management_type"] == "QUANTITY":
                 # Set quantity to restock_quantity and re-evaluate state
                 new_qty = item["restock_quantity"]
                 min_qty = item["min_quantity"]
@@ -346,7 +346,7 @@ def update_shopping_task(task_id: str, body: ShoppingTaskUpdate) -> JSONResponse
                         (new_qty, new_state, item_id),
                     )
             else:
-                # No restock_quantity: just set state to stored
+                # No restock_quantity (or KANBAN: status only, no quantity): just set state to stored
                 new_state = "stored"
                 with conn.cursor() as cur:
                     cur.execute(

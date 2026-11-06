@@ -35,6 +35,8 @@ interface ItemRow extends Row {
   produced_at:  string | null;
   archived_at:  string | null;
   kind:         'ingredient' | 'batch';
+  stock_management_type: 'QUANTITY' | 'KANBAN';
+  category:     string;
   created_at:   string;
   updated_at:   string;
   history?:     HistoryRow[];
@@ -84,6 +86,8 @@ interface FormState {
   restock_quantity: string;
   unit:             string;
   expires_at:       string;   // YYYY-MM-DD or ''
+  stock_management_type: string;
+  category:         string;
 }
 
 const EMPTY_FORM: FormState = {
@@ -98,6 +102,8 @@ const EMPTY_FORM: FormState = {
   restock_quantity: '',
   unit:             '',
   expires_at:       '',
+  stock_management_type: 'QUANTITY',
+  category:         'Other',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -118,6 +124,16 @@ const STATE_COLOURS: Record<string, string> = {
   lent_out:             'var(--md-sys-color-secondary)',
 };
 
+const CATEGORIES = [
+  'Vegetables & Fruit', 'Meat & Fish', 'Dairy', 'Dry Goods', 'Spices', 'Frozen', 'Beverages', 'Other',
+];
+
+// Kanban articles: items.state is the manual status (stored = In Stock, low_stock = Low, out_of_stock = Out)
+const KANBAN_STATES = ['stored', 'low_stock', 'out_of_stock'];
+const KANBAN_LABEL: Record<string, string> = {
+  stored: 'In Stock', low_stock: 'Low', out_of_stock: 'Out of Stock',
+};
+
 const STATE_LABEL: Record<string, string> = {
   stored:               'Stored',
   low_stock:            'Low Stock',
@@ -135,7 +151,7 @@ const TYPE_LABEL: Record<string, string> = {
 
 // ── Small UI pieces ───────────────────────────────────────────────────────────
 
-function StateBadge({ state }: { state: string }) {
+function StateBadge({ state, kanban }: { state: string; kanban?: boolean }) {
   return (
     <span style={{
       display:      'inline-block',
@@ -146,7 +162,7 @@ function StateBadge({ state }: { state: string }) {
       background:   STATE_COLOURS[state] ?? '#888',
       color:        '#fff',
     }}>
-      {STATE_LABEL[state] ?? state}
+      {(kanban ? KANBAN_LABEL[state] : undefined) ?? STATE_LABEL[state] ?? state}
     </span>
   );
 }
@@ -238,6 +254,27 @@ function ExpiryBanner() {
   );
 }
 
+// ── Kanban status (manual) ────────────────────────────────────────────────────
+// Low / Out create the open shopping task (backend); marking the task done resets the status to In Stock.
+
+function KanbanStatus({ item, onChanged }: { item: ItemRow; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const set = async (state: string) => {
+    if (state === item.state) return;
+    setBusy(true);
+    await apiFetch(`/items/${item.id}`, { method: 'PATCH', body: JSON.stringify({ state }) });
+    setBusy(false);
+    onChanged();
+  };
+  return (
+    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+      {KANBAN_STATES.map(s => (
+        <Chip key={s} label={KANBAN_LABEL[s]} active={item.state === s} onClick={() => !busy && set(s)} />
+      ))}
+    </div>
+  );
+}
+
 // ── Item row card ─────────────────────────────────────────────────────────────
 
 const SHOPPING_STATES = new Set(['low_stock', 'out_of_stock']);
@@ -276,8 +313,11 @@ function ItemCard({
             {item.name}
           </span>
           <span style={{ fontSize: 12, color: '#888' }} title="Article number">#{item.id}</span>
-          <StateBadge state={item.state} />
+          <StateBadge state={item.state} kanban={item.stock_management_type === 'KANBAN'} />
           <span style={{ fontSize: 12, color: '#888' }}>{TYPE_LABEL[item.item_type] ?? item.item_type}</span>
+          {item.category && item.category !== 'Other' && (
+            <span style={{ fontSize: 12, color: '#888' }}>· {item.category}</span>
+          )}
           {SHOPPING_STATES.has(item.state) && (
             <span style={{
               fontSize: 11, padding: '1px 6px', borderRadius: 10,
@@ -292,7 +332,7 @@ function ItemCard({
             Location: {item.location}
           </div>
         )}
-        {item.item_type === 'consumable' && item.quantity !== null && (
+        {item.item_type === 'consumable' && item.stock_management_type !== 'KANBAN' && item.quantity !== null && (
           <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
             Qty: {item.quantity}{item.unit ? ` ${item.unit}` : ''}{item.min_quantity !== null ? ` / min ${item.min_quantity}` : ''}
           </div>
@@ -304,6 +344,7 @@ function ItemCard({
             Buy at: {item.source_tags.join(', ')}
           </div>
         )}
+        {item.stock_management_type === 'KANBAN' && <KanbanStatus item={item} onChanged={onChanged} />}
       </div>
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         {item.expiry_status === 'expired' && <DiscardButton item={item} onDone={onChanged} />}
@@ -350,11 +391,14 @@ function ItemFormModal({
             : '',
           unit:             initial.unit ?? '',
           expires_at:       initial.expires_at ?? '',
+          stock_management_type: initial.stock_management_type ?? 'QUANTITY',
+          category:         initial.category ?? 'Other',
         }
       : { ...EMPTY_FORM },
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isKanban = form.item_type === 'consumable' && form.stock_management_type === 'KANBAN';
 
   const set = (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [key]: e.target.value }));
@@ -375,7 +419,10 @@ function ItemFormModal({
         : [],
     };
 
-    if (form.item_type === 'consumable') {
+    body.category = form.category;
+    if (form.item_type === 'consumable') body.stock_management_type = form.stock_management_type;
+    const kanban = form.item_type === 'consumable' && form.stock_management_type === 'KANBAN';
+    if (form.item_type === 'consumable' && !kanban) {
       body.quantity         = form.quantity !== '' ? parseFloat(form.quantity) : null;
       body.min_quantity     = form.min_quantity !== '' ? parseInt(form.min_quantity, 10) : null;
       body.restock_quantity = form.restock_quantity !== '' ? parseInt(form.restock_quantity, 10) : null;
@@ -422,9 +469,31 @@ function ItemFormModal({
           <label style={labelStyle}>
             State
             <select value={form.state} onChange={set('state')} style={inputStyle}>
-              {ALL_STATES.map(s => <option key={s} value={s}>{STATE_LABEL[s]}</option>)}
+              {(isKanban ? KANBAN_STATES : ALL_STATES).map(s => (
+                <option key={s} value={s}>{isKanban ? KANBAN_LABEL[s] : STATE_LABEL[s]}</option>
+              ))}
             </select>
           </label>
+          <label style={labelStyle}>
+            Category
+            <select value={form.category} onChange={set('category')} style={inputStyle}>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          {form.item_type === 'consumable' && (
+            <label style={labelStyle}>
+              Stock management
+              <select value={form.stock_management_type}
+                      onChange={(e) => setForm(f => ({
+                        ...f, stock_management_type: e.target.value,
+                        state: e.target.value === 'KANBAN' && !KANBAN_STATES.includes(f.state) ? 'stored' : f.state,
+                      }))}
+                      style={inputStyle}>
+                <option value="QUANTITY">Quantity (count stock)</option>
+                <option value="KANBAN">Kanban (In Stock / Low / Out)</option>
+              </select>
+            </label>
+          )}
           <label style={labelStyle}>
             Location
             <input value={form.location} onChange={set('location')} style={inputStyle} />
@@ -435,6 +504,7 @@ function ItemFormModal({
           </label>
           {form.item_type === 'consumable' && (
             <>
+              {!isKanban && <>
               <label style={labelStyle}>
                 Quantity
                 <input type="number" min={0} step="any" value={form.quantity} onChange={set('quantity')} style={inputStyle} />
@@ -451,6 +521,7 @@ function ItemFormModal({
                 Restock Quantity
                 <input type="number" min={0} value={form.restock_quantity} onChange={set('restock_quantity')} style={inputStyle} placeholder="quantity to set when restocked" />
               </label>
+              </>}
               <label style={labelStyle}>
                 Buy at (comma-separated)
                 <input value={form.source_tags} onChange={set('source_tags')} placeholder="Rewe, DM" style={inputStyle} />
@@ -511,6 +582,7 @@ function ItemListView({
   reload,
   extraHeaderContent,
   topContent,
+  groupByCategory,
 }: {
   title: string;
   items: ItemRow[];
@@ -519,6 +591,7 @@ function ItemListView({
   reload: () => void;
   extraHeaderContent?: React.ReactNode;
   topContent?: React.ReactNode;
+  groupByCategory?: boolean;
 }) {
   const navigate = useNavigate();
   const [editItem, setEditItem]   = useState<ItemRow | null>(null);
@@ -529,6 +602,12 @@ function ItemListView({
     await apiFetch(`/items/${id}`, { method: 'DELETE' });
     reload();
   };
+
+  // Category groups in master order (empty groups omitted); ungrouped = one headerless block
+  const groupedItems: [string | null, ItemRow[]][] = groupByCategory
+    ? CATEGORIES.map(c => [c, items.filter(i => (i.category ?? 'Other') === c)] as [string, ItemRow[]])
+        .filter(([, rows]) => rows.length > 0)
+    : [[null, items]];
 
   return (
     <div style={{ padding: 16 }}>
@@ -548,15 +627,24 @@ function ItemListView({
       {!loading && !error && items.length === 0 && (
         <div style={{ color: '#888', fontSize: 14 }}>No items.</div>
       )}
-      {!loading && !error && items.map(item => (
-        <ItemCard
-          key={item.id}
-          item={item}
-          onEdit={setEditItem}
-          onDelete={handleDelete}
-          onNavigate={(id: number) => navigate(`/items/${id}`)}
-          onChanged={reload}
-        />
+      {!loading && !error && groupedItems.map(([category, rows]) => (
+        <div key={category ?? 'all'}>
+          {category && (
+            <h3 style={{ margin: '16px 0 8px', fontSize: 15, color: '#555', borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>
+              {category} <span style={{ fontWeight: 400, color: '#999' }}>({rows.length})</span>
+            </h3>
+          )}
+          {rows.map(item => (
+            <ItemCard
+              key={item.id}
+              item={item}
+              onEdit={setEditItem}
+              onDelete={handleDelete}
+              onNavigate={(id: number) => navigate(`/items/${id}`)}
+              onChanged={reload}
+            />
+          ))}
+        </div>
       ))}
 
       {creating && (
@@ -575,14 +663,16 @@ function AllItemsView() {
   const [stateFilter, setStateFilter]   = useState<string | null>(null);
   const [typeFilter, setTypeFilter]     = useState<string | null>(null);
   const [archivedOnly, setArchivedOnly] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
 
   const params = new URLSearchParams();
   if (stateFilter) params.set('state', stateFilter);
   if (typeFilter)  params.set('item_type', typeFilter);
+  if (categoryFilter) params.set('category', categoryFilter);
   if (archivedOnly) params.set('archived', 'only');
   const url = `/items?${params.toString()}`;
 
-  const { items, loading, error, reload } = useItems(url, [stateFilter, typeFilter, archivedOnly]);
+  const { items, loading, error, reload } = useItems(url, [stateFilter, typeFilter, archivedOnly, categoryFilter]);
 
   const header = (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -596,10 +686,19 @@ function AllItemsView() {
     </div>
   );
 
+  const categoryBar = (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      {CATEGORIES.map(c => (
+        <Chip key={c} label={c} active={categoryFilter === c} onClick={() => setCategoryFilter(categoryFilter === c ? null : c)} />
+      ))}
+    </div>
+  );
+
   return (
     <ItemListView
       title="All Items"
-      topContent={<ExpiryBanner />}
+      topContent={<><ExpiryBanner /><div style={{ marginTop: 8 }}>{categoryBar}</div></>}
+      groupByCategory
       items={items}
       loading={loading}
       error={error}
@@ -708,13 +807,16 @@ function ItemDetailView() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>{item.name} <span style={{ fontSize: 14, color: '#888', fontWeight: 400 }}>#{item.id}</span></h2>
-        <StateBadge state={item.state} />
+        <StateBadge state={item.state} kanban={item.stock_management_type === 'KANBAN'} />
         <span style={{ fontSize: 13, color: '#888' }}>{TYPE_LABEL[item.item_type] ?? item.item_type}</span>
       </div>
 
+      <div style={{ marginBottom: 6 }}>Category: <strong>{item.category ?? 'Other'}</strong>{item.stock_management_type === 'KANBAN' && <> · <strong>Kanban</strong></>}</div>
+      {item.stock_management_type === 'KANBAN' && <div style={{ marginBottom: 8 }}><KanbanStatus item={item} onChanged={load} /></div>}
+
       {item.location && <div style={{ marginBottom: 6 }}>Location: <strong>{item.location}</strong></div>}
 
-      {item.item_type === 'consumable' && (
+      {item.item_type === 'consumable' && item.stock_management_type !== 'KANBAN' && (
         <div style={{ marginBottom: 6 }}>
           Quantity: <strong>{item.quantity ?? '—'}{item.unit ? ` ${item.unit}` : ''}</strong>
           {item.min_quantity !== null && <> / Min: <strong>{item.min_quantity}</strong></>}
@@ -831,6 +933,32 @@ function ShoppingListView() {
     }
   };
 
+  // Plain-text export of what is on screen (flat or by store): copy to clipboard, share sheet as fallback
+  const exportText = () => {
+    const line = (t: ShoppingTaskRow) => `- ${t.item_name}${t.notes ? ` (${t.notes})` : ''}`;
+    if (!grouped) return tasks.map(line).join('\n');
+    const groups: Record<string, ShoppingTaskRow[]> = {};
+    for (const row of tasks) (groups[row.source_tag ?? 'Other'] ??= []).push(row);
+    return Object.keys(groups)
+      .sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)))
+      .map(tag => `${tag}:\n${groups[tag].map(line).join('\n')}`)
+      .join('\n\n');
+  };
+
+  const handleCopy = async () => {
+    const text = exportText();
+    try {
+      await navigator.clipboard.writeText(text);
+      setActionMsg('Shopping list copied.');
+    } catch {
+      if (navigator.share) {
+        try { await navigator.share({ title: 'Shopping list', text }); } catch { /* cancelled */ }
+      } else {
+        setActionMsg('Clipboard not available — check the browser permission.');
+      }
+    }
+  };
+
   // When grouped, render rows grouped by source_tag
   const renderGrouped = () => {
     const groups: Record<string, ShoppingTaskRow[]> = {};
@@ -865,12 +993,13 @@ function ShoppingListView() {
         <div style={{ display: 'flex', gap: 8 }}>
           <Chip label="Flat" active={!grouped} onClick={() => setGrouped(false)} />
           <Chip label="By Store" active={grouped} onClick={() => setGrouped(true)} />
+          <button onClick={handleCopy} disabled={tasks.length === 0} style={btnStyle}>Copy as text</button>
         </div>
       </div>
 
       {loading && <Skeleton />}
       {error && <ErrorCard message={error} />}
-      {actionMsg && <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{actionMsg}</div>}
+      {actionMsg && <div style={{ color: actionMsg === 'Shopping list copied.' ? '#065f46' : 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{actionMsg}</div>}
 
       {!loading && !error && tasks.length === 0 && (
         <div style={{ color: '#888', fontSize: 14 }}>No open shopping tasks.</div>
