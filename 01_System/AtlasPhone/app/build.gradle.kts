@@ -54,6 +54,7 @@ dependencies {
     implementation("com.google.androidbrowserhelper:androidbrowserhelper:2.7.4")
     implementation("com.google.firebase:firebase-messaging-ktx:24.1.0")
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -20,6 +20,21 @@
     />
   </head>
   <body>
+    <!-- AtlasPhone native bridge: capture the MessagePort the TWA host delivers (see platform-ui/mobile).
+         Runs before the app boots so a port delivered at page load is never missed. Only ports sent by
+         the AtlasPhone app origin are accepted; in a normal browser nothing ever arrives. -->
+    <script>
+      (function () {
+        var native = (window.__atlasNative = { port: null, onPort: null, log: [] });
+        window.addEventListener('message', function (e) {
+          if (!e.ports || !e.ports.length) return;
+          native.log.push(new Date().toISOString() + ' port from ' + e.origin);
+          if (e.origin.indexOf('android-app://net.linspad.atlasphone') !== 0) return;
+          native.port = e.ports[0];
+          if (native.onPort) native.onPort(native.port);
+        });
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/shell/main.tsx"></script>
   </body>
