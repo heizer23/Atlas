@@ -13,6 +13,7 @@ services:
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
+      ATLAS_SERVICE_TOKEN: ${ATLAS_SERVICE_TOKEN}
       STORAGETRACKER_URL: http://atlas-storagetracker:8000
     volumes:
       - ${DATA_ROOT}/kitchen/logs:/app/logs
@@ -30,6 +31,7 @@ services:
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
+      ATLAS_SERVICE_TOKEN: ${ATLAS_SERVICE_TOKEN}
     command: ["sleep", "infinity"]
     networks:
       - atlas-net

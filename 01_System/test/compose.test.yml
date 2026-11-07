@@ -148,6 +148,7 @@ services:
       ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
       ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
       ATLAS_PG_HOST:     atlas-postgres
+      ATLAS_SERVICE_TOKEN: ${ATLAS_SERVICE_TOKEN}
     networks:
       - atlas-net
 

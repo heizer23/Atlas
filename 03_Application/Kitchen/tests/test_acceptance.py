@@ -12,7 +12,22 @@ def item_id(name):
 
 
 def buy(client, name, qty):
-    return client.post("/api/kitchen/shopping/purchase", json={"item_id": item_id(name), "qty": qty})
+    """Purchases are Storage's job now (central shopping list 'Bought')."""
+    r = httpx.post(f"{ST}/shopping-tasks/purchase", json={"item_id": item_id(name), "qty": qty})
+    assert r.status_code == 200, r.text
+    return r
+
+
+def central():
+    """Storage's central shopping list keyed by article name (Kitchen's demand was synced on every plan change)."""
+    rows = httpx.get(f"{ST}/shopping-tasks/views/central").json()["rows"]
+    return {r["item_name"]: r for r in rows}
+
+
+def sync_issues(client):
+    st = client.get("/api/kitchen/demand/status").json()["rows"][0]
+    assert st["status"] == "ok", st
+    return st["issues"]
 
 
 def stock(name, unit=None):
@@ -54,21 +69,19 @@ def test_full_flow(client):
     m_chicken = add_meal(client, pid, "Dal with Chicken and Spinach", "2030-01-10")
     m_moved = add_meal(client, pid, "Spaghetti Bolognese", "2030-01-11")
 
-    # 2 consolidated shopping list; Spinach (2 meals) summed, bases not shopped
-    shop = client.get(f"/api/kitchen/plans/{pid}/shopping").json()["rows"][0]
-    spinat = next(l for l in shop["buy"] if l["name"] == "Spinach")
-    assert spinat["to_buy"] == 400
-    assert shop["missing_bases"] == []
-    assert not shop["probably_have"]
+    # 2 consolidated shopping list in Storage; Spinach (2 meals) summed, bases not shopped
+    shop = central()
+    assert shop["Spinach"]["purchase_qty"] == 400 and shop["Spinach"]["origins"] == ["kitchen"]
+    assert not any(i["type"] == "missing_base" for i in sync_issues(client))
 
     # 3 buy + confirm on-hand: lentils 300 g bought; onions "probably have" corrected
     buy(client, "Red lentils", 500)
-    client.post("/api/kitchen/shopping/stocktake", json={"item_id": item_id("Onion"), "qty": 6})
+    httpx.patch(f"{ST}/items/{item_id('Onion')}", json={"quantity": 6})       # stock correction (stocktake)
     for n, q in [("Garlic", 10), ("Ginger", 100), ("Canned tomatoes", 800), ("Coconut milk", 800),
                  ("Curry powder", 10), ("Olive oil", 20), ("Chicken breast", 300), ("Spinach", 400), ("Eggs", 6)]:
         buy(client, n, q)
-    shop = client.get(f"/api/kitchen/plans/{pid}/shopping").json()["rows"][0]
-    assert any(l["name"] == "Red lentils" for l in shop["probably_have"])
+    client.post("/api/kitchen/demand/sync")          # stock changed outside Kitchen: Storage recalculates by itself
+    assert "Red lentils" not in central() and "Spinach" not in central()
 
     # 4/5 cook 6 portions Dal -> batch, raw ingredients backflushed
     r = client.post(f"/api/kitchen/meals/{cook_dal}/cooked", json={"produced_qty": 6})
@@ -129,8 +142,7 @@ def test_suggest_plan_shape(client):
     assert sum(1 for m in meals if m["kind"] == "cook") == 2
     assert sum(1 for m in meals if m["kind"] == "meal") == 7
     # portions drawn from cooked bases never exceed what is produced
-    shop = client.get(f"/api/kitchen/plans/{r.json()['rows'][0]['id']}/shopping").json()["rows"][0]
-    assert shop["missing_bases"] == []
+    assert not any(i["type"] == "missing_base" for i in sync_issues(client))
 
 
 def test_recipe_crud(client):
@@ -161,8 +173,7 @@ def test_plan_length_one_to_seven_days(client):
         allowed = {(start + timedelta(days=i)).isoformat() for i in range(days)}
         assert {m["day"] for m in plan["meals"]} == allowed or {m["day"] for m in plan["meals"]} <= allowed
         assert len(cooks) == (1 if days <= 4 else 2)               # auto: one cook for a short shopping round
-        shop = client.get(f"/api/kitchen/plans/{plan['id']}/shopping").json()["rows"][0]
-        assert shop["missing_bases"] == []                         # derived meals only use portions that exist
+        assert not any(i["type"] == "missing_base" for i in sync_issues(client))   # derived meals only use portions that exist
 
 
 def test_three_day_plan_cooks_once_and_uses_the_batch(client):

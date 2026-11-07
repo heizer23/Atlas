@@ -27,6 +27,7 @@ for p in (os.path.join(_repo_root, "02_Platform", "packages"), os.path.join(_rep
         sys.path.insert(0, p)
 
 os.environ.setdefault("STORAGETRACKER_URL", "http://atlas-storagetracker-test:8000")
+os.environ.setdefault("ATLAS_SERVICE_TOKEN", "test-token")   # must match the StorageTracker test instance (compose passes the real one)
 
 
 def _build_url() -> str:

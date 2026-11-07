@@ -142,4 +142,19 @@ insert into kitchen.cook_batches (meal_id, item_id, location, qty)
     select meal_id, batch_item_id, 'fridge', produced_qty from kitchen.cook_events
     where batch_item_id is not null on conflict do nothing;
 
+-- Demand sync to StorageTracker (central shopping list). Kitchen publishes its complete GROSS demand snapshot;
+-- this single row records the outcome so failures stay visible and retryable. Not part of the booking contract.
+create table if not exists kitchen.demand_sync (
+    id              boolean     primary key default true check (id),
+    status          text        not null default 'pending' check (status in ('pending', 'ok', 'error')),
+    last_attempt_at timestamptz,
+    last_ok_at      timestamptz,
+    last_error      text,
+    problems        jsonb       not null default '[]'::jsonb,   -- per-line problems from a rejected snapshot
+    issues          jsonb       not null default '[]'::jsonb,   -- planning flags: draft recipes, excluded lines, missing bases
+    line_count      integer     not null default 0,
+    snapshot_hash   text
+);
+insert into kitchen.demand_sync (id) values (true) on conflict do nothing;
+
 commit;

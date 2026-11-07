@@ -199,4 +199,49 @@ end $$;
 
 create index if not exists ix_items_category on storagetracker.items(category);
 
+-- Central shopping list: purchase rules per article, task origin, source-tagged demands.
+-- purchase_multiple = pack size (shortages are rounded UP to a multiple of it), min_purchase_qty = minimum order quantity.
+-- Both are in the article's base unit; null = buy exactly the shortage.
+alter table storagetracker.items add column if not exists purchase_multiple numeric
+    check (purchase_multiple is null or purchase_multiple > 0);
+alter table storagetracker.items add column if not exists min_purchase_qty numeric
+    check (min_purchase_qty is null or min_purchase_qty > 0);
+
+-- manual = added by the user, low_stock = created by the low/out-of-stock transition
+alter table storagetracker.shopping_tasks add column if not exists origin text not null default 'manual';
+do $$
+begin
+    if not exists (select 1 from pg_constraint where conname = 'shopping_tasks_origin_check') then
+        alter table storagetracker.shopping_tasks
+            add constraint shopping_tasks_origin_check check (origin in ('manual', 'low_stock'));
+    end if;
+end $$;
+
+-- Gross demand published by other apps (Kitchen, ...). One row per (source, external_ref); a source's snapshot is
+-- replaced atomically and never touches other sources, manual tasks or stock. Demand is NOT a stock movement.
+create table if not exists storagetracker.demands (
+    id            uuid        primary key default gen_random_uuid(),
+    source        text        not null,
+    external_ref  text        not null,
+    item_id       integer     not null references storagetracker.items(id) on delete cascade,
+    qty           numeric     not null check (qty > 0),
+    unit          text        not null,
+    required_date date,
+    label         text,
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+    unique (source, external_ref)
+);
+create index if not exists ix_demands_item on storagetracker.demands(item_id);
+
+-- Per-source sync bookkeeping (last accepted snapshot + last rejected attempt).
+create table if not exists storagetracker.demand_sync (
+    source         text        primary key,
+    snapshot_hash  text,
+    line_count     integer     not null default 0,
+    last_ok_at     timestamptz,
+    last_error     jsonb,
+    last_error_at  timestamptz
+);
+
 commit;

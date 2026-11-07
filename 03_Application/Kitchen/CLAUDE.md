@@ -3,7 +3,7 @@
 App-local guidance only. Global rules: repository root CLAUDE.md.
 
 ## App
-Kitchen: weekly meal planner. Recipes -> week plan -> shopping list -> cook (backflush) -> eat.
+Kitchen: weekly meal planner. Recipes -> week plan -> cook (backflush) -> eat. The shopping list lives in Storage.
 Vision and scope: `Sprint01_Core/00_draft.md`.
 
 ## Boundaries
@@ -36,7 +36,20 @@ Vision and scope: `Sprint01_Core/00_draft.md`.
 - `GET /ingredients` = master export (zero stock included, batches excluded); `GET /recipes/import-example`.
 - `migrate_legacy_ingredients()` (seed.py, startup, idempotent): one-time assignment of article ids to pre-1.1 recipe
   lines (existing article by name+unit, else create with stock 0), then status recompute. Not used by imports.
-- Purchase / stocktake endpoints take `item_id`, not names.
+- Kitchen has no shopping list, purchase or stocktake endpoints any more (removed with the central shopping list).
+
+## Demand sync (central shopping list)
+- Kitchen publishes GROSS raw-ingredient demand of the NEWEST plan's still-`planned` meals (`service.compute_demand`) to
+  StorageTracker (`PUT /api/internal/demands/kitchen`, header `X-Atlas-Service-Token` = env `ATLAS_SERVICE_TOKEN`). It never subtracts
+  stock and never computes a buy quantity; Storage nets demand vs usable stock and rounds to pack size / MOQ.
+- Counting: a planned cook of a base = its raw lines once; a derived/favorite meal = only its own raw lines (base lines are batch
+  portions, never purchase demand); cooked/eaten/skipped meals contribute nothing. One line per (meal, recipe line), ref `meal:<id>:<line>`.
+- The snapshot is complete + atomic + idempotent on the Storage side. `backend/demand_sync.py`: `sync_quietly()` after suggest/add/patch/delete
+  meal, cook/eat/undo, recipe save, and a background sync at startup. It never raises: outcome is stored in `kitchen.demand_sync`
+  (`GET /kitchen/demand/status`, retry `POST /kitchen/demand/sync`). UI: strip on the plan page (error + problems + Retry).
+- `issues` flag, never silently drop: `draft_recipe` (planned recipe with unassigned lines: demand not published), `excluded_line`
+  (article/unit no longer valid), `missing_base` (no batch and no planned cook; bases are never purchased).
+- Tests need the StorageTracker test instance to have the same `ATLAS_SERVICE_TOKEN` (compose passes it from secrets.env).
 
 ## Cooked batches (fridge / freezer)
 - Cooking (`POST /meals/{id}/cooked {produced_qty, allocations:[{location: fridge|freezer, qty, shelf_life_days?}], remember_shelf_life}`)

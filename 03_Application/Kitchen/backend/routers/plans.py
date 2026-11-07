@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from backend import service
 from backend import storage_client as st
+from backend.demand_sync import sync_quietly
 from backend.common import berlin_today, dataset_response, plain
 from backend.database import get_db
 from platform_errorhandling import api_error
@@ -72,11 +73,6 @@ class FreezeThawIn(BaseModel):
 class ConsumeIn(BaseModel):
     qty:             float = Field(gt=0)
     idempotency_key: str | None = None
-
-
-class StockLineIn(BaseModel):
-    item_id: int   # StorageTracker article number (stable identity); qty is in the article's base unit
-    qty:     float = Field(ge=0)
 
 
 def _expiry_warnings(cur: Any, meals: list[dict[str, Any]], all_batches: list[dict[str, Any]] | None) -> None:
@@ -198,6 +194,7 @@ def suggest(body: SuggestIn) -> JSONResponse:
         plan_id = service.suggest_plan(conn, start, body.cook_sessions, body.days)
         with conn.cursor() as cur:
             p = _plan_payload(cur, plan_id)
+    sync_quietly()
     return dataset_response("plan", [p], "Plan", status=201)
 
 
@@ -226,6 +223,7 @@ def add_meal(plan_id: str, body: MealIn) -> JSONResponse:
                 (plan_id, body.recipe_id, body.kind, body.day, body.slot, portions or 1))
             row = _meal_row(cur, str(cur.fetchone()["id"]))
         conn.commit()
+    sync_quietly()
     return dataset_response("meal", [row], "Meal", status=201)
 
 
@@ -261,6 +259,7 @@ def patch_meal(meal_id: str, body: MealPatch) -> JSONResponse:
             cur.execute(f"update kitchen.planned_meals set {', '.join(sets)} where id = %s", (*params, meal_id))
             row = _meal_row(cur, meal_id)
         conn.commit()
+    sync_quietly()
     return dataset_response("meal", [row], "Meal")
 
 
@@ -273,6 +272,7 @@ def delete_meal(meal_id: str) -> JSONResponse:
             if not cur.fetchone():
                 return api_error("CONFLICT", "Meal not found or not in status planned", status=409)
         conn.commit()
+    sync_quietly()
     return JSONResponse(status_code=200, content={"deleted": True})
 
 
@@ -297,6 +297,7 @@ def _run(fn) -> JSONResponse:
             return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
         with conn.cursor() as cur:
             result["meal"] = _meal_row(cur, result["meal_id"])
+    sync_quietly()   # cook / eat / undo change which demand is still unfulfilled (stock was booked by the ledger already)
     return JSONResponse(status_code=200, content=plain(result))
 
 
@@ -318,56 +319,7 @@ def undo(meal_id: str) -> JSONResponse:
     return _run(lambda c: {**service.undo(c, meal_id), "meal_id": meal_id})
 
 
-# ── shopping ──────────────────────────────────────────────────────────────────
-
-@router.get("/plans/{plan_id}/shopping", response_model=None)
-def shopping(plan_id: str) -> JSONResponse:
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select 1 from kitchen.plans where id = %s", (plan_id,))
-            if not cur.fetchone():
-                return api_error("NOT_FOUND", f"Plan {plan_id} not found", status=404)
-        try:
-            data = service.compute_shopping(conn, plan_id)
-        except st.StorageError as e:
-            return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
-    return dataset_response("shopping", [data], "Shopping")
-
-
-@router.post("/shopping/stocktake", response_model=None)
-def stocktake(body: StockLineIn) -> JSONResponse:
-    """User confirms/corrects the real amount on hand: books the difference as a 'stocktake' movement."""
-    try:
-        item = st.get_item(body.item_id)
-        if not item:
-            return api_error("NOT_FOUND", f"Article {body.item_id} not found", status=404)
-        delta = body.qty - float(item["quantity"] or 0)
-        if abs(delta) > 1e-9:
-            st.post_movement(item["id"], delta, "stocktake", f"stocktake:{uuid.uuid4()}")
-    except st.StorageError as e:
-        return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
-    return JSONResponse(status_code=200, content={"item_id": item["id"], "quantity": body.qty})
-
-
-class PurchaseIn(StockLineIn):
-    idempotency_key: str | None = None
-
-
-@router.post("/shopping/purchase", response_model=None)
-def purchase(body: PurchaseIn) -> JSONResponse:
-    """Confirmed purchase: adds `qty` to stock. Pass idempotency_key to make a retry safe."""
-    if body.qty <= 0:
-        return api_error("VALIDATION_ERROR", "qty must be > 0")
-    try:
-        item = st.get_item(body.item_id)
-        if not item:
-            return api_error("NOT_FOUND", f"Article {body.item_id} not found", status=404)
-        res = st.post_movement(item["id"], body.qty, "purchase", body.idempotency_key or f"purchase:{uuid.uuid4()}")
-    except st.StorageError as e:
-        return api_error("STORAGE_UNAVAILABLE", str(e), status=502)
-    return JSONResponse(status_code=200, content={"item_id": item["id"], "quantity": res["quantity"],
-                                                  "replayed": res["replayed"]})
-
+# ── batches ───────────────────────────────────────────────────────────────────
 
 def _batch_row(b: dict[str, Any], recipes: dict[str, dict[str, Any]]) -> dict[str, Any]:
     r = recipes.get(b.get("recipe_ref") or "", {})

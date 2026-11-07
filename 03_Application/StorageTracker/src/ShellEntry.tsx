@@ -37,6 +37,8 @@ interface ItemRow extends Row {
   kind:         'ingredient' | 'batch';
   stock_management_type: 'QUANTITY' | 'KANBAN';
   category:     string;
+  purchase_multiple: number | null;
+  min_purchase_qty:  number | null;
   created_at:   string;
   updated_at:   string;
   history?:     HistoryRow[];
@@ -88,6 +90,8 @@ interface FormState {
   expires_at:       string;   // YYYY-MM-DD or ''
   stock_management_type: string;
   category:         string;
+  purchase_multiple: string;   // pack size, '' = no rule (sent as null)
+  min_purchase_qty:  string;   // minimum order, '' = no rule (sent as null)
 }
 
 const EMPTY_FORM: FormState = {
@@ -104,6 +108,8 @@ const EMPTY_FORM: FormState = {
   expires_at:       '',
   stock_management_type: 'QUANTITY',
   category:         'Other',
+  purchase_multiple: '',
+  min_purchase_qty:  '',
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -393,6 +399,8 @@ function ItemFormModal({
           expires_at:       initial.expires_at ?? '',
           stock_management_type: initial.stock_management_type ?? 'QUANTITY',
           category:         initial.category ?? 'Other',
+          purchase_multiple: initial.purchase_multiple != null ? String(initial.purchase_multiple) : '',
+          min_purchase_qty:  initial.min_purchase_qty != null ? String(initial.min_purchase_qty) : '',
         }
       : { ...EMPTY_FORM },
   );
@@ -427,6 +435,9 @@ function ItemFormModal({
       body.min_quantity     = form.min_quantity !== '' ? parseInt(form.min_quantity, 10) : null;
       body.restock_quantity = form.restock_quantity !== '' ? parseInt(form.restock_quantity, 10) : null;
       body.unit             = form.unit.trim() || null;
+      // purchase rule: explicit null clears it (PATCH null vs omit)
+      body.purchase_multiple = form.purchase_multiple !== '' ? parseFloat(form.purchase_multiple) : null;
+      body.min_purchase_qty  = form.min_purchase_qty !== '' ? parseFloat(form.min_purchase_qty) : null;
     }
     // explicit null clears the date (PATCH null vs omit); new items send null too
     body.expires_at = form.expires_at || null;
@@ -520,6 +531,14 @@ function ItemFormModal({
               <label style={labelStyle}>
                 Restock Quantity
                 <input type="number" min={0} value={form.restock_quantity} onChange={set('restock_quantity')} style={inputStyle} placeholder="quantity to set when restocked" />
+              </label>
+              <label style={labelStyle}>
+                Pack size (buy in multiples of)
+                <input type="number" min={0} step="any" value={form.purchase_multiple} onChange={set('purchase_multiple')} style={inputStyle} placeholder="e.g. 400 for a 400 ml can" />
+              </label>
+              <label style={labelStyle}>
+                Minimum order
+                <input type="number" min={0} step="any" value={form.min_purchase_qty} onChange={set('min_purchase_qty')} style={inputStyle} placeholder="smallest quantity you buy" />
               </label>
               </>}
               <label style={labelStyle}>
@@ -895,10 +914,43 @@ function ItemDetailView() {
 }
 
 // ── Shopping List View ────────────────────────────────────────────────────────
+// THE shopping list: automatic shortages (demand from Kitchen etc. netted against usable stock by the backend,
+// rounded to pack sizes) and manual / low-stock tasks in one list. Origin chips tell them apart.
+
+interface CentralRow extends Row {
+  id:           string;
+  item_id:      number;
+  item_name:    string;
+  unit:         string | null;
+  category:     string;
+  source_tags:  string[];
+  stock_management_type: 'QUANTITY' | 'KANBAN';
+  stock:        number;
+  usable_stock: number;
+  demand_qty:   number | null;
+  shortage:     number | null;
+  purchase_qty: number | null;
+  needed_by:    string | null;
+  origins:      string[];
+  demands:      { source: string; label: string | null; qty: number; required_date: string | null }[];
+  task_id:      string | null;
+  notes:        string | null;
+}
+
+interface DemandStatusRow extends Row {
+  source: string; line_count: number; last_ok_at: string | null; last_error: unknown; last_error_at: string | null;
+}
+
+const ORIGIN_LABEL: Record<string, string> = { kitchen: 'Kitchen plan', manual: 'Manual', low_stock: 'Low stock' };
+
+function amount(n: number | null | undefined, unit: string | null): string {
+  return n == null ? '' : `${n}${unit ? ` ${unit}` : ''}`;
+}
 
 function ShoppingListView() {
   const [grouped, setGrouped]   = useState(false);
-  const [tasks, setTasks]       = useState<ShoppingTaskRow[]>([]);
+  const [rows, setRows]         = useState<CentralRow[]>([]);
+  const [syncErrors, setSyncErrors] = useState<DemandStatusRow[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -906,39 +958,41 @@ function ShoppingListView() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const url = grouped
-      ? '/shopping-tasks/views/by_source'
-      : '/shopping-tasks?status=open';
-    const res = await apiFetch(url);
+    const res = await apiFetch('/shopping-tasks/views/central');
     setLoading(false);
     if (isApiError(res)) {
       setError((res as ApiError).error.message);
       return;
     }
-    setTasks((res as ShoppingTasksDataset).rows ?? []);
-  }, [grouped]);
+    setRows((res as { rows: CentralRow[] }).rows ?? []);
+    const st = await apiFetch('/shopping-tasks/views/demand_status');
+    if (!isApiError(st)) setSyncErrors(((st as { rows: DemandStatusRow[] }).rows ?? []).filter(r => r.last_error));
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const handleAction = async (taskId: string, action: 'done' | 'dismissed') => {
+  const handleTask = async (taskId: string, action: 'done' | 'dismissed') => {
     setActionMsg(null);
-    const res = await apiFetch(`/shopping-tasks/${taskId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: action }),
-    });
-    if (isApiError(res)) {
-      setActionMsg((res as ApiError).error.message);
-    } else {
-      load();
-    }
+    const res = await apiFetch(`/shopping-tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify({ status: action }) });
+    if (isApiError(res)) setActionMsg((res as ApiError).error.message); else load();
   };
 
-  // Plain-text export of what is on screen (flat or by store): copy to clipboard, share sheet as fallback
+  const handleBought = async (row: CentralRow, qty: number, key: string): Promise<void> => {
+    setActionMsg(null);
+    const res = await apiFetch('/shopping-tasks/purchase', {
+      method: 'POST', body: JSON.stringify({ item_id: row.item_id, qty, idempotency_key: key }),
+    });
+    if (isApiError(res)) setActionMsg((res as ApiError).error.message); else load();
+  };
+
+  const store = (r: CentralRow) => r.source_tags?.[0] ?? 'Other';
+
+  // Plain-text export of what is on screen (flat or by store): clipboard first, share sheet as fallback
   const exportText = () => {
-    const line = (t: ShoppingTaskRow) => `- ${t.item_name}${t.notes ? ` (${t.notes})` : ''}`;
-    if (!grouped) return tasks.map(line).join('\n');
-    const groups: Record<string, ShoppingTaskRow[]> = {};
-    for (const row of tasks) (groups[row.source_tag ?? 'Other'] ??= []).push(row);
+    const line = (r: CentralRow) => `- ${r.item_name}${r.purchase_qty != null ? `: ${amount(r.purchase_qty, r.unit)}` : ''}${r.notes ? ` (${r.notes})` : ''}`;
+    if (!grouped) return rows.map(line).join('\n');
+    const groups: Record<string, CentralRow[]> = {};
+    for (const r of rows) (groups[store(r)] ??= []).push(r);
     return Object.keys(groups)
       .sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)))
       .map(tag => `${tag}:\n${groups[tag].map(line).join('\n')}`)
@@ -959,29 +1013,14 @@ function ShoppingListView() {
     }
   };
 
-  // When grouped, render rows grouped by source_tag
   const renderGrouped = () => {
-    const groups: Record<string, ShoppingTaskRow[]> = {};
-    for (const row of tasks) {
-      const key = row.source_tag ?? 'Other';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(row);
-    }
-    // 'Other' last
-    const keys = Object.keys(groups).sort((a, b) => {
-      if (a === 'Other') return 1;
-      if (b === 'Other') return -1;
-      return a.localeCompare(b);
-    });
-
+    const groups: Record<string, CentralRow[]> = {};
+    for (const r of rows) (groups[store(r)] ??= []).push(r);
+    const keys = Object.keys(groups).sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
     return keys.map(tag => (
       <div key={tag} style={{ marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 8px', fontSize: 15, color: '#555', borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>
-          {tag}
-        </h3>
-        {groups[tag].map(t => (
-          <TaskCard key={`${t.id}-${tag}`} task={t} onAction={handleAction} />
-        ))}
+        <h3 style={{ margin: '0 0 8px', fontSize: 15, color: '#555', borderBottom: '1px solid #e0e0e0', paddingBottom: 4 }}>{tag}</h3>
+        {groups[tag].map(r => <ShoppingRow key={r.id} row={r} onTask={handleTask} onBought={handleBought} />)}
       </div>
     ));
   };
@@ -993,69 +1032,99 @@ function ShoppingListView() {
         <div style={{ display: 'flex', gap: 8 }}>
           <Chip label="Flat" active={!grouped} onClick={() => setGrouped(false)} />
           <Chip label="By Store" active={grouped} onClick={() => setGrouped(true)} />
-          <button onClick={handleCopy} disabled={tasks.length === 0} style={btnStyle}>Copy as text</button>
+          <button onClick={handleCopy} disabled={rows.length === 0} style={btnStyle}>Copy as text</button>
         </div>
       </div>
+
+      {syncErrors.map(e => (
+        <div key={e.source} style={{ background: '#fdf0cc', color: '#6b4b00', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 8 }}>
+          The latest {ORIGIN_LABEL[e.source] ?? e.source} update was rejected, so these quantities may be out of date. Open
+          the app that sent it to see what to fix and retry. <span style={{ color: '#8a6d1f' }}>{JSON.stringify(e.last_error).slice(0, 300)}</span>
+        </div>
+      ))}
 
       {loading && <Skeleton />}
       {error && <ErrorCard message={error} />}
       {actionMsg && <div style={{ color: actionMsg === 'Shopping list copied.' ? '#065f46' : 'var(--md-sys-color-error)', fontSize: 13, marginBottom: 8 }}>{actionMsg}</div>}
 
-      {!loading && !error && tasks.length === 0 && (
-        <div style={{ color: '#888', fontSize: 14 }}>No open shopping tasks.</div>
+      {!loading && !error && rows.length === 0 && (
+        <div style={{ color: '#888', fontSize: 14 }}>Nothing to buy.</div>
       )}
 
-      {!loading && !error && tasks.length > 0 && (
+      {!loading && !error && rows.length > 0 && (
         grouped
           ? renderGrouped()
-          : tasks.map(t => <TaskCard key={t.id} task={t} onAction={handleAction} />)
+          : rows.map(r => <ShoppingRow key={r.id} row={r} onTask={handleTask} onBought={handleBought} />)
       )}
     </div>
   );
 }
 
-function TaskCard({
-  task,
-  onAction,
+function ShoppingRow({
+  row,
+  onTask,
+  onBought,
 }: {
-  task: ShoppingTaskRow;
-  onAction: (id: string, action: 'done' | 'dismissed') => void;
+  row: CentralRow;
+  onTask: (taskId: string, action: 'done' | 'dismissed') => void;
+  onBought: (row: CentralRow, qty: number, key: string) => Promise<void>;
 }) {
+  const navigate = useNavigate();
+  const buyable = row.purchase_qty != null && row.stock_management_type === 'QUANTITY';
+  const [qty, setQty] = useState(String(row.purchase_qty ?? ''));
+  const [busy, setBusy] = useState(false);
+  // fresh key per tap (a second purchase of the same article is a new booking); the button is locked while in flight
+  const bought = async () => {
+    setBusy(true);
+    await onBought(row, Number(qty), crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+    setBusy(false);
+  };
+  useEffect(() => { setQty(String(row.purchase_qty ?? '')); }, [row.purchase_qty]);
+
   return (
     <div style={{
-      padding:      10,
-      borderRadius: 8,
-      border:       '1px solid #e0e0e0',
-      marginBottom: 8,
-      background:   '#fff',
-      display:      'flex',
-      justifyContent: 'space-between',
-      alignItems:   'center',
-      gap:          12,
+      padding: 10, borderRadius: 8, border: '1px solid #e0e0e0', marginBottom: 8, background: '#fff',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
     }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{task.item_name}</div>
-        {task.source_tags && task.source_tags.length > 0 && (
-          <div style={{ fontSize: 12, color: '#777' }}>
-            Buy at: {task.source_tags.join(', ')}
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, fontSize: 14, cursor: 'pointer' }} onClick={() => navigate(`/items/${row.item_id}`)}>{row.item_name}</span>
+          {row.origins.map(o => (
+            <span key={o} style={{
+              fontSize: 11, padding: '1px 6px', borderRadius: 10, border: '1px solid',
+              ...(o === 'manual' ? { background: '#e0e7ff', color: '#3730a3', borderColor: '#a5b4fc' }
+                : o === 'low_stock' ? { background: '#fef3c7', color: '#92400e', borderColor: '#fcd34d' }
+                : { background: '#d1fae5', color: '#065f46', borderColor: '#6ee7b7' }),
+            }}>{ORIGIN_LABEL[o] ?? o}</span>
+          ))}
+        </div>
+        {row.shortage != null && (
+          <div style={{ fontSize: 13, color: '#555' }}>
+            Need {amount(row.demand_qty, row.unit)} · on hand {amount(row.usable_stock, row.unit)} → short {amount(row.shortage, row.unit)}
+            {row.purchase_qty !== row.shortage && <> · buy <strong>{amount(row.purchase_qty, row.unit)}</strong></>}
+            {row.needed_by && <> · by {row.needed_by}</>}
           </div>
         )}
-        {task.notes && <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>{task.notes}</div>}
-        <div style={{ fontSize: 11, color: '#aaa' }}>{task.created_at}</div>
+        {row.demands.length > 0 && (
+          <div style={{ fontSize: 12, color: '#888' }}>{row.demands.map(d => `${d.label ?? d.source}: ${amount(d.qty, row.unit)}`).join(' · ')}</div>
+        )}
+        {row.source_tags.length > 0 && <div style={{ fontSize: 12, color: '#777' }}>Buy at: {row.source_tags.join(', ')}</div>}
+        {row.notes && <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>{row.notes}</div>}
       </div>
-      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        <button
-          onClick={() => onAction(task.id, 'done')}
-          style={{ ...btnStyle, background: '#d1fae5', borderColor: '#6ee7b7' }}
-        >
-          Done
-        </button>
-        <button
-          onClick={() => onAction(task.id, 'dismissed')}
-          style={{ ...btnStyle, color: '#888' }}
-        >
-          Dismiss
-        </button>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
+        {buyable ? (
+          <>
+            <input type="number" min={0} step="any" value={qty} onChange={e => setQty(e.target.value)}
+                   style={{ ...inputStyle, width: 72 }} aria-label="Quantity bought" />
+            <button disabled={busy || !(Number(qty) > 0)} onClick={bought}
+                    style={{ ...btnStyle, background: '#d1fae5', borderColor: '#6ee7b7' }}>Bought</button>
+          </>
+        ) : row.task_id && (
+          <>
+            <button onClick={() => onTask(row.task_id!, 'done')} style={{ ...btnStyle, background: '#d1fae5', borderColor: '#6ee7b7' }}>Done</button>
+            <button onClick={() => onTask(row.task_id!, 'dismissed')} style={{ ...btnStyle, color: '#888' }}>Dismiss</button>
+          </>
+        )}
       </div>
     </div>
   );

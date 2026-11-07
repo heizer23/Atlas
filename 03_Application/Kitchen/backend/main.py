@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
-from backend.routers import importing, plans, recipes
+from backend import demand_sync
+from backend.routers import demand, importing, plans, recipes
 from backend.seed import migrate_legacy_ingredients
 from platform_errorhandling.logging import setup_logging
 from platform_errorhandling.logFastapi import install_exception_handlers
@@ -30,6 +31,7 @@ install_request_timing(app)
 app.include_router(importing.router, prefix="/api")
 app.include_router(recipes.router, prefix="/api")
 app.include_router(plans.router, prefix="/api")
+app.include_router(demand.router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -42,6 +44,7 @@ def on_startup() -> None:
             init_schema()
             migrate_legacy_ingredients()
             log.info("Ready.")
+            demand_sync.sync_at_startup()
             return
         except Exception as exc:
             log.warning("DB not ready (attempt %d/10): %s", attempt, exc)

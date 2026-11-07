@@ -59,6 +59,8 @@ ITEM_SCHEMA: list[ColumnSchema] = [
     ColumnSchema(key="expiry_status",    label="Expiry",          type="enum",   sortable=False, filterable=False),
     ColumnSchema(key="stock_management_type", label="Stock Mgmt",  type="enum",   sortable=True,  filterable=True),
     ColumnSchema(key="category",         label="Category",        type="enum",   sortable=True,  filterable=True),
+    ColumnSchema(key="purchase_multiple", label="Pack size",       type="number", sortable=False, filterable=False),
+    ColumnSchema(key="min_purchase_qty", label="Min order",       type="number", sortable=False, filterable=False),
     ColumnSchema(key="recipe_ref",       label="Recipe Ref",      type="string", sortable=False, filterable=False),
     ColumnSchema(key="source_tags",      label="Source Tags",     type="string", sortable=False, filterable=False),
     ColumnSchema(key="notes",            label="Notes",           type="string", sortable=False, filterable=False, detail_visible=True),
@@ -93,6 +95,8 @@ class ItemCreate(BaseModel):
     produced_at:      date | None = None
     stock_management_type: str = "QUANTITY"
     category:         str = "Other"
+    purchase_multiple: float | None = None
+    min_purchase_qty: float | None = None
 
 
 class ItemUpdate(BaseModel):
@@ -108,6 +112,8 @@ class ItemUpdate(BaseModel):
     produced_at:      date | None = None
     stock_management_type: str | None = None
     category:         str | None = None
+    purchase_multiple: float | None = None
+    min_purchase_qty: float | None = None
     notes:            str | None = None
     source_tags:      list[str] | None = None
 
@@ -132,8 +138,9 @@ def _num(v: Decimal | float | int) -> int | float:
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
-    if isinstance(d.get("quantity"), Decimal):
-        d["quantity"] = _num(d["quantity"])
+    for k in ("quantity", "purchase_multiple", "min_purchase_qty"):
+        if isinstance(d.get(k), Decimal):
+            d[k] = _num(d[k])
     d["expiry_status"] = _expiry_status(d.get("expires_at"), d.get("quantity"))
     if d.get("expires_at"):
         d["expires_at"] = d["expires_at"].isoformat()
@@ -205,8 +212,8 @@ def _ensure_open_shopping_task(
         if cur.fetchone() is None:
             cur.execute(
                 """
-                insert into storagetracker.shopping_tasks (item_id, source_tags)
-                values (%s, %s::jsonb)
+                insert into storagetracker.shopping_tasks (item_id, source_tags, origin)
+                values (%s, %s::jsonb, 'low_stock')
                 """,
                 (item_id, _json.dumps(source_tags)),
             )
@@ -288,7 +295,7 @@ def view_low_stock() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items
                 where state in ('low_stock', 'out_of_stock') and archived_at is null
                 order by name asc
@@ -306,7 +313,7 @@ def view_recycling() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items
                 where state = 'marked_for_recycling' and archived_at is null
                 order by name asc
@@ -326,7 +333,7 @@ def view_expiring() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items
                 where expires_at is not null and expires_at <= %s and quantity > 0 and archived_at is null
                 order by expires_at asc, name asc
@@ -345,7 +352,7 @@ def view_important() -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items
                 where item_type = 'object' and archived_at is null
                 order by name asc
@@ -366,7 +373,7 @@ def view_search(q: str = "") -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items
                 where archived_at is null
                   and (lower(name)     like %s
@@ -446,7 +453,7 @@ def list_items(
                 f"""
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items {where}
                 order by created_at desc
                 """,
@@ -480,6 +487,9 @@ def create_item(body: ItemCreate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", "min_quantity must be >= 0")
     if body.restock_quantity is not None and body.restock_quantity < 0:
         return api_error("VALIDATION_ERROR", "restock_quantity must be >= 0")
+    for f in ("purchase_multiple", "min_purchase_qty"):
+        if getattr(body, f) is not None and getattr(body, f) <= 0:
+            return api_error("VALIDATION_ERROR", f"{f} must be > 0 (omit it for no rule)")
 
     # Auto-transition: only apply if caller left state at default 'stored'. KANBAN status is manual only.
     state = body.state
@@ -495,11 +505,12 @@ def create_item(body: ItemCreate) -> JSONResponse:
                 insert into storagetracker.items
                     (name, item_type, state, location, notes, source_tags,
                      quantity, min_quantity, restock_quantity,
-                     unit, expires_at, kind, recipe_ref, produced_at, stock_management_type, category)
-                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     unit, expires_at, kind, recipe_ref, produced_at, stock_management_type, category,
+                     purchase_multiple, min_purchase_qty)
+                values (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 returning id, name, item_type, state, location, notes, source_tags,
                           quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                          produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                          produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 """,
                 (
                     body.name.strip(),
@@ -518,6 +529,8 @@ def create_item(body: ItemCreate) -> JSONResponse:
                     body.produced_at,
                     body.stock_management_type,
                     body.category,
+                    body.purchase_multiple,
+                    body.min_purchase_qty,
                 ),
             )
             row = _row_to_dict(cur.fetchone())
@@ -541,7 +554,7 @@ def get_item(item_id: int) -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -590,6 +603,9 @@ def update_item(item_id: int, body: ItemUpdate) -> JSONResponse:
         return api_error("VALIDATION_ERROR", f"stock_management_type must be one of: {', '.join(sorted(VALID_STOCK_TYPES))}")
     if "category" in set_fields and body.category not in VALID_CATEGORIES:
         return api_error("VALIDATION_ERROR", f"category must be one of: {', '.join(VALID_CATEGORIES)}")
+    for f in ("purchase_multiple", "min_purchase_qty"):
+        if f in set_fields and getattr(body, f) is not None and getattr(body, f) <= 0:
+            return api_error("VALIDATION_ERROR", f"{f} must be > 0 (send null to clear the rule)")
     if "source_tags" in set_fields and body.source_tags is None:
         return api_error("VALIDATION_ERROR", "source_tags cannot be null — use empty list [] to clear")
 
@@ -600,7 +616,7 @@ def update_item(item_id: int, body: ItemUpdate) -> JSONResponse:
                 """
                 select id, name, item_type, state, location, notes, source_tags,
                        quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                       produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                       produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 from storagetracker.items where id = %s
                 """,
                 (item_id,),
@@ -640,7 +656,7 @@ def update_item(item_id: int, body: ItemUpdate) -> JSONResponse:
                 where id = %s
                 returning id, name, item_type, state, location, notes, source_tags,
                           quantity, min_quantity, restock_quantity, unit, expires_at, kind, recipe_ref,
-                          produced_at, archived_at, stock_management_type, category, created_at, updated_at
+                          produced_at, archived_at, stock_management_type, category, purchase_multiple, min_purchase_qty, created_at, updated_at
                 """,
                 params,
             )

@@ -258,63 +258,77 @@ def undo(conn: Any, meal_id: str) -> dict[str, Any]:
     return {"status": "planned"}
 
 
-# ── shopping ──────────────────────────────────────────────────────────────────
+# ── demand ────────────────────────────────────────────────────────────────────
 
-def compute_shopping(conn: Any, plan_id: str) -> dict[str, Any]:
-    """Needs of all still-planned meals vs. StorageTracker stock, keyed by article id.
+def compute_demand(conn: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """GROSS raw-ingredient demand of the newest plan's still-planned meals, one line per (meal, recipe line).
 
-    buy:          shortfall per article.
-    probably_have: stock that covers (part of) the need; user confirms/corrects it.
-    missing_bases: prepared bases required but neither stocked nor cooked in this plan.
-    draft_recipes: planned recipes skipped because they still have unresolved articles.
+    Kitchen never subtracts stock and never decides a buy quantity: StorageTracker nets the demand against usable
+    stock and applies pack sizes. Counting rules (no double counting):
+      - a planned cooking session of a base contributes the base's raw ingredients, once;
+      - a derived dish / favorite contributes ONLY its own raw lines; its base lines are portions of a batch
+        (stock or a planned cook in this plan), never purchase demand;
+      - cooked / eaten / skipped meals are fulfilled and contribute nothing.
+    Returns (lines, issues). Issues are flags, never silently dropped data: draft recipes (unresolved lines),
+    lines whose article/unit is no longer valid (excluded so one bad line cannot block the snapshot), missing bases.
     """
     master = ing_mod.master_by_id()
+    lines: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     with conn.cursor() as cur:
-        cur.execute("select id, recipe_id, kind, portions from kitchen.planned_meals "
-                    "where plan_id = %s and status = 'planned' and recipe_id is not null", (plan_id,))
+        cur.execute("select id from kitchen.plans order by created_at desc limit 1")
+        plan = cur.fetchone()
+        if not plan:
+            return [], []
+        cur.execute("select id, recipe_id, kind, day, portions from kitchen.planned_meals "
+                    "where plan_id = %s and status = 'planned' and recipe_id is not null order by day, created_at",
+                    (plan["id"],))
         meals = [dict(m) for m in cur.fetchall()]
-        need: dict[int, dict[str, Any]] = {}
         base_need: dict[str, dict[str, Any]] = {}
         cooked_here: dict[str, float] = {}
-        drafts: set[str] = set()
+        flagged: set[str] = set()
         for m in meals:
             recipe = load_recipe(cur, str(m["recipe_id"]))
             if recipe["status"] != "active":
-                drafts.add(recipe["name"])
+                if recipe["name"] not in flagged:
+                    flagged.add(recipe["name"])
+                    bad = [i["name"] for i in recipe["ingredients"]
+                           if ing_mod.line_status(i, master) not in ("base", "matched")]
+                    issues.append({"type": "draft_recipe", "recipe": recipe["name"], "ingredients": bad,
+                                   "message": f"'{recipe['name']}' is a draft (unassigned ingredients: "
+                                              f"{', '.join(bad) or 'none'}); its demand is not published"})
                 continue
             scale = float(m["portions"]) / float(recipe["servings"])
             if m["kind"] == "cook":
                 cooked_here[str(recipe["id"])] = cooked_here.get(str(recipe["id"]), 0) + float(m["portions"])
             for ing in recipe["ingredients"]:
-                q = float(ing["qty"]) * scale
+                q = round(float(ing["qty"]) * scale, 6)
                 if ing["base_recipe_id"]:
                     b = base_need.setdefault(str(ing["base_recipe_id"]), {"name": ing["name"], "need": 0.0})
                     b["need"] += q
-                else:
-                    line = need.setdefault(ing["item_id"], {"unit": ing["unit"], "needed": 0.0})
-                    line["needed"] += q
-
-    buy, have = [], []
-    for item_id, n in sorted(need.items(), key=lambda kv: master.get(kv[0], {}).get("name", "").lower()):
-        item = master.get(item_id)
-        if item is None or item.get("stock_management_type") == "KANBAN":
-            continue   # Kanban articles carry no quantity; Low / Out reach the StorageTracker shopping list via their status
-        stock = float(item["quantity"] or 0)
-        line = {"item_id": item_id, "name": item["name"], "unit": n["unit"], "needed": round(n["needed"], 4),
-                "stock": round(stock, 4)}
-        if stock > 0:
-            have.append({**line, "covered": round(min(stock, n["needed"]), 4)})
-        if stock < n["needed"] - 1e-9:
-            buy.append({**line, "to_buy": round(n["needed"] - stock, 4)})
-
-    missing_bases = []
+                    continue
+                if q <= 0:
+                    continue
+                status = ing_mod.line_status(ing, master)
+                if status not in ("matched",):
+                    issues.append({"type": "excluded_line", "recipe": recipe["name"], "ingredient": ing["name"],
+                                   "item_id": ing["item_id"], "status": status,
+                                   "message": f"'{ing['name']}' in '{recipe['name']}' is {status}; "
+                                              f"demand for it is not published"})
+                    continue
+                lines.append({"ref": f"meal:{m['id']}:{ing['id']}", "item_id": int(ing["item_id"]), "qty": q,
+                              "unit": ing["unit"], "required_date": m["day"].isoformat(),
+                              "label": f"{recipe['name']} ({m['day'].isoformat()})"})
     for rid, b in base_need.items():
         avail = sum(float(x["quantity"]) for x in st.find_batches(rid)) + cooked_here.get(rid, 0)
         if avail + 1e-9 < b["need"]:
             frozen = sum(float(x["quantity"]) for x in st.find_batches(rid, storage="freezer"))
-            missing_bases.append({"name": b["name"], "needed": round(b["need"], 4), "available": round(avail, 4),
-                                  "frozen": round(frozen, 4)})   # frozen portions: usable after thawing
-    return {"buy": buy, "probably_have": have, "missing_bases": missing_bases, "draft_recipes": sorted(drafts)}
+            issues.append({"type": "missing_base", "name": b["name"], "needed": round(b["need"], 4),
+                           "available": round(avail, 4), "frozen": round(frozen, 4),
+                           "message": f"Cooked base '{b['name']}' is missing: need {round(b['need'], 2):g}, ready "
+                                      f"{round(avail, 2):g}" + (f" ({round(frozen, 2):g} in the freezer - thaw it)"
+                                                               if frozen > 0 else "") + " - add a cooking session"})
+    return lines, issues
 
 
 # ── plan suggestion ───────────────────────────────────────────────────────────

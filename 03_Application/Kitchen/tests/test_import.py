@@ -133,14 +133,14 @@ def test_imported_recipe_plans_shops_and_cooks_by_id(client):
         client.delete(f"{K}/meals/{m['id']}")
     mid = client.post(f"{K}/plans/{plan['id']}/meals",
                       json={"recipe_id": rid, "day": "2031-02-03", "kind": "cook"}).json()["rows"][0]["id"]
-    shop = client.get(f"{K}/plans/{plan['id']}/shopping").json()["rows"][0]
-    line = next(l for l in shop["buy"] if l["item_id"] == a["id"])
-    assert line["to_buy"] == 200 and line["name"] == "Import rice"
+    def central():
+        return {r["item_id"]: r for r in httpx.get(f"{ST}/shopping-tasks/views/central").json()["rows"]}
+    line = central()[a["id"]]
+    assert line["purchase_qty"] == 200 and line["item_name"] == "Import rice"
     # rename article: recipe link survives (identity is the id)
     httpx.patch(f"{ST}/items/{a['id']}", json={"name": "Import rice (renamed)"})
-    shop = client.get(f"{K}/plans/{plan['id']}/shopping").json()["rows"][0]
-    assert next(l for l in shop["buy"] if l["item_id"] == a["id"])["name"] == "Import rice (renamed)"
-    client.post(f"{K}/shopping/purchase", json={"item_id": a["id"], "qty": 200})
+    assert central()[a["id"]]["item_name"] == "Import rice (renamed)"
+    httpx.post(f"{ST}/shopping-tasks/purchase", json={"item_id": a["id"], "qty": 200})
     assert client.post(f"{K}/meals/{mid}/cooked").status_code == 200
     q = httpx.get(f"{ST}/items/{a['id']}").json()["rows"][0]["quantity"]
     assert q == 0

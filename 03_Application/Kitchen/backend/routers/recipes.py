@@ -10,6 +10,7 @@ from backend import ingredients as ing_mod
 from backend import storage_client as st
 from backend.common import dataset_response
 from backend.database import get_db
+from backend.demand_sync import sync_quietly
 from backend.recipes_repo import annotate_lines, load_recipe, recompute_status, save_ingredients
 from platform_errorhandling import api_error
 
@@ -136,6 +137,7 @@ def create_recipe(body: RecipeIn) -> JSONResponse:
             recompute_status(cur, rid, master)
             r = annotate_lines(load_recipe(cur, rid), master)
         conn.commit()
+    sync_quietly()
     return dataset_response("recipe", [r], "Recipe", status=201)
 
 
@@ -173,6 +175,7 @@ def update_recipe(recipe_id: str, body: RecipePatch) -> JSONResponse:
             recompute_status(cur, recipe_id, master)
             r = annotate_lines(load_recipe(cur, recipe_id), master)
         conn.commit()
+    sync_quietly()
     return dataset_response("recipe", [r], "Recipe")
 
 

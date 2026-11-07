@@ -18,6 +18,14 @@ class StorageError(RuntimeError):
     pass
 
 
+class DemandRejected(StorageError):
+    """StorageTracker refused the demand snapshot (nothing was changed there). `problems` is actionable per line."""
+
+    def __init__(self, message: str, problems: list[dict[str, Any]]):
+        super().__init__(message)
+        self.problems = problems
+
+
 def _client() -> httpx.Client:
     return httpx.Client(base_url=f"{BASE_URL}/api", timeout=10.0)
 
@@ -130,3 +138,25 @@ def reverse_movement(movement_id: str) -> dict[str, Any] | None:
         if r.status_code == 409:  # already reversed
             return None
         return _check(r)
+
+
+# ── demand sync (internal endpoint, service token) ────────────────────────────
+
+def _service_headers() -> dict[str, str]:
+    return {"X-Atlas-Service-Token": os.environ.get("ATLAS_SERVICE_TOKEN", "")}
+
+
+def put_demands(lines: list[dict[str, Any]]) -> dict[str, Any]:
+    """Replace Kitchen's complete demand snapshot in StorageTracker (atomic there; identical re-sends are no-ops)."""
+    try:
+        with httpx.Client(base_url=f"{BASE_URL}/api", timeout=8.0) as c:
+            r = c.put("/internal/demands/kitchen", json={"lines": lines}, headers=_service_headers())
+    except httpx.HTTPError as e:
+        raise StorageError(f"StorageTracker unreachable: {e}") from e
+    if r.status_code == 422:
+        err = r.json().get("error", {})
+        raise DemandRejected(err.get("message", "demand snapshot rejected"), err.get("detail") or [])
+    if r.status_code in (401, 503):
+        raise StorageError(f"StorageTracker refused the service token ({r.status_code}): "
+                           f"check ATLAS_SERVICE_TOKEN on both containers")
+    return _check(r)

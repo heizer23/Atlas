@@ -10,7 +10,7 @@ import { AppRegistry } from '@atlas/shell';
 
 const nav = [
   { id: 'kitchen-plan',     label: 'Plan',     path: '/kitchen',          order: 1 },
-  { id: 'kitchen-shopping', label: 'Shopping', path: '/kitchen/shopping', order: 2 },
+  { id: 'kitchen-shopping', label: 'Shopping', path: '/items/shopping', order: 2 },  // list lives in Storage
   { id: 'kitchen-recipes',  label: 'Recipes', path: '/kitchen/recipes',  order: 3 },
 ];
 

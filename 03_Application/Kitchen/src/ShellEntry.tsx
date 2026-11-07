@@ -3,15 +3,16 @@
  *
  * Views:
  *   /kitchen            -> PlanView      (meal plan of 1-7 days, cook / eat / move / undo, batches)
- *   /kitchen/shopping   -> ShoppingView  (buy list + "probably have" check)
+ *   /kitchen/shopping   -> redirect to Storage's central shopping list (/items/shopping)
  *   /kitchen/recipes    -> RecipesView   (list, create, edit)
  *
  * All stock changes happen server-side (StorageTracker ledger); this UI only triggers
- * business events (cooked / eaten / undo / purchase / stocktake).
+ * business events (cooked / eaten / undo). Kitchen publishes gross ingredient demand to Storage, which owns the
+ * shopping list; this UI only shows the sync state.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import Skeleton from '@platform-ui/components/Skeleton';
 import { ImportView, IngredientLine, useMaster } from './RecipeImport';
@@ -41,10 +42,11 @@ interface Meal {
   bases: BaseInfo[];
 }
 interface Plan { id: string; week_start: string; days: number; meals: Meal[] }
-interface ShopLine { item_id: number; name: string; unit: string; needed: number; stock: number; to_buy?: number; covered?: number }
-interface Shopping {
-  buy: ShopLine[]; probably_have: ShopLine[]; missing_bases: { name: string; needed: number; available: number; frozen: number }[];
-  draft_recipes: string[];
+interface DemandProblem { index: number | null; ref: string | null; field: string; message: string }
+interface DemandIssue { type: string; message: string }
+interface DemandSync {
+  status: 'pending' | 'ok' | 'error'; last_attempt_at: string | null; last_ok_at: string | null;
+  last_error: string | null; problems: DemandProblem[]; issues: DemandIssue[]; line_count: number;
 }
 
 function Loading({ error }: { error: string | null }) {
@@ -183,6 +185,7 @@ function PlanView() {
   return (
     <div className="kitchen-page">
       <h1 className="type-headline">Meal plan{plan ? ` · ${plan.days} day${plan.days === 1 ? '' : 's'}` : ''}</h1>
+      <DemandStrip refreshKey={plan} />
       {batches.length > 0 && (
         <div className="kitchen-card">
           <strong>Cooked bases in stock</strong>
@@ -252,86 +255,42 @@ function AddMeal({ planId, recipes, weekStart, onAdded }: { planId: string; reci
   );
 }
 
-// ── Shopping view ─────────────────────────────────────────────────────────────
+// ── Shopping list lives in Storage ────────────────────────────────────────────
+// Kitchen publishes gross demand; Storage nets it against stock and owns the list. This strip shows the sync state
+// (visible failure + retry) and the planning flags that used to sit on the old Kitchen shopping page.
 
-function BuyRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
-  const { post, error, busy } = useAction();
-  const [qty, setQty] = useState(String(line.to_buy ?? 0));
-  return (
-    <div className="kitchen-card">
-      <div className="kitchen-row spread">
-        <strong>{line.name}</strong>
-        <span className="kitchen-muted">need {num(line.needed)} {line.unit}, have {num(line.stock)}</span>
-      </div>
-      <div className="kitchen-row">
-        <input className="kitchen-input num" type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
-        <span>{line.unit}</span>
-        <button className="kitchen-btn primary" disabled={busy || !(Number(qty) > 0)}
-                onClick={async () => {
-                  if (await post('/shopping/purchase', { item_id: line.item_id, qty: Number(qty), idempotency_key: crypto.randomUUID?.() })) onDone();
-                }}>Bought</button>
-      </div>
-      {error && <div className="kitchen-warn">{error}</div>}
-    </div>
-  );
-}
-
-function HaveRow({ line, onDone }: { line: ShopLine; onDone: () => void }) {
-  const { post, error, busy } = useAction();
-  const [qty, setQty] = useState(String(line.stock));
-  return (
-    <div className="kitchen-card">
-      <div className="kitchen-row spread">
-        <strong>{line.name}</strong>
-        <span className="kitchen-muted">need {num(line.needed)} {line.unit} · stock {num(line.stock)}</span>
-      </div>
-      <div className="kitchen-row">
-        <input className="kitchen-input num" type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
-        <span>{line.unit} actually on hand</span>
-        <button className="kitchen-btn" disabled={busy}
-                onClick={async () => { if (await post('/shopping/stocktake', { item_id: line.item_id, qty: Number(qty) })) onDone(); }}>
-          Confirm
-        </button>
-      </div>
-      {error && <div className="kitchen-warn">{error}</div>}
-    </div>
-  );
-}
-
-function ShoppingView() {
-  const [data, setData] = useState<Shopping | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
+function DemandStrip({ refreshKey }: { refreshKey: unknown }) {
+  const navigate = useNavigate();
+  const { post, busy } = useAction();
+  const [sync, setSync] = useState<DemandSync | null>(null);
 
   const load = useCallback(async () => {
-    const list = await apiFetch<Dataset<{ id: string }>>('/kitchen/plans');
-    if (isApiError(list)) { setError(list.error.message); return; }
-    if (!list.rows.length) { setData(null); return; }
-    const res = await apiFetch<Dataset<Shopping>>(`/kitchen/plans/${list.rows[0].id}/shopping`);
-    if (isApiError(res)) { setError(res.error.message); return; }
-    setData(res.rows[0]);
+    const res = await apiFetch<Dataset<DemandSync>>('/kitchen/demand/status');
+    if (!isApiError(res)) setSync(res.rows[0]);
   }, []);
+  useEffect(() => { load(); }, [load, refreshKey]);
 
-  useEffect(() => { load(); }, [load]);
-
-  if (data === undefined) return <div className="kitchen-page"><Loading error={error} /></div>;
-  if (data === null) return <div className="kitchen-page"><p className="kitchen-muted">No plan yet.</p></div>;
+  const retry = async () => {
+    const res = await post<{ rows: DemandSync[] }>('/demand/sync', {});
+    if (res) setSync(res.rows[0]);
+  };
 
   return (
-    <div className="kitchen-page">
-      <h1 className="type-headline">Shopping</h1>
-      {data.draft_recipes.length > 0 && (
-        <div className="kitchen-warn">Not included (draft, ingredients not assigned): {data.draft_recipes.join(', ')}</div>
-      )}
-      {data.missing_bases.map((b) => (
-        <div key={b.name} className="kitchen-warn">
-          Cooked base "{b.name}" is missing: need {num(b.needed)}, ready {num(b.available)}{b.frozen > 0 ? ` (${num(b.frozen)} in the freezer — thaw it)` : ''} — add a cooking session to the plan.
+    <div className="kitchen-card">
+      <div className="kitchen-row spread">
+        <button className="kitchen-btn primary" onClick={() => navigate('/items/shopping')}>Shopping list in Storage →</button>
+        {sync?.status === 'ok' && <span className="kitchen-muted">Shopping needs synced ({sync.line_count} lines)</span>}
+        {sync?.status === 'pending' && <span className="kitchen-muted">Not synced yet</span>}
+      </div>
+      {sync?.status === 'error' && (
+        <div className="kitchen-warn">
+          <div>Shopping needs could not be sent to Storage — the list there may be out of date.</div>
+          <div>{sync.last_error}</div>
+          {sync.problems.map((p, i) => <div key={i}>• {p.ref ? `${p.ref}: ` : ''}{p.field}: {p.message}</div>)}
+          <button className="kitchen-btn" disabled={busy} onClick={retry}>Retry sync</button>
         </div>
-      ))}
-      <div className="kitchen-day">To buy ({data.buy.length})</div>
-      {data.buy.length === 0 && <p className="kitchen-muted">Nothing to buy.</p>}
-      {data.buy.map((l) => <BuyRow key={`${l.item_id}-${l.stock}`} line={l} onDone={load} />)}
-      <div className="kitchen-day">Probably on hand ({data.probably_have.length})</div>
-      {data.probably_have.map((l) => <HaveRow key={`${l.item_id}-${l.stock}`} line={l} onDone={load} />)}
+      )}
+      {sync?.issues.map((is, i) => <div key={i} className="kitchen-warn">{is.message}</div>)}
     </div>
   );
 }
@@ -477,7 +436,7 @@ export default function KitchenApp() {
   return (
     <Routes>
       <Route path="/" element={<PlanView />} />
-      <Route path="/shopping" element={<ShoppingView />} />
+      <Route path="/shopping" element={<Navigate to="/items/shopping" replace />} />
       <Route path="/recipes" element={<RecipesView />} />
     </Routes>
   );
