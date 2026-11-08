@@ -31,6 +31,7 @@ COPY 03_Application/ClaudeConsole/src/         03_Application/ClaudeConsole/src/
 COPY 03_Application/StoryReader/src/           03_Application/StoryReader/src/
 COPY 03_Application/HabitTracker/src/          03_Application/HabitTracker/src/
 COPY 03_Application/Kitchen/src/               03_Application/Kitchen/src/
+COPY 03_Application/RunningTracker/src/        03_Application/RunningTracker/src/
 
 WORKDIR /repo/02_Platform/Atlas_Shell
 RUN npm run build

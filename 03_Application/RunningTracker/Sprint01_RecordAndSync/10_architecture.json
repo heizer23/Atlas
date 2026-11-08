@@ -1,0 +1,431 @@
+{
+  "component_name": "runningtracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Stores, verifies and presents runs recorded natively by AtlasPhone: device-token-authenticated sync (begin, idempotent sample upload, verified finish) over a tailnet-only listener, plus a web history with pace/HR charts, prepared runs, pairing and device management.",
+  "classification": {
+    "why_application": "Owns running-domain meaning: runs, pauses, splits, pace/HR derivation, prepared runs, sync verification rules and the run history UI. Native pairing/sync/Running Screen code is AtlasPhone-side (01_System) but its behavior is defined here by the contract in interfaces.",
+    "non_goals": [
+      "Maps, tiles, routes, interval plans (route_id is reserved only)",
+      "Ghost runner (Sprint 02c) and WorkoutTracker link (Sprint 02d)",
+      "Polar Flow",
+      "Any web-to-app bridge (postMessage / loopback stay removed)",
+      "Push of live data",
+      "Elevation (no altitude accuracy in the Sprint01 sample payload; field is absent from metrics)"
+    ],
+    "not_platform": "Everything here carries running-specific meaning (distance filtering, splits, pause rule, sync verification of a run). Generic pieces already exist as platform capability and are only consumed (Dataset contract, error handling, Postgres pool, MobilePlatform sensor delivery). Device pairing/token auth is deliberately app-local and minimal; if a second app needs it, promotion to a platform component is a separate decision."
+  },
+  "contracts": {
+    "consumes": [
+      "02_Platform/packages/platform_contracts/contracts.py (Dataset, DatasetMeta, ColumnSchema)",
+      "02_Platform/packages/platform_errorhandling (api_error, install_exception_handlers, install_request_timing, setup_logging)",
+      "02_Platform/Atlas_Shell/platform-ui (apiFetch, ErrorCard, Skeleton, LineChart, TableView, DetailView) and AppRegistry/AppConfig contract 1.1.0",
+      "Shared Postgres instance (atlas-postgres), schema runningtracker",
+      "01_System/AtlasPhone MobilePlatform API (01_System/AtlasPhone/Sprint01_MobilePlatform/MobilePlatform_API.md): permissions, location, heartRate, store (CaptureStore), recorder, ensureForegroundService",
+      "Tailscale on the Atlas host (tailscale serve) and on the phone, as the private transport for native endpoints"
+    ],
+    "provides": [
+      "Web read endpoints return Dataset | ApiError; web mutations return Dataset | ApiError (see interfaces.exposed_surfaces).",
+      "Native endpoints are machine-to-machine (AtlasPhone only), authenticated by device token, and are EXEMPT from the Dataset requirement of R-CON-BP-04: they exchange typed JSON records (models in 10_scaffolding.json backend/models.py) and return ApiError on failure. They are never rendered by the UI.",
+      "Idempotent sync: re-sending begin, a sample batch or finish never creates duplicates and never changes raw samples.",
+      "Verified completion: a run is complete only after finish verification (algorithm V1) succeeds; the phone may delete local samples only after that response.",
+      "Atlas owns the history; AtlasPhone owns the live run. The server never starts, pauses or stops a run."
+    ],
+    "invariants": [
+      "D1 (open decision 1, resolved): Tailnet exposure = `tailscale serve --https=8443` on the Atlas host, path-limited to /api/runningtracker/native, proxying to 127.0.0.1:8029 (the backend stays published on loopback only). TLS = Tailscale-issued certificate for the host's MagicDNS name (publicly trusted CA, no pinning, no custom CA on the phone). Tailscale Funnel is never enabled. No new public port, no 0.0.0.0 bind, no new container. Operator steps (manual, human): enable HTTPS certificates in the tailnet admin console, confirm MagicDNS, run the serve command, set RUNNINGTRACKER_NATIVE_BASE_URL. Fallback if certificates cannot be enabled: see open_questions Q1 (needs human approval, because it is cleartext at the HTTP layer).",
+      "D2 (open decision 2, resolved): Sample storage = one row per sample in runningtracker.run_samples, raw JSON in payload, sample_ts extracted for ordering/metrics. Volume is about 2 rows/s (about 7,200 rows/hour). No batched JSONB.",
+      "D3 (open decision 3, resolved): Navigation = one shell app appId 'running', label 'Running', basePath '/running', icon directions_run, tone teal. Primary nav: Run (/running), History (/running/history), Devices (/running/devices). Pair phone lives on the Devices page; Free Run is phone-only and the Run page only explains it and manages prepared runs.",
+      "E1: Public shell nginx must not forward /api/runningtracker/native/*. Enforced by an explicit `location ^~ /api/runningtracker/native { return 404; }` placed before the /api/runningtracker proxy block, and by a defense-in-depth guard in the backend that rejects (403 NATIVE_ROUTE_FORBIDDEN) any native request carrying a CF-Connecting-IP header. The 404 block is the control; the header guard is a backstop.",
+      "E2: The pairing endpoint moved from the draft's /api/runningtracker/device/pair to /api/runningtracker/native/pair so that one path prefix covers every native route (single tailscale serve mount, single nginx deny). Behavior is unchanged.",
+      "A1 (metrics algorithm, single authoritative definition; Kotlin RunMetrics and Python metrics.compute_metrics both implement it, algo_version 1, parity enforced by the shared golden vectors file tests/fixtures/metrics_golden.json): (1) location fixes ordered by seq; a fix is usable only if accuracyMeters is non-null and <= ACCURACY_MAX_M; (2) fixes whose wall timestamp lies inside a pause interval [started_at, ended_at) are ignored; the first usable fix after a pause or at run start becomes the anchor and adds no distance; (3) for each later usable fix: d = haversine(anchor, fix); if d < MIN_STEP_M the fix is skipped and the anchor is kept; dt = elapsedRealtimeNanos difference when both fixes carry it and it is > 0, else wall-timestamp difference; if dt <= 0 or d/dt > MAX_SPEED_MPS the fix is dropped and the anchor is kept; otherwise distance += d and the fix becomes the anchor; (4) moving time axis = wall time minus the sum of earlier pause durations; (5) pace at an accepted fix = (t_i - t_j) / (D_i - D_j) * 1000 seconds per km, where j is the earliest accepted fix of the same pause-free segment with t_j >= t_i - SMOOTHING_WINDOW_S and D_i - D_j >= 1 m, otherwise no pace point; (6) splits every SPLIT_DISTANCE_M of cumulative D with the crossing time linearly interpolated on the moving-time axis, plus one final partial split when the remainder is >= 10 m; split avg_hr = mean of heart_rate bpm whose timestamp falls into the split's moving-time range, null if none; (7) avg_hr = mean and max_hr = max of heart_rate samples with bpm >= 1 outside pauses, null if none; (8) series are bucketed to SERIES_BUCKET_S seconds of run time (wall time since started_at): pace keeps the last point per bucket, hr uses the bucket mean; null values are omitted, never zero-filled.",
+      "T1 (time authority, R-CON-AL-06): Persisted domain time for runs (started_at, finished_at, pause stamps, sample timestamps) is phone-reported UTC and is stored as given; the server never replaces it with its own clock. Server time (now()) is authoritative only for created_at, pairing-code TTL and lockout window, prepared-run TTL (is_expired), device last_used_at and revoked_at. Durations (elapsed_s, moving_s) are measured on the phone with a monotonic clock. Web timestamps are ISO-8601 UTC; the browser formats them in local time. The server rejects finished_at < started_at (422).",
+      "S1 (scope): Single-user system. There is no user column. 'Scoped to the owning user' means: a device token authorizes only the native endpoints, and a run is reachable only by the device that began it (run.device_id), otherwise 404 NOT_FOUND. Exception: if the owning device is revoked and the run is not complete, begin from a newly paired device adopts the run (device_id reassigned) so a re-pair does not strand a pending upload.",
+      "S2 (secrets): The device token and pairing codes are stored only as SHA-256 hex digests server-side and are never written to logs, query strings or deep links. Location and heart-rate samples are never logged (request logging records method, path and status only). Delete-run removes samples, pauses and metrics (cascade).",
+      "S3 (pairing lockout): All pair failures (unknown, expired, used or locked code) return the same generic response 403 PAIRING_FAILED. A failure is recorded in pairing_failures. When PAIRING_MAX_FAILURES failures exist within the last PAIRING_FAILURE_WINDOW_SECONDS, every currently active code is locked (locked_at set) and the endpoint answers 429 PAIRING_RATE_LIMITED until the window passes; locked codes stay locked and a new code must be created. Lockout is global because a wrong guess cannot be attributed to a code.",
+      "S4 (token): A pairing code is valid iff used_at and locked_at are null and expires_at > now(); redeeming sets used_at and creates a device with a fresh random 256-bit token returned exactly once. A revoked device (revoked_at set) gets 401 DEVICE_UNAUTHORIZED on every native call except pair.",
+      "V1 (finish verification): finish succeeds with result 'complete' iff (a) for each stream the stored sample count equals expected_counts[stream], and (b) the union of stored seq values over both streams equals exactly {1..last_seq}. The phone's CaptureStore assigns one sequence shared by both streams, strictly increasing and consumed only by stored samples, so (b) is realizable. Otherwise result is 'incomplete' with missing_seq_ranges (gaps inside 1..last_seq) and count_mismatch (streams whose stored count differs). Run summary fields and pauses are stored on every finish call; status becomes 'complete' and metrics are computed only on a successful verification.",
+      "R1 (resume): begin and every sample response return contiguous_seq (largest N such that all of 1..N are stored in the union of streams) and per-stream high_seq. The phone resumes uploading from contiguous_seq. Sample batches are applied atomically (all rows of a batch or none).",
+      "Q1 (query behavior, R-CON-AL-01): see query on each web surface in interfaces.exposed_surfaces. Lists are paginated (page default 1, page_size default 25, max 100), total is the unpaginated count, an empty result is an empty Dataset with total 0, no zero-fill, no grouping, no client-supplied time boundaries (time basis: phone UTC for run times, server time for is_expired).",
+      "U1 (PATCH, R-CON-AL-04/05): PATCH /runs/{id} accepts only {comment}. Omitted = unchanged. A string = stored after trimming. null or a string that is empty after trimming = stored as NULL. Any other key = 422. Round trip: UI empty textarea -> frontend sends null (not omission, not empty string) -> backend stores NULL -> response row has comment null -> UI shows the empty placeholder.",
+      "N1 (no cleartext): AtlasClient (native) refuses any base URL whose scheme is not https and logs neither headers nor bodies.",
+      "N2 (no regression): MainActivity (TWA launcher), AtlasMessagingService (FCM), the atlas:// deep link, and the MobilePlatform public API remain behaviorally unchanged. Sample payloads change only additively (nullable elapsedRealtimeNanos); existing captures stay valid."
+    ],
+    "failure_modes": [
+      "PAIRING_FAILED (403): generic; unknown, expired, used or locked code.",
+      "PAIRING_RATE_LIMITED (429): lockout window active; create a new code after the window.",
+      "DEVICE_UNAUTHORIZED (401): missing, unknown or revoked token; phone shows 're-pair' and stops syncing.",
+      "NATIVE_ROUTE_FORBIDDEN (403): native route reached through the public proxy path.",
+      "NOT_FOUND (404): run/prepared run unknown, owned by another non-revoked device, or prepared run expired (native list/download only).",
+      "VALIDATION_ERROR (422): malformed body, batch > 2000 samples, unparsable sample timestamp, finished_at < started_at, unknown PATCH key.",
+      "PAYLOAD_TOO_LARGE (413): body above MAX_BODY_BYTES.",
+      "RUN_NOT_UPLOADABLE (409): sample batch for a run whose status is complete (batches are accepted only while status is uploading; begin and finish stay idempotent for complete runs).",
+      "Finish result 'incomplete' (200 body, not an error): gaps or count mismatch; phone re-sends from the first gap, stays pending_upload, and shows an error after the bounded retry rounds.",
+      "Network/Tailscale down on the phone: sync fails with retry and backoff; recording and Free Run are unaffected.",
+      "Deleted run resurrection: a run deleted on the web while the phone still holds it as pending_upload is recreated by the next begin (accepted, see risks)."
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "AtlasPhone MobilePlatform: platform.permissions, platform.location, platform.heartRate, platform.store (CaptureStore.fetch/ack/purgeAcked/deleteCapture/openCaptures/info), platform.recorder.start/stop, platform.ensureForegroundService",
+      "Android: Keystore (AES-GCM), WorkManager, Compose, optional Google code scanner (QR)",
+      "Platform UI: apiFetch from platform-ui/api/client.ts (prefixes /api), Dataset types, LineChart, TableView"
+    ],
+    "provides": [
+      "Web API under /api/runningtracker (via shell nginx) for the Running web UI",
+      "Native API under /api/runningtracker/native (tailnet only) for AtlasPhone",
+      "Native documentation: 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs",
+        "purpose": "History list.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Params: status (prepared|uploading|complete, optional; default = uploading and complete together, prepared runs excluded), page (>=1, default 1), page_size (1..100, default 25). Invalid values -> 422. Ordering: started_at DESC NULLS LAST, id ASC (prepared: created_at DESC). Empty -> empty Dataset, total 0. Time basis: stored phone UTC. avg_pace_s_per_km computed on read as moving_s / (distance_m / 1000), null if distance_m is null or 0.",
+        "row_shape": "RunRow: id:string, run_type:enum(continuous|interval), status:enum(prepared|uploading|complete), sync_state:enum(prepared|pending|synced), started_at:date|null, finished_at:date|null, elapsed_s:number|null, moving_s:number|null, distance_m:number|null, avg_pace_s_per_km:number|null, avg_hr:number|null, max_hr:number|null, comment:string|null, device_name:string|null, location_count:number, hr_count:number. object_type 'run'. row_actions: delete."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs/{id}",
+        "purpose": "Run detail.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No params. Single-row Dataset (RunRow) or 404 ApiError.",
+        "row_shape": "RunRow (declared on GET /runs)."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs/{id}/splits",
+        "purpose": "Per-km splits from run_metrics.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No params. Ordered by km ASC. Empty Dataset (total 0) when the run has no metrics yet (status uploading) or distance < 1 split; 404 if the run does not exist.",
+        "row_shape": "SplitRow: id:string, km:number, distance_m:number, duration_s:number, pace_s_per_km:number, avg_hr:number|null, partial:boolean. object_type 'run_split'."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs/{id}/series",
+        "purpose": "Pace or heart-rate points for a LineChart.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Param metric (pace|heart_rate, required; other/missing -> 422). Ordered by t_s ASC. No pagination (page_size = total). Empty Dataset when no metrics or no data for that metric (e.g. GPS-only run has no heart_rate points); missing HR stays absent, never 0. LineChart mapping: x=t_s, y=value, aggregation avg.",
+        "row_shape": "SeriesRow: id:string (point index), t_s:number (seconds since started_at, pauses included), value:number (pace: seconds per km; heart_rate: bpm). object_type 'run_series'."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/runningtracker/runs/{id}",
+        "purpose": "Edit the comment (null-vs-omit per invariant U1).",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Body RunPatch. Returns the updated single-row Dataset (RunRow)."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/runningtracker/runs/{id}",
+        "purpose": "Delete a run (any status, including prepared) with samples, pauses, metrics.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Returns an empty Dataset (200); 404 ApiError if unknown."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/prepared-runs",
+        "purpose": "Prepared runs created on the web, newest first.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No params. Includes expired ones with is_expired=true (server time vs expires_at). Ordered by created_at DESC. Empty -> empty Dataset.",
+        "row_shape": "PreparedRunRow: id:string, short_id:string, title:string|null, planned_for:date|null, expires_at:date, is_expired:boolean, created_at:date. object_type 'prepared_run'. row_actions: delete."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/prepared-runs",
+        "purpose": "Create a prepared run (server-generated uuid, 6-char short_id from the unambiguous alphabet, expires_at = now + PREPARED_RUN_TTL_HOURS).",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Body PreparedRunCreate {title?: string|null, planned_for?: datetime|null}. 201 with single-row Dataset (PreparedRunRow)."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/pairing-codes",
+        "purpose": "Create a one-time pairing code; the plain code is returned exactly once.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx (behind existing Google/Cloudflare auth)",
+        "query": "No body. 201 with single-row Dataset (PairingCodeRow). native_base_url comes from env RUNNINGTRACKER_NATIVE_BASE_URL and is null when unset (UI then shows the code without QR URL).",
+        "row_shape": "PairingCodeRow: id:string, code:string, expires_at:date, native_base_url:string|null. object_type 'pairing_code'. The frontend renders text and a QR encoding the payload format defined by PairingPayload (10_scaffolding.json)."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/devices",
+        "purpose": "Paired devices (name, last used) including revoked ones.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No params. Ordered by created_at DESC. Empty -> empty Dataset.",
+        "row_shape": "DeviceRow: id:string, name:string, created_at:date, last_used_at:date|null, revoked_at:date|null, is_revoked:boolean. object_type 'device'. row_actions: revoke (only for non-revoked rows)."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/devices/{id}/revoke",
+        "purpose": "Revoke a device token. Idempotent (revoking a revoked device keeps the original revoked_at).",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Returns single-row Dataset (DeviceRow); 404 ApiError if unknown."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/native/pair",
+        "purpose": "Redeem a pairing code for a device token (only unauthenticated native endpoint).",
+        "ui_contract": "none (machine-to-machine, exempt from Dataset; typed record PairResponse | ApiError)",
+        "exposure": "tailnet only (invariants D1, E1)",
+        "query": "Body PairRequest. Rules S3, S4."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/native/prepared-runs",
+        "purpose": "List non-expired prepared runs for the Running Screen.",
+        "ui_contract": "none (machine-to-machine; typed record PreparedRunList | ApiError)",
+        "exposure": "tailnet only; Bearer device token",
+        "query": "No params. Only status prepared and expires_at > now(). Ordered by created_at DESC. Empty list when none."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/native/prepared-runs/{id}",
+        "purpose": "Download one prepared run.",
+        "ui_contract": "none (machine-to-machine; typed record PreparedRunOut | ApiError)",
+        "exposure": "tailnet only; Bearer device token",
+        "query": "404 NOT_FOUND if unknown, not prepared, or expired."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/native/runs/{id}/begin",
+        "purpose": "Create or confirm the run row (idempotent) and return the resume cursors.",
+        "ui_contract": "none (machine-to-machine; typed record BeginResponse | ApiError)",
+        "exposure": "tailnet only; Bearer device token",
+        "query": "Body BeginRequest. Branches: unknown id -> insert status uploading, device_id = caller; prepared id -> convert to uploading, set started_at and device_id (TTL not enforced here: a prepared run downloaded in time may be started later); existing run of the caller -> 200 unchanged; existing run of another revoked device and status != complete -> adopt; existing run of another non-revoked device -> 404; complete run of the caller -> 200 with status complete."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/runningtracker/native/runs/{id}/samples",
+        "purpose": "Idempotent bounded batch upload.",
+        "ui_contract": "none (machine-to-machine; typed record SamplesResponse | ApiError)",
+        "exposure": "tailnet only; Bearer device token",
+        "query": "Body SamplesBatch (1..2000 samples). Insert with conflict-ignore on (run_id, stream, seq); stored counts new rows, duplicates counts ignored rows; existing rows are never modified. Whole batch atomic. 404 unknown/foreign run; 409 RUN_NOT_UPLOADABLE for a complete run; 422 invalid batch."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/native/runs/{id}/finish",
+        "purpose": "Store the run summary and pauses, verify completeness (V1), compute metrics, set complete.",
+        "ui_contract": "none (machine-to-machine; typed record FinishResponse | ApiError)",
+        "exposure": "tailnet only; Bearer device token",
+        "query": "Body FinishRequest. Idempotent: pauses are replaced as a set; a repeated finish of a complete run answers result 'complete' with the same verified_counts and does not recompute unless stored algo_version differs from ALGO_VERSION. 404 unknown/foreign run."
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "create_pairing_code",
+      "description": "Web request. Generate PAIRING_CODE_LENGTH chars from PAIRING_CODE_ALPHABET with a CSPRNG, store sha256 hex, expires_at = now + PAIRING_CODE_TTL_SECONDS (retry on hash collision), return plain code once with native_base_url.",
+      "inputs": ["server time", "env RUNNINGTRACKER_NATIVE_BASE_URL"],
+      "outputs": ["PairingCodeRow"]
+    },
+    {
+      "step": 2,
+      "name": "redeem_pairing_code",
+      "description": "Native pair. If PAIRING_MAX_FAILURES failures exist in the window: lock all active codes, answer 429. Else hash the code; valid code (S4) -> mark used, create device with random 256-bit token (store sha256), return PairResponse. Any other outcome -> insert pairing_failures row, re-check the lockout threshold (lock all active codes when reached), answer 403 generic.",
+      "inputs": ["PairRequest", "pairing_codes", "pairing_failures", "server time"],
+      "outputs": ["PairResponse | 403 | 429"]
+    },
+    {
+      "step": 3,
+      "name": "authenticate_device",
+      "description": "Every native call except pair: reject CF-Connecting-IP header (403, E1); parse Bearer token, sha256, find device with revoked_at null else 401; set last_used_at when older than DEVICE_LAST_USED_THROTTLE_SECONDS; reject Content-Length > MAX_BODY_BYTES with 413.",
+      "inputs": ["Authorization header", "devices"],
+      "outputs": ["DeviceContext | 401 | 403 | 413"]
+    },
+    {
+      "step": 4,
+      "name": "prepare_run",
+      "description": "Web create: insert runs row status prepared with generated uuid and short_id (retry on unique conflict), title, planned_for, expires_at = now + PREPARED_RUN_TTL_HOURS. Native list/download read only non-expired prepared rows.",
+      "inputs": ["PreparedRunCreate", "server time"],
+      "outputs": ["PreparedRunRow", "PreparedRunList", "PreparedRunOut"]
+    },
+    {
+      "step": 5,
+      "name": "begin_run",
+      "description": "Apply the begin branch table (interfaces: begin). Always returns status plus resume cursors computed from stored samples (R1).",
+      "inputs": ["BeginRequest", "DeviceContext", "runs", "run_samples"],
+      "outputs": ["BeginResponse"]
+    },
+    {
+      "step": 6,
+      "name": "store_samples",
+      "description": "Validate batch (size, stream value, seq >= 1, parsable payload timestamp -> sample_ts). In one transaction insert with conflict-ignore, count stored vs duplicates, read cursors. Never update existing rows.",
+      "inputs": ["SamplesBatch", "run ownership check"],
+      "outputs": ["SamplesResponse"]
+    },
+    {
+      "step": 7,
+      "name": "finish_run",
+      "description": "Validate finished_at >= started_at; store summary fields and replace run_pauses; run verification V1 over stored seqs and counts; if incomplete return gaps and mismatch with status unchanged (uploading); if complete compute metrics (A1) from samples and pauses, upsert run_metrics, set status complete.",
+      "inputs": ["FinishRequest", "run_samples", "run_pauses"],
+      "outputs": ["FinishResponse"]
+    },
+    {
+      "step": 8,
+      "name": "serve_history",
+      "description": "Web reads: join runs with device name, sample counts and run_metrics (avg_hr, max_hr) into RunRow; splits and series read from run_metrics JSON columns; build Dataset objects in datasets.py; PATCH comment per U1; DELETE cascades; devices list and revoke (idempotent).",
+      "inputs": ["query params", "runs", "run_metrics", "devices"],
+      "outputs": ["Dataset | ApiError"]
+    },
+    {
+      "step": 9,
+      "name": "phone_record_and_sync",
+      "description": "Native lifecycle (RunLifecycle states prepared, recording, paused, completed_local, pending_upload, synced, persisted in CaptureStore run_meta). Start: recorder.start(captureId = prepared id or new uuid), ensureForegroundService. Finish: stop recorder, close open pause, compute summary with RunMetrics (A1), state completed_local then pending_upload, enqueue UploadWorker. UploadWorker: begin -> resume from contiguous_seq -> fetch/PUT batches (UploadPlanner) -> finish; on result complete: ack up to last_seq, purgeAcked, state synced; on incomplete: resend from first gap, bounded rounds, remain pending_upload with visible error; on 401: flag 're-pair'; network errors: WorkManager exponential backoff. Interrupted captures (open, no finished run_meta) are offered Recover (reopens as PAUSED with a synthetic pause starting at the last sample time) or Discard (explicit confirm, deleteCapture force); never auto-finalized.",
+      "inputs": ["MobilePlatform flows", "CaptureStore", "TokenStore", "AtlasClient"],
+      "outputs": ["synced run in Atlas", "local state transitions"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset types for web endpoints"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error envelope, logging, request timing"},
+      {"component": "02_Platform/Atlas_Shell", "role": "shell registration (AppRegistry), platform-ui primitives, nginx proxy block and deny block, Dockerfile COPY, main.tsx import"},
+      {"component": "01_System/AtlasPhone", "role": "native host app: MobilePlatform, CaptureStore, RecordingService; receives new running package, manifest and shortcut entries"},
+      {"component": "02_Platform/Postgres (atlas-postgres)", "role": "storage for schema runningtracker"}
+    ],
+    "internal_optional": [
+      {"component": "01_System/Access/Tailscale", "role": "documentation and Makefile target for the tailscale serve mount (operational, not a code dependency)"}
+    ],
+    "external_required": [
+      {"name": "fastapi, uvicorn, psycopg2-binary, pydantic", "role": "backend (same set as StorageTracker pyproject)", "reuse_existing": true},
+      {"name": "androidx.work:work-runtime-ktx", "role": "durable upload worker with backoff (new AtlasPhone dependency)", "reuse_existing": false},
+      {"name": "Android Keystore (platform API)", "role": "AES-GCM encryption of the device token; no extra library", "reuse_existing": true},
+      {"name": "java.net.HttpURLConnection behind HttpTransport", "role": "HTTPS client without a new dependency; tests inject a fake transport", "reuse_existing": true},
+      {"name": "recharts via platform-ui LineChart", "role": "pace/HR charts", "reuse_existing": true}
+    ],
+    "external_optional": [
+      {"name": "qrcode.react (npm, added to 02_Platform/Atlas_Shell/package.json)", "role": "QR rendering of the pairing payload; without it the page shows the text code only", "reuse_existing": false},
+      {"name": "com.google.android.gms:play-services-code-scanner", "role": "QR scan on the pairing screen (no camera permission needed); typing the code always works", "reuse_existing": false}
+    ],
+    "forbidden": [
+      "Proxying /api/runningtracker/native/* through the public shell nginx",
+      "Binding the backend to 0.0.0.0 or any non-loopback address; Tailscale Funnel; new public ports",
+      "Cleartext HTTP from the phone; logging tokens, codes, samples",
+      "Reintroducing postMessage / loopback web-app bridges or touching the TWA launcher / FCM service",
+      "Querying other applications' schemas; other applications querying schema runningtracker",
+      "Domain logic in 02_Platform",
+      "Reusing the Notifications precedent of a 0.0.0.0 plain-HTTP listener (R-OPS-BP-02)"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "runtime_schema_path": "03_Application/RunningTracker/schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Backend (03_Application/RunningTracker): create files per 10_scaffolding.json; copy 10_schema.sql to schema.sql; follow StorageTracker patterns (database.py, main.py startup retry, Dockerfile, compose.yml with prod service on 127.0.0.1:8029 and a Kitchen-style sleep-infinity atlas-runningtracker-test service, env RUNNINGTRACKER_NATIVE_BASE_URL).",
+      "Implement pairing.py (S3/S4), security.py (E1 header guard, Bearer auth, throttled last_used), routers (web, native), verification.py (V1) and metrics.py (A1) exactly as defined in invariants; constants only in config.py.",
+      "Create tests/fixtures/metrics_golden.json (small hand-checked synthetic runs incl. a pause, a GPS jump, a low-accuracy fix, a stationary stretch, a GPS-only run) and use it from both pytest and the Kotlin RunMetricsTest.",
+      "Shell integration: nginx.conf (deny block before proxy block, E1), Dockerfile COPY line, main.tsx side-effect import, package.json qrcode.react.",
+      "01_System: add RUNNINGTRACKER_NATIVE_BASE_URL (empty, commented) to config.env; add Makefile target for the tailscale serve mount and document the manual operator steps and the verify commands in 01_System/Access/Tailscale/readme.md. Do NOT run tailscale serve or change tailnet settings; that is a human step (Q1).",
+      "AtlasPhone native (01_System/AtlasPhone): additive sample fields (elapsedRealtimeNanos on location and heart-rate payloads, null-safe; update LocationMapper/LocationTracker/HeartRateMonitor/SampleJson), CaptureStore run_meta table via DB version 2 onUpgrade (existing captures untouched), running package per scaffolding (pairing, TokenStore with Keystore AES-GCM, AtlasClient with https-only and no secret logging, RunMetrics, RunLifecycle, UploadPlanner/UploadWorker, RunController, RunningActivity screens), manifest (RunningActivity exported=false), shortcut, strings, backup/extraction rules excluding the pairing prefs file and mobile_captures.db, build.gradle.kts deps. RunningActivity must not be exported; the optional intent:// spike (draft section 6) is built last and only if added as an activity-alias that accepts nothing but a short id matching the prepared-run alphabet and only pre-selects a prepared run (never auto-starts); record the spike result in RunningScreen_API.md.",
+      "Write 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md in the style of MobilePlatform_API.md with per-statement status [tested: JVM] / [built] / [unverified]; no hardware item is marked verified.",
+      "Draft section 3 gate: do not declare the Running Screen done until one real 20-minute locked-screen capture is recorded in MobilePlatform_API.md (human/hardware task); the additive sample-stamp fields requirement of section 3 was checked: neither RawLocation, RawHeartRate nor SampleJson currently carries a monotonic stamp, so the additive change is required.",
+      "Host build and lint: JAVA_HOME=~/toolchain/jdk17 ANDROID_HOME=~/toolchain/android-sdk bash ./gradlew :app:assembleDebug :app:testDebugUnitTest (and :app:lintDebug) in 01_System/AtlasPhone; Sprint 01 tests (30) must still pass.",
+      "Compose rebuilds need --env-file 01_System/secrets.env --env-file 01_System/config.env. Frontend deploy is done by the Stop hook (vite build + docker cp); an nginx.conf or Dockerfile change needs a manual shell rebuild."
+    ],
+    "ui_implementer": [
+      "Web: shellConfig.ts (appId running, nav per D3), ShellEntry.tsx routes /running, /running/history, /running/history/:id, /running/devices; RunPage (explains Free Run on the phone, create and list prepared runs with delete), HistoryPage (TableView over RunRow: date, distance, duration, avg pace, avg HR, sync state), RunDetailPage (DetailView, LineChart pace over time, LineChart HR over time, splits TableView, comment edit per U1; no map), DevicesPage (create pairing code with text + QR + expiry countdown, device list with Revoke). Use apiFetch and platform-ui components only; empty HR chart shows a neutral 'no heart-rate data' state.",
+      "Native Running Screen (Compose, high contrast, keep-screen-on): before start GPS/H10 status, prepared runs (pull), Free Run, pending/failed uploads with retry, Recover/Discard banner; while recording elapsed, distance, smoothed current pace, average pace, HR, GPS quality, HR connection state, Pause/Resume/Finish(confirm); pause visibly distinct from poor GPS/missing HR; summary showing 'synced' vs 'pending sync' and a link back to RunningTracker; pairing screen with code entry, server URL, device name and optional QR scan."
+    ],
+    "test_writer": [
+      "Implement every scenario of 10_test_spec.md: pytest in atlas-runningtracker-test (fixtures.sql with fix- prefixed ids), Playwright specs under tests/ui, Kotlin JVM tests under app/src/test.",
+      "Hardware scenarios are listed as manual/unverified: do not write automated stand-ins that claim to verify them."
+    ],
+    "reviewer": [
+      "Verify E1 end to end: nginx deny block precedes the proxy block, and tests prove /api/runningtracker/native/* through atlas-shell is 404 while web paths work.",
+      "Verify there is no 0.0.0.0 bind or new public port anywhere in the diff; the compose port is 127.0.0.1:8029.",
+      "Check A1 parity between Kotlin RunMetrics and Python metrics via the shared golden file; check V1 realizability against CaptureStore sequence semantics.",
+      "Check tokens, codes and samples never reach logs; backup rules exclude pairing prefs and the capture DB.",
+      "Check Sprint 01 behavior and TWA/FCM are untouched (N2) and that sample payload changes are additive only."
+    ]
+  },
+  "deferred_decisions": [
+    "Which of phone-reported runs.distance_m and server run_metrics.server_distance_m wins when they differ; Sprint01 shows phone values in History and uses server values for charts and splits.",
+    "Retention of raw samples and a possible downsampling policy.",
+    "Whether pairing/device-token auth should become a platform component when a second app needs it.",
+    "Interval runs, routes and ghost profiles (02b/02c/02d); run_type 'interval' and route_id are reserved only."
+  ],
+  "risks": [
+    {
+      "risk": "Tailnet exposure depends on manual host/tailnet configuration (HTTPS certificates enabled in the admin console, MagicDNS, tailscale serve command) that cannot be verified on this host or by automated tests.",
+      "impact": "Sync cannot work until a human completes it; a misconfiguration (for example serve mounted without the path limit, or Funnel enabled) would expose the web API without app-level auth."
+    },
+    {
+      "risk": "Tailscale-issued certificates publish the host's MagicDNS name in Certificate Transparency logs.",
+      "impact": "The machine and tailnet name become publicly discoverable (not reachable, but visible); acceptable only if the human agrees (Q1)."
+    },
+    {
+      "risk": "Web endpoints have no app-level auth (existing Atlas convention: Cloudflare/Google at the edge). The backend shares one FastAPI app with the native routes.",
+      "impact": "Any path accidentally exposed via tailscale serve or nginx bypasses authentication; mitigated by the path-limited serve mount, the nginx deny block and the CF header backstop."
+    },
+    {
+      "risk": "Pairing code entropy is about 40 bits and lockout is global.",
+      "impact": "Brute force is bounded by TTL and lockout; a tailnet peer could deliberately lock pairing (denial of service only)."
+    },
+    {
+      "risk": "Kotlin and Python implement algorithm A1 separately.",
+      "impact": "Drift between phone summary and server metrics; limited by the shared golden file and algo_version."
+    },
+    {
+      "risk": "A run deleted on the web is recreated if the phone still holds it as pending_upload.",
+      "impact": "Unexpected reappearance of a deleted run; accepted for Sprint01 (no tombstones)."
+    },
+    {
+      "risk": "Foreground-service behavior with screen locked, Bluetooth reconnect and OEM battery optimization are unverified on hardware.",
+      "impact": "Possible GPS/HR gaps in real runs; gap handling (HR gap stays a gap) is designed, hardware acceptance stays open."
+    },
+    {
+      "risk": "Android cloud backup could copy location data and the pairing prefs.",
+      "impact": "Privacy leak; mitigated by excluding the capture DB and pairing prefs in backup_rules.xml and data_extraction_rules.xml."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Q1 Tailnet exposure (needs human confirmation): confirm (a) HTTPS certificates are enabled in the tailnet admin console and MagicDNS is on, (b) the host's tailnet DNS name, (c) acceptance that the name appears in CT logs, (d) the serve port 8443 is free. Fallback if (a) is refused: publish the backend on the host's tailnet IP only (docker port mapping bound to the 100.x address, not 0.0.0.0) and let the phone use http over WireGuard; this violates the draft's 'no cleartext' wording at the HTTP layer and requires explicit approval. Also recommended: a tailnet ACL allowing the phone only to this host on port 8443.",
+      "owner": "product"
+    },
+    {
+      "question": "Q2 The exact `tailscale serve` syntax (--set-path mount semantics, background flag) depends on the installed tailscale version; the implementer must verify with `tailscale serve --help`, record the final command in the readme and Makefile target, and the human must run it.",
+      "owner": "implementer"
+    },
+    {
+      "question": "Q3 Is the CF-Connecting-IP backstop assumption valid for the Cloudflare tunnel in use (header added by cloudflared and passed through nginx)? It is only a backstop; the nginx 404 block is the control.",
+      "owner": "implementer"
+    },
+    {
+      "question": "Q4 Adding qrcode.react to 02_Platform/Atlas_Shell/package.json and play-services-code-scanner / work-runtime-ktx to AtlasPhone are new dependencies; confirm acceptable or drop QR (typing always works).",
+      "owner": "product"
+    },
+    {
+      "question": "Q5 PREPARED_RUN_TTL_HOURS = 48 and PAIRING_CODE_TTL_SECONDS = 300 are chosen defaults (draft fixes 5 min for codes, leaves the prepared TTL open); confirm 48 h.",
+      "owner": "product"
+    },
+    {
+      "question": "Q6 The pair endpoint path changed from /device/pair to /native/pair (invariant E2); confirm acceptable.",
+      "owner": "product"
+    },
+    {
+      "question": "Q7 Port allocation: 8029 (prod, loopback) is unused in all compose files and config.env as of this design; test container is a sleep-infinity service without a host port (Kitchen pattern).",
+      "owner": "architecture"
+    }
+  ]
+}

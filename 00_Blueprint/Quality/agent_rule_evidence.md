@@ -1139,3 +1139,54 @@ severity: minor
 recurrence_hint: "Shared-container test arrangement from Sprint09; test_calendar_blocker.py (Sprint10) remains un-copied and unverified."
 linked_immediate_artifact: 03_Application/TaskTracker/Dockerfile
 ---
+
+---
+entry_id: EVD-2026-11-08-001
+date: 2026-11-08
+source_agent: sprint_implement
+run_type: implementer_note
+component: RunningTracker
+sprint: Sprint01_RecordAndSync
+pattern_name: algorithm_invariant_leaves_boundary_conventions_open
+short_description: Invariant A1 defines the metrics algorithm "exactly" but leaves four conventions open (origin of the first split, t_s of a bucketed series point, heart-rate range edges per split, behaviour when a sample lands exactly on a split crossing); two independent implementations would otherwise diverge.
+evidence: "10_architecture.json A1 steps (5)-(8). Compensation, applied identically in backend/metrics.py and Kotlin RunMetrics: first split starts at the moving time of the first accepted fix; series t_s = bucket start (bucket*SERIES_BUCKET_S) for pace and hr; split hr range is [start,end) for full splits and [start,end] for the final partial split. A first golden file with heart-rate samples exactly on the crossing times produced 158.08 instead of 158.04 for split 2 purely from float fuzz at the boundary (crossing at 251.0000000001 excluded the sample at 251); fixed by placing hr samples 0.5 s off the crossing (tests/fixtures/metrics_golden.json, case clean_route)."
+likely_root_cause: spec_ambiguity
+candidate_response: design_template
+severity: minor
+recurrence_hint: "First observed. Any design that requires two implementations to agree on a derived value should state boundary conventions and require oracle vectors that avoid boundary coincidence."
+linked_immediate_artifact: 03_Application/RunningTracker/backend/metrics.py
+---
+
+---
+entry_id: EVD-2026-11-08-002
+date: 2026-11-08
+source_agent: sprint_implement
+run_type: implementer_note
+component: RunningTracker
+sprint: Sprint01_RecordAndSync
+pattern_name: platform_ui_primitive_cannot_express_declared_view
+short_description: The design maps the History list and splits to TableView/DetailView and the charts to LineChart(x=t_s); TableView/DetailView render raw numbers (seconds, metres, null as an em dash) and LineChart sorts x as strings, so "10" sorts before "5".
+evidence: "platform-ui/components/LineChart.tsx (xVals = [...new Set(rows.map(r => String(r[x])))].sort()), TableView.formatCell. Compensation: SeriesRow gained an additive string column t_label (fixed-width h:mm:ss, sorts like time) used as the chart x; History, splits and run detail are small formatted cards/tables built from the Dataset rows (src/format.ts) instead of TableView/DetailView; LineChart is still used for both charts. Dataset meta/schema are unchanged otherwise."
+likely_root_cause: spec_ambiguity
+candidate_response: skill
+severity: minor
+recurrence_hint: "First observed. Platform LineChart/TableView have no value formatting hook; a platform-ui extension (format hint honoured by TableView, numeric x ordering in LineChart) would remove the per-app workaround."
+linked_immediate_artifact: 03_Application/RunningTracker/src/RunDetailPage.tsx
+---
+
+---
+entry_id: EVD-2026-11-08-003
+date: 2026-11-08
+source_agent: sprint_implement
+run_type: implementer_note
+component: RunningTracker
+sprint: Sprint01_RecordAndSync
+pattern_name: small_scaffold_deviations_for_testability_and_review_notes
+short_description: Minor deviations from 10_scaffolding.json made to satisfy the approved review notes or to make logic testable.
+evidence: "(1) finish/samples on a still-prepared run answer 409 RUN_NOT_STARTED (review note 7; new error code). (2) Pairing code redemption is one atomic conditional UPDATE (review note 6); pairing.redeem_pairing_code commits its own work because the lockout must persist before the exception. (3) UploadEngine (plain blocking class in sync/UploadWorker.kt) holds the upload logic so it runs in Robolectric with a fake transport; UploadWorker only wires real objects. (4) RunController.finish() is suspend (short drain delay so in-flight samples reach the buffer); RunningScreen/PairingScreen take extra defaulted parameters for permission requests and navigation. (5) 01_System/test/compose.test.yml is NOT changed: the design places the sleep-infinity atlas-runningtracker-test service in the component compose (Kitchen pattern), so `make test-up` does not start it; `make runningtracker-up` does. (6) tests import `tests.conftest` (tests/ is a package, as in StorageTracker). (7) The optional intent:// spike (draft section 6) was not built. (8) RUNNINGTRACKER_NATIVE_BASE_URL stays unset/commented; Q1 (CT-log exposure), Q4 (new dependencies work-runtime-ktx, play-services-code-scanner, qrcode.react), Q5 (48 h TTL) and Q6 (/native/pair path) were implemented with the design defaults without product confirmation."
+likely_root_cause: none
+candidate_response: none
+severity: minor
+recurrence_hint: "First observed."
+linked_immediate_artifact: 03_Application/RunningTracker/backend/routers/native.py
+---

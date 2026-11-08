@@ -33,6 +33,7 @@ export default defineConfig({
       '@fullcalendar/interaction':  path.resolve(__dirname, 'node_modules/@fullcalendar/interaction'),
       'react-markdown':  path.resolve(__dirname, 'node_modules/react-markdown'),
       'unist-util-visit': path.resolve(__dirname, 'node_modules/unist-util-visit'),
+      'qrcode.react':    path.resolve(__dirname, 'node_modules/qrcode.react'),
     },
   },
   server: {
@@ -57,6 +58,7 @@ export default defineConfig({
       '/api/storyreader':    { target: 'http://localhost:8026', changeOrigin: true },
       '/api/habittracker':   { target: 'http://localhost:8027', changeOrigin: true },
       '/api/kitchen':        { target: 'http://localhost:8028', changeOrigin: true },
+      '/api/runningtracker': { target: 'http://localhost:8029', changeOrigin: true },
     },
   },
   test: {

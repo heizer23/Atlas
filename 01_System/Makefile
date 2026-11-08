@@ -438,6 +438,51 @@ kitchen-reboot:
 # endregion
 
 
+# region --- Application: RunningTracker
+RUNNINGTRACKER_DIR=../03_Application/RunningTracker
+
+RUNNINGTRACKER_COMPOSE=docker compose \
+	-f $(RUNNINGTRACKER_DIR)/compose.yml \
+	$(ENV_FILES)
+
+# The backend creates/updates schema runningtracker itself at startup (idempotent schema.sql).
+runningtracker-build:
+	$(RUNNINGTRACKER_COMPOSE) build runningtracker runningtracker-test
+
+runningtracker-up:
+	$(RUNNINGTRACKER_COMPOSE) up -d runningtracker runningtracker-test
+
+runningtracker-down:
+	$(RUNNINGTRACKER_COMPOSE) down
+
+runningtracker-logs:
+	$(RUNNINGTRACKER_COMPOSE) logs -f runningtracker
+
+runningtracker-reboot:
+	$(RUNNINGTRACKER_COMPOSE) down
+	$(RUNNINGTRACKER_COMPOSE) up -d runningtracker runningtracker-test
+
+# Tailnet-only exposure of the NATIVE API for AtlasPhone (HUMAN STEP; see Access/Tailscale/readme.md).
+# Prerequisites: HTTPS certificates + MagicDNS enabled in the tailnet admin console. Funnel is never used.
+# Syntax verified against `tailscale serve --help` (1.104.5): --set-path mounts the URL path; the target carries the
+# same path because the mount path is not forwarded. NOT executed by the implementer; confirm with `make runningtracker-tailnet-status`.
+RUNNINGTRACKER_NATIVE_PATH=/api/runningtracker/native
+RUNNINGTRACKER_TAILNET_PORT=8443
+
+runningtracker-tailnet-up:
+	sudo tailscale serve --bg --https=$(RUNNINGTRACKER_TAILNET_PORT) --set-path=$(RUNNINGTRACKER_NATIVE_PATH) \
+	  http://127.0.0.1:8029$(RUNNINGTRACKER_NATIVE_PATH)
+
+runningtracker-tailnet-down:
+	sudo tailscale serve --https=$(RUNNINGTRACKER_TAILNET_PORT) --set-path=$(RUNNINGTRACKER_NATIVE_PATH) off
+
+runningtracker-tailnet-status:
+	@sudo tailscale serve status
+	@echo "Funnel must be OFF:"; sudo tailscale funnel status || true
+
+# endregion
+
+
 # region --- Application: StoryReader
 STORYREADER_DIR=../03_Application/StoryReader
 
@@ -783,6 +828,7 @@ net-connect:
 	@docker network connect atlas-net atlas-claudeconsole     2>/dev/null || true
 	@docker network connect atlas-net atlas-storyreader       2>/dev/null || true
 	@docker network connect atlas-net atlas-kitchen           2>/dev/null || true
+	@docker network connect atlas-net atlas-runningtracker    2>/dev/null || true
 
 up:
 	@test -f $(SYSTEM_SECRETS) || \
@@ -818,6 +864,7 @@ up:
 	$(MAKE) storyreader-schema
 	$(MAKE) storyreader-build storyreader-up
 	$(MAKE) kitchen-build    kitchen-up
+	$(MAKE) runningtracker-build runningtracker-up
 	$(MAKE) console-schema
 	$(MAKE) console-build    console-up
 	$(MAKE) cloudflared-up

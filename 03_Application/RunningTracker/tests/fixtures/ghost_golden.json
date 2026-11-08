@@ -1,0 +1,77 @@
+{
+ "comment": "Shared oracle for the ghost comparison (server reference + future Kotlin engine). Sign convention: time_gap_s negative = ahead; lead_m positive = ahead. null = unknown, never a fabricated number.",
+ "profile": [
+  [
+   0,
+   0,
+   100
+  ],
+  [
+   455,
+   1000,
+   140
+  ],
+  [
+   900,
+   2000,
+   150
+  ],
+  [
+   1400,
+   3000,
+   null
+  ],
+  [
+   1936,
+   4000,
+   165
+  ]
+ ],
+ "cases": [
+  {
+   "my_t": 890,
+   "my_s": 2000,
+   "time_gap_s": -10.0,
+   "lead_m": 22.47191011235955,
+   "ghost_hr_at_position": 150.0,
+   "ghost_hr_at_time": 149.77528089887642,
+   "ghost_finished": false
+  },
+  {
+   "my_t": 0,
+   "my_s": 0,
+   "time_gap_s": 0.0,
+   "lead_m": 0.0,
+   "ghost_hr_at_position": 100.0,
+   "ghost_hr_at_time": 100.0,
+   "ghost_finished": false
+  },
+  {
+   "my_t": 1000,
+   "my_s": 2400,
+   "time_gap_s": -100.0,
+   "lead_m": 200.0,
+   "ghost_hr_at_position": null,
+   "ghost_hr_at_time": null,
+   "ghost_finished": false
+  },
+  {
+   "my_t": 2100,
+   "my_s": 4000,
+   "time_gap_s": 164.0,
+   "lead_m": 0.0,
+   "ghost_hr_at_position": 165.0,
+   "ghost_hr_at_time": null,
+   "ghost_finished": true
+  },
+  {
+   "my_t": 500,
+   "my_s": 4500,
+   "time_gap_s": null,
+   "lead_m": 3398.876404494382,
+   "ghost_hr_at_position": null,
+   "ghost_hr_at_time": 141.01123595505618,
+   "ghost_finished": false
+  }
+ ]
+}

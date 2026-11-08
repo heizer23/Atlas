@@ -1,0 +1,757 @@
+{
+  "component_name": "runningtracker",
+  "target_root": "03_Application/RunningTracker",
+  "cross_layer_note": "Backend and web live under 03_Application/RunningTracker. Native files live under 01_System/AtlasPhone (host app, package net.linspad.atlasphone). Shell/System integration files are listed with change markers. Files marked change=changed exist already; all others are new.",
+  "directories": [
+    "03_Application/RunningTracker",
+    "03_Application/RunningTracker/backend",
+    "03_Application/RunningTracker/backend/routers",
+    "03_Application/RunningTracker/src",
+    "03_Application/RunningTracker/tests",
+    "03_Application/RunningTracker/tests/fixtures",
+    "03_Application/RunningTracker/tests/ui",
+    "01_System/AtlasPhone/Sprint02_RunningScreen",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/auth",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/net",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metrics",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/session",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/sync",
+    "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui",
+    "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running"
+  ],
+  "files": [
+    {
+      "path": "03_Application/RunningTracker/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "Same pattern as 03_Application/StorageTracker/Dockerfile (python:3.12-slim, platform packages on PYTHONPATH, copy backend, schema.sql, tests incl. fixtures).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/pyproject.toml",
+      "stub_kind": "config",
+      "role": "Dependencies as StorageTracker (fastapi, uvicorn, psycopg2-binary, pydantic) plus dev: pytest, httpx.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/compose.yml",
+      "stub_kind": "compose",
+      "role": "Service runningtracker (container atlas-runningtracker, ports 127.0.0.1:8029:8000 ONLY, env ATLAS_PG_*, RUNNINGTRACKER_NATIVE_BASE_URL with empty default, logs volume ${DATA_ROOT}/runningtracker/logs, network atlas-net external) and service runningtracker-test (container atlas-runningtracker-test, ATLAS_PG_DB=atlas_test, command sleep infinity, no ports), Kitchen pattern.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/schema.sql",
+      "stub_kind": "sql",
+      "role": "Runtime copy of 10_schema.sql (single canonical runtime path, R-CON-BP-07). Executed idempotently by backend/database.py init_schema.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/config.py",
+      "stub_kind": "python_module",
+      "role": "Single home of every tunable constant (declare once). Metric constants are shared in value with Kotlin RunMetrics via tests/fixtures/metrics_golden.json.",
+      "public_objects": [
+        {"kind": "constant", "name": "PAIRING_CODE_LENGTH", "pattern": "constant", "methods": [], "value": "8"},
+        {"kind": "constant", "name": "PAIRING_CODE_ALPHABET", "pattern": "constant", "methods": [], "value": "'23456789ABCDEFGHJKMNPQRSTUVWXYZ' (31 chars, no 0 O 1 I L)"},
+        {"kind": "constant", "name": "PAIRING_CODE_TTL_SECONDS", "pattern": "constant", "methods": [], "value": "300"},
+        {"kind": "constant", "name": "PAIRING_MAX_FAILURES", "pattern": "constant", "methods": [], "value": "5"},
+        {"kind": "constant", "name": "PAIRING_FAILURE_WINDOW_SECONDS", "pattern": "constant", "methods": [], "value": "300"},
+        {"kind": "constant", "name": "PREPARED_RUN_TTL_HOURS", "pattern": "constant", "methods": [], "value": "48"},
+        {"kind": "constant", "name": "SHORT_ID_LENGTH", "pattern": "constant", "methods": [], "value": "6 (same alphabet as pairing codes)"},
+        {"kind": "constant", "name": "MAX_SAMPLES_PER_BATCH", "pattern": "constant", "methods": [], "value": "2000"},
+        {"kind": "constant", "name": "MAX_BODY_BYTES", "pattern": "constant", "methods": [], "value": "2000000"},
+        {"kind": "constant", "name": "DEVICE_LAST_USED_THROTTLE_SECONDS", "pattern": "constant", "methods": [], "value": "60"},
+        {"kind": "constant", "name": "ALGO_VERSION", "pattern": "constant", "methods": [], "value": "1"},
+        {"kind": "constant", "name": "ACCURACY_MAX_M", "pattern": "constant", "methods": [], "value": "30.0"},
+        {"kind": "constant", "name": "MIN_STEP_M", "pattern": "constant", "methods": [], "value": "1.0"},
+        {"kind": "constant", "name": "MAX_SPEED_MPS", "pattern": "constant", "methods": [], "value": "12.0"},
+        {"kind": "constant", "name": "SMOOTHING_WINDOW_S", "pattern": "constant", "methods": [], "value": "10"},
+        {"kind": "constant", "name": "SPLIT_DISTANCE_M", "pattern": "constant", "methods": [], "value": "1000.0"},
+        {"kind": "constant", "name": "PARTIAL_SPLIT_MIN_M", "pattern": "constant", "methods": [], "value": "10.0"},
+        {"kind": "constant", "name": "SERIES_BUCKET_S", "pattern": "constant", "methods": [], "value": "5"},
+        {"kind": "constant", "name": "DEFAULT_PAGE_SIZE", "pattern": "constant", "methods": [], "value": "25 (max 100)"},
+        {"kind": "constant", "name": "PAIRING_QR_PREFIX", "pattern": "constant", "methods": [], "value": "'ATLASRUN1' (payload format ATLASRUN1|<base_url>|<code>, built by src/pairingPayload.ts, parsed by Kotlin PairingPayload)"}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/database.py",
+      "stub_kind": "python_module",
+      "role": "Connection pool and idempotent schema init, identical pattern to StorageTracker backend/database.py.",
+      "public_objects": [
+        {
+          "kind": "function", "name": "init_pool", "pattern": "factory",
+          "methods": [{"name": "init_pool", "visibility": "public", "args": [], "returns": "None", "purpose": "Create the psycopg2 SimpleConnectionPool with RealDictCursor."}]
+        },
+        {
+          "kind": "function", "name": "init_schema", "pattern": "factory",
+          "methods": [{"name": "init_schema", "visibility": "public", "args": [], "returns": "None", "purpose": "Execute schema.sql."}]
+        },
+        {
+          "kind": "function", "name": "get_db", "pattern": "factory",
+          "methods": [{"name": "get_db", "visibility": "public", "args": [], "returns": "ContextManager[connection]", "purpose": "Yield a pooled connection; roll back on error."}]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/models.py",
+      "stub_kind": "python_module",
+      "role": "Pydantic request/response records for native endpoints and web mutation bodies (authoritative signatures for every wire record; extra keys forbidden on all request models).",
+      "public_objects": [
+        {"kind": "class", "name": "StreamCounts", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["location: int", "heart_rate: int"], "returns": "StreamCounts", "purpose": "Per-stream integer counts or cursors (>= 0)."}]},
+        {"kind": "class", "name": "PairRequest", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["code: str", "device_name: str"], "returns": "PairRequest", "purpose": "Body of POST /native/pair; device_name 1..60 chars."}]},
+        {"kind": "class", "name": "PairResponse", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["device_id: str", "device_token: str", "device_name: str"], "returns": "PairResponse", "purpose": "Token returned exactly once."}]},
+        {"kind": "class", "name": "PreparedRunOut", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["id: str", "short_id: str", "run_type: str", "title: Optional[str]", "planned_for: Optional[datetime]", "expires_at: datetime"], "returns": "PreparedRunOut", "purpose": "One prepared run as downloaded by the phone."}]},
+        {"kind": "class", "name": "PreparedRunList", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["prepared_runs: list[PreparedRunOut]"], "returns": "PreparedRunList", "purpose": "Native list response."}]},
+        {"kind": "class", "name": "PreparedRunCreate", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["title: Optional[str] = None", "planned_for: Optional[datetime] = None"], "returns": "PreparedRunCreate", "purpose": "Body of POST /prepared-runs."}]},
+        {"kind": "class", "name": "BeginRequest", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["run_type: Literal['continuous'] = 'continuous'", "started_at: datetime"], "returns": "BeginRequest", "purpose": "Body of begin; started_at is phone UTC."}]},
+        {"kind": "class", "name": "BeginResponse", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["run_id: str", "status: str", "high_seq: StreamCounts", "contiguous_seq: int"], "returns": "BeginResponse", "purpose": "Run status plus resume cursors (R1)."}]},
+        {"kind": "class", "name": "SampleIn", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["stream: Literal['location','heart_rate']", "seq: int", "payload: dict"], "returns": "SampleIn", "purpose": "One raw sample; payload is the Mobile Platform public payload (SampleJson) incl. optional elapsedRealtimeNanos; payload.timestamp (ISO-8601 UTC) becomes sample_ts."}]},
+        {"kind": "class", "name": "SamplesBatch", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["samples: list[SampleIn]"], "returns": "SamplesBatch", "purpose": "1..MAX_SAMPLES_PER_BATCH samples."}]},
+        {"kind": "class", "name": "SamplesResponse", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["stored: int", "duplicates: int", "high_seq: StreamCounts", "contiguous_seq: int"], "returns": "SamplesResponse", "purpose": "Upload acknowledgement and resume cursors."}]},
+        {"kind": "class", "name": "PauseIn", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["started_at: datetime", "ended_at: datetime", "started_elapsed_s: float", "ended_elapsed_s: float"], "returns": "PauseIn", "purpose": "One closed manual pause (UTC stamps plus phone monotonic offsets from run start)."}]},
+        {"kind": "class", "name": "FinishRequest", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["finished_at: datetime", "elapsed_s: float", "moving_s: float", "distance_m: float", "last_seq: int", "expected_counts: StreamCounts", "pauses: list[PauseIn]", "dropped: int = 0"], "returns": "FinishRequest", "purpose": "Run summary reported by the phone plus verification inputs; dropped is informational (samples refused by the phone buffer never received a seq)."}]},
+        {"kind": "class", "name": "SeqRange", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["start: int", "end: int"], "returns": "SeqRange", "purpose": "Inclusive range of missing sequence numbers."}]},
+        {"kind": "class", "name": "CountMismatch", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["stream: str", "expected: int", "stored: int"], "returns": "CountMismatch", "purpose": "Stream whose stored count differs from expected_counts."}]},
+        {"kind": "class", "name": "FinishResponse", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["result: Literal['complete','incomplete']", "run_id: str", "verified_counts: StreamCounts", "missing_seq_ranges: list[SeqRange]", "count_mismatch: list[CountMismatch]", "high_seq: StreamCounts", "contiguous_seq: int"], "returns": "FinishResponse", "purpose": "Verification outcome; verified_counts = stored counts."}]},
+        {"kind": "class", "name": "RunPatch", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["comment: Optional[str] = None"], "returns": "RunPatch", "purpose": "PATCH body. Use model_fields_set to tell omitted from explicit null (invariant U1); unknown keys rejected with 422; comment max 2000 chars."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/security.py",
+      "stub_kind": "python_module",
+      "role": "Hashing, token generation, native auth dependency and public-route backstop (flow step 3).",
+      "public_objects": [
+        {"kind": "class", "name": "DeviceContext", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["device_id: str", "name: str"], "returns": "DeviceContext", "purpose": "Authenticated device."}]},
+        {"kind": "function", "name": "sha256_hex", "pattern": "mapper", "methods": [{"name": "sha256_hex", "visibility": "public", "args": ["value: str"], "returns": "str", "purpose": "Hex digest used for tokens and codes."}]},
+        {"kind": "function", "name": "new_device_token", "pattern": "factory", "methods": [{"name": "new_device_token", "visibility": "public", "args": [], "returns": "str", "purpose": "256-bit CSPRNG token (secrets.token_urlsafe(32))."}]},
+        {"kind": "function", "name": "native_guard", "pattern": "validator", "methods": [{"name": "native_guard", "visibility": "public", "args": ["request: Request"], "returns": "None", "purpose": "FastAPI dependency for ALL native routes: 403 NATIVE_ROUTE_FORBIDDEN when CF-Connecting-IP is present; 413 when Content-Length > MAX_BODY_BYTES."}]},
+        {"kind": "function", "name": "require_device", "pattern": "validator", "methods": [{"name": "require_device", "visibility": "public", "args": ["request: Request"], "returns": "DeviceContext", "purpose": "FastAPI dependency for authenticated native routes: Bearer token -> non-revoked device else 401 DEVICE_UNAUTHORIZED; throttled last_used_at update."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/pairing.py",
+      "stub_kind": "python_module",
+      "role": "Pairing code lifecycle, lockout and device revocation (invariants S3, S4).",
+      "public_objects": [
+        {"kind": "function", "name": "create_pairing_code", "pattern": "service", "methods": [{"name": "create_pairing_code", "visibility": "public", "args": ["conn"], "returns": "tuple[str, str, datetime]", "purpose": "Returns (code_id, plain_code, expires_at); stores only the hash."}]},
+        {"kind": "function", "name": "redeem_pairing_code", "pattern": "service", "methods": [{"name": "redeem_pairing_code", "visibility": "public", "args": ["conn", "code: str", "device_name: str"], "returns": "PairResponse", "purpose": "Applies S3/S4. Raises PairingFailed (403) or PairingRateLimited (429) defined in this module."}]},
+        {"kind": "class", "name": "PairingFailed", "pattern": "exception", "methods": []},
+        {"kind": "class", "name": "PairingRateLimited", "pattern": "exception", "methods": []},
+        {"kind": "function", "name": "revoke_device", "pattern": "service", "methods": [{"name": "revoke_device", "visibility": "public", "args": ["conn", "device_id: str"], "returns": "Optional[dict]", "purpose": "Set revoked_at once; None if device unknown."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/verification.py",
+      "stub_kind": "python_module",
+      "role": "Finish verification V1 and resume cursors R1.",
+      "public_objects": [
+        {"kind": "function", "name": "compute_gaps", "pattern": "validator", "methods": [{"name": "compute_gaps", "visibility": "public", "args": ["present_seqs: list[int]", "last_seq: int"], "returns": "list[tuple[int, int]]", "purpose": "Pure: inclusive ranges missing from 1..last_seq; seqs > last_seq are ignored here (they surface as count mismatch)."}]},
+        {"kind": "function", "name": "contiguous_prefix", "pattern": "validator", "methods": [{"name": "contiguous_prefix", "visibility": "public", "args": ["present_seqs: list[int]"], "returns": "int", "purpose": "Pure: largest N with 1..N all present (0 if none)."}]},
+        {"kind": "function", "name": "read_cursors", "pattern": "repository", "methods": [{"name": "read_cursors", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "tuple[StreamCounts, int]", "purpose": "Per-stream max seq and contiguous prefix from run_samples."}]},
+        {"kind": "function", "name": "verify_run", "pattern": "service", "methods": [{"name": "verify_run", "visibility": "public", "args": ["conn", "run_id: str", "expected_counts: StreamCounts", "last_seq: int"], "returns": "FinishResponse", "purpose": "Apply V1; returns the response record (result complete or incomplete) without changing run status."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/metrics.py",
+      "stub_kind": "python_module",
+      "role": "Pure implementation of algorithm A1 (algo_version 1) plus persistence of run_metrics.",
+      "public_objects": [
+        {"kind": "class", "name": "SampleRow", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["seq: int", "ts: datetime", "payload: dict"], "returns": "SampleRow", "purpose": "One stored sample."}]},
+        {"kind": "class", "name": "PauseRow", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["started_at: datetime", "ended_at: datetime"], "returns": "PauseRow", "purpose": "Pause interval used for exclusion and moving-time axis."}]},
+        {"kind": "class", "name": "MetricsResult", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["server_distance_m: float", "avg_hr: Optional[float]", "max_hr: Optional[int]", "splits: list[dict]", "pace_series: list[list[float]]", "hr_series: list[list[float]]"], "returns": "MetricsResult", "purpose": "Shape stored in run_metrics (splits dict keys match SplitRow minus id; series entries are [t_s, value])."}]},
+        {"kind": "function", "name": "compute_metrics", "pattern": "service", "methods": [{"name": "compute_metrics", "visibility": "public", "args": ["locations: list[SampleRow]", "heart_rates: list[SampleRow]", "pauses: list[PauseRow]", "started_at: datetime"], "returns": "MetricsResult", "purpose": "Pure A1. started_at is the series time origin (no database access, no clock)."}]},
+        {"kind": "function", "name": "recompute_and_store", "pattern": "repository", "methods": [{"name": "recompute_and_store", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "None", "purpose": "Load samples and pauses ordered by seq, run compute_metrics, upsert run_metrics with ALGO_VERSION."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/datasets.py",
+      "stub_kind": "python_module",
+      "role": "Dataset builders implementing the row shapes declared in 10_architecture.json exposed_surfaces (object_type, schema keys, row_actions).",
+      "public_objects": [
+        {"kind": "function", "name": "runs_dataset", "pattern": "mapper", "methods": [{"name": "runs_dataset", "visibility": "public", "args": ["rows: list[dict]", "total: int", "page: int", "page_size: int"], "returns": "Dataset", "purpose": "RunRow Dataset (derives sync_state and avg_pace_s_per_km)."}]},
+        {"kind": "function", "name": "splits_dataset", "pattern": "mapper", "methods": [{"name": "splits_dataset", "visibility": "public", "args": ["splits: list[dict]"], "returns": "Dataset", "purpose": "SplitRow Dataset."}]},
+        {"kind": "function", "name": "series_dataset", "pattern": "mapper", "methods": [{"name": "series_dataset", "visibility": "public", "args": ["metric: str", "points: list[list[float]]"], "returns": "Dataset", "purpose": "SeriesRow Dataset (unpaginated)."}]},
+        {"kind": "function", "name": "prepared_dataset", "pattern": "mapper", "methods": [{"name": "prepared_dataset", "visibility": "public", "args": ["rows: list[dict]"], "returns": "Dataset", "purpose": "PreparedRunRow Dataset; is_expired computed by the SQL (now() > expires_at)."}]},
+        {"kind": "function", "name": "devices_dataset", "pattern": "mapper", "methods": [{"name": "devices_dataset", "visibility": "public", "args": ["rows: list[dict]"], "returns": "Dataset", "purpose": "DeviceRow Dataset."}]},
+        {"kind": "function", "name": "pairing_code_dataset", "pattern": "mapper", "methods": [{"name": "pairing_code_dataset", "visibility": "public", "args": ["code_id: str", "code: str", "expires_at: datetime", "native_base_url: Optional[str]"], "returns": "Dataset", "purpose": "Single-row PairingCodeRow Dataset."}]},
+        {"kind": "function", "name": "empty_dataset", "pattern": "mapper", "methods": [{"name": "empty_dataset", "visibility": "public", "args": ["object_type: str", "label: str"], "returns": "Dataset", "purpose": "Empty Dataset for delete responses."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/runs.py",
+      "stub_kind": "python_module",
+      "role": "Web routes: runs list/detail/splits/series/patch/delete.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "methods": []},
+        {"kind": "function", "name": "list_runs", "pattern": "router", "methods": [{"name": "list_runs", "visibility": "public", "args": ["status: Optional[str] = None", "page: int = 1", "page_size: int = 25"], "returns": "Dataset", "purpose": "GET /runs."}]},
+        {"kind": "function", "name": "get_run", "pattern": "router", "methods": [{"name": "get_run", "visibility": "public", "args": ["run_id: str"], "returns": "Dataset", "purpose": "GET /runs/{id}."}]},
+        {"kind": "function", "name": "get_splits", "pattern": "router", "methods": [{"name": "get_splits", "visibility": "public", "args": ["run_id: str"], "returns": "Dataset", "purpose": "GET /runs/{id}/splits."}]},
+        {"kind": "function", "name": "get_series", "pattern": "router", "methods": [{"name": "get_series", "visibility": "public", "args": ["run_id: str", "metric: str"], "returns": "Dataset", "purpose": "GET /runs/{id}/series."}]},
+        {"kind": "function", "name": "patch_run", "pattern": "router", "methods": [{"name": "patch_run", "visibility": "public", "args": ["run_id: str", "body: RunPatch"], "returns": "Dataset", "purpose": "PATCH /runs/{id} (U1)."}]},
+        {"kind": "function", "name": "delete_run", "pattern": "router", "methods": [{"name": "delete_run", "visibility": "public", "args": ["run_id: str"], "returns": "Dataset", "purpose": "DELETE /runs/{id}."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/pairing_web.py",
+      "stub_kind": "python_module",
+      "role": "Web routes: prepared runs, pairing codes, devices.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "methods": []},
+        {"kind": "function", "name": "list_prepared_runs", "pattern": "router", "methods": [{"name": "list_prepared_runs", "visibility": "public", "args": [], "returns": "Dataset", "purpose": "GET /prepared-runs."}]},
+        {"kind": "function", "name": "create_prepared_run", "pattern": "router", "methods": [{"name": "create_prepared_run", "visibility": "public", "args": ["body: PreparedRunCreate"], "returns": "Dataset", "purpose": "POST /prepared-runs (201)."}]},
+        {"kind": "function", "name": "create_code", "pattern": "router", "methods": [{"name": "create_code", "visibility": "public", "args": [], "returns": "Dataset", "purpose": "POST /pairing-codes (201)."}]},
+        {"kind": "function", "name": "list_devices", "pattern": "router", "methods": [{"name": "list_devices", "visibility": "public", "args": [], "returns": "Dataset", "purpose": "GET /devices."}]},
+        {"kind": "function", "name": "revoke", "pattern": "router", "methods": [{"name": "revoke", "visibility": "public", "args": ["device_id: str"], "returns": "Dataset", "purpose": "POST /devices/{id}/revoke."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/native.py",
+      "stub_kind": "python_module",
+      "role": "Native routes under /native (machine-to-machine, tailnet only, exempt from Dataset; ApiError on failure). Router-level dependency native_guard; every route except pair also depends on require_device.",
+      "public_objects": [
+        {"kind": "constant", "name": "router", "pattern": "router", "methods": []},
+        {"kind": "function", "name": "pair", "pattern": "router", "methods": [{"name": "pair", "visibility": "public", "args": ["body: PairRequest"], "returns": "PairResponse", "purpose": "POST /native/pair."}]},
+        {"kind": "function", "name": "native_list_prepared", "pattern": "router", "methods": [{"name": "native_list_prepared", "visibility": "public", "args": ["device: DeviceContext"], "returns": "PreparedRunList", "purpose": "GET /native/prepared-runs."}]},
+        {"kind": "function", "name": "native_get_prepared", "pattern": "router", "methods": [{"name": "native_get_prepared", "visibility": "public", "args": ["run_id: str", "device: DeviceContext"], "returns": "PreparedRunOut", "purpose": "GET /native/prepared-runs/{id}."}]},
+        {"kind": "function", "name": "begin", "pattern": "router", "methods": [{"name": "begin", "visibility": "public", "args": ["run_id: str", "body: BeginRequest", "device: DeviceContext"], "returns": "BeginResponse", "purpose": "POST /native/runs/{id}/begin (branch table in the begin surface)."}]},
+        {"kind": "function", "name": "put_samples", "pattern": "router", "methods": [{"name": "put_samples", "visibility": "public", "args": ["run_id: str", "body: SamplesBatch", "device: DeviceContext"], "returns": "SamplesResponse", "purpose": "PUT /native/runs/{id}/samples."}]},
+        {"kind": "function", "name": "finish", "pattern": "router", "methods": [{"name": "finish", "visibility": "public", "args": ["run_id: str", "body: FinishRequest", "device: DeviceContext"], "returns": "FinishResponse", "purpose": "POST /native/runs/{id}/finish."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI app (StorageTracker pattern): logging, CORS (localhost only), exception handlers, request timing; web routers under prefix /api/runningtracker, native router under /api/runningtracker/native; startup pool + schema retry loop.",
+      "public_objects": [
+        {"kind": "constant", "name": "app", "pattern": "factory", "methods": []}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/conftest.py",
+      "stub_kind": "python_module",
+      "role": "Fixtures as StorageTracker conftest: schema applied once, truncate runningtracker tables then load fixtures.sql before each test, TestClient, helper to mint a device token and auth headers.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures.sql",
+      "stub_kind": "sql",
+      "role": "Test world: active device fix-device-1 (known token via conftest), revoked device fix-device-2, a prepared run (fresh) and an expired prepared run, one complete run with 20 samples per stream, pauses and metrics, one uploading run with a gap, active/expired/used pairing codes.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures/metrics_golden.json",
+      "stub_kind": "json",
+      "role": "Golden vectors for algorithm A1 (inputs: location and heart-rate samples, pauses, started_at; expected: distance, splits, avg/max hr, series). Read by pytest AND by the Kotlin RunMetricsTest (path ../../03_Application/RunningTracker/tests/fixtures/metrics_golden.json relative to 01_System/AtlasPhone). Tolerances: distance 0.5 m, durations 0.5 s.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_pairing.py",
+      "stub_kind": "python_module",
+      "role": "Pairing, lockout, revoke, token scoping scenarios.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_native_sync.py",
+      "stub_kind": "python_module",
+      "role": "begin / samples / finish / ownership / adoption / idempotency / verification scenarios.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_metrics.py",
+      "stub_kind": "python_module",
+      "role": "A1 golden-vector scenarios and recompute persistence.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_web_api.py",
+      "stub_kind": "python_module",
+      "role": "Web list/detail/splits/series/PATCH/DELETE/prepared/devices/pairing-code scenarios (Dataset | ApiError).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_shell_proxy.py",
+      "stub_kind": "python_module",
+      "role": "Full-stack proxy checks against http://atlas-shell (StorageTracker pattern): web paths proxied as JSON; /api/runningtracker/native/* answers 404 and never reaches the backend.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/pairingPayload.ts",
+      "stub_kind": "typescript_module",
+      "role": "Builds the QR/text pairing payload (format constant PAIRING_QR_PREFIX in config.py is the single definition).",
+      "public_objects": [
+        {"kind": "function", "name": "buildPairingPayload", "pattern": "mapper", "methods": [{"name": "buildPairingPayload", "visibility": "public", "args": ["baseUrl: string | null", "code: string"], "returns": "string", "purpose": "Returns 'ATLASRUN1|<baseUrl>|<code>', or the bare code when baseUrl is null."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/shellConfig.ts",
+      "stub_kind": "typescript_module",
+      "role": "AppRegistry.register side-effect module (StorageTracker/Kitchen pattern, AppConfig 1.1.0): appId running, label Running, basePath /running, launcherIcon directions_run, launcherTone teal, lazy ShellEntry, nav Run/History/Devices (invariant D3).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/ShellEntry.tsx",
+      "stub_kind": "react_component",
+      "role": "Default-exported root with routes /running, /running/history, /running/history/:id, /running/devices.",
+      "public_objects": [
+        {"kind": "function", "name": "ShellEntry", "pattern": "router", "methods": [{"name": "ShellEntry", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "Routes to the four pages."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/RunPage.tsx",
+      "stub_kind": "react_component",
+      "role": "Run page: Free Run explanation (phone only), create/list/delete prepared runs.",
+      "public_objects": [{"kind": "function", "name": "RunPage", "pattern": "view", "methods": [{"name": "RunPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "Prepared runs view."}]}],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/HistoryPage.tsx",
+      "stub_kind": "react_component",
+      "role": "History table with sync state, pagination.",
+      "public_objects": [{"kind": "function", "name": "HistoryPage", "pattern": "view", "methods": [{"name": "HistoryPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "Runs list."}]}],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/RunDetailPage.tsx",
+      "stub_kind": "react_component",
+      "role": "Run detail: summary, pace and HR LineCharts, splits table, comment edit (U1 round trip), delete with confirmation. No map.",
+      "public_objects": [{"kind": "function", "name": "RunDetailPage", "pattern": "view", "methods": [{"name": "RunDetailPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "Run detail view."}]}],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/DevicesPage.tsx",
+      "stub_kind": "react_component",
+      "role": "Pair phone (code text, QR via qrcode.react, expiry countdown) and device list with Revoke.",
+      "public_objects": [{"kind": "function", "name": "DevicesPage", "pattern": "view", "methods": [{"name": "DevicesPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "Pairing and devices view."}]}],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/ui/running_web.spec.ts",
+      "stub_kind": "playwright_spec",
+      "role": "Playwright specs for the [UI] scenarios with stubbed API responses (Kitchen cook_allocation.spec.ts pattern).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/nginx.conf",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add, in this order: `location ^~ /api/runningtracker/native { return 404; }` then `location /api/runningtracker { proxy_pass to atlas-runningtracker:8000 }` using the existing lazy-resolver block pattern.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/Dockerfile",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add `COPY 03_Application/RunningTracker/src/ 03_Application/RunningTracker/src/`.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/src/shell/main.tsx",
+      "change": "changed",
+      "stub_kind": "typescript_module",
+      "role": "Add side-effect import of 03_Application/RunningTracker/src/shellConfig.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/package.json",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add dependency qrcode.react (optional QR, open question Q4). package-lock.json updated accordingly.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/config.env",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add commented RUNNINGTRACKER_NATIVE_BASE_URL (non-secret, https://<host>.<tailnet>.ts.net:8443 set by the operator) and the port note 'RunningTracker 8029 (127.0.0.1)'.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/Makefile",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add targets runningtracker-tailnet-up / -down / -status wrapping the verified `tailscale serve` command for the path-limited mount (final syntax per open question Q2; never funnel). Targets are run by the human.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/Access/Tailscale/readme.md",
+      "change": "changed",
+      "stub_kind": "markdown",
+      "role": "Document the RunningTracker native mount: operator prerequisites (HTTPS certificates, MagicDNS), the make targets, verification (`tailscale serve status`, funnel off, curl from the phone's tailnet), and the optional ACL recommendation.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md",
+      "stub_kind": "markdown",
+      "role": "Native API documentation (pairing, AtlasClient, RunLifecycle, RunMetrics, UploadWorker, Running Screen, spike result) with per-statement status tags [tested: JVM] / [built] / [unverified]; hardware items stay unverified until performed.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/build.gradle.kts",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add implementation androidx.work:work-runtime-ktx and (optional) play-services-code-scanner. No other change; TWA/FCM dependencies untouched.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/AndroidManifest.xml",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Declare .running.ui.RunningActivity (exported=false, singleTop). Nothing else changes; the optional spike alias is added only if the spike succeeds (see deferrals). No network-security config (https only).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/res/xml/shortcuts.xml",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add shortcut running_screen targeting .running.ui.RunningActivity (existing mobile_platform_test shortcut unchanged).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/res/values/strings.xml",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Add shortcut labels and Running Screen texts.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/res/xml/backup_rules.xml",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Exclude shared prefs atlas_run_pairing.xml and database mobile_captures.db from backup.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/res/xml/data_extraction_rules.xml",
+      "change": "changed",
+      "stub_kind": "config",
+      "role": "Same exclusions for cloud-backup and device-transfer sections.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/model/Samples.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Additive stamps (draft section 3): RawLocation and RawHeartRate gain `elapsedRealtimeNanos: Long? = null` (default keeps all callers and tests compiling); SampleJson emits `elapsedRealtimeNanos` (null when absent) for both streams. Nothing else changes.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/location/LocationMapper.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "map() gains optional `elapsedRealtimeNanos: Long? = null` argument copied into RawLocation; LocationTracker passes Location.elapsedRealtimeNanos.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/location/LocationTracker.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Pass Location.elapsedRealtimeNanos into LocationMapper.map.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/heartrate/HeartRateMonitor.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Set RawHeartRate.elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos() at notification arrival.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/capture/CaptureStore.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Extend, do not replace: DB version 1 -> 2; onUpgrade creates table run_meta(capture_id TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL); onCreate creates it too. Adds putRunMeta / getRunMeta / listRunMeta / deleteRunMeta (deleteCapture also removes run_meta). Existing methods and tables unchanged; existing captures stay valid.",
+      "public_objects": [
+        {
+          "kind": "class", "name": "CaptureStore", "pattern": "repository",
+          "methods": [
+            {"name": "putRunMeta", "visibility": "public", "args": ["captureId: String", "json: String"], "returns": "Unit", "purpose": "Upsert serialized RunMeta."},
+            {"name": "getRunMeta", "visibility": "public", "args": ["captureId: String"], "returns": "String?", "purpose": "Serialized RunMeta or null."},
+            {"name": "listRunMeta", "visibility": "public", "args": [], "returns": "List<String>", "purpose": "All serialized RunMeta rows."},
+            {"name": "deleteRunMeta", "visibility": "public", "args": ["captureId: String"], "returns": "Unit", "purpose": "Remove run metadata."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/RunModels.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Authoritative native data types; JSON (de)serialization via org.json. Run id == capture id.",
+      "public_objects": [
+        {"kind": "class", "name": "RunState", "pattern": "enum", "methods": [], "values": "PREPARED, RECORDING, PAUSED, COMPLETED_LOCAL, PENDING_UPLOAD, SYNCED"},
+        {"kind": "class", "name": "PauseRecord", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["startedAtMillis: Long", "endedAtMillis: Long?", "startedElapsedS: Double", "endedElapsedS: Double?"], "returns": "PauseRecord", "purpose": "One pause; open while endedAtMillis is null."}]},
+        {"kind": "class", "name": "RunSummary", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["elapsedS: Double", "movingS: Double", "distanceM: Double", "avgPaceSPerKm: Double?", "avgHr: Double?"], "returns": "RunSummary", "purpose": "Initial stats computed on the phone with RunMetrics."}]},
+        {"kind": "class", "name": "RunMeta", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["captureId: String", "state: RunState", "preparedShortId: String?", "title: String?", "startedAtMillis: Long", "finishedAtMillis: Long?", "pauses: List<PauseRecord>", "summary: RunSummary?", "uploadCursor: Long", "lastError: String?", "needsRepair: Boolean"], "returns": "RunMeta", "purpose": "Persisted in CaptureStore.run_meta."},
+          {"name": "toJson", "visibility": "public", "args": [], "returns": "String", "purpose": "Serialize."},
+          {"name": "fromJson", "visibility": "public", "args": ["json: String"], "returns": "RunMeta", "purpose": "Deserialize (companion)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/RunLifecycle.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Pure lifecycle state machine: prepared -> recording <-> paused -> completed_local -> pending_upload -> synced. A free run enters at RECORDING (previous state null). Recovery enters at PAUSED.",
+      "public_objects": [
+        {"kind": "class", "name": "RunEvent", "pattern": "enum", "methods": [], "values": "START, PAUSE, RESUME, FINISH, QUEUE_UPLOAD, UPLOAD_VERIFIED, RECOVER"},
+        {"kind": "constant", "name": "RunLifecycle", "pattern": "state_machine", "methods": [
+          {"name": "next", "visibility": "public", "args": ["state: RunState?", "event: RunEvent"], "returns": "RunState?", "purpose": "New state, or null when the transition is illegal (callers must not change state on null)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metrics/RunMetrics.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Pure Kotlin implementation of algorithm A1 (same constants as backend/config.py; parity via metrics_golden.json). Incremental accumulator for the live screen plus batch summarize for finish/recovery. Uses elapsedRealtimeNanos for dt when present, else wall time.",
+      "public_objects": [
+        {"kind": "class", "name": "RunMetricsAccumulator", "pattern": "service", "methods": [
+          {"name": "addFix", "visibility": "public", "args": ["fix: RawLocation"], "returns": "Unit", "purpose": "Apply A1 steps 1-3 for one fix (ignored while paused)."},
+          {"name": "addHeartRate", "visibility": "public", "args": ["hr: RawHeartRate"], "returns": "Unit", "purpose": "Track current/avg/max HR outside pauses."},
+          {"name": "pause", "visibility": "public", "args": ["atMillis: Long"], "returns": "Unit", "purpose": "Start a pause; resets the anchor."},
+          {"name": "resume", "visibility": "public", "args": ["atMillis: Long"], "returns": "Unit", "purpose": "End the pause."},
+          {"name": "snapshot", "visibility": "public", "args": ["nowMillis: Long"], "returns": "LiveMetrics", "purpose": "Distance, current smoothed pace, average pace on moving time, HR values, GPS quality (last accuracy)."}
+        ]},
+        {"kind": "class", "name": "LiveMetrics", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["distanceM: Double", "currentPaceSPerKm: Double?", "avgPaceSPerKm: Double?", "movingS: Double", "elapsedS: Double", "currentHr: Int?", "avgHr: Double?", "lastAccuracyM: Float?"], "returns": "LiveMetrics", "purpose": "Values shown while recording."}]},
+        {"kind": "constant", "name": "RunMetrics", "pattern": "service", "methods": [
+          {"name": "summarize", "visibility": "public", "args": ["locations: List<RawLocation>", "heartRates: List<RawHeartRate>", "pauses: List<PauseRecord>", "startedAtMillis: Long", "finishedAtMillis: Long"], "returns": "RunSummary", "purpose": "Batch A1 for finish and recovery (rebuilds state from stored samples)."},
+          {"name": "splits", "visibility": "public", "args": ["locations: List<RawLocation>", "heartRates: List<RawHeartRate>", "pauses: List<PauseRecord>"], "returns": "List<SplitInfo>", "purpose": "Per-km splits for the finish summary and golden-vector parity."}
+        ]},
+        {"kind": "class", "name": "SplitInfo", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["km: Int", "distanceM: Double", "durationS: Double", "paceSPerKm: Double", "avgHr: Double?", "partial: Boolean"], "returns": "SplitInfo", "purpose": "One split."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/auth/TokenStore.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Device token and server URL persistence. Token encrypted with an Android Keystore AES-GCM key via SecretCipher; ciphertext in SharedPreferences atlas_run_pairing (excluded from backup). Plain token never logged, never in URLs or deep links.",
+      "public_objects": [
+        {"kind": "class", "name": "SecretCipher", "pattern": "interface", "methods": [
+          {"name": "encrypt", "visibility": "public", "args": ["plain: ByteArray"], "returns": "ByteArray", "purpose": "Return iv + ciphertext."},
+          {"name": "decrypt", "visibility": "public", "args": ["blob: ByteArray"], "returns": "ByteArray", "purpose": "Inverse; throws on tamper/missing key."}
+        ]},
+        {"kind": "class", "name": "KeystoreAesGcmCipher", "pattern": "adapter", "methods": [{"name": "constructor", "visibility": "public", "args": ["alias: String = \"atlasphone_run_token\""], "returns": "KeystoreAesGcmCipher", "purpose": "AES/GCM/NoPadding, key generated in AndroidKeyStore if absent."}]},
+        {"kind": "class", "name": "TokenStore", "pattern": "repository", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["prefs: SharedPreferences", "cipher: SecretCipher"], "returns": "TokenStore", "purpose": "Injected for JVM tests (fake cipher, Robolectric prefs)."},
+          {"name": "savePairing", "visibility": "public", "args": ["baseUrl: String", "deviceId: String", "token: String"], "returns": "Unit", "purpose": "Encrypt and store; rejects non-https baseUrl."},
+          {"name": "token", "visibility": "public", "args": [], "returns": "String?", "purpose": "Decrypted token or null (also null if decryption fails)."},
+          {"name": "baseUrl", "visibility": "public", "args": [], "returns": "String?", "purpose": "Stored server URL."},
+          {"name": "clear", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Forget pairing (after 401 the UI offers re-pair)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/auth/PairingPayload.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Parses the QR/text payload built by src/pairingPayload.ts: 'ATLASRUN1|<base_url>|<code>' or a bare code. Code is normalised (upper case, trimmed).",
+      "public_objects": [
+        {"kind": "constant", "name": "PairingPayload", "pattern": "mapper", "methods": [
+          {"name": "parse", "visibility": "public", "args": ["raw: String"], "returns": "ParsedPairing?", "purpose": "Null when neither format matches or the URL is not https."}
+        ]},
+        {"kind": "class", "name": "ParsedPairing", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["baseUrl: String?", "code: String"], "returns": "ParsedPairing", "purpose": "baseUrl null when only a code was typed."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/net/AtlasClient.kt",
+      "stub_kind": "kotlin_file",
+      "role": "HTTPS client for the native endpoints. Refuses non-https base URLs, connect 10 s / read 30 s timeouts, Bearer from tokenProvider, never logs headers/bodies/tokens, maps responses to AtlasResult. Wire records mirror backend/models.py (declared there).",
+      "public_objects": [
+        {"kind": "class", "name": "HttpRequest", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["method: String", "url: String", "headers: Map<String, String>", "body: String?"], "returns": "HttpRequest", "purpose": "Transport input."}]},
+        {"kind": "class", "name": "HttpResponse", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["status: Int", "body: String"], "returns": "HttpResponse", "purpose": "Transport output."}]},
+        {"kind": "class", "name": "HttpTransport", "pattern": "interface", "methods": [{"name": "execute", "visibility": "public", "args": ["request: HttpRequest"], "returns": "HttpResponse", "purpose": "Throws IOException on network failure."}]},
+        {"kind": "class", "name": "UrlConnectionTransport", "pattern": "adapter", "methods": [{"name": "constructor", "visibility": "public", "args": [], "returns": "UrlConnectionTransport", "purpose": "HttpURLConnection implementation."}]},
+        {"kind": "class", "name": "AtlasResult", "pattern": "sealed_result", "methods": [], "values": "Ok(value), Unauthorized, NotFound, Rejected(code, message), NetworkError(cause), ServerError(status)"},
+        {"kind": "class", "name": "AtlasClient", "pattern": "adapter", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["baseUrl: String", "tokenProvider: () -> String?", "transport: HttpTransport"], "returns": "AtlasClient", "purpose": "Throws IllegalArgumentException for non-https baseUrl."},
+          {"name": "pair", "visibility": "public", "args": ["code: String", "deviceName: String"], "returns": "AtlasResult<PairResult>", "purpose": "POST /api/runningtracker/native/pair (no Authorization header)."},
+          {"name": "preparedRuns", "visibility": "public", "args": [], "returns": "AtlasResult<List<PreparedRun>>", "purpose": "GET native/prepared-runs."},
+          {"name": "preparedRun", "visibility": "public", "args": ["id: String"], "returns": "AtlasResult<PreparedRun>", "purpose": "GET native/prepared-runs/{id}."},
+          {"name": "begin", "visibility": "public", "args": ["runId: String", "startedAtMillis: Long"], "returns": "AtlasResult<BeginResult>", "purpose": "POST native/runs/{id}/begin."},
+          {"name": "putSamples", "visibility": "public", "args": ["runId: String", "samples: List<CaptureSample>"], "returns": "AtlasResult<SamplesResult>", "purpose": "PUT native/runs/{id}/samples; stream names mapped location.sample->location, heartRate.sample->heart_rate; payload = CaptureSample.json unchanged."},
+          {"name": "finish", "visibility": "public", "args": ["runId: String", "meta: RunMeta", "counts: StreamCountsLocal", "lastSeq: Long", "dropped: Long"], "returns": "AtlasResult<FinishResult>", "purpose": "POST native/runs/{id}/finish."}
+        ]},
+        {"kind": "class", "name": "PairResult", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["deviceId: String", "deviceToken: String", "deviceName: String"], "returns": "PairResult", "purpose": "Mirror of PairResponse."}]},
+        {"kind": "class", "name": "PreparedRun", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["id: String", "shortId: String", "title: String?", "plannedForMillis: Long?", "expiresAtMillis: Long"], "returns": "PreparedRun", "purpose": "Mirror of PreparedRunOut."}]},
+        {"kind": "class", "name": "StreamCountsLocal", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["location: Long", "heartRate: Long"], "returns": "StreamCountsLocal", "purpose": "Mirror of StreamCounts."}]},
+        {"kind": "class", "name": "BeginResult", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["status: String", "contiguousSeq: Long"], "returns": "BeginResult", "purpose": "Mirror of BeginResponse (cursor used for resume)."}]},
+        {"kind": "class", "name": "SamplesResult", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["stored: Int", "duplicates: Int", "contiguousSeq: Long"], "returns": "SamplesResult", "purpose": "Mirror of SamplesResponse."}]},
+        {"kind": "class", "name": "FinishResult", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["complete: Boolean", "missingRanges: List<LongRange>", "mismatchedStreams: List<String>", "contiguousSeq: Long"], "returns": "FinishResult", "purpose": "Mirror of FinishResponse."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/sync/UploadPlanner.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Pure upload decisions, unit-tested without Android: where to resume, when to finish, what to do with a finish outcome, bounded resend rounds.",
+      "public_objects": [
+        {"kind": "class", "name": "UploadAction", "pattern": "sealed_result", "methods": [], "values": "SendFrom(afterSeq), Finish, MarkSynced(ackUpTo), RetryLater(reason), NeedsRepair, FailVisible(message)"},
+        {"kind": "constant", "name": "UploadPlanner", "pattern": "service", "methods": [
+          {"name": "afterBegin", "visibility": "public", "args": ["begin: BeginResult", "localLastSeq: Long"], "returns": "UploadAction", "purpose": "SendFrom(contiguousSeq) or Finish when contiguousSeq >= localLastSeq."},
+          {"name": "afterBatch", "visibility": "public", "args": ["sentUpToSeq: Long", "localLastSeq: Long"], "returns": "UploadAction", "purpose": "SendFrom(sentUpToSeq) or Finish."},
+          {"name": "afterFinish", "visibility": "public", "args": ["result: FinishResult", "localLastSeq: Long", "round: Int"], "returns": "UploadAction", "purpose": "complete -> MarkSynced(localLastSeq); gaps -> SendFrom(firstGapStart-1) while round < MAX_RESEND_ROUNDS (3); mismatch without gaps or rounds exhausted -> FailVisible; local samples are never acked before MarkSynced."},
+          {"name": "afterError", "visibility": "public", "args": ["result: AtlasResult<*>"], "returns": "UploadAction", "purpose": "Unauthorized -> NeedsRepair; NetworkError/ServerError -> RetryLater; NotFound/Rejected -> FailVisible."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/sync/UploadWorker.kt",
+      "stub_kind": "kotlin_file",
+      "role": "WorkManager CoroutineWorker (unique work per run id, network-connected constraint, exponential backoff). Executes UploadPlanner decisions against CaptureStore (fetch 1000 per batch, ack + purgeAcked only on MarkSynced) and AtlasClient; updates RunMeta (state, uploadCursor, lastError, needsRepair).",
+      "public_objects": [
+        {"kind": "class", "name": "UploadWorker", "pattern": "worker", "methods": [{"name": "doWork", "visibility": "public", "args": [], "returns": "Result", "purpose": "Run one upload attempt for the run id in input data."}]},
+        {"kind": "constant", "name": "UploadScheduler", "pattern": "factory", "methods": [
+          {"name": "enqueue", "visibility": "public", "args": ["context: Context", "runId: String"], "returns": "Unit", "purpose": "Unique work, KEEP policy."},
+          {"name": "enqueueAllPending", "visibility": "public", "args": ["context: Context"], "returns": "Unit", "purpose": "Called at app start and by 'Retry sync'."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/session/RunController.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Process-wide singleton (like MobilePlatform) that owns the active run so screen recreation reattaches: start from prepared or free, pause/resume/finish, persists RunMeta on every transition, feeds RunMetricsAccumulator from platform sample flows, offers recover/discard of interrupted captures, enqueues upload at finish. Uses MobilePlatform only; no new GPS/BLE code.",
+      "public_objects": [
+        {"kind": "class", "name": "RunController", "pattern": "service", "methods": [
+          {"name": "get", "visibility": "public", "args": ["context: Context"], "returns": "RunController", "purpose": "Singleton accessor (companion)."},
+          {"name": "startFree", "visibility": "public", "args": [], "returns": "String", "purpose": "recorder.start(), RECORDING, ensureForegroundService; returns run id."},
+          {"name": "startPrepared", "visibility": "public", "args": ["prepared: PreparedRun"], "returns": "String", "purpose": "recorder.start(captureId = prepared.id)."},
+          {"name": "pause", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Manual pause (distinct from GPS/HR loss)."},
+          {"name": "resume", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Resume."},
+          {"name": "finish", "visibility": "public", "args": [], "returns": "RunMeta", "purpose": "Stop, drain, summary via RunMetrics.summarize, PENDING_UPLOAD, enqueue upload."},
+          {"name": "interruptedRuns", "visibility": "public", "args": [], "returns": "List<RunMeta>", "purpose": "Open captures without a finished RunMeta (offer Recover/Discard)."},
+          {"name": "recover", "visibility": "public", "args": ["runId: String"], "returns": "Unit", "purpose": "Reopen as PAUSED with synthetic pause starting at the last sample time."},
+          {"name": "discard", "visibility": "public", "args": ["runId: String"], "returns": "Unit", "purpose": "Explicit user discard: deleteCapture(force = true) and deleteRunMeta."},
+          {"name": "live", "visibility": "public", "args": [], "returns": "StateFlow<LiveRunState?>", "purpose": "Observable state for the Running Screen."}
+        ]},
+        {"kind": "class", "name": "LiveRunState", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["meta: RunMeta", "metrics: LiveMetrics", "gpsState: String", "hrState: String"], "returns": "LiveRunState", "purpose": "Everything the recording screen renders."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RunningActivity.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Compose host (not exported). Keep-screen-on, permission requests via PermissionManager.toRequest/markRequested (same pattern as MobileTestActivity), hosts PairingScreen, RunningScreen and SummaryScreen. Does not touch MainActivity (TWA).",
+      "public_objects": [
+        {"kind": "class", "name": "RunningActivity", "pattern": "activity", "methods": [{"name": "onCreate", "visibility": "public", "args": ["savedInstanceState: Bundle?"], "returns": "Unit", "purpose": "setContent with the three screens; reattach to RunController.live."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/PairingScreen.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Code entry (typed or QR scan via optional Google code scanner), server URL (prefilled from the QR payload or last value, must be https), device name; calls AtlasClient.pair, stores token via TokenStore, shows generic error text; offers re-pair after 401.",
+      "public_objects": [
+        {"kind": "function", "name": "PairingScreen", "pattern": "view", "methods": [{"name": "PairingScreen", "visibility": "public", "args": ["onPaired: () -> Unit"], "returns": "Unit", "purpose": "Composable."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RunningScreen.kt",
+      "stub_kind": "kotlin_file",
+      "role": "Pre-start panel (GPS/H10 status, prepared runs, Free Run, pending uploads with retry, Recover/Discard) and recording panel (elapsed, distance, smoothed pace, average pace, HR, GPS quality, HR connection state, Pause/Resume/Finish with confirmation); Summary with 'synced' vs 'pending sync' and a link to https://workout.linspad.net/running/history/<id> opened in the browser/TWA via the existing atlas:// scheme handling (no bridge).",
+      "public_objects": [
+        {"kind": "function", "name": "RunningScreen", "pattern": "view", "methods": [{"name": "RunningScreen", "visibility": "public", "args": ["controller: RunController"], "returns": "Unit", "purpose": "Composable for home and recording states."}]},
+        {"kind": "function", "name": "SummaryScreen", "pattern": "view", "methods": [{"name": "SummaryScreen", "visibility": "public", "args": ["meta: RunMeta"], "returns": "Unit", "purpose": "Composable for the finish summary."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RunMetricsTest.kt",
+      "stub_kind": "kotlin_test",
+      "role": "JVM tests for A1 incl. golden vectors from tests/fixtures/metrics_golden.json.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RunLifecycleTest.kt",
+      "stub_kind": "kotlin_test",
+      "role": "JVM tests for legal/illegal lifecycle transitions and RunMeta JSON round trip.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/UploadPlannerTest.kt",
+      "stub_kind": "kotlin_test",
+      "role": "JVM tests for resume, finish outcomes, bounded resend rounds, error mapping, and a Robolectric run of UploadWorker logic against a fake HttpTransport and the real CaptureStore (ack only after verified finish).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/TokenStoreTest.kt",
+      "stub_kind": "kotlin_test",
+      "role": "JVM tests for TokenStore with a fake SecretCipher and Robolectric prefs: round trip, https-only, no plaintext in prefs, clear, corrupt blob -> null.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/AtlasClientTest.kt",
+      "stub_kind": "kotlin_test",
+      "role": "JVM tests with a fake HttpTransport: https enforced, Bearer header present except on pair, status-to-AtlasResult mapping, stream name mapping, no secrets in thrown messages, PairingPayload parsing.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

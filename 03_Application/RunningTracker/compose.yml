@@ -1,0 +1,43 @@
+services:
+  runningtracker:
+    build:
+      context: ../..
+      dockerfile: 03_Application/RunningTracker/Dockerfile
+    container_name: atlas-runningtracker
+    restart: unless-stopped
+    # Loopback only (R-OPS-BP-02). The tailnet mount (tailscale serve, human step) proxies to this port;
+    # never publish on 0.0.0.0.
+    ports:
+      - "127.0.0.1:8029:8000"
+    environment:
+      ATLAS_PG_DB:       ${ATLAS_PG_DB}
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+      # Non-secret: https://<host>.<tailnet>.ts.net:8443 set by the operator (empty = pairing shows the code without QR URL)
+      RUNNINGTRACKER_NATIVE_BASE_URL: ${RUNNINGTRACKER_NATIVE_BASE_URL:-}
+    volumes:
+      - ${DATA_ROOT}/runningtracker/logs:/app/logs
+    networks:
+      - atlas-net
+
+  runningtracker-test:
+    container_name: atlas-runningtracker-test
+    build:
+      context: ../..
+      dockerfile: 03_Application/RunningTracker/Dockerfile
+    environment:
+      ATLAS_PG_DB:       atlas_test
+      ATLAS_PG_USER:     ${ATLAS_PG_USER}
+      ATLAS_PG_PASSWORD: ${ATLAS_PG_PASSWORD}
+      ATLAS_PG_PORT:     ${ATLAS_PG_PORT}
+      ATLAS_PG_HOST:     atlas-postgres
+      RUNNINGTRACKER_NATIVE_BASE_URL: https://atlas.example.ts.net:8443
+    command: ["sleep", "infinity"]
+    networks:
+      - atlas-net
+
+networks:
+  atlas-net:
+    external: true
