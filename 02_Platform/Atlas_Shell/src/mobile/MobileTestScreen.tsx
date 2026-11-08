@@ -70,6 +70,17 @@ export default function MobileTestScreen(): JSX.Element {
       </div>
 
       <div style={box}>
+        <h3 style={{ marginTop: 0 }}>Local network permission</h3>
+        <div style={{ fontSize: 14 }}>
+          Chrome asks before a website may talk to the phone itself. AtlasPhone cannot show that question, so
+          answer it once in a normal Chrome tab: tap the button, tap <b>Allow</b> when asked, then come back here.
+        </div>
+        <a href="atlas://grant-local-access" style={{ ...btn, display: 'inline-block', textDecoration: 'none', border: '1px solid #8886', borderRadius: 6 }}>
+          Open in Chrome to allow
+        </a>
+      </div>
+
+      <div style={box}>
         <h3 style={{ marginTop: 0 }}>Connection diagnostics</h3>
         <pre style={pre}>{channelLog.length ? channelLog.join('\n') : 'no loopback activity (no endpoint from AtlasPhone)'}</pre>
       </div>
