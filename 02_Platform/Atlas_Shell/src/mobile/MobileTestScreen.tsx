@@ -23,6 +23,13 @@ export default function MobileTestScreen(): JSX.Element {
     setLog(logRef.current);
   }, []);
 
+  // The transport log is written outside React, so poll it.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => mobile.on('bridge.state', ({ state: s }) => note(`bridge.state -> ${s}`)), [note]);
 
   const ping = async () => {
@@ -53,7 +60,9 @@ export default function MobileTestScreen(): JSX.Element {
       <div style={box}>
         <h3 style={{ marginTop: 0 }}>Device status</h3>
         <div>Native bridge: <b>{state}</b></div>
-        <div>Bridge endpoint from AtlasPhone: {String(!!window.__atlasNative?.endpoint)}</div>
+        <div>Bridge endpoint from AtlasPhone: {String(!!window.__atlasNative?.endpoint)}
+          {window.__atlasNative?.endpoint ? ` (port ${window.__atlasNative.endpoint.port})` : ''}</div>
+        <div>Page: {window.location.origin} · secure context: {String(window.isSecureContext)}</div>
         <div>Capabilities: {Object.keys(capabilities).length === 0 ? '—' : Object.keys(capabilities).join(', ')}</div>
         <button style={btn} onClick={ping} disabled={state !== 'connected'}>Ping</button>
         <button style={btn} onClick={refresh} disabled={state !== 'connected'}>Refresh capabilities</button>
