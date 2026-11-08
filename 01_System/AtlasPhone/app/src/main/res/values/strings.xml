@@ -1,4 +1,6 @@
 <resources>
     <string name="app_name">AtlasPhone</string>
+    <string name="shortcut_mobile_test_short">Sensor test</string>
+    <string name="shortcut_mobile_test_long">Mobile Platform test</string>
     <string name="asset_statements" translatable="false">[{\"relation\": [\"delegate_permission/common.handle_all_urls\"], \"target\": {\"namespace\": \"web\", \"site\": \"https://workout.linspad.net\"}}]</string>
 </resources>

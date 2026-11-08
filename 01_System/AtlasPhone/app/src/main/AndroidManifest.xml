@@ -5,6 +5,21 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Mobile Platform: GPS, BLE heart-rate sensor, recording foreground service. No background-location permission. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -34,6 +49,7 @@
             </intent-filter>
             <!-- Trusted Web Activity: full-screen Chrome, verified via
                  https://workout.linspad.net/.well-known/assetlinks.json -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
             <meta-data
                 android:name="android.support.customtabs.trusted.DEFAULT_URL"
                 android:value="https://workout.linspad.net/" />
@@ -44,6 +60,19 @@
                 android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
                 android:resource="@color/atlas_bar" />
         </activity>
+
+        <!-- Mobile Platform diagnostics; reached through the launcher shortcut, not exported to other apps. -->
+        <activity
+            android:name=".mobile.diagnostics.MobileTestActivity"
+            android:exported="false"
+            android:label="Mobile Platform test"
+            android:launchMode="singleTop" />
+
+        <!-- Keeps GPS/BLE recording alive with the screen off; started only from a user action. -->
+        <service
+            android:name=".mobile.service.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="location|connectedDevice" />
 
         <!-- Required by androidbrowserhelper's LauncherActivity (site-settings shortcut);
              the library does not declare it itself. -->

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="mobile_platform_test"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_mobile_test_short"
+        android:shortcutLongLabel="@string/shortcut_mobile_test_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="net.linspad.atlasphone"
+            android:targetClass="net.linspad.atlasphone.mobile.diagnostics.MobileTestActivity" />
+    </shortcut>
+</shortcuts>

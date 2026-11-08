@@ -37,6 +37,7 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true // android.util.Log in JVM unit tests
+        unitTests.isIncludeAndroidResources = true // Robolectric
     }
     buildFeatures {
         compose = true
@@ -57,7 +58,10 @@ dependencies {
     implementation("com.google.androidbrowserhelper:androidbrowserhelper:2.7.4")
     implementation("com.google.firebase:firebase-messaging-ktx:24.1.0")
     testImplementation(libs.junit)
-    testImplementation("org.json:json:20240303")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
