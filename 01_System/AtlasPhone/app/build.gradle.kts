@@ -35,6 +35,9 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+    testOptions {
+        unitTests.isReturnDefaultValues = true // android.util.Log in JVM unit tests
+    }
     buildFeatures {
         compose = true
     }

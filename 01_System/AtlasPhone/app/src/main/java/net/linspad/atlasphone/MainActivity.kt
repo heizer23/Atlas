@@ -6,18 +6,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.content.ComponentName
-import androidx.browser.customtabs.CustomTabsCallback
-import androidx.browser.customtabs.CustomTabsClient
-import androidx.browser.customtabs.CustomTabsServiceConnection
-import androidx.browser.customtabs.CustomTabsSession
-import androidx.browser.trusted.TrustedWebActivityIntent
 import com.google.androidbrowserhelper.trusted.LauncherActivity
-import com.google.androidbrowserhelper.trusted.SessionStore
-import com.google.androidbrowserhelper.trusted.SharedPreferencesTokenStore
-import com.google.androidbrowserhelper.trusted.TwaLauncher
 import net.linspad.atlasphone.mobile.MobilePlatform
-import net.linspad.atlasphone.mobile.bridge.BridgeCallback
 import com.google.firebase.messaging.FirebaseMessaging
 
 private const val ATLAS_URL = "https://workout.linspad.net/"
@@ -31,77 +21,20 @@ class MainActivity : LauncherActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         requestNotificationPermissionIfNeeded()
         logFcmToken()
-        logChromeVersion()
-        warmUpChrome()
+        MobilePlatform.start(this)
         super.onCreate(savedInstanceState)
     }
 
-    // Chrome refuses postMessage channel requests until some client has called warmup(). The launcher
-    // library skips warmup for modern Chrome, so we do it ourselves on a separate, short-lived binding.
-    private var warmupConnection: CustomTabsServiceConnection? = null
-
-    private fun warmUpChrome() {
-        val provider = CustomTabsClient.getPackageName(this, null) ?: return
-        val connection = object : CustomTabsServiceConnection() {
-            override fun onCustomTabsServiceConnected(name: ComponentName, client: CustomTabsClient) {
-                val ok = client.warmup(0)
-                Log.i("NativeBridge", "warmup($provider) -> $ok")
-                MobilePlatform.bridge(this@MainActivity).onWarmedUp()
-            }
-
-            override fun onServiceDisconnected(name: ComponentName) {}
-        }
-        warmupConnection = connection
-        if (!CustomTabsClient.bindCustomTabsService(this, provider, connection)) {
-            Log.w("NativeBridge", "could not bind $provider for warmup")
-            warmupConnection = null
-        }
-    }
-
-    override fun onDestroy() {
-        warmupConnection?.let { runCatching { unbindService(it) } }
-        warmupConnection = null
-        super.onDestroy()
-    }
-
-    private fun logChromeVersion() {
-        try {
-            val info = packageManager.getPackageInfo("com.android.chrome", 0)
-            Log.i("NativeBridge", "Chrome ${info.versionName}")
-        } catch (e: Exception) {
-            Log.i("NativeBridge", "Chrome version unknown: ${e.message}")
-        }
-    }
-
-    private var twaLauncher: TwaLauncher? = null
-
-    // Mobile Platform bridge: the TWA session's callbacks carry web <-> native messages.
-    override fun getCustomTabsCallback(): CustomTabsCallback = BridgeCallback(MobilePlatform.bridge(this))
-
-    // The launcher is created by the library; we only observe it. onPrepareIntent runs right before the
-    // TWA is launched, when the Custom Tabs session exists and AtlasPhone is still in the foreground.
-    override fun createTwaLauncher(): TwaLauncher {
-        val bridge = MobilePlatform.bridge(this)
-        val launcher = object : TwaLauncher(
-            this, null as String?, SessionStore.makeSessionId(taskId), SharedPreferencesTokenStore(this),
-        ) { // same arguments LauncherActivity.createTwaLauncher() uses (no launchingBrowser is configured)
-            override fun onPrepareIntent(intent: TrustedWebActivityIntent): TrustedWebActivityIntent {
-                sessionOf(this)?.let { bridge.onBeforeLaunch(it) }
-                return super.onPrepareIntent(intent)
-            }
-        }
-        twaLauncher = launcher
-        bridge.attachSessionSupplier { sessionOf(launcher) }
-        return launcher
-    }
-
     // atlas://workout/123  →  https://workout.linspad.net/workout/123
+    // The launch URL also carries the Mobile Platform bridge endpoint in its fragment (never sent to a server).
     override fun getLaunchingUrl(): Uri {
         val uri = intent.data
-        if (uri?.scheme == "atlas") {
-            return Uri.parse(uri.toString().replaceFirst("atlas://", ATLAS_URL))
+        val base = if (uri?.scheme == "atlas") {
+            Uri.parse(uri.toString().replaceFirst("atlas://", ATLAS_URL))
+        } else {
+            super.getLaunchingUrl()
         }
-        return super.getLaunchingUrl()
+        return base.buildUpon().encodedFragment(MobilePlatform.launchFragment()).build()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -117,14 +50,5 @@ class MainActivity : LauncherActivity() {
             Log.i(TAG, "FCM token: $token")
             AtlasMessagingService.registerToken(this, token)
         }
-    }
-
-    // androidbrowserhelper keeps its CustomTabsSession private; the bridge needs it for postMessage.
-    // If a library update renames the field the bridge reports itself unavailable instead of crashing.
-    private fun sessionOf(launcher: TwaLauncher): CustomTabsSession? = try {
-        TwaLauncher::class.java.getDeclaredField("mSession").apply { isAccessible = true }.get(launcher) as? CustomTabsSession
-    } catch (e: Exception) {
-        Log.e(TAG, "cannot reach TWA session; native bridge disabled", e)
-        null
     }
 }

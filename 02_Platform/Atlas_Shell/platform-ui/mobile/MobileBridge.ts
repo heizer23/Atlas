@@ -6,10 +6,10 @@
  * requests/events and manages the connection; interpretation of the data
  * belongs to the consuming Atlas application.
  *
- * Transport: the TWA host hands the page a MessagePort (Chrome Custom Tabs
- * postMessage). An inline script in index.html captures it into
- * `window.__atlasNative` before the app boots, so no delivery is missed.
- * Outside AtlasPhone no port ever arrives and the bridge stays 'unavailable'.
+ * Transport: an authenticated WebSocket to the AtlasPhone app on 127.0.0.1
+ * (see loopback.ts). Chrome refuses the TWA postMessage channel, so the bridge
+ * talks to a loopback server instead. Outside AtlasPhone no endpoint exists and
+ * the bridge stays 'unavailable'.
  */
 
 import {
@@ -20,13 +20,17 @@ import {
 export interface PortLike {
   postMessage(message: string): void;
   onmessage: ((ev: { data: unknown }) => void) | null;
+  /** Transport closed (page keeps running); the bridge goes 'disconnected' until a new port arrives. */
+  onclose?: (() => void) | null;
   close?(): void;
 }
 
 /** Shape of the global written by the inline capture script in index.html. */
 export interface NativeGlobal {
+  /** Loopback endpoint handed over by AtlasPhone ({port, token}); null outside AtlasPhone. */
+  endpoint?: { port: number; token: string } | null;
   port: PortLike | null;
-  /** Called with each port delivered by the host (page load and every re-attach). */
+  /** Called with each port the transport delivers (first connect and every reconnect). */
   onPort: ((port: PortLike) => void) | null;
   /** Last channel-related diagnostics, shown on the test screen. */
   log: string[];
@@ -142,10 +146,18 @@ export class MobileBridge {
   private attach(port: PortLike): void {
     if (this.port && this.port !== port) {
       this.port.onmessage = null;
+      this.port.onclose = null;
       this.port.close?.();
     }
     this.port = port;
     port.onmessage = (ev) => this.onMessage(ev.data);
+    port.onclose = () => {
+      if (this.port !== port) return;
+      this.stopHeartbeat();
+      this.handshakeToken++;
+      this.failAllPending(new MobileError('disconnected', 'Native connection closed'));
+      this.setState('disconnected');
+    };
     this.setState('connecting');
     void this.handshake();
   }
@@ -185,7 +197,7 @@ export class MobileBridge {
   /** Stop timers and drop the port (used by tests and on page teardown). */
   dispose(): void {
     this.stopHeartbeat();
-    if (this.port) this.port.onmessage = null;
+    if (this.port) { this.port.onmessage = null; this.port.onclose = null; }
     this.port = null;
     this.failAllPending(new MobileError('disconnected', 'Bridge disposed'));
     this.setState('unavailable');

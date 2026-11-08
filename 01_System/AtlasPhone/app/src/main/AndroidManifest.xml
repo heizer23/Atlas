@@ -5,10 +5,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <queries>
-        <package android:name="com.android.chrome" />
-    </queries>
-
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -71,13 +67,6 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-
-        <!-- Chrome binds to this service to open the TWA postMessage channel (native bridge).
-             Without it requestPostMessageChannel() returns false. It only relays to the callback
-             of the caller's own session and carries no data of ours. -->
-        <service
-            android:name="androidx.browser.customtabs.PostMessageService"
-            android:exported="true" />
 
         <meta-data
             android:name="asset_statements"

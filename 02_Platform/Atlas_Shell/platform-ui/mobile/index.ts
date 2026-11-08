@@ -7,14 +7,18 @@
  */
 
 import { MobileBridge, type NativeGlobal } from './MobileBridge';
+import { startLoopback } from './loopback';
 
 declare global {
   interface Window { __atlasNative?: NativeGlobal }
 }
 
-export const mobile = new MobileBridge(typeof window === 'undefined' ? undefined : window.__atlasNative);
+const native = typeof window === 'undefined' ? undefined : window.__atlasNative;
+export const mobile = new MobileBridge(native);
+startLoopback(native);
 
 export { MobileBridge } from './MobileBridge';
 export type { PortLike, NativeGlobal, BridgeOptions } from './MobileBridge';
+export { startLoopback } from './loopback';
 export * from './types';
 export { useMobileBridge } from './useMobileBridge';

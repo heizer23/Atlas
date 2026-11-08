@@ -1,130 +1,38 @@
 package net.linspad.atlasphone.mobile.bridge
 
-import android.net.Uri
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import androidx.browser.customtabs.CustomTabsService
-import androidx.browser.customtabs.CustomTabsSession
 import org.json.JSONObject
 
 private const val TAG = "NativeBridge"
 
+/** Carries encoded protocol messages to the web app. */
+fun interface BridgeTransport {
+    /** @return false if no client is connected. */
+    fun send(message: String): Boolean
+}
+
 /**
- * Native end of the TWA postMessage channel.
- *
- * Connection model (Chrome Custom Tabs postMessage):
- *  1. Chrome verifies that the page origin trusts this app (Digital Asset Links, relation use_as_origin).
- *  2. We request a message channel for exactly [TRUSTED_ORIGIN]; the page receives a MessagePort.
- *  3. The page sends the first message (`hello`); only then is the bridge "connected".
- *  4. A page reload / navigation drops the channel; we request it again after every navigation.
- *
- * Only [TRUSTED_ORIGIN] is ever granted a channel, so other origins (e.g. an external link opened
- * inside the TWA) can never reach native code.
+ * Transport-independent core of the native bridge: parses requests, answers the built-in methods
+ * (`hello`, `ping`, `capabilities`), routes `<module>.<method>` to the registered [MobileModule]s
+ * and lets modules push events. The wire transport is the authenticated [LoopbackServer].
  */
-class NativeBridge(
-    private val sourceOrigin: Uri,
-    private val modules: List<MobileModule>,
-) {
-    companion object {
-        const val TRUSTED_ORIGIN = "https://workout.linspad.net"
+class NativeBridge(private val modules: List<MobileModule>) {
+    @Volatile private var transport: BridgeTransport? = null
+
+    /** Lets modules push events to the web app (dropped while no client is connected). */
+    val emitter = BridgeEmitter { name, data -> send(BridgeProtocol.event(name, data)) }
+
+    fun attachTransport(transport: BridgeTransport) {
+        this.transport = transport
     }
 
-    enum class State { DETACHED, VALIDATING, CHANNEL_REQUESTED, CHANNEL_READY, CONNECTED }
-
-    @Volatile var state: State = State.DETACHED
-        private set
-    private var session: CustomTabsSession? = null
-    private val main = Handler(Looper.getMainLooper())
-    private val emitter = BridgeEmitter { name, data -> send(BridgeProtocol.event(name, data)) }
-
-    val bridgeEmitter: BridgeEmitter get() = emitter
-
-    private var sessionSupplier: (() -> CustomTabsSession?)? = null
-
-    /** The session only exists once the TWA has connected, so it is looked up lazily. */
-    fun attachSessionSupplier(supplier: () -> CustomTabsSession?) {
-        sessionSupplier = supplier
+    /** The authenticated client appeared or went away (page load, reload, navigation, crash). */
+    fun onConnectionChanged(connected: Boolean) {
+        Log.i(TAG, if (connected) "web client connected" else "web client disconnected")
+        if (!connected) modules.forEach { it.onBridgeDisconnected() }
     }
 
-    /**
-     * Called right before the TWA intent is launched, while AtlasPhone is still the foreground app.
-     * Chrome only accepts channel requests from a foreground caller, so this is the earliest and
-     * most reliable moment; later requests (after navigation) are a fallback.
-     */
-    fun onBeforeLaunch(launchSession: CustomTabsSession) {
-        session = launchSession
-        Log.i(TAG, "before launch: requesting channel while foreground")
-        if (openChannel()) state = State.CHANNEL_REQUESTED
-    }
-
-    /** Chrome accepted warmup(): retry the channel request if an earlier one was refused. */
-    fun onWarmedUp() {
-        Log.i(TAG, "warmup done")
-        if (state != State.DETACHED && state != State.VALIDATING) return
-        val s = sessionSupplier?.invoke() ?: return
-        session = s
-        if (openChannel()) state = State.CHANNEL_REQUESTED
-    }
-
-    /** Called on every finished navigation: (re)establish the channel. */
-    fun onNavigationFinished() {
-        val s = sessionSupplier?.invoke()?.also { session = it } ?: return
-        if (state == State.CONNECTED) modules.forEach { it.onBridgeDisconnected() }
-        state = State.VALIDATING
-        val origin = Uri.parse(TRUSTED_ORIGIN)
-        val started = try {
-            s.validateRelationship(CustomTabsService.RELATION_USE_AS_ORIGIN, origin, null)
-        } catch (e: Exception) {
-            Log.e(TAG, "validateRelationship threw", e)
-            false
-        }
-        Log.i(TAG, "validateRelationship started=$started")
-        if (!started) state = State.DETACHED
-    }
-
-    fun onRelationshipValidated(relation: Int, origin: Uri, validated: Boolean) {
-        if (relation != CustomTabsService.RELATION_USE_AS_ORIGIN) return
-        if (origin.toString().trimEnd('/') != TRUSTED_ORIGIN) return
-        if (!validated) {
-            Log.w(TAG, "origin not validated: assetlinks.json lacks delegate_permission/common.use_as_origin?")
-            state = State.DETACHED
-            return
-        }
-        state = if (openChannel()) State.CHANNEL_REQUESTED else State.DETACHED
-    }
-
-    /**
-     * Two forms of the request (both target only our origin): with the explicit target origin
-     * (newer Chrome) and the classic form. Each outcome is logged to diagnose Chrome support.
-     */
-    private fun openChannel(): Boolean {
-        val target = Uri.parse(TRUSTED_ORIGIN)
-        val withTarget = tryRequest("with target origin") {
-            // Bundle.EMPTY is immutable and the library putAll()s into it: pass a fresh Bundle.
-            requestPostMessageChannel(sourceOrigin, target, Bundle())
-        }
-        return withTarget || tryRequest("classic") { requestPostMessageChannel(sourceOrigin) }
-    }
-
-    private fun tryRequest(label: String, call: CustomTabsSession.() -> Boolean): Boolean {
-        val ok = try {
-            session?.call() == true
-        } catch (e: Exception) {
-            Log.e(TAG, "requestPostMessageChannel ($label) threw", e)
-            false
-        }
-        Log.i(TAG, "requestPostMessageChannel ($label) -> $ok")
-        return ok
-    }
-
-    fun onChannelReady() {
-        Log.i(TAG, "message channel ready")
-        state = State.CHANNEL_READY
-    }
-
-    /** Incoming message from the page. */
+    /** Incoming message from the (already authenticated) web client. */
     fun onMessage(raw: String) {
         val request = try {
             BridgeProtocol.parseRequest(raw)
@@ -132,10 +40,9 @@ class NativeBridge(
             Log.w(TAG, "dropped malformed message: ${e.message}")
             return
         }
-        state = State.CONNECTED
         val reply = object : Reply {
-            override fun ok(result: JSONObject) = send(BridgeProtocol.ok(request.id, result))
-            override fun error(code: String, message: String) = send(BridgeProtocol.error(request.id, code, message))
+            override fun ok(result: JSONObject) { send(BridgeProtocol.ok(request.id, result)) }
+            override fun error(code: String, message: String) { send(BridgeProtocol.error(request.id, code, message)) }
         }
         try {
             dispatch(request, reply)
@@ -168,11 +75,6 @@ class NativeBridge(
     }
 
     private fun send(message: String) {
-        val s = session
-        if (s == null || state < State.CHANNEL_READY) return
-        main.post {
-            val result = s.postMessage(message, null)
-            if (result != CustomTabsService.RESULT_SUCCESS) Log.w(TAG, "postMessage result=$result")
-        }
+        transport?.send(message)
     }
 }

@@ -53,7 +53,7 @@ export default function MobileTestScreen(): JSX.Element {
       <div style={box}>
         <h3 style={{ marginTop: 0 }}>Device status</h3>
         <div>Native bridge: <b>{state}</b></div>
-        <div>Native global present: {String(!!window.__atlasNative)}</div>
+        <div>Bridge endpoint from AtlasPhone: {String(!!window.__atlasNative?.endpoint)}</div>
         <div>Capabilities: {Object.keys(capabilities).length === 0 ? '—' : Object.keys(capabilities).join(', ')}</div>
         <button style={btn} onClick={ping} disabled={state !== 'connected'}>Ping</button>
         <button style={btn} onClick={refresh} disabled={state !== 'connected'}>Refresh capabilities</button>
@@ -61,8 +61,8 @@ export default function MobileTestScreen(): JSX.Element {
       </div>
 
       <div style={box}>
-        <h3 style={{ marginTop: 0 }}>Channel diagnostics</h3>
-        <pre style={pre}>{channelLog.length ? channelLog.join('\n') : 'no native message port received'}</pre>
+        <h3 style={{ marginTop: 0 }}>Connection diagnostics</h3>
+        <pre style={pre}>{channelLog.length ? channelLog.join('\n') : 'no loopback activity (no endpoint from AtlasPhone)'}</pre>
       </div>
 
       <div style={box}>
