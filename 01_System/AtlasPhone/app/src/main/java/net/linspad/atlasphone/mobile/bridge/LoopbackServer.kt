@@ -98,12 +98,13 @@ class LoopbackServer(
             socket.soTimeout = HANDSHAKE_TIMEOUT_MS
             val input = DataInputStream(BufferedInputStream(socket.getInputStream()))
             val out = socket.getOutputStream()
+            Log.i(TAG, "connection from ${socket.inetAddress.hostAddress}")
             if (!handshake(input, out, port)) return
 
             conn = Connection(socket, out)
             socket.soTimeout = AUTH_TIMEOUT_MS
             val first = conn.readFrame(input) ?: return
-            if (!authenticate(first)) { conn.close(1008); return }
+            if (!authenticate(first)) { Log.w(TAG, "rejected connection: authentication failed"); conn.close(1008); return }
 
             socket.soTimeout = 0
             val previous = current
@@ -138,16 +139,16 @@ class LoopbackServer(
 
     /** Validates the HTTP upgrade request; writes 101 or an error. Returns true on success. */
     private fun handshake(input: DataInputStream, out: OutputStream, port: Int): Boolean {
-        val headers = readHeaders(input) ?: return reject(out, "400 Bad Request")
+        val headers = readHeaders(input) ?: return reject(out, "400 Bad Request", "malformed request")
         val request = headers.first
         val h = headers.second
-        if (!request.startsWith("GET ") || !request.endsWith(" HTTP/1.1")) return reject(out, "400 Bad Request")
+        if (!request.startsWith("GET ") || !request.endsWith(" HTTP/1.1")) return reject(out, "400 Bad Request", "not a GET")
         if (h["upgrade"]?.lowercase() != "websocket" || h["connection"]?.lowercase()?.contains("upgrade") != true ||
             h["sec-websocket-version"] != "13"
-        ) return reject(out, "400 Bad Request")
-        if (h["origin"] != allowedOrigin) return reject(out, "403 Forbidden")
-        if (h["host"] != "127.0.0.1:$port" && h["host"] != "localhost:$port") return reject(out, "403 Forbidden")
-        val key = h["sec-websocket-key"]?.takeIf { it.isNotBlank() && it.length < 64 } ?: return reject(out, "400 Bad Request")
+        ) return reject(out, "400 Bad Request", "not a websocket upgrade")
+        if (h["origin"] != allowedOrigin) return reject(out, "403 Forbidden", "origin '${h["origin"]?.take(80)}'")
+        if (h["host"] != "127.0.0.1:$port" && h["host"] != "localhost:$port") return reject(out, "403 Forbidden", "host '${h["host"]?.take(80)}'")
+        val key = h["sec-websocket-key"]?.takeIf { it.isNotBlank() && it.length < 64 } ?: return reject(out, "400 Bad Request", "no key")
         val accept = Base64.getEncoder().encodeToString(
             MessageDigest.getInstance("SHA-1").digest((key + WS_GUID).toByteArray(Charsets.US_ASCII)),
         )
@@ -159,7 +160,8 @@ class LoopbackServer(
         return true
     }
 
-    private fun reject(out: OutputStream, status: String): Boolean {
+    private fun reject(out: OutputStream, status: String, why: String): Boolean {
+        Log.w(TAG, "rejected connection: $why")
         runCatching {
             out.write("HTTP/1.1 $status\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
             out.flush()
