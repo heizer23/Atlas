@@ -68,6 +68,13 @@
             </intent-filter>
         </service>
 
+        <!-- Chrome binds to this service to open the TWA postMessage channel (native bridge).
+             Without it requestPostMessageChannel() returns false. It only relays to the callback
+             of the caller's own session and carries no data of ours. -->
+        <service
+            android:name="androidx.browser.customtabs.PostMessageService"
+            android:exported="true" />
+
         <meta-data
             android:name="asset_statements"
             android:resource="@string/asset_statements" />
