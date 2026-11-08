@@ -21,6 +21,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.ParcelUuid
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -291,7 +292,7 @@ class HeartRateMonitor(
         val now = System.currentTimeMillis()
         val parsed = HeartRateParser.parse(value) ?: return
         if (parsed.bpm <= 0) return // 0 = no valid reading yet (e.g. no skin contact); never invent a value
-        val sample = RawHeartRate(now, parsed.bpm, parsed.rrIntervalsMs)
+        val sample = RawHeartRate(now, parsed.bpm, parsed.rrIntervalsMs, SystemClock.elapsedRealtimeNanos())
         handler.post { _latest.value = sample; _received.value = _received.value + 1 }
         _samples.tryEmit(sample)
     }

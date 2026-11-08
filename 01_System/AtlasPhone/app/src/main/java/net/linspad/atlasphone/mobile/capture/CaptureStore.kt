@@ -45,7 +45,7 @@ class CaptureStore(
     context: Context,
     name: String? = "mobile_captures.db",
     private val maxUnackedPerCapture: Long = 100_000,
-) : SQLiteOpenHelper(context, name, null, 1) {
+) : SQLiteOpenHelper(context, name, null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -61,9 +61,17 @@ class CaptureStore(
                 payload TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (capture_id, seq))""",
         )
+        createRunMeta(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    /** v1 -> v2 adds run_meta only; captures and samples are untouched (existing captures stay valid). */
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createRunMeta(db)
+    }
+
+    private fun createRunMeta(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS run_meta (capture_id TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+    }
 
     /** Creates a capture (or returns the existing one with that id, e.g. to continue after a restart). */
     fun createCapture(id: String? = null, nowMillis: Long = System.currentTimeMillis()): String {
@@ -168,11 +176,31 @@ class CaptureStore(
         try {
             db.delete("samples", "capture_id = ?", arrayOf(captureId))
             db.delete("captures", "id = ?", arrayOf(captureId))
+            db.delete("run_meta", "capture_id = ?", arrayOf(captureId))
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
         return true
+    }
+
+    // ── Run metadata (RunningTracker lifecycle state, opaque JSON owned by the running package) ─────────────────
+
+    fun putRunMeta(captureId: String, json: String, nowMillis: Long = System.currentTimeMillis()) {
+        val cv = ContentValues().apply { put("capture_id", captureId); put("json", json); put("updated_at", nowMillis) }
+        writableDatabase.insertWithOnConflict("run_meta", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun getRunMeta(captureId: String): String? = readableDatabase.rawQuery(
+        "SELECT json FROM run_meta WHERE capture_id = ?", arrayOf(captureId),
+    ).use { if (it.moveToFirst()) it.getString(0) else null }
+
+    fun listRunMeta(): List<String> = readableDatabase.rawQuery(
+        "SELECT json FROM run_meta ORDER BY updated_at DESC", null,
+    ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+
+    fun deleteRunMeta(captureId: String) {
+        writableDatabase.delete("run_meta", "capture_id = ?", arrayOf(captureId))
     }
 
     /**

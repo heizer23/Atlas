@@ -10,4 +10,14 @@
             android:targetPackage="net.linspad.atlasphone"
             android:targetClass="net.linspad.atlasphone.mobile.diagnostics.MobileTestActivity" />
     </shortcut>
+    <shortcut
+        android:shortcutId="running_screen"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/shortcut_running_short"
+        android:shortcutLongLabel="@string/shortcut_running_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="net.linspad.atlasphone"
+            android:targetClass="net.linspad.atlasphone.running.ui.RunningActivity" />
+    </shortcut>
 </shortcuts>

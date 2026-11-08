@@ -11,6 +11,7 @@ object LocationMapper {
         hasSpeed: Boolean, speed: Float,
         hasAltitude: Boolean, altitude: Double,
         hasBearing: Boolean, bearing: Float,
+        elapsedRealtimeNanos: Long? = null,
     ): RawLocation? {
         if (latitude.isNaN() || longitude.isNaN()) return null
         if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) return null
@@ -23,6 +24,7 @@ object LocationMapper {
             speedMetersPerSecond = speed.takeIf { hasSpeed && it >= 0f && !it.isNaN() },
             altitudeMeters = altitude.takeIf { hasAltitude && !it.isNaN() },
             bearingDegrees = bearing.takeIf { hasBearing && it in 0f..360f },
+            elapsedRealtimeNanos = elapsedRealtimeNanos?.takeIf { it > 0 },
         )
     }
 }

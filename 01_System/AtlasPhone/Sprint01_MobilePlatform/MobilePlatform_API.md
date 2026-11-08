@@ -139,3 +139,11 @@ GPS start/stop and live values, H10 scan/connect/live BPM, capture and buffer ch
 - **Not confirmed:** the 20-minute outdoor run and the screen-locked run (foreground service), Bluetooth drop/reconnect, and
   reload/process-death behaviour. Treat the foreground-service and reconnection rows above as [unverified] until reported.
 Checklist is the acceptance list in `00_draft.md`.
+
+## Sprint 02 additions (additive; see Sprint02_RunningScreen/RunningScreen_API.md)
+
+- `RawLocation` and `RawHeartRate` gained `elapsedRealtimeNanos: Long? = null` (monotonic stamp); `SampleJson` emits it as
+  `elapsedRealtimeNanos` (null when absent). Existing captures and callers are unaffected. **[tested: JVM]**
+- `CaptureStore` is database version 2 and adds `putRunMeta/getRunMeta/listRunMeta/deleteRunMeta` (table `run_meta`);
+  `deleteCapture` also removes the run's metadata. Version-1 databases upgrade in place. **[tested: JVM]**
+- The 20-minute locked-screen hardware capture required by the RunningTracker sprint is still open; record it here when done.

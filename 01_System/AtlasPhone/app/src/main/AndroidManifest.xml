@@ -68,6 +68,13 @@
             android:label="Mobile Platform test"
             android:launchMode="singleTop" />
 
+        <!-- RunningTracker Running Screen (native, Sprint 02); reached through the launcher shortcut, not exported. -->
+        <activity
+            android:name=".running.ui.RunningActivity"
+            android:exported="false"
+            android:label="@string/shortcut_running_short"
+            android:launchMode="singleTop" />
+
         <!-- Keeps GPS/BLE recording alive with the screen off; started only from a user action. -->
         <service
             android:name=".mobile.service.RecordingService"

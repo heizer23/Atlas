@@ -15,6 +15,8 @@ data class RawLocation(
     val speedMetersPerSecond: Float?,
     val altitudeMeters: Double?,
     val bearingDegrees: Float?,
+    /** Monotonic stamp (SystemClock.elapsedRealtimeNanos domain) for durations; null when unavailable. Additive in Sprint 02. */
+    val elapsedRealtimeNanos: Long? = null,
 )
 
 /** A heart-rate notification as delivered by the heart-rate module (timestamp = arrival on the phone). */
@@ -22,6 +24,8 @@ data class RawHeartRate(
     val timestampMillis: Long,
     val bpm: Int,
     val rrIntervalsMs: List<Int>?,
+    /** Monotonic stamp taken at notification arrival; null when unavailable. Additive in Sprint 02. */
+    val elapsedRealtimeNanos: Long? = null,
 )
 
 enum class Stream(val wireName: String) {
@@ -58,6 +62,7 @@ object SampleJson {
         .put("speedMetersPerSecond", raw.speedMetersPerSecond?.toDouble() ?: JSONObject.NULL)
         .put("altitudeMeters", raw.altitudeMeters ?: JSONObject.NULL)
         .put("bearingDegrees", raw.bearingDegrees?.toDouble() ?: JSONObject.NULL)
+        .put("elapsedRealtimeNanos", raw.elapsedRealtimeNanos ?: JSONObject.NULL)
 
     fun heartRate(raw: RawHeartRate, captureId: String?, sequence: Long?): JSONObject = JSONObject()
         .put("type", Stream.HEART_RATE.wireName)
@@ -67,4 +72,5 @@ object SampleJson {
         .put("bpm", raw.bpm)
         .put("rrIntervalsMs", raw.rrIntervalsMs?.let { JSONArray(it) } ?: JSONObject.NULL)
         .put("source", "bluetooth")
+        .put("elapsedRealtimeNanos", raw.elapsedRealtimeNanos ?: JSONObject.NULL)
 }

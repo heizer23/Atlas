@@ -61,6 +61,7 @@ class LocationTracker(
                 val raw = LocationMapper.map(
                     l.time, now, l.latitude, l.longitude,
                     l.hasAccuracy(), l.accuracy, l.hasSpeed(), l.speed, l.hasAltitude(), l.altitude, l.hasBearing(), l.bearing,
+                    l.elapsedRealtimeNanos,
                 ) ?: continue
                 _latest.value = raw
                 _received.value = _received.value + 1
