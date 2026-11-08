@@ -48,6 +48,17 @@ class NativeBridge(
         sessionSupplier = supplier
     }
 
+    /**
+     * Called right before the TWA intent is launched, while AtlasPhone is still the foreground app.
+     * Chrome only accepts channel requests from a foreground caller, so this is the earliest and
+     * most reliable moment; later requests (after navigation) are a fallback.
+     */
+    fun onBeforeLaunch(launchSession: CustomTabsSession) {
+        session = launchSession
+        Log.i(TAG, "before launch: requesting channel while foreground")
+        if (openChannel()) state = State.CHANNEL_REQUESTED
+    }
+
     /** Called on every finished navigation: (re)establish the channel. */
     fun onNavigationFinished() {
         val s = sessionSupplier?.invoke()?.also { session = it } ?: return
@@ -72,15 +83,31 @@ class NativeBridge(
             state = State.DETACHED
             return
         }
-        // Bundle.EMPTY is immutable and the library putAll()s into it, so pass a fresh Bundle.
+        state = if (openChannel()) State.CHANNEL_REQUESTED else State.DETACHED
+    }
+
+    /**
+     * Two forms of the request (both target only our origin): with the explicit target origin
+     * (newer Chrome) and the classic form. Each outcome is logged to diagnose Chrome support.
+     */
+    private fun openChannel(): Boolean {
+        val target = Uri.parse(TRUSTED_ORIGIN)
+        val withTarget = tryRequest("with target origin") {
+            // Bundle.EMPTY is immutable and the library putAll()s into it: pass a fresh Bundle.
+            requestPostMessageChannel(sourceOrigin, target, Bundle())
+        }
+        return withTarget || tryRequest("classic") { requestPostMessageChannel(sourceOrigin) }
+    }
+
+    private fun tryRequest(label: String, call: CustomTabsSession.() -> Boolean): Boolean {
         val ok = try {
-            session?.requestPostMessageChannel(sourceOrigin, Uri.parse(TRUSTED_ORIGIN), Bundle()) == true
+            session?.call() == true
         } catch (e: Exception) {
-            Log.e(TAG, "requestPostMessageChannel threw", e)
+            Log.e(TAG, "requestPostMessageChannel ($label) threw", e)
             false
         }
-        Log.i(TAG, "requestPostMessageChannel -> $ok")
-        state = if (ok) State.CHANNEL_REQUESTED else State.DETACHED
+        Log.i(TAG, "requestPostMessageChannel ($label) -> $ok")
+        return ok
     }
 
     fun onChannelReady() {

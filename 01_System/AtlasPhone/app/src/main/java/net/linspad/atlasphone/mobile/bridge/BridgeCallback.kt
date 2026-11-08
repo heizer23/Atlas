@@ -2,11 +2,13 @@ package net.linspad.atlasphone.mobile.bridge
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.browser.customtabs.CustomTabsCallback
 
 /** Routes Custom Tabs session callbacks into the [NativeBridge]. */
 class BridgeCallback(private val bridge: NativeBridge) : CustomTabsCallback() {
     override fun onNavigationEvent(navigationEvent: Int, extras: Bundle?) {
+        Log.i("NativeBridge", "navigation event $navigationEvent")
         if (navigationEvent == NAVIGATION_FINISHED) bridge.onNavigationFinished()
     }
 

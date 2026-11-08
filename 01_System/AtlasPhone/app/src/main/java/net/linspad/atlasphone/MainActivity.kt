@@ -8,7 +8,10 @@ import android.os.Bundle
 import android.util.Log
 import androidx.browser.customtabs.CustomTabsCallback
 import androidx.browser.customtabs.CustomTabsSession
+import androidx.browser.trusted.TrustedWebActivityIntent
 import com.google.androidbrowserhelper.trusted.LauncherActivity
+import com.google.androidbrowserhelper.trusted.SessionStore
+import com.google.androidbrowserhelper.trusted.SharedPreferencesTokenStore
 import com.google.androidbrowserhelper.trusted.TwaLauncher
 import net.linspad.atlasphone.mobile.MobilePlatform
 import net.linspad.atlasphone.mobile.bridge.BridgeCallback
@@ -25,7 +28,17 @@ class MainActivity : LauncherActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         requestNotificationPermissionIfNeeded()
         logFcmToken()
+        logChromeVersion()
         super.onCreate(savedInstanceState)
+    }
+
+    private fun logChromeVersion() {
+        try {
+            val info = packageManager.getPackageInfo("com.android.chrome", 0)
+            Log.i("NativeBridge", "Chrome ${info.versionName}")
+        } catch (e: Exception) {
+            Log.i("NativeBridge", "Chrome version unknown: ${e.message}")
+        }
     }
 
     private var twaLauncher: TwaLauncher? = null
@@ -33,9 +46,21 @@ class MainActivity : LauncherActivity() {
     // Mobile Platform bridge: the TWA session's callbacks carry web <-> native messages.
     override fun getCustomTabsCallback(): CustomTabsCallback = BridgeCallback(MobilePlatform.bridge(this))
 
-    override fun createTwaLauncher(): TwaLauncher = super.createTwaLauncher().also {
-        twaLauncher = it
-        MobilePlatform.bridge(this).attachSessionSupplier { sessionOf(it) }
+    // The launcher is created by the library; we only observe it. onPrepareIntent runs right before the
+    // TWA is launched, when the Custom Tabs session exists and AtlasPhone is still in the foreground.
+    override fun createTwaLauncher(): TwaLauncher {
+        val bridge = MobilePlatform.bridge(this)
+        val launcher = object : TwaLauncher(
+            this, null as String?, SessionStore.makeSessionId(taskId), SharedPreferencesTokenStore(this),
+        ) { // same arguments LauncherActivity.createTwaLauncher() uses (no launchingBrowser is configured)
+            override fun onPrepareIntent(intent: TrustedWebActivityIntent): TrustedWebActivityIntent {
+                sessionOf(this)?.let { bridge.onBeforeLaunch(it) }
+                return super.onPrepareIntent(intent)
+            }
+        }
+        twaLauncher = launcher
+        bridge.attachSessionSupplier { sessionOf(launcher) }
+        return launcher
     }
 
     // atlas://workout/123  →  https://workout.linspad.net/workout/123
