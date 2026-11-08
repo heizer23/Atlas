@@ -20,30 +20,6 @@
     />
   </head>
   <body>
-    <!-- AtlasPhone native bridge endpoint (see platform-ui/mobile). AtlasPhone launches the TWA with
-         "#bridge=<port>.<token>". Read it before the app boots, keep it for reloads of this tab only
-         (sessionStorage) and strip it from the address bar. In a normal browser there is no fragment
-         and no stored value, so nothing ever connects. -->
-    <script>
-      (function () {
-        var native = (window.__atlasNative = { endpoint: null, port: null, onPort: null, log: [] });
-        var RE = /^(\d{1,5})\.([A-Za-z0-9_-]{20,128})$/;
-        function parse(raw) {
-          var m = raw && RE.exec(raw);
-          return m ? { port: parseInt(m[1], 10), token: m[2] } : null;
-        }
-        try {
-          var h = /(?:^#|&)bridge=([^&]+)/.exec(location.hash);
-          var raw = h ? h[1] : sessionStorage.getItem('atlas.bridge');
-          var ep = parse(raw);
-          if (ep) {
-            sessionStorage.setItem('atlas.bridge', raw);
-            native.endpoint = ep;
-          }
-          if (h) history.replaceState(history.state, '', location.pathname + location.search);
-        } catch (e) { /* storage blocked: bridge simply unavailable */ }
-      })();
-    </script>
     <div id="root"></div>
     <script type="module" src="/src/shell/main.tsx"></script>
   </body>

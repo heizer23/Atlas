@@ -50,7 +50,6 @@ import '../../../../03_Application/ClaudeConsole/src/shellConfig';
 import '../../../../03_Application/StoryReader/src/shellConfig';
 import '../../../../03_Application/HabitTracker/src/shellConfig';
 import '../../../../03_Application/Kitchen/src/shellConfig';
-import '../mobile/shellConfig';
 
 // ─────────────────────────────────────────────────────────────────────────────
 

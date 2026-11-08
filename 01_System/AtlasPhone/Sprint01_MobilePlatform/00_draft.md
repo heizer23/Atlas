@@ -1,6 +1,6 @@
 # Sprint 01 (revised) — AtlasPhone Native Mobile Platform
 
-Status: DRAFT for approval — revision of the original "Native Mobile Platform & Sensor Bridge" sprint.
+Status: APPROVED 2026-11-08 (hybrid; foreground service IN; server access = Tailscale in the next sprint) — revision of the original "Native Mobile Platform & Sensor Bridge" sprint.
 Revised 2026-11-08 after on-device findings (below). Nothing in this document is implemented yet.
 
 ## Why the sprint changed
@@ -39,7 +39,7 @@ In scope
    buffered-sample retrieval check, errors and reconnection events.
 4. Entry to the diagnostic screen without the web app: launcher app shortcut ("Mobile Platform test").
 5. Foreground-service-ready design (acquisition not tied to the Activity lifecycle); documentation of how to run it in a
-   Foreground Service. A minimal foreground service MAY be included if time permits (see decision 2).
+   Foreground Service. A minimal foreground service IS included (approved): recording continues with the screen off; persistent notification with Stop.
 6. Documentation of the public Kotlin API, payloads, units, states, lifecycle, behaviour when closed/minimised/locked.
 7. Automated tests (JVM) for protocol-independent logic: buffer ordering/idempotency/ack/bounds, heart-rate payload
    parsing, reconnection policy, permission state mapping. Physical-device tests reported separately.
@@ -50,7 +50,7 @@ Out of scope
 - Any web-side sensor bridge: the loopback server, TypeScript `MobileBridge`, the web `/mobile-test` screen and the
   Chrome permission helper are removed from the sprint (code stays in git history, commits 6f21de3..c066936).
 - Polar SDK, ECG, Polar Flow, generalised notification/haptics/audio framework.
-- Guaranteed screen-off recording (unless decision 2 includes the service AND it passes the outdoor test).
+- Claiming reliable screen-off recording before it passes the physical outdoor test with the screen locked.
 
 ## Architecture
 
@@ -91,7 +91,8 @@ Recommendation: option 1. To be decided with the RunningTracker sprint; this spr
 - [ ] Temporary Bluetooth loss: bounded reconnect, manual reconnect, no crash; Bluetooth-off handled.
 - [ ] Capture buffer: samples ordered with unique sequence; survive Activity restart and process death; retrieval without
       duplicates; explicit ack and cleanup; unacknowledged data never auto-deleted; bounded size with defined overflow behaviour.
-- [ ] 20-minute outdoor test of stable foreground recording (screen on) or gaps documented explicitly.
+- [ ] 20-minute outdoor test of stable recording (screen on, and a second run with the screen locked) or gaps documented explicitly.
+- [ ] Foreground service: notification visible while recording, Stop works, service ends when nothing is active.
 - [ ] No new exposed ports or listeners; no new web-origin access to native code; existing deployment/install workflow unchanged.
 - [ ] Automated tests pass; hardware features are reported as verified ONLY if tested on the phone.
 
@@ -100,10 +101,9 @@ Recommendation: option 1. To be decided with the RunningTracker sprint; this spr
 Summary of modules; public API documentation; payloads/units/timestamps/errors/lifecycle; how RunningTracker subscribes;
 behaviour when closed/minimised/screen-locked; automated vs physical test results separately; limitations.
 
-## Decisions needed from the user
+## Decisions (user, 2026-11-08)
 
-1. Approve this scope (hybrid, no web bridge, no server upload in this sprint).
-2. Include a minimal Foreground Service now (screen-off recording, adds a persistent notification and Android 14+
-   foreground-service-type permissions), or keep it as documentation only for now? Recommendation: include it — for a
-   native recorder it is small and is what makes a real run reliable.
-3. Server access option for the next sprint (recommended: Tailscale).
+1. Scope approved: hybrid, no web bridge, no server upload in this sprint.
+2. Foreground Service included (types `location|connectedDevice`, persistent notification with Stop action, partial wake lock
+   while recording). Screen-off reliability is reported only after the physical test.
+3. Server access for the next sprint: Tailscale (private network, per-device token, no public exposure).
