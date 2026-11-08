@@ -107,7 +107,9 @@ body[data-app="workout"] .type-display {
     filter: drop-shadow(0 0 4px rgba(43, 95, 217, 0.55));
   }
   body[data-app="workout"] .wt-welcome { animation: wt-rise 500ms ease-out both; }
+  body[data-app="workout"] .wt-bar { transform-origin: left; animation: wt-grow 700ms cubic-bezier(.2,.9,.3,1) both; }
 }
+@keyframes wt-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes wt-fade { from { opacity: 0; } to { opacity: 0.7; } }
 @keyframes wt-pop { from { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.15); opacity: 1; } to { transform: scale(1); opacity: 1; } }
 @keyframes wt-pop-strong {

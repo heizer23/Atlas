@@ -225,3 +225,17 @@ def test_history_rows_carry_session_id_and_are_read_only(client, seed, db_conn):
     with db_conn.cursor() as cur:
         cur.execute("select count(*) as n from workout.workout_log")
         assert cur.fetchone()["n"] == 2
+
+
+def test_finish_summary_compares_with_last_occurrence_and_flags_weight_change(client, seed):
+    seed(A, "2026-05-01", "Pull", [("Row", 30, [10, 10], None), ("Curl", 10, [8, 8], None)])
+    seed(B, "2026-06-01", "Pull", [("Row", 30, [10, 8], None)])
+    sid = rows(client.post("/api/workout/sessions/start", json={"split": "Pull"}))[0]["id"]
+    for name, w in (("Row", 35), ("Squat", 50)):
+        client.post(f"/api/workout/sessions/{sid}/exercises", json={"exercise": name, "status": "done", "weight_kg": w, "set1_reps": 9, "set2_reps": 9})
+    s = client.post(f"/api/workout/sessions/{sid}/finish").json()["summary"]
+    by = {e["exercise"]: e for e in s["exercises"]}
+    assert by["Row"]["reps"] == 18 and by["Row"]["prev_reps"] == 18 and by["Row"]["prev_date"] == "2026-06-01"
+    assert by["Row"]["weight_changed"] is True and by["Row"]["prev_weight_kg"] == 30.0
+    assert by["Squat"]["prev_reps"] is None and by["Squat"]["weight_changed"] is False
+    assert s["duration_sec"] is not None and s["avg_duration_sec"] is None

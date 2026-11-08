@@ -145,9 +145,27 @@ class Celebration(BaseModel):
     crossed_champions: bool
 
 
+class ExerciseSummary(BaseModel):
+    exercise: str
+    reps: int
+    weight_kg: float | None
+    prev_reps: int | None                      # None = first time (no earlier finished session)
+    prev_weight_kg: float | None
+    prev_date: str | None
+    weight_changed: bool                       # prev exists and weight differs (NULL == NULL is unchanged)
+
+
+class SessionSummary(BaseModel):
+    duration_sec: int | None                   # None = session has no recorded start/finish
+    avg_duration_sec: int | None               # mean of earlier finished sessions; None = no history
+    avg_count: int
+    exercises: list[ExerciseSummary]
+
+
 class CompletionResult(BaseModel):
     """celebration is None when nothing is rewarded (backdated, discarded, or already finished)."""
     celebration: Celebration | None = None
+    summary: SessionSummary | None = None
     already_finished: bool = False
 
 
@@ -196,10 +214,55 @@ def activity_dates(cur: Any, exclude_session: str | None = None) -> set[datetime
 
 
 def completion_result(before: set[datetime.date], after: set[datetime.date],
-                      event_date: datetime.date, today: datetime.date) -> JSONResponse:
+                      event_date: datetime.date, today: datetime.date,
+                      summary: SessionSummary | None = None) -> JSONResponse:
     c = progress.celebration(before, after, event_date, today)
-    return JSONResponse(content=CompletionResult(celebration=Celebration.model_validate(c) if c else None)
-                        .model_dump(mode="json"))
+    return JSONResponse(content=CompletionResult(celebration=Celebration.model_validate(c) if c else None,
+                                                 summary=summary).model_dump(mode="json"))
+
+
+_REPS_SQL = "COALESCE(set1_reps,0)+COALESCE(set2_reps,0)+COALESCE(set3_reps,0)+COALESCE(set4_reps,0)+COALESCE(set5_reps,0)"
+
+
+def session_summary(cur: Any, session_id: str) -> SessionSummary:
+    """Durations (this session vs. mean of earlier finished ones) and per-exercise reps vs. the most
+    recent earlier finished occurrence of the same exercise (case-insensitive)."""
+    cur.execute("SELECT EXTRACT(EPOCH FROM finished_at - started_at)::int AS sec FROM workout.workout_session "
+                "WHERE workout_id = %s", (session_id,))
+    duration = (cur.fetchone() or {}).get("sec")
+    cur.execute("SELECT AVG(EXTRACT(EPOCH FROM finished_at - started_at))::int AS avg, COUNT(*) AS n "
+                "FROM workout.workout_session WHERE status = 'finished' AND workout_id <> %s "
+                "AND finished_at IS NOT NULL", (session_id,))
+    avg = cur.fetchone()
+    cur.execute(
+        f"""
+        SELECT l.exercise, l.weight_kg, {_REPS_SQL} AS reps, p.prev_reps, p.prev_weight, p.prev_date::text AS prev_date,
+               p.workout_log_id IS NOT NULL AS has_prev
+        FROM workout.workout_log l
+        LEFT JOIN LATERAL (
+            SELECT o.workout_log_id, o.workout_date AS prev_date, o.weight_kg AS prev_weight,
+                   {_REPS_SQL.replace('set', 'o.set')} AS prev_reps
+            FROM workout.workout_log o
+            LEFT JOIN workout.workout_session os ON os.workout_id = o.workout_id
+            WHERE lower(o.exercise) = lower(l.exercise) AND o.status = 'done'
+              AND o.workout_id <> l.workout_id AND COALESCE(os.status, 'finished') = 'finished'
+              AND (o.workout_date, o.created_at, o.workout_log_id) < (l.workout_date, l.created_at, l.workout_log_id)
+            ORDER BY o.workout_date DESC, o.created_at DESC, o.workout_log_id DESC LIMIT 1
+        ) p ON true
+        WHERE l.workout_id = %s AND l.status = 'done'
+        ORDER BY l.created_at, l.workout_log_id
+        """,
+        (session_id,),
+    )
+    ex = [ExerciseSummary(
+        exercise=r["exercise"], reps=r["reps"],
+        weight_kg=float(r["weight_kg"]) if r["weight_kg"] is not None else None,
+        prev_reps=r["prev_reps"] if r["has_prev"] else None,
+        prev_weight_kg=float(r["prev_weight"]) if r["prev_weight"] is not None else None,
+        prev_date=r["prev_date"],
+        weight_changed=bool(r["has_prev"]) and r["weight_kg"] != r["prev_weight"],
+    ) for r in cur.fetchall()]
+    return SessionSummary(duration_sec=duration, avg_duration_sec=avg["avg"], avg_count=avg["n"], exercises=ex)
 
 
 def dataset_response(dataset: Dataset) -> JSONResponse:
@@ -568,13 +631,14 @@ def finish_session(session_id: str, today: str | None = None) -> JSONResponse:
                 )
                 before = activity_dates(cur, exclude_session=session_id)
                 after = activity_dates(cur)
+                summary = session_summary(cur, session_id)
             else:
                 cur.execute("DELETE FROM workout.workout_session WHERE workout_id = %s", (session_id,))
         conn.commit()
 
     if not kept:
         return JSONResponse(content=CompletionResult().model_dump(mode="json"))
-    return completion_result(before, after, sess["workout_date"], today_d)
+    return completion_result(before, after, sess["workout_date"], today_d, summary)
 
 
 # ── Light activity days (running / stretching / mobility) ─────────────────────

@@ -39,8 +39,31 @@ export interface Celebration {
   crossed_champions: boolean;
 }
 
+export interface ExerciseSummary {
+  exercise: string;
+  reps: number;
+  weight_kg: number | null;
+  prev_reps: number | null;
+  prev_weight_kg: number | null;
+  prev_date: string | null;
+  weight_changed: boolean;
+}
+
+export interface SessionSummary {
+  duration_sec: number | null;
+  avg_duration_sec: number | null;
+  avg_count: number;
+  exercises: ExerciseSummary[];
+}
+
+export function formatDuration(sec: number): string {
+  const m = Math.round(sec / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+}
+
 export interface CompletionResult {
   celebration: Celebration | null;
+  summary?: SessionSummary | null;
   already_finished: boolean;
 }
 

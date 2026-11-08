@@ -16,7 +16,7 @@ import type { ApiError, Dataset, Row } from "@platform-ui/api/types";
 import ExerciseLogView from "./ExerciseLogView";
 import ActivityDayCard from "./ActivityDayCard";
 import FinishModal from "./FinishModal";
-import type { Celebration, CompletionResult } from "./progressModel";
+import type { Celebration, CompletionResult, SessionSummary } from "./progressModel";
 import {
   ConfirmDialog,
   DeltaChip,
@@ -270,7 +270,7 @@ const actionBtn: React.CSSProperties = {
 
 // ── Active session overview ───────────────────────────────────────────────────
 
-function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded: (finished?: { celebration: Celebration | null }) => void }) {
+function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded: (finished?: { celebration: Celebration | null; summary?: SessionSummary | null }) => void }) {
   const cached = activeCache.sessionId === session.id;
   const [exercises, setExercises] = useState<ExerciseRow[] | null>(cached ? activeCache.exercises : null);
   const [histories, setHistories] = useState<Record<string, HistoryRow[]>>(cached ? activeCache.histories : {});
@@ -346,7 +346,7 @@ function ActiveOverview({ session, onEnded }: { session: ActiveSession; onEnded:
     }
     writeOpen(null);
     invalidateLogCache();
-    onEnded({ celebration: res.celebration });
+    onEnded({ celebration: res.celebration, summary: res.summary });
   }
 
   async function discard() {
@@ -544,11 +544,12 @@ export default function SessionView() {
   }, [active]);
 
   // The reward modal lives here, above both states: finishing unmounts ActiveOverview.
-  const [reward, setReward] = useState<{ celebration: Celebration; title: string; goToLog: boolean } | null>(null);
+  const [reward, setReward] = useState<{ celebration: Celebration; summary?: SessionSummary | null; title: string; goToLog: boolean } | null>(null);
   const navigate = useNavigate();
   const modal = reward && (
     <FinishModal
       celebration={reward.celebration}
+      summary={reward.summary}
       title={reward.title}
       onClose={() => {
         setReward(null);
@@ -580,7 +581,7 @@ export default function SessionView() {
           setArchetypes(null);
           loadArchetypes();
           setActive(null);
-          if (finished?.celebration) setReward({ celebration: finished.celebration, title: "Workout saved", goToLog: true });
+          if (finished?.celebration) setReward({ celebration: finished.celebration, summary: finished.summary, title: "Workout saved", goToLog: true });
           else if (finished) navigate("/workout/log");
         }}
       />
