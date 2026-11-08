@@ -133,4 +133,9 @@ Server upload/download (next sprint, over Tailscale), routes, runs, ghost logic,
 Automated (JVM, `./gradlew :app:testDebugUnitTest`): 30 tests — heart-rate parser, reconnect policy, permission logic,
 location mapping, capture store + recorder (Robolectric/SQLite), retrieval verification. Lint (`:app:lintDebug`): no errors.
 
-Physical device (Android phone, Polar H10): **not yet run.** Checklist is the acceptance list in `00_draft.md`.
+Physical device (Android phone, Polar H10), 2026-11-08, reported by the user as "everything works" (not itemised):
+GPS start/stop and live values, H10 scan/connect/live BPM, capture and buffer checks from the diagnostic screen.
+- **Not run on the device:** permission denial / "don't ask again" flow (user chose to defer; logic is unit-tested, dialog flow unverified).
+- **Not confirmed:** the 20-minute outdoor run and the screen-locked run (foreground service), Bluetooth drop/reconnect, and
+  reload/process-death behaviour. Treat the foreground-service and reconnection rows above as [unverified] until reported.
+Checklist is the acceptance list in `00_draft.md`.
