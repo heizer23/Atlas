@@ -54,7 +54,12 @@ class NativeBridge(
         if (state == State.CONNECTED) modules.forEach { it.onBridgeDisconnected() }
         state = State.VALIDATING
         val origin = Uri.parse(TRUSTED_ORIGIN)
-        val started = s.validateRelationship(CustomTabsService.RELATION_USE_AS_ORIGIN, origin, null)
+        val started = try {
+            s.validateRelationship(CustomTabsService.RELATION_USE_AS_ORIGIN, origin, null)
+        } catch (e: Exception) {
+            Log.e(TAG, "validateRelationship threw", e)
+            false
+        }
         Log.i(TAG, "validateRelationship started=$started")
         if (!started) state = State.DETACHED
     }
@@ -67,7 +72,13 @@ class NativeBridge(
             state = State.DETACHED
             return
         }
-        val ok = session?.requestPostMessageChannel(sourceOrigin, Uri.parse(TRUSTED_ORIGIN), Bundle.EMPTY) == true
+        // Bundle.EMPTY is immutable and the library putAll()s into it, so pass a fresh Bundle.
+        val ok = try {
+            session?.requestPostMessageChannel(sourceOrigin, Uri.parse(TRUSTED_ORIGIN), Bundle()) == true
+        } catch (e: Exception) {
+            Log.e(TAG, "requestPostMessageChannel threw", e)
+            false
+        }
         Log.i(TAG, "requestPostMessageChannel -> $ok")
         state = if (ok) State.CHANNEL_REQUESTED else State.DETACHED
     }
