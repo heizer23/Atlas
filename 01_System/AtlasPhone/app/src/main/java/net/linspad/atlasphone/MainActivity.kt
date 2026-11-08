@@ -6,7 +6,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.content.ComponentName
 import androidx.browser.customtabs.CustomTabsCallback
+import androidx.browser.customtabs.CustomTabsClient
+import androidx.browser.customtabs.CustomTabsServiceConnection
 import androidx.browser.customtabs.CustomTabsSession
 import androidx.browser.trusted.TrustedWebActivityIntent
 import com.google.androidbrowserhelper.trusted.LauncherActivity
@@ -29,7 +32,36 @@ class MainActivity : LauncherActivity() {
         requestNotificationPermissionIfNeeded()
         logFcmToken()
         logChromeVersion()
+        warmUpChrome()
         super.onCreate(savedInstanceState)
+    }
+
+    // Chrome refuses postMessage channel requests until some client has called warmup(). The launcher
+    // library skips warmup for modern Chrome, so we do it ourselves on a separate, short-lived binding.
+    private var warmupConnection: CustomTabsServiceConnection? = null
+
+    private fun warmUpChrome() {
+        val provider = CustomTabsClient.getPackageName(this, null) ?: return
+        val connection = object : CustomTabsServiceConnection() {
+            override fun onCustomTabsServiceConnected(name: ComponentName, client: CustomTabsClient) {
+                val ok = client.warmup(0)
+                Log.i("NativeBridge", "warmup($provider) -> $ok")
+                MobilePlatform.bridge(this@MainActivity).onWarmedUp()
+            }
+
+            override fun onServiceDisconnected(name: ComponentName) {}
+        }
+        warmupConnection = connection
+        if (!CustomTabsClient.bindCustomTabsService(this, provider, connection)) {
+            Log.w("NativeBridge", "could not bind $provider for warmup")
+            warmupConnection = null
+        }
+    }
+
+    override fun onDestroy() {
+        warmupConnection?.let { runCatching { unbindService(it) } }
+        warmupConnection = null
+        super.onDestroy()
     }
 
     private fun logChromeVersion() {

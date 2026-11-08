@@ -59,6 +59,15 @@ class NativeBridge(
         if (openChannel()) state = State.CHANNEL_REQUESTED
     }
 
+    /** Chrome accepted warmup(): retry the channel request if an earlier one was refused. */
+    fun onWarmedUp() {
+        Log.i(TAG, "warmup done")
+        if (state != State.DETACHED && state != State.VALIDATING) return
+        val s = sessionSupplier?.invoke() ?: return
+        session = s
+        if (openChannel()) state = State.CHANNEL_REQUESTED
+    }
+
     /** Called on every finished navigation: (re)establish the channel. */
     fun onNavigationFinished() {
         val s = sessionSupplier?.invoke()?.also { session = it } ?: return
