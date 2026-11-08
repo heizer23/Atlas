@@ -65,8 +65,15 @@ export function startLoopback(native: NativeGlobal | undefined, opts: LoopbackOp
       return;
     }
     current = ws;
+    log(`loopback: connecting to 127.0.0.1:${endpoint.port} (attempt ${attempt + 1})`);
+    // A hung attempt (neither open nor error) usually means the browser is holding the request,
+    // e.g. waiting for a local-network permission it cannot show.
+    const pending = setTimeout(() => {
+      if (ws.readyState === 0) log('loopback: still connecting after 4 s (browser may be blocking local access)');
+    }, 4_000);
 
     ws.onopen = () => {
+      clearTimeout(pending);
       log('loopback: socket open, authenticating');
       ws.send(JSON.stringify({ v: PROTOCOL_VERSION, type: 'auth', token: endpoint.token }));
     };
@@ -99,6 +106,7 @@ export function startLoopback(native: NativeGlobal | undefined, opts: LoopbackOp
     ws.onerror = () => { log('loopback: socket error'); };
 
     ws.onclose = (ev: CloseEvent) => {
+      clearTimeout(pending);
       if (current === ws) current = null;
       log(`loopback: closed (code ${ev.code})`);
       if (port) { port.open = false; port.onclose?.(); }

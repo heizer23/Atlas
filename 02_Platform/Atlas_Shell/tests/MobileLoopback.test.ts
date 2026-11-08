@@ -10,6 +10,7 @@ import { MobileBridge, type NativeGlobal } from '../platform-ui/mobile/MobileBri
 class FakeWS {
   static instances: FakeWS[] = [];
   static failConstruct = false;
+  readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
