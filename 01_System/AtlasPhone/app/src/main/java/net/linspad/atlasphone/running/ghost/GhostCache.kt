@@ -16,6 +16,9 @@ class GhostCache(private val dir: File) {
     fun saveRoute(route: RouteGeometry) = write(file("route", route.routeId), route.toJson())
     fun saveProfile(profile: GhostProfile) = write(file("ghost", profile.runId), profile.toJson())
 
+    fun saveLibrary(library: Library) = write(File(dir, "library.json"), library.toJson())
+    fun library(): Library = read(File(dir, "library.json"))?.let { runCatching { Library.fromCacheJson(it) }.getOrNull() } ?: Library.EMPTY
+
     fun route(routeId: String): RouteGeometry? = read(file("route", routeId))?.let { runCatching { RouteGeometry.fromJson(it) }.getOrNull() }
     fun profile(runId: String): GhostProfile? = read(file("ghost", runId))?.let { runCatching { GhostProfile.fromJson(it) }.getOrNull() }
 

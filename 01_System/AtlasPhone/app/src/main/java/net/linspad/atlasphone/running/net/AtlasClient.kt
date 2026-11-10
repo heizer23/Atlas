@@ -5,6 +5,7 @@ import net.linspad.atlasphone.mobile.model.SampleJson
 import net.linspad.atlasphone.mobile.model.Stream
 import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.ghost.GhostProfile
+import net.linspad.atlasphone.running.ghost.Library
 import net.linspad.atlasphone.running.ghost.RouteGeometry
 import org.json.JSONArray
 import org.json.JSONException
@@ -99,6 +100,11 @@ class AtlasClient(
 
     fun preparedRun(id: String): AtlasResult<PreparedRun> = call("GET", "/prepared-runs/$id", null) { parsePrepared(it) }
 
+    /** Every route and every qualified run on it, for choosing a route and ghost on the phone. */
+    fun library(): AtlasResult<Library> = call("GET", "/library", null) { o ->
+        Library.fromJson(o) { millis(it.getString("started_at")) }
+    }
+
     /** Reference route for offline use. */
     fun route(routeId: String): AtlasResult<RouteGeometry> = call("GET", "/routes/$routeId", null) { RouteGeometry.fromJson(it) }
 
@@ -137,6 +143,9 @@ class AtlasClient(
             .put("last_seq", lastSeq)
             .put("expected_counts", JSONObject().put("location", counts.location).put("heart_rate", counts.heartRate))
             .put("pauses", pauses).put("dropped", dropped)
+        meta.category?.let { body.put("category", it) }
+        meta.routeId?.let { body.put("route_id", it) }
+        meta.ghostRunId?.let { body.put("ghost_run_id", it) }
         return call("POST", "/runs/$runId/finish", body) { o ->
             val ranges = o.getJSONArray("missing_seq_ranges").let { a -> (0 until a.length()).map { a.getJSONObject(it).let { r -> r.getLong("start")..r.getLong("end") } } }
             val mismatched = o.getJSONArray("count_mismatch").let { a -> (0 until a.length()).map { a.getJSONObject(it).getString("stream") } }

@@ -33,6 +33,13 @@ def _run_id(value: str) -> str:
         raise AppError("NOT_FOUND", "Run not found.", 404)
 
 
+def _opt_uuid(value: Optional[str]) -> Optional[str]:
+    try:
+        return str(uuid.UUID(value)) if value else None
+    except ValueError:
+        return None
+
+
 def _not_found() -> AppError:
     return AppError("NOT_FOUND", "Run not found.", 404)
 
@@ -210,11 +217,22 @@ def finish(run_id: str, body: FinishRequest, device: DeviceContext = Depends(req
             cur.execute(
                 """
                 update runningtracker.runs
-                set finished_at = %s, elapsed_s = %s, moving_s = %s, distance_m = %s, updated_at = now()
+                set finished_at = %s, elapsed_s = %s, moving_s = %s, distance_m = %s,
+                    category = coalesce(category, nullif(btrim(%s), '')), updated_at = now()
                 where id = %s
                 """,
-                (body.finished_at, body.elapsed_s, body.moving_s, body.distance_m, rid),
+                (body.finished_at, body.elapsed_s, body.moving_s, body.distance_m, body.category, rid),
             )
+            # Route / ghost chosen on the phone. Only fills an empty route; ids that do not exist are ignored.
+            route_id, ghost_id = _opt_uuid(body.route_id), _opt_uuid(body.ghost_run_id)
+            if route_id:
+                cur.execute(
+                    "update runningtracker.runs set route_id = %s where id = %s and route_id is null "
+                    "and exists (select 1 from runningtracker.routes where id = %s)", (route_id, rid, route_id))
+            if ghost_id:
+                cur.execute(
+                    "update runningtracker.runs set ghost_run_id = %s where id = %s and ghost_run_id is null "
+                    "and exists (select 1 from runningtracker.runs where id = %s)", (ghost_id, rid, ghost_id))
             # Pauses are replaced as a set on every finish call (idempotent).
             cur.execute("delete from runningtracker.run_pauses where run_id = %s", (rid,))
             for p in {p.started_at: p for p in body.pauses}.values():
@@ -270,3 +288,28 @@ def native_get_ghost_profile(run_id: str, device: DeviceContext = Depends(requir
     return {"run_id": rid, "route_id": str(row["route_id"]), "geometry_version": row["geometry_version"],
             "algo_version": row["algo_version"], "time_basis": "moving_seconds",
             "end_progress_m": row["end_progress_m"], "duration_s": points[-1][0], "points": points}
+
+
+@router.get("/library")
+def native_library(device: DeviceContext = Depends(require_device)):
+    """Everything the phone needs to pick a route and a ghost offline: routes and every qualified run on them.
+    Profiles and geometry are fetched per id (only what the phone lacks or what changed version)."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select id, name, geometry_version, reference_distance_m from runningtracker.routes order by lower(name)")
+            routes = [{"route_id": str(r["id"]), "name": r["name"], "geometry_version": r["geometry_version"],
+                       "reference_distance_m": r["reference_distance_m"]} for r in cur.fetchall()]
+            cur.execute(
+                """
+                select r.id, p.route_id, r.started_at, r.moving_s, r.distance_m, r.category, m.avg_hr,
+                       p.geometry_version, p.algo_version
+                from runningtracker.run_route_progress p
+                join runningtracker.runs r on r.id = p.run_id and r.status = 'complete'
+                left join runningtracker.run_metrics m on m.run_id = r.id
+                where p.qualified
+                order by r.started_at desc, r.id
+                """)
+            runs = [{"run_id": str(r["id"]), "route_id": str(r["route_id"]), "started_at": r["started_at"].isoformat(),
+                     "moving_s": r["moving_s"], "distance_m": r["distance_m"], "category": r["category"], "avg_hr": r["avg_hr"],
+                     "geometry_version": r["geometry_version"], "algo_version": r["algo_version"]} for r in cur.fetchall()]
+    return {"routes": routes, "runs": runs}

@@ -122,6 +122,11 @@ class FinishRequest(_Strict):
     expected_counts: StreamCounts
     pauses: list[PauseIn] = Field(default_factory=list, max_length=1000)
     dropped: int = Field(0, ge=0)
+    # Phone-chosen category ("4 km · HR 140"); only fills an empty category, never overwrites a web edit.
+    category: Optional[str] = Field(None, max_length=60)
+    # Route and ghost the phone raced against (chosen on the phone, no prepared run); unknown ids are ignored.
+    route_id: Optional[str] = None
+    ghost_run_id: Optional[str] = None
 
 
 class SeqRange(BaseModel):

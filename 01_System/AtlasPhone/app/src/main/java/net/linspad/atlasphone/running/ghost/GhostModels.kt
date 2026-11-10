@@ -62,3 +62,44 @@ data class GhostProfile(
         fun fromJson(json: String) = fromJson(JSONObject(json))
     }
 }
+
+/** A route in the phone's library (geometry is fetched separately by id). */
+data class LibraryRoute(val routeId: String, val name: String, val geometryVersion: Int, val referenceDistanceM: Double)
+
+/** A completed run that can be a ghost on [routeId]: everything the picker shows, no samples. */
+data class LibraryRun(
+    val runId: String, val routeId: String, val startedAtMillis: Long, val movingS: Double?, val distanceM: Double?,
+    val category: String?, val avgHr: Double?, val geometryVersion: Int,
+)
+
+/** All routes and all qualified runs per route, as served by `GET /native/library` and cached for offline selection. */
+data class Library(val routes: List<LibraryRoute>, val runs: List<LibraryRun>) {
+    fun runsOn(routeId: String) = runs.filter { it.routeId == routeId }
+
+    fun toJson(): String = JSONObject()
+        .put("routes", JSONArray(routes.map { JSONObject().put("route_id", it.routeId).put("name", it.name)
+            .put("geometry_version", it.geometryVersion).put("reference_distance_m", it.referenceDistanceM) }))
+        .put("runs", JSONArray(runs.map { JSONObject().put("run_id", it.runId).put("route_id", it.routeId)
+            .put("started_at_millis", it.startedAtMillis).put("moving_s", it.movingS ?: JSONObject.NULL)
+            .put("distance_m", it.distanceM ?: JSONObject.NULL).put("category", it.category ?: JSONObject.NULL)
+            .put("avg_hr", it.avgHr ?: JSONObject.NULL).put("geometry_version", it.geometryVersion) }))
+        .toString()
+
+    companion object {
+        val EMPTY = Library(emptyList(), emptyList())
+        private fun JSONObject.d(k: String): Double? = if (isNull(k)) null else getDouble(k)
+
+        /** [startedAt] converts the server's ISO text; the cache stores millis instead (see [toJson]). */
+        fun fromJson(o: JSONObject, startedAt: (JSONObject) -> Long): Library {
+            val r = o.getJSONArray("routes"); val u = o.getJSONArray("runs")
+            return Library(
+                (0 until r.length()).map { r.getJSONObject(it).let { x -> LibraryRoute(x.getString("route_id"), x.getString("name"), x.getInt("geometry_version"), x.getDouble("reference_distance_m")) } },
+                (0 until u.length()).map { u.getJSONObject(it).let { x ->
+                    LibraryRun(x.getString("run_id"), x.getString("route_id"), startedAt(x), x.d("moving_s"), x.d("distance_m"),
+                        if (x.isNull("category")) null else x.getString("category"), x.d("avg_hr"), x.getInt("geometry_version"))
+                } },
+            )
+        }
+        fun fromCacheJson(json: String): Library = fromJson(JSONObject(json)) { it.getLong("started_at_millis") }
+    }
+}

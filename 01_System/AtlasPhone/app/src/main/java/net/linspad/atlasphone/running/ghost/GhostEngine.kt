@@ -129,6 +129,8 @@ data class GhostReading(
     val ghostHrAtPosition: Double?,
     val ghostHrAtTime: Double?,
     val ghostFinished: Boolean,
+    /** Where the ghost is on the route now (metres along the route); the end of the route once it has finished. */
+    val ghostProgressM: Double? = null,
 )
 
 object GhostComparison {
@@ -171,6 +173,7 @@ object GhostComparison {
             ghostHrAtPosition = hrAtProgress(p, myS),
             ghostHrAtTime = hrAtTime(p, myT),
             ghostFinished = finished,
+            ghostProgressM = ghostS,
         )
     }
 }
@@ -186,7 +189,11 @@ enum class GhostStatus {
 }
 
 /** What the screen renders. [reading] is non-null only while [status] is ON_COURSE. */
-data class GhostLive(val status: GhostStatus, val routeName: String, val reading: GhostReading?, val progressM: Double?, val routeLengthM: Double)
+data class GhostLive(
+    val status: GhostStatus, val routeName: String, val reading: GhostReading?, val progressM: Double?, val routeLengthM: Double,
+    /** The route polyline for the local map (shared, not copied). */
+    val route: List<RoutePoint> = emptyList(),
+)
 
 /**
  * One ghost race: feeds fixes through the tracker using the run's moving clock and answers the live comparison from the
@@ -210,10 +217,10 @@ class GhostSession(
     fun snapshot(nowMillis: Long): GhostLive {
         val s = tracker.lastProgressM; val t = tracker.lastMovingS
         val len = route.referenceDistanceM
-        if (s == null || t == null) return GhostLive(GhostStatus.WAITING_FOR_START, route.name, null, null, len)
-        if (tracker.consecutiveOffCourse >= GhostConfig.SUSPEND_AFTER_OFF_COURSE) return GhostLive(GhostStatus.OFF_COURSE, route.name, null, s, len)
+        if (s == null || t == null) return GhostLive(GhostStatus.WAITING_FOR_START, route.name, null, null, len, route.points)
+        if (tracker.consecutiveOffCourse >= GhostConfig.SUSPEND_AFTER_OFF_COURSE) return GhostLive(GhostStatus.OFF_COURSE, route.name, null, s, len, route.points)
         val seen = lastFixMillis
-        if (seen == null || nowMillis - seen > GhostConfig.GPS_LOST_MS) return GhostLive(GhostStatus.GPS_LOST, route.name, null, s, len)
-        return GhostLive(GhostStatus.ON_COURSE, route.name, GhostComparison.compare(profile, t, s), s, len)
+        if (seen == null || nowMillis - seen > GhostConfig.GPS_LOST_MS) return GhostLive(GhostStatus.GPS_LOST, route.name, null, s, len, route.points)
+        return GhostLive(GhostStatus.ON_COURSE, route.name, GhostComparison.compare(profile, t, s), s, len, route.points)
     }
 }

@@ -231,6 +231,19 @@ def test_finish_verifies_and_completes(client, db_conn):
     assert _row(db_conn, "select count(*) as n from runningtracker.run_metrics where run_id = %s", NEW_RUN)[0]["n"] == 1
 
 
+def test_finish_category_fills_empty_but_never_overwrites(client, db_conn):
+    begin(client)
+    put(client, NEW_RUN, batch(10, 0))
+    r = finish(client, NEW_RUN, {**finish_body(10, 10, 0), "category": "4 km \u00b7 HR 140"})
+    assert r.status_code == 200
+    q = "select category from runningtracker.runs where id = %s"
+    assert _row(db_conn, q, NEW_RUN)[0]["category"] == "4 km \u00b7 HR 140"
+    db_conn.cursor().execute("update runningtracker.runs set category = 'Web edit' where id = %s", (NEW_RUN,))
+    db_conn.commit()
+    finish(client, NEW_RUN, {**finish_body(10, 10, 0), "category": "other"})
+    assert _row(db_conn, q, NEW_RUN)[0]["category"] == "Web edit"
+
+
 def test_finish_detects_gaps(client, db_conn):
     r = finish(client, RUN_GAP, finish_body(20, 10, 10))
     assert r.status_code == 200
@@ -293,3 +306,21 @@ def test_ownership_on_every_native_call(client, db_conn):
     # unknown / malformed ids are 404 too
     assert put(client, "not-a-uuid", [loc(1, 1)]).status_code == 404
     assert finish(client, "b1000000-0000-0000-0000-000000000009", finish_body(1, 1, 0)).status_code == 404
+
+
+def test_finish_links_route_and_library_lists_qualified_runs(client, db_conn):
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "insert into runningtracker.routes (name, geometry, reference_distance_m, is_loop, point_count, geometry_version) "
+            "values ('Test route', '[[50,10,0],[50.001,10,111]]'::jsonb, 111, false, 2, 1) returning id")
+        route_id = str(cur.fetchone()["id"])
+    db_conn.commit()
+    lib = client.get(f"{NATIVE}/library", headers=auth())
+    assert lib.status_code == 200 and set(lib.json()) == {"routes", "runs"}
+    assert any(r["route_id"] == route_id for r in lib.json()["routes"])
+    assert client.get(f"{NATIVE}/library").status_code in (401, 403)
+    begin(client)
+    put(client, NEW_RUN, batch(10, 0))
+    finish(client, NEW_RUN, {**finish_body(10, 10, 0), "route_id": route_id, "ghost_run_id": "not-a-uuid"})
+    got = _row(db_conn, "select route_id, ghost_run_id from runningtracker.runs where id = %s", NEW_RUN)[0]
+    assert str(got["route_id"]) == route_id and got["ghost_run_id"] is None

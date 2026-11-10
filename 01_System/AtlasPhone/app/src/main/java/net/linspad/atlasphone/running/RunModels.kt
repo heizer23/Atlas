@@ -44,6 +44,9 @@ data class RunMeta(
     val needsRepair: Boolean,
     val routeId: String? = null,
     val ghostRunId: String? = null,
+    /** Target heart rate chosen before the start, and the equivalent-effort category derived from it ("4 km · HR 140"). */
+    val targetHr: Int? = null,
+    val category: String? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("captureId", captureId)
@@ -69,6 +72,8 @@ data class RunMeta(
         .put("needsRepair", needsRepair)
         .put("routeId", routeId ?: JSONObject.NULL)
         .put("ghostRunId", ghostRunId ?: JSONObject.NULL)
+        .put("targetHr", targetHr ?: JSONObject.NULL)
+        .put("category", category ?: JSONObject.NULL)
         .toString()
 
     companion object {
@@ -94,6 +99,8 @@ data class RunMeta(
                 lastError = o.optStr("lastError"), needsRepair = o.getBoolean("needsRepair"),
                 routeId = if (o.has("routeId")) o.optStr("routeId") else null,
                 ghostRunId = if (o.has("ghostRunId")) o.optStr("ghostRunId") else null,
+                targetHr = if (o.has("targetHr") && !o.isNull("targetHr")) o.getInt("targetHr") else null,
+                category = if (o.has("category")) o.optStr("category") else null,
             )
         }
     }

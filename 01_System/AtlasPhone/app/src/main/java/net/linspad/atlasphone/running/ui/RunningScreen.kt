@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -37,6 +39,8 @@ import kotlinx.coroutines.launch
 import net.linspad.atlasphone.mobile.MobilePlatform
 import net.linspad.atlasphone.mobile.heartrate.HeartRateMonitor
 import net.linspad.atlasphone.mobile.permissions.Capability
+import net.linspad.atlasphone.mobile.permissions.PermissionStatus
+import net.linspad.atlasphone.running.live.HrTarget
 import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.RunState
 import net.linspad.atlasphone.running.ghost.GhostLive
@@ -47,7 +51,7 @@ import net.linspad.atlasphone.running.session.RunController
 
 // ── Formatting (display only) ────────────────────────────────────────────────
 
-private const val DASH = "–"
+internal const val DASH = "–"
 
 internal fun fmtDuration(s: Double?): String {
     if (s == null) return DASH
@@ -95,7 +99,7 @@ fun RunningScreen(
     onPair: () -> Unit = {},
 ) {
     val live by controller.live().collectAsState()
-    live?.let { RecordingPanel(controller, it, onFinished); return }
+    live?.let { RecordingPanel(controller, it, ensurePermission, onFinished); return }
     HomePanel(controller, ensurePermission, onPair)
 }
 
@@ -110,6 +114,11 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
     LaunchedEffect(Unit) { while (true) { delay(3000); tick++ } } // the stored lists are not reactive
 
     @Suppress("UNUSED_VARIABLE") val t = tick
+    val prefs = remember { context.getSharedPreferences("running_prefs", android.content.Context.MODE_PRIVATE) }
+    var targetOn by remember { mutableStateOf(prefs.getBoolean("target_on", false)) }
+    var targetBpm by remember { mutableIntStateOf(prefs.getInt("target_hr", HrTarget.DEFAULT_BPM)) }
+    fun saveTarget() { prefs.edit().putBoolean("target_on", targetOn).putInt("target_hr", targetBpm).apply() }
+    val targetHr = if (targetOn) targetBpm else null
     val gps by platform.location.state.collectAsState()
     val hrState by platform.heartRate.state.collectAsState()
     val hrLatest by platform.heartRate.latest.collectAsState()
@@ -118,6 +127,18 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
     val pending = controller.pendingUploads()
     val interrupted = controller.interruptedRuns()
     val paired = controller.tokens.isPaired()
+
+    // Keep the library current in the background (best effort, silent when Atlas is unreachable).
+    LaunchedEffect(Unit) { if (controller.tokens.isPaired()) { controller.refreshLibrary(); tick++ } }
+
+    // A remembered sensor is reconnected as soon as this screen opens (only if Bluetooth permission is already granted).
+    LaunchedEffect(Unit) {
+        val idle = platform.heartRate.state.value.let { it == HeartRateMonitor.State.IDLE || it == HeartRateMonitor.State.DISCONNECTED }
+        if (idle && platform.heartRate.lastDeviceAddress() != null &&
+            platform.permissions.status(Capability.BLUETOOTH, context as? android.app.Activity) == PermissionStatus.GRANTED) {
+            platform.heartRate.connectLast(); platform.ensureForegroundService(context)
+        }
+    }
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Running", style = MaterialTheme.typography.headlineMedium)
@@ -142,7 +163,13 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Sensors", style = MaterialTheme.typography.titleMedium)
                 Text("GPS: ${gps.name.lowercase().replace('_', ' ')}")
-                Text("Heart-rate sensor: ${hrState.name.lowercase().replace('_', ' ')}" + (hrLatest?.let { " (${it.bpm} bpm)" } ?: "") + "  (optional)")
+                val hrOk = hrState == HeartRateMonitor.State.CONNECTED
+                Text("Heart-rate sensor: ${hrState.name.lowercase().replace('_', ' ')}" + (hrLatest?.takeIf { hrOk }?.let { " (${it.bpm} bpm)" } ?: ""),
+                    color = if (hrOk) MaterialTheme.colorScheme.primary else Color(0xFFFFC107))
+                if (!hrOk) Text(
+                    if (targetOn) "No heart-rate sensor: the target cannot be tracked. You can still run without it."
+                    else "No heart-rate sensor: heart rate will not be recorded. You can still run without it.",
+                    color = Color(0xFFFFC107))
                 OutlinedButton(onClick = {
                     ensurePermission(Capability.BLUETOOTH) {
                         if (platform.heartRate.lastDeviceAddress() != null) platform.heartRate.connectLast() else platform.heartRate.scan()
@@ -159,9 +186,28 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
             }
         }
 
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Target heart rate", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Switch(checked = targetOn, onCheckedChange = { targetOn = it; saveTarget() })
+                }
+                if (targetOn) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(onClick = { targetBpm = (targetBpm - 5).coerceAtLeast(HrTarget.MIN_BPM); saveTarget() }) { Text("−5") }
+                        Text("$targetBpm bpm", fontSize = 32.sp)
+                        OutlinedButton(onClick = { targetBpm = (targetBpm + 5).coerceAtMost(HrTarget.MAX_BPM); saveTarget() }) { Text("+5") }
+                    }
+                    Text("Category: ${HrTarget.category(targetBpm, null)} (a route adds its length, e.g. 4 km · HR $targetBpm)")
+                }
+            }
+        }
+
         Button(modifier = Modifier.fillMaxWidth(), onClick = {
-            ensurePermission(Capability.LOCATION) { runCatching { controller.startFree() }.onFailure { message = it.message } }
+            ensurePermission(Capability.LOCATION) { runCatching { controller.startFree(targetHr) }.onFailure { message = it.message } }
         }) { Text("Free Run", fontSize = 22.sp) }
+
+        RaceCard(controller, tick, targetHr, { go -> ensurePermission(Capability.LOCATION, go) }) { message = it }
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -179,12 +225,12 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
                             }
                         }
                         Button(onClick = {
-                            ensurePermission(Capability.LOCATION) { runCatching { controller.startPrepared(controller.preparedRunFor(r)) }.onFailure { message = it.message } }
+                            ensurePermission(Capability.LOCATION) { runCatching { controller.startPrepared(controller.preparedRunFor(r), targetHr) }.onFailure { message = it.message } }
                         }) { Text("Start") }
                     }
                 }
                 if (paired) {
-                    OutlinedButton(onClick = { scope.launch { message = controller.refreshPrepared() ?: "Prepared runs updated."; tick++ } }) { Text("Refresh from Atlas") }
+                    OutlinedButton(onClick = { scope.launch { message = controller.refreshLibrary() ?: controller.refreshPrepared() ?: "Library and prepared runs updated."; tick++ } }) { Text("Refresh from Atlas") }
                 } else {
                     Text("This phone is not paired with Atlas. Free Run works without it.")
                     OutlinedButton(onClick = onPair) { Text("Pair with Atlas") }
@@ -218,8 +264,10 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
 }
 
 @Composable
-private fun RecordingPanel(controller: RunController, live: LiveRunState, onFinished: (RunMeta) -> Unit) {
+private fun RecordingPanel(controller: RunController, live: LiveRunState, ensurePermission: (Capability, () -> Unit) -> Unit, onFinished: (RunMeta) -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val platform = remember { MobilePlatform.get(context) }
     var confirmFinish by remember { mutableStateOf(false) }
     var finishing by remember { mutableStateOf(false) }
     val paused = live.meta.state == RunState.PAUSED
@@ -230,28 +278,29 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, onFini
         m.lastAccuracyM > 30f -> "GPS: poor (%.0f m)".format(m.lastAccuracyM)
         else -> "GPS: good (%.0f m)".format(m.lastAccuracyM)
     }
-    val hrText = when (live.hrState) {
-        "CONNECTED" -> "HR sensor: connected"
-        "IDLE", "DISCONNECTED" -> "HR sensor: not connected"
-        else -> "HR sensor: ${live.hrState.lowercase().replace('_', ' ')}"
-    }
 
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (paused) {
-            // Manual pause is its own, unmistakable state; it is not poor GPS and not missing HR.
-            Text("PAUSED", Modifier.fillMaxWidth().background(Color(0xFFFFC107)).padding(12.dp), color = Color.Black, fontSize = 28.sp)
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Scrolling cockpit; Pause / Finish stay pinned below it. Order = priority: HR, ghost gap, pace, map, graphs.
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (paused) {
+                // Manual pause is its own, unmistakable state; it is not poor GPS and not missing HR.
+                Text("PAUSED", Modifier.fillMaxWidth().background(Color(0xFFFFC107)).padding(12.dp), color = Color.Black, fontSize = 28.sp)
+            }
+            live.meta.category?.let { Text(it, color = Color(0xFF9E9E9E)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Column { Text("Time"); Text(fmtDuration(m.elapsedS), fontSize = 40.sp) }
+                Column { Text("Distance"); Text(fmtKm(m.distanceM), fontSize = 40.sp) }
+            }
+            Text("moving ${fmtDuration(m.movingS)}")
+            HrCard(m, live.hrState, live.targetHr) {
+                ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) }
+            }
+            live.ghost?.let { GhostCard(it, live.trends, m.currentHr) }
+            PaceCard(m, live.trends)
+            live.ghost?.let { LocalMapCard(it) }
+            HrTrendCard(live.trends, live.targetHr, live.ghost != null)
+            Text(gpsText)
         }
-        Text(fmtDuration(m.elapsedS), fontSize = 64.sp)
-        Text("moving ${fmtDuration(m.movingS)}")
-        Text(fmtKm(m.distanceM), fontSize = 48.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            Column { Text("Pace"); Text(fmtPace(m.currentPaceSPerKm), fontSize = 28.sp) }
-            Column { Text("Average"); Text(fmtPace(m.avgPaceSPerKm), fontSize = 28.sp) }
-            Column { Text("Heart rate"); Text(m.currentHr?.let { "$it" } ?: DASH, fontSize = 28.sp) }
-        }
-        live.ghost?.let { GhostPanel(it, m.currentHr) }
-        Text(gpsText)
-        Text(hrText)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (paused) Button(modifier = Modifier.weight(1f), onClick = { controller.resume() }) { Text("Resume", fontSize = 22.sp) }
             else OutlinedButton(modifier = Modifier.weight(1f), onClick = { controller.pause() }) { Text("Pause", fontSize = 22.sp) }
@@ -272,35 +321,6 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, onFini
             },
             dismissButton = { TextButton(onClick = { confirmFinish = false }) { Text("Keep running") } },
         )
-    }
-}
-
-/**
- * Live ghost comparison. Big line = time gap at your position ("0:23 AHEAD"); then the lead in metres at the same elapsed
- * time and the ghost's heart rate at your position and at the same time next to yours. Suspended states say why
- * instead of showing a false gap.
- */
-@Composable
-private fun GhostPanel(ghost: GhostLive, myHr: Int?) {
-    val r = ghost.reading
-    Column(Modifier.fillMaxWidth().background(Color(0xFF1B1B2F)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("GHOST RUNNER · ${ghost.routeName}")
-        when (ghost.status) {
-            GhostStatus.WAITING_FOR_START -> Text("Go to the start of the route", fontSize = 22.sp)
-            GhostStatus.OFF_COURSE -> Text("Off the route: comparison paused", fontSize = 22.sp, color = Color(0xFFFFC107))
-            GhostStatus.GPS_LOST -> Text("GPS lost: comparison paused", fontSize = 22.sp, color = Color(0xFFFFC107))
-            GhostStatus.ON_COURSE -> if (r != null) {
-                val ahead = (r.timeGapS ?: 0.0) < 0
-                Text(fmtGap(r.timeGapS), fontSize = 40.sp, color = if (r.timeGapS == null || Math.abs(r.timeGapS) < 1.0) Color.White else if (ahead) Color(0xFF8CFF66) else Color(0xFFFF8A80))
-                Text("Lead now: ${fmtLead(r.leadM)}")
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    Column { Text("You"); Text(myHr?.toString() ?: DASH, fontSize = 22.sp) }
-                    Column { Text("Ghost, same spot"); Text(fmtBpm(r.ghostHrAtPosition), fontSize = 22.sp) }
-                    Column { Text("Ghost, same time"); Text(fmtBpm(r.ghostHrAtTime), fontSize = 22.sp) }
-                }
-                if (r.ghostFinished) Text("The ghost has finished.")
-            }
-        }
     }
 }
 

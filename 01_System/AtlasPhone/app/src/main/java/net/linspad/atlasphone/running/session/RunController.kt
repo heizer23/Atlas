@@ -25,6 +25,11 @@ import net.linspad.atlasphone.running.auth.TokenStore
 import net.linspad.atlasphone.running.ghost.GhostCache
 import net.linspad.atlasphone.running.ghost.GhostLive
 import net.linspad.atlasphone.running.ghost.GhostSession
+import net.linspad.atlasphone.running.ghost.Library
+import net.linspad.atlasphone.running.ghost.LibraryRun
+import net.linspad.atlasphone.running.live.HrTarget
+import net.linspad.atlasphone.running.live.LiveHistory
+import net.linspad.atlasphone.running.live.LiveTrends
 import net.linspad.atlasphone.running.metrics.LiveMetrics
 import net.linspad.atlasphone.running.metrics.RunMetrics
 import net.linspad.atlasphone.running.metrics.RunMetricsAccumulator
@@ -35,7 +40,12 @@ import net.linspad.atlasphone.running.net.UrlConnectionTransport
 import net.linspad.atlasphone.running.sync.UploadScheduler
 
 /** Everything the recording screen renders. [gpsState] / [hrState] are the Mobile Platform state names. */
-class LiveRunState(val meta: RunMeta, val metrics: LiveMetrics, val gpsState: String, val hrState: String, val ghost: GhostLive? = null)
+class LiveRunState(
+    val meta: RunMeta, val metrics: LiveMetrics, val gpsState: String, val hrState: String, val ghost: GhostLive? = null,
+    val trends: LiveTrends = LiveTrends.EMPTY,
+) {
+    val targetHr: Int? get() = meta.targetHr
+}
 
 /** Whether the prepared run's ghost race can run offline: NONE (no ghost chosen), READY, or MISSING (download needed). */
 enum class GhostReadiness { NONE, READY, MISSING }
@@ -46,7 +56,7 @@ enum class GhostReadiness { NONE, READY, MISSING }
  * Persists RunMeta on every transition; the server never starts, pauses or stops a run.
  */
 class RunController private constructor(private val app: Application) {
-    private class Active(var meta: RunMeta, val acc: RunMetricsAccumulator, val monoStartMs: Long?, val jobs: List<Job>, val ghost: GhostSession?)
+    private class Active(var meta: RunMeta, val acc: RunMetricsAccumulator, val monoStartMs: Long?, val jobs: List<Job>, val ghost: GhostSession?, val history: LiveHistory = LiveHistory())
 
     private val platform = MobilePlatform.get(app)
     private val store get() = platform.store
@@ -62,18 +72,24 @@ class RunController private constructor(private val app: Application) {
 
     // ── Start ────────────────────────────────────────────────────────────────
 
-    fun startFree(): String = start(null)
+    fun startFree(targetHr: Int? = null): String = start(null, targetHr)
 
-    fun startPrepared(prepared: PreparedRun): String = start(prepared)
+    fun startPrepared(prepared: PreparedRun, targetHr: Int? = null): String = start(prepared, targetHr)
 
-    private fun start(prepared: PreparedRun?): String = synchronized(lock) {
+    /** A race chosen on the phone: route and ghost come from the local library, no prepared run and no Atlas needed. */
+    fun startRace(routeId: String, ghostRunId: String, targetHr: Int? = null): String = start(null, targetHr, routeId, ghostRunId)
+
+    private fun start(prepared: PreparedRun?, targetHr: Int?, raceRouteId: String? = null, raceGhostId: String? = null): String = synchronized(lock) {
         check(active == null) { "A run is already active" }
         val previous = prepared?.let { p -> store.getRunMeta(p.id)?.let(RunMeta::fromJson)?.state ?: RunState.PREPARED }
         val state = RunLifecycle.next(previous, RunEvent.START) ?: error("This run cannot be started")
         check(platform.location.start()) { "GPS cannot start (location permission or location services missing)" }
         val now = System.currentTimeMillis()
         val id = platform.recorder.start(prepared?.id)
-        val meta = RunMeta(id, state, prepared?.shortId, prepared?.title, now, null, emptyList(), null, 0, null, false, prepared?.routeId, prepared?.ghostRunId)
+        val routeId = prepared?.routeId ?: raceRouteId
+        val routeLengthM = routeId?.let { ghostCache.route(it)?.referenceDistanceM }
+        val meta = RunMeta(id, state, prepared?.shortId, prepared?.title, now, null, emptyList(), null, 0, null, false, routeId, prepared?.ghostRunId ?: raceGhostId,
+            targetHr, HrTarget.category(targetHr, routeLengthM))
         store.putRunMeta(id, meta.toJson())
         attach(meta, RunMetricsAccumulator(now), SystemClock.elapsedRealtime(), ghostFor(meta))
         platform.ensureForegroundService(app)
@@ -113,7 +129,10 @@ class RunController private constructor(private val app: Application) {
         val live = synchronized(lock) {
             active?.let {
                 val now = System.currentTimeMillis()
-                LiveRunState(it.meta, it.acc.snapshot(now), platform.location.state.value.name, platform.heartRate.state.value.name, it.ghost?.snapshot(now))
+                val metrics = it.acc.snapshot(now)
+                val ghost = it.ghost?.snapshot(now)
+                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost) // no history while paused
+                LiveRunState(it.meta, metrics, platform.location.state.value.name, platform.heartRate.state.value.name, ghost, it.history.snapshot())
             }
         }
         _live.value = live
@@ -334,6 +353,44 @@ class RunController private constructor(private val app: Application) {
             ghostCache.saveProfile(profile)
         }
         return if (failed) "Ghost data could not be downloaded for some runs. Refresh again with Atlas reachable." else null
+    }
+
+    // ── Library: all routes and all qualified runs, kept on the phone ────────────────────────────────────
+
+    /** The locally stored library (offline). */
+    fun library(): Library = ghostCache.library()
+
+    /** True when both route and ghost profile of this library run are stored (the race can start offline). */
+    fun raceReady(run: LibraryRun): Boolean = ghostCache.isReady(run.routeId, run.runId)
+
+    /**
+     * Downloads the library list, then every route and ghost profile that is missing or whose route/geometry version
+     * changed. Existing files are kept, so later refreshes only fetch what is new. Returns an error text or null.
+     */
+    suspend fun refreshLibrary(): String? = withContext(Dispatchers.IO) {
+        val c = client() ?: return@withContext "This phone is not paired yet."
+        val lib = when (val r = c.library()) {
+            is AtlasResult.Success -> r.value
+            AtlasResult.Unauthorized -> { tokens.clear(); return@withContext "Pairing was revoked. Pair this phone again." }
+            is AtlasResult.NetworkError -> return@withContext "Atlas is not reachable. Is Tailscale running on this phone?"
+            else -> return@withContext "Could not load the run library."
+        }
+        ghostCache.saveLibrary(lib)
+        var failed = 0
+        for (route in lib.routes) {
+            if (lib.runsOn(route.routeId).isEmpty()) continue
+            val cached = ghostCache.route(route.routeId)
+            if (cached != null && cached.geometryVersion == route.geometryVersion) continue
+            val g = (c.route(route.routeId) as? AtlasResult.Success)?.value
+            if (g == null) failed++ else ghostCache.saveRoute(g)
+        }
+        for (run in lib.runs) {
+            val cached = ghostCache.profile(run.runId)
+            if (cached != null && cached.routeId == run.routeId && cached.geometryVersion == run.geometryVersion) continue
+            val p = (c.ghostProfile(run.runId) as? AtlasResult.Success)?.value
+            if (p == null) failed++ else ghostCache.saveProfile(p)
+        }
+        if (failed > 0) "$failed items could not be downloaded. Refresh again with Atlas reachable." else null
     }
 
     /** Offline readiness of the ghost race of a prepared run (local storage only). */

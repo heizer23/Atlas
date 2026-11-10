@@ -26,6 +26,12 @@ object A1 {
     const val EARTH_RADIUS_M = 6_371_000.0
     /** Live display only (not part of A1): a pace older than this is not shown. */
     const val LIVE_PACE_STALE_MS = 15_000L
+    /** Live display only: a heart rate older than this is "no signal", not the last value. */
+    const val LIVE_HR_STALE_MS = 10_000L
+    /** Live display only: window and minimum span of the rolling average pace. */
+    const val ROLLING_PACE_WINDOW_S = 120.0
+    const val ROLLING_PACE_MIN_S = 20.0
+    const val ROLLING_PACE_MIN_M = 20.0
 }
 
 data class SplitInfo(
@@ -47,6 +53,8 @@ data class LiveMetrics(
     val currentHr: Int?,
     val avgHr: Double?,
     val lastAccuracyM: Float?,
+    /** Average pace over the last 2 minutes of moving time (live display only). */
+    val rollingPaceSPerKm: Double? = null,
 )
 
 fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -137,6 +145,17 @@ class RunMetricsAccumulator(private val startedAtMillis: Long, initialPauses: Li
         return if (p.dist - q.dist >= 1.0) (p.moving - q.moving) / (p.dist - q.dist) * 1000.0 else null
     }
 
+    /** Average pace over the last [A1.ROLLING_PACE_WINDOW_S] of moving time ending at the newest accepted point. */
+    private fun rollingPace(): Double? {
+        val last = points.lastOrNull() ?: return null
+        val threshold = last.moving - A1.ROLLING_PACE_WINDOW_S
+        var lo = points.lastIndex
+        while (lo > 0 && points[lo - 1].moving >= threshold) lo--
+        val first = points[lo]
+        val dt = last.moving - first.moving; val dd = last.dist - first.dist
+        return if (dt >= A1.ROLLING_PACE_MIN_S && dd >= A1.ROLLING_PACE_MIN_M) dt / dd * 1000.0 else null
+    }
+
     fun snapshot(nowMillis: Long): LiveMetrics {
         val elapsed = max(0.0, (nowMillis - startedAtMillis) / 1000.0)
         val paused = pauses.sumOf { p ->
@@ -146,11 +165,14 @@ class RunMetricsAccumulator(private val startedAtMillis: Long, initialPauses: Li
         val moving = max(0.0, elapsed - paused)
         val openPause = pauses.lastOrNull()?.endedAtMillis == null && pauses.isNotEmpty()
         val last = points.lastOrNull()
-        val current = if (last == null || openPause || nowMillis - last.tsMillis > A1.LIVE_PACE_STALE_MS) null else paceAt(points.lastIndex)
+        val fresh = !(last == null || openPause || nowMillis - last.tsMillis > A1.LIVE_PACE_STALE_MS)
+        val current = if (fresh) paceAt(points.lastIndex) else null
+        val rolling = if (fresh) rollingPace() else null
+        val lastHr = hr.lastOrNull()?.takeIf { nowMillis - it.first <= A1.LIVE_HR_STALE_MS }
         return LiveMetrics(
             distanceM = distance, currentPaceSPerKm = current,
             avgPaceSPerKm = if (distance > 0 && moving > 0) moving / (distance / 1000.0) else null,
-            movingS = moving, elapsedS = elapsed, currentHr = hr.lastOrNull()?.second, avgHr = avgHr, lastAccuracyM = lastAccuracy,
+            movingS = moving, elapsedS = elapsed, currentHr = lastHr?.second, avgHr = avgHr, lastAccuracyM = lastAccuracy, rollingPaceSPerKm = rolling,
         )
     }
 
