@@ -1,6 +1,7 @@
 package net.linspad.atlasphone.running.ghost
 
 import net.linspad.atlasphone.running.PauseRecord
+import net.linspad.atlasphone.running.live.HrByDistance
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -162,6 +163,17 @@ object GhostComparison {
     fun hrAtTime(p: GhostProfile, t: Double): Double? = interp(p.points.map { it.t }, p.points.map { it.hr }, t)
     fun hrAtProgress(p: GhostProfile, s: Double): Double? = timeAtProgress(p, s)?.let { hrAtTime(p, it) }
 
+    /** Where a profile's runner is at moving time [t]: before its first point at the start, after its last at the end. */
+    fun progressNow(p: GhostProfile, t: Double): Double {
+        val pts = p.points
+        if (t <= pts.first().t) return pts.first().s
+        if (t >= pts.last().t) return pts.last().s
+        var lo = 0; var hi = pts.size - 1                 // pts[lo].t < t <= pts[hi].t
+        while (hi - lo > 1) { val mid = (lo + hi) ushr 1; if (pts[mid].t < t) lo = mid else hi = mid }
+        val a = pts[lo]; val b = pts[hi]
+        return a.s + (b.s - a.s) * (t - a.t) / (b.t - a.t)
+    }
+
     fun compare(p: GhostProfile, myT: Double, myS: Double): GhostReading {
         val last = p.points.last()
         val finished = myT > last.t
@@ -178,6 +190,16 @@ object GhostComparison {
     }
 }
 
+/** Rank by finishing time (profile duration, idle start already trimmed): 1 = fastest; ties broken by run id. */
+object FieldRanking {
+    fun ranks(profiles: Collection<GhostProfile>): Map<String, Int> =
+        profiles.sortedWith(compareBy<GhostProfile> { it.points.last().t }.thenBy { it.runId })
+            .mapIndexed { i, p -> p.runId to i + 1 }.toMap()
+}
+
+/** One runner of the field on the minimap: [rank] by finishing time, [isMain] = the run being raced. */
+data class FieldMarker(val rank: Int, val progressM: Double, val isMain: Boolean)
+
 enum class GhostStatus {
     /** No fix matched the route start yet: go to the start of the route. */
     WAITING_FOR_START,
@@ -193,6 +215,15 @@ data class GhostLive(
     val status: GhostStatus, val routeName: String, val reading: GhostReading?, val progressM: Double?, val routeLengthM: Double,
     /** The route polyline for the local map (shared, not copied). */
     val route: List<RoutePoint> = emptyList(),
+    /** Every run of the field (main ghost included) where it is now; empty without a field. Only set while ON_COURSE. */
+    val field: List<FieldMarker> = emptyList(),
+    /** Your place among the field right now (1 = ahead of everyone) and the number of field runners; null without a field. */
+    val position: Int? = null,
+    val fieldSize: Int = 0,
+    /** Rank by finishing time of the main ghost. */
+    val mainRank: Int? = null,
+    /** The main ghost's whole run: heart rate along the route (progress metres, bpm), 20 m buckets. Shared, not copied. */
+    val ghostHrProfile: List<Pair<Double, Double>> = emptyList(),
 )
 
 /**
@@ -203,7 +234,12 @@ class GhostSession(
     private val route: RouteGeometry,
     private val profile: GhostProfile,
     startedAtMillis: Long,
+    /** The other runs on the route (the main [profile] may be included; it is deduplicated). Each only needs its profile. */
+    otherRuns: List<GhostProfile> = emptyList(),
 ) {
+    private val everyone = (listOf(profile) + otherRuns).distinctBy { it.runId }
+    private val ranks = FieldRanking.ranks(everyone)
+    private val ghostHrProfile = HrByDistance.bucket(profile.points.mapNotNull { p -> p.hr?.let { p.s to it } })
     private val tracker = ProgressTracker(RouteProjector(route.points))
     private val clock = MovingClock(startedAtMillis)
     private var lastFixMillis: Long? = null
@@ -217,10 +253,15 @@ class GhostSession(
     fun snapshot(nowMillis: Long): GhostLive {
         val s = tracker.lastProgressM; val t = tracker.lastMovingS
         val len = route.referenceDistanceM
-        if (s == null || t == null) return GhostLive(GhostStatus.WAITING_FOR_START, route.name, null, null, len, route.points)
-        if (tracker.consecutiveOffCourse >= GhostConfig.SUSPEND_AFTER_OFF_COURSE) return GhostLive(GhostStatus.OFF_COURSE, route.name, null, s, len, route.points)
+        if (s == null || t == null) return GhostLive(GhostStatus.WAITING_FOR_START, route.name, null, null, len, route.points, ghostHrProfile = ghostHrProfile)
+        if (tracker.consecutiveOffCourse >= GhostConfig.SUSPEND_AFTER_OFF_COURSE) return GhostLive(GhostStatus.OFF_COURSE, route.name, null, s, len, route.points, ghostHrProfile = ghostHrProfile)
         val seen = lastFixMillis
-        if (seen == null || nowMillis - seen > GhostConfig.GPS_LOST_MS) return GhostLive(GhostStatus.GPS_LOST, route.name, null, s, len, route.points)
-        return GhostLive(GhostStatus.ON_COURSE, route.name, GhostComparison.compare(profile, t, s), s, len, route.points)
+        if (seen == null || nowMillis - seen > GhostConfig.GPS_LOST_MS) return GhostLive(GhostStatus.GPS_LOST, route.name, null, s, len, route.points, ghostHrProfile = ghostHrProfile)
+        val field = if (everyone.size < 2) emptyList() else everyone.map {
+            FieldMarker(ranks.getValue(it.runId), GhostComparison.progressNow(it, t), it.runId == profile.runId)
+        }
+        val position = if (field.isEmpty()) null else 1 + field.count { it.progressM > s }
+        return GhostLive(GhostStatus.ON_COURSE, route.name, GhostComparison.compare(profile, t, s), s, len, route.points,
+            field, position, field.size, ranks[profile.runId], ghostHrProfile)
     }
 }

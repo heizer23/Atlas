@@ -1,9 +1,10 @@
-"""Route progress and ghost profile (PROGRESS_ALGO_VERSION 1). Pure functions, no I/O.
+"""Route progress and ghost profile (PROGRESS_ALGO_VERSION 2). Pure functions, no I/O.
 
 Definitions
 - Progress: distance in metres ALONG the reference route (its cumulative distance), not GPS-travelled distance.
 - Time basis: MOVING time (seconds since start minus manual pauses); paused time counts for neither runner.
 - Profile: list of [t, s, hr] ordered by t; s non-decreasing; hr is the recorded bpm near t or None (never filled).
+  Idle start (standing still right after pressing start) is trimmed: t=0 is the moment the runner starts moving.
 - Comparison sign convention: time_gap_s = my_t - ghost_t(at my progress); NEGATIVE = ahead, POSITIVE = behind.
   lead_m = my_s - ghost_s(at my time); POSITIVE = ahead.
 The Kotlin engine in AtlasPhone must reproduce these results (tests/fixtures/ghost_golden.json is the shared oracle).
@@ -16,7 +17,7 @@ from datetime import datetime
 from typing import Optional
 
 from backend.config import (
-    ACCURACY_MAX_M, MAX_SPEED_MPS, PROFILE_HR_MAX_AGE_S, PROFILE_MIN_SPACING_S, PROGRESS_BACK_TOLERANCE_M,
+    ACCURACY_MAX_M, IDLE_START_MIN_S, IDLE_START_MOVE_M, IDLE_START_SEARCH_S, MAX_SPEED_MPS, PROFILE_HR_MAX_AGE_S, PROFILE_MIN_SPACING_S, PROGRESS_BACK_TOLERANCE_M,
     PROGRESS_FORWARD_SLACK_M, PROGRESS_MIN_COVERAGE, PROGRESS_OFF_COURSE_M, PROGRESS_START_WINDOW_M,
 )
 
@@ -73,6 +74,23 @@ class ProgressResult:
     reason: Optional[str]
 
 
+def trim_idle_start(profile: list[list[Optional[float]]]) -> list[list[Optional[float]]]:
+    """Drop an initial standing-still stretch and re-zero t at the moment movement begins; no idle start -> unchanged.
+    Idle = progress grows < IDLE_START_MOVE_M over >= IDLE_START_MIN_S, with the window starting within IDLE_START_SEARCH_S
+    of the start (the first fix may jump a few metres onto the route before the runner stands still)."""
+    for i, (t_i, s_i, _) in enumerate(profile):
+        if t_i > profile[0][0] + IDLE_START_SEARCH_S:
+            break
+        j = i
+        while j + 1 < len(profile) and profile[j + 1][1] - s_i < IDLE_START_MOVE_M:
+            j += 1
+        if profile[j][0] - t_i < IDLE_START_MIN_S:
+            continue
+        t0 = profile[j][0]
+        return [[round(t - t0, 2), s, h] for t, s, h in profile[j:]]
+    return profile
+
+
 def build_progress(
     geometry: list[list[float]],
     fixes: list[tuple[datetime, float, float, Optional[float]]],        # (ts, lat, lon, accuracy_m or None), seq order
@@ -126,6 +144,7 @@ def build_progress(
             continue
         profile.append([round(t, 2), round(s, 2), hr_near(t)])
 
+    profile = trim_idle_start(profile)
     end = profile[-1][1] if profile else 0.0
     coverage = end / proj.length if proj.length else 0.0
     reason = None

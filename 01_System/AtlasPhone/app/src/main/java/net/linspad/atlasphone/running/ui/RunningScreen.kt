@@ -279,8 +279,14 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
         else -> "GPS: good (%.0f m)".format(m.lastAccuracyM)
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Scrolling cockpit; Pause / Finish stay pinned below it. Order = priority: HR, ghost gap, pace, map, graphs.
+    val ghost = live.ghost
+    if (ghost != null) {
+        // Ghost race: full-screen heading-up map with the stats laid over it.
+        GhostRaceScreen(live, ghost, paused, finishing, gpsText, gpsGood = live.gpsState == "TRACKING" && (m.lastAccuracyM ?: 99f) <= 30f,
+            onReconnectHr = { ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) } },
+            onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmFinish = true })
+    } else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Free run: scrolling cockpit; Pause / Finish stay pinned below it.
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (paused) {
                 // Manual pause is its own, unmistakable state; it is not poor GPS and not missing HR.
@@ -295,10 +301,7 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
             HrCard(m, live.hrState, live.targetHr) {
                 ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) }
             }
-            live.ghost?.let { GhostCard(it, live.trends, m.currentHr) }
             PaceCard(m, live.trends)
-            live.ghost?.let { LocalMapCard(it) }
-            HrTrendCard(live.trends, live.targetHr, live.ghost != null)
             Text(gpsText)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

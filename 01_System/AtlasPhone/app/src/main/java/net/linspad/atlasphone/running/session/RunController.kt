@@ -22,6 +22,7 @@ import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.RunState
 import net.linspad.atlasphone.running.SampleDecoder
 import net.linspad.atlasphone.running.auth.TokenStore
+import net.linspad.atlasphone.running.ghost.FieldRanking
 import net.linspad.atlasphone.running.ghost.GhostCache
 import net.linspad.atlasphone.running.ghost.GhostLive
 import net.linspad.atlasphone.running.ghost.GhostSession
@@ -103,7 +104,11 @@ class RunController private constructor(private val app: Application) {
         val route = ghostCache.route(routeId) ?: return null
         val profile = ghostCache.profile(ghostId) ?: return null
         if (profile.routeId != route.routeId || profile.geometryVersion != route.geometryVersion) return null
-        return GhostSession(route, profile, meta.startedAtMillis)
+        // The rest of the field: every other cached run on this route (same route + geometry version as the main ghost).
+        val others = ghostCache.library().runsOn(routeId).filter { it.runId != ghostId }
+            .mapNotNull { ghostCache.profile(it.runId) }
+            .filter { it.routeId == route.routeId && it.geometryVersion == route.geometryVersion }
+        return GhostSession(route, profile, meta.startedAtMillis, others)
     }
 
     private fun attach(meta: RunMeta, acc: RunMetricsAccumulator, monoStartMs: Long?, ghost: GhostSession?) {
@@ -360,6 +365,10 @@ class RunController private constructor(private val app: Application) {
     /** The locally stored library (offline). */
     fun library(): Library = ghostCache.library()
 
+    /** Rank by finishing time (1 = fastest) of every cached run on [routeId]; runs without a cached profile have no rank. */
+    fun fieldRanks(routeId: String): Map<String, Int> =
+        FieldRanking.ranks(ghostCache.library().runsOn(routeId).mapNotNull { ghostCache.profile(it.runId) })
+
     /** True when both route and ghost profile of this library run are stored (the race can start offline). */
     fun raceReady(run: LibraryRun): Boolean = ghostCache.isReady(run.routeId, run.runId)
 
@@ -386,7 +395,7 @@ class RunController private constructor(private val app: Application) {
         }
         for (run in lib.runs) {
             val cached = ghostCache.profile(run.runId)
-            if (cached != null && cached.routeId == run.routeId && cached.geometryVersion == run.geometryVersion) continue
+            if (cached != null && cached.routeId == run.routeId && cached.geometryVersion == run.geometryVersion && cached.algoVersion == run.algoVersion) continue
             val p = (c.ghostProfile(run.runId) as? AtlasResult.Success)?.value
             if (p == null) failed++ else ghostCache.saveProfile(p)
         }

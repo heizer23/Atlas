@@ -5,7 +5,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from backend.ghost import build_progress, compare, ghost_time_at_progress
+from backend.ghost import build_progress, compare, ghost_time_at_progress, trim_idle_start
 from tests.conftest import RUN_COMPLETE, TOKEN_1, auth
 
 W = "/api/runningtracker"
@@ -59,6 +59,21 @@ def test_clean_run_gives_linear_progress_and_qualifies():
     assert s == sorted(s)
     for ti, si in zip(t, s):
         assert abs(si - 4.0 * ti) < 6          # constant 4 m/s, within projection error
+
+
+def test_idle_start_is_trimmed_and_time_is_rezeroed():
+    g = geom(SQUARE)
+    fixes = [(T0 + timedelta(seconds=i), *at(0, 0), None) for i in range(40)]            # standing 40 s
+    walk = run_fixes(SQUARE)
+    fixes += [(T0 + timedelta(seconds=40) + (ts - T0), lat, lon, acc) for ts, lat, lon, acc in walk]
+    res = build_progress(g, fixes, [], [], T0)
+    assert res.qualified and res.profile[0][0] == 0.0 and res.profile[0][1] < 5
+    assert abs(res.profile[-1][0] - (walk[-1][0] - T0).total_seconds()) < 3          # idle time gone from the ghost clock
+
+
+def test_run_without_idle_start_is_left_untouched():
+    prof = [[float(t), 4.0 * t, None] for t in range(60)]
+    assert trim_idle_start(prof) == prof
 
 
 def test_gps_noise_never_makes_progress_jump_or_go_back():

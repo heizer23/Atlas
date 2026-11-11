@@ -1,5 +1,8 @@
 package net.linspad.atlasphone.running.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -11,18 +14,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.linspad.atlasphone.running.ghost.GhostLive
 import net.linspad.atlasphone.running.ghost.GhostStatus
 import net.linspad.atlasphone.running.live.HrTarget
 import net.linspad.atlasphone.running.live.HrZone
+import net.linspad.atlasphone.running.live.HeadingSmoother
 import net.linspad.atlasphone.running.live.LocalMap
 import net.linspad.atlasphone.running.live.LiveTrends
 import net.linspad.atlasphone.running.live.Trend
@@ -83,76 +91,6 @@ internal fun HrCard(m: LiveMetrics, hrState: String, targetHr: Int?, onReconnect
     }
 }
 
-/**
- * Ghost: time gap at your position (big), lead in metres at the same elapsed time with its recent change
- * ("50 m ahead → 45 m ahead") and the change over the last 100 m (closing / widening). Suspended states say why.
- */
-@Composable
-internal fun GhostCard(ghost: GhostLive, trends: LiveTrends, myHr: Int?) {
-    val r = ghost.reading
-    Column(Modifier.fillMaxWidth().background(PanelBg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("GHOST RUNNER · ${ghost.routeName}")
-        when (ghost.status) {
-            GhostStatus.WAITING_FOR_START -> Text("Go to the start of the route", fontSize = 22.sp)
-            GhostStatus.OFF_COURSE -> Text("Off the route: comparison paused", fontSize = 22.sp, color = Amber)
-            GhostStatus.GPS_LOST -> Text("GPS lost: comparison paused", fontSize = 22.sp, color = Amber)
-            GhostStatus.ON_COURSE -> if (r != null) {
-                val gap = r.timeGapS
-                val lead = r.leadM
-                val gapColor = if (gap == null || Math.abs(gap) < 1.0) Color.White else if (gap < 0) Green else Red
-                Text(fmtGap(gap), fontSize = 36.sp, color = gapColor)
-                if (lead != null) {
-                    Text(leadTransition(trends.leadSecondsAgoM, lead), fontSize = 26.sp, color = if (lead >= 0) Green else Red)
-                    val trend = trendOf(trends.leadChange100mM, lead >= 0)
-                    val change = trends.leadChange100mM
-                    if (trend != null && change != null) {
-                        val sign = if (change > 0) "+" else if (change < 0) "−" else ""
-                        val label = when (trend) { Trend.CLOSING -> "closing"; Trend.WIDENING -> "widening"; Trend.STEADY -> "steady" }
-                        Text("Last 100 m: $label ($sign${Math.round(Math.abs(change))} m)", fontSize = 18.sp,
-                            color = when (trend) { Trend.CLOSING -> if (lead >= 0) Amber else Green; Trend.WIDENING -> if (lead >= 0) Green else Red; Trend.STEADY -> Color.White })
-                    } else Text("Last 100 m: measuring…", color = Grey)
-                } else Text("Lead now: $DASH")
-                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Column { Text("You"); Text(myHr?.toString() ?: DASH, fontSize = 22.sp) }
-                    Column { Text("Ghost, same spot"); Text(fmtBpm(r.ghostHrAtPosition), fontSize = 22.sp) }
-                    Column { Text("Ghost, same time"); Text(fmtBpm(r.ghostHrAtTime), fontSize = 22.sp) }
-                }
-                if (r.ghostFinished) Text("The ghost has finished.")
-            }
-        }
-    }
-}
-
-/** Small north-up map around the runner: route window, you (green) and the ghost (purple, hollow when beyond the view). */
-@Composable
-internal fun LocalMapCard(ghost: GhostLive) {
-    val progress = ghost.progressM ?: return
-    if (ghost.route.size < 2 || ghost.status == GhostStatus.WAITING_FOR_START) return
-    val ghostS = ghost.reading?.ghostProgressM
-    val view = remember(ghost.route, progress, ghostS) { LocalMap.build(ghost.route, progress, ghostS) }
-    Column(Modifier.fillMaxWidth().background(PanelBg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("●", color = Green); Text("You")
-            Text("●", color = GhostColor); Text(if (view.ghostClamped) "Ghost (beyond view)" else "Ghost")
-            Text("view ±${view.radiusM.toInt()} m", color = Grey)
-        }
-        Canvas(Modifier.fillMaxWidth().height(180.dp)) {
-            val centre = Offset(size.width / 2, size.height / 2)
-            val scale = minOf(size.width, size.height) / 2 / view.radiusM.toFloat()
-            fun at(east: Double, north: Double) = Offset(centre.x + east.toFloat() * scale, centre.y - north.toFloat() * scale)
-            val path = androidx.compose.ui.graphics.Path()
-            view.route.forEachIndexed { i, p -> val o = at(p.east, p.north); if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y) }
-            drawPath(path, Color(0xFF616161), style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round))
-            view.ghost?.let {
-                val o = at(it.east, it.north)
-                if (view.ghostClamped) drawCircle(GhostColor, 9.dp.toPx(), o, style = Stroke(3.dp.toPx())) else drawCircle(GhostColor, 9.dp.toPx(), o)
-            }
-            drawCircle(Color.Black, 11.dp.toPx(), centre)
-            drawCircle(Green, 8.dp.toPx(), centre)
-        }
-    }
-}
-
 /** Current (smoothed) pace, rolling 2-minute and run-average pace, and the pace history graph (faster = higher). */
 @Composable
 internal fun PaceCard(m: LiveMetrics, trends: LiveTrends) {
@@ -163,18 +101,6 @@ internal fun PaceCard(m: LiveMetrics, trends: LiveTrends) {
             Column { Text("Average"); Text(fmtPace(m.avgPaceSPerKm), fontSize = 28.sp) }
         }
         Sparkline(listOf(Line(trends.paceSeries, Color.White)), invertY = true, emptyText = "Pace history appears once GPS has a pace")
-    }
-}
-
-/** Compact heart-rate trend with the ghost's heart rate at your position (purple) when a ghost race runs. */
-@Composable
-internal fun HrTrendCard(trends: LiveTrends, targetHr: Int?, hasGhost: Boolean) {
-    Column(Modifier.fillMaxWidth().background(PanelBg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Heart-rate trend" + if (hasGhost) " · you vs ghost at the same position" else "")
-        Sparkline(
-            listOf(Line(trends.hrSeries, Color.White)) + (if (hasGhost) listOf(Line(trends.ghostHrSeries, GhostColor)) else emptyList()),
-            guide = targetHr?.toDouble(), emptyText = "No heart-rate data yet",
-        )
     }
 }
 

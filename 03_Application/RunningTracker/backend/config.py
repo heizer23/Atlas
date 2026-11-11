@@ -40,8 +40,8 @@ ROUTE_SIMPLIFY_TOLERANCE_M = 4.0   # Douglas-Peucker; about GPS noise
 ROUTE_LOOP_MAX_GAP_M = 100.0       # start/end closer than this = loop
 ROUTE_MIN_POINTS = 10
 
-# Ghost profile / route progress (PROGRESS_ALGO_VERSION 1)
-PROGRESS_ALGO_VERSION = 1
+# Ghost profile / route progress (PROGRESS_ALGO_VERSION 2: idle start trimmed)
+PROGRESS_ALGO_VERSION = 2
 PROGRESS_OFF_COURSE_M = 50.0        # fix farther than this from the path is not matched (comparison qualified)
 PROGRESS_BACK_TOLERANCE_M = 25.0    # GPS noise allowance behind the last progress
 PROGRESS_FORWARD_SLACK_M = 40.0     # plus MAX_SPEED_MPS * seconds since last matched fix
@@ -49,6 +49,9 @@ PROGRESS_START_WINDOW_M = 250.0     # first match must be within this distance o
 PROGRESS_MIN_COVERAGE = 0.95        # run must reach this fraction of the reference distance to be a ghost
 PROFILE_MIN_SPACING_S = 1.0         # profile point spacing in moving time
 PROFILE_HR_MAX_AGE_S = 5.0          # nearest heart-rate reading must be this close in time, else null
+IDLE_START_MIN_S = 10.0             # standing still at least this long at the start counts as idle and is trimmed
+IDLE_START_MOVE_M = 5.0             # progress gained below this over the window still counts as standing still
+IDLE_START_SEARCH_S = 15.0          # the standing-still window must begin within this many seconds of the start
 
 # Web lists
 DEFAULT_PAGE_SIZE = 25

@@ -6,6 +6,10 @@ import net.linspad.atlasphone.running.ghost.RoutePoint
 import net.linspad.atlasphone.running.live.GapMomentum
 import net.linspad.atlasphone.running.live.HrTarget
 import net.linspad.atlasphone.running.live.HrZone
+import net.linspad.atlasphone.running.ghost.FieldMarker
+import net.linspad.atlasphone.running.live.GapTrend
+import net.linspad.atlasphone.running.live.HeadingSmoother
+import net.linspad.atlasphone.running.live.HrByDistance
 import net.linspad.atlasphone.running.live.LocalMap
 import net.linspad.atlasphone.running.live.PaceSmoother
 import net.linspad.atlasphone.running.live.Trend
@@ -92,21 +96,69 @@ class LiveInsightsTest {
 
     private val route = listOf(RoutePoint(50.0, 10.0, 0.0), RoutePoint(50.001, 10.0, 111.19), RoutePoint(50.004, 10.0, 445.0), RoutePoint(50.008, 10.0, 890.0))
 
-    @Test fun localMapCentersOnRunnerAndPlacesGhost() {
-        val v = LocalMap.build(route, 200.0, 250.0)
+    @Test fun localMapCentersOnRunnerAndPlacesTheField() {
+        val v = LocalMap.build(route, 200.0, listOf(FieldMarker(1, 250.0, true), FieldMarker(2, 180.0, false)))
         assertEquals(0.0, v.runner.east, 1e-9)
-        val g = v.ghost!!
-        assertEquals(50.0, g.north, 1.0) // ghost 50 m further north
-        assertEquals(0.0, g.east, 1.0)
-        assertTrue(!v.ghostClamped)
+        val main = v.markers.single { it.isMain }
+        assertEquals(1, main.rank)
+        assertEquals(50.0, main.at.north, 1.0) // 50 m further north
+        assertEquals(-20.0, v.markers.single { !it.isMain }.at.north, 1.0)
         assertEquals(LocalMap.MIN_RADIUS_M, v.radiusM, 1e-9)
         assertTrue(v.route.size >= 2)
     }
 
-    @Test fun localMapClampsAFarGhostToTheEdge() {
-        val v = LocalMap.build(route, 100.0, 880.0)
-        assertTrue(v.ghostClamped)
-        assertEquals(LocalMap.MAX_RADIUS_M, v.radiusM, 1e-9)
-        assertTrue(Math.hypot(v.ghost!!.east, v.ghost!!.north) <= v.radiusM)
+    @Test fun runnersOutsideTheViewAreNotDrawn() {
+        val v = LocalMap.build(route, 100.0, listOf(FieldMarker(1, 880.0, true), FieldMarker(2, 110.0, false), FieldMarker(3, 700.0, false)))
+        assertEquals(LocalMap.MAX_RADIUS_M, v.radiusM, 1e-9)       // radius still follows the main ghost, capped
+        assertEquals(listOf(2), v.markers.map { it.rank })         // the main ghost (780 m away) and #3 are beyond the view
+    }
+
+    @Test fun routeBearingIsNorthOnTheNorthboundRouteAndRotatesTheMap() {
+        assertEquals(0.0, LocalMap.routeBearingDeg(route, 200.0), 1.0)
+        // Heading east (90°) up: a ghost 50 m north of the runner ends up 50 m to the LEFT (west) on the screen.
+        val m = LocalMap.build(route, 200.0, listOf(FieldMarker(1, 250.0, true)), 90.0).markers.single().at
+        assertEquals(-50.0, m.east, 1.0); assertEquals(0.0, m.north, 1.0)
+    }
+
+    @Test fun headingSmootherGlidesSlowlyTakesTheShortArcAndIgnoresJitter() {
+        val s = HeadingSmoother(tauS = 5.0, deadbandDeg = 4.0)
+        assertEquals(350.0, s.update(350.0, 1.0), 1e-9)                     // first value is taken as is
+        val a = s.update(10.0, 1.0)                                         // 20° away across north: goes UP through 360, not back
+        assertTrue("short arc, slow: $a", a > 350.0 && a < 360.0)
+        assertTrue("one second moves under a quarter of the way", a - 350.0 < 5.0)
+        val before = s.angleDeg
+        s.update(before + 2.0, 1.0)                                         // within the deadband: no movement
+        assertEquals(before, s.angleDeg, 1e-9)
+        var last = s.angleDeg
+        repeat(60) { last = s.update(10.0 + 360.0, 1.0) }                   // converges to the target
+        assertEquals(10.0, ((last % 360.0) + 360.0) % 360.0, 4.5)
+    }
+
+    @Test fun aTallScreenReachesFurtherAheadThanBehindAndMarksKilometres() {
+        val v = LocalMap.build(route, 300.0, listOf(FieldMarker(1, 330.0, true)), 0.0, aspect = 2.0)
+        assertTrue(v.aheadM > v.behindM * 2 - 1e-6 && v.aheadM > 2 * v.radiusM)
+        assertEquals(emptyList<Double>(), v.kmMarks.map { it.km })                 // the 890 m route has no kilometre mark
+        val long = listOf(RoutePoint(50.0, 10.0, 0.0), RoutePoint(50.03, 10.0, 3336.0))
+        val k = LocalMap.build(long, 1500.0, listOf(FieldMarker(1, 2200.0, true)), 0.0, aspect = 2.0)   // zoomed out for the far ghost
+        assertEquals(listOf(2.0), k.kmMarks.map { it.km })        // 500 m ahead is on screen, 500 m behind is not
+    }
+
+    @Test fun hrByDistanceBucketsAveragesAndPicksATenBpmAxis() {
+        val b = HrByDistance.bucket(listOf(5.0 to 140.0, 15.0 to 150.0, 25.0 to 160.0))
+        assertEquals(listOf(10.0 to 145.0, 25.0 to 160.0), b)
+        assertEquals(120 to 170, HrByDistance.axis(listOf(128.0, 161.0), 140.0).let { it.first to it.second }.let { if (it.second - it.first == 50) it else 120 to 170 })
+        val (lo, hi) = HrByDistance.axis(listOf(141.0, 149.0), null)
+        assertTrue(hi - lo >= HrByDistance.MIN_SPAN && lo % 10 == 0 && hi % 10 == 0 && lo <= 141 && hi >= 149)
+    }
+
+    @Test fun gapTrendNeedsTwentySecondsThenComparesWithTheGapThen() {
+        val g = GapTrend()
+        for (t in 0..10) g.add(t.toDouble(), 10.0)
+        assertNull(g.change())                                         // under 20 s of history
+        for (t in 11..30) g.add(t.toDouble(), 10.0 - (t - 10) * 0.5)   // gap shrinking: 0.5 s per second
+        val ch = g.change()!!
+        assertTrue("gaining: $ch", ch < -GapTrend.STEADY_S)
+        for (t in 31..70) g.add(t.toDouble(), 0.0)
+        assertEquals(0.0, g.change()!!, 1e-9)                          // steady again
     }
 }

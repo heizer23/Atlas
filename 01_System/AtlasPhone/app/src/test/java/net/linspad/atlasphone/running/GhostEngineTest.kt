@@ -1,5 +1,6 @@
 package net.linspad.atlasphone.running
 
+import net.linspad.atlasphone.running.ghost.FieldRanking
 import net.linspad.atlasphone.running.ghost.GhostCache
 import net.linspad.atlasphone.running.ghost.GhostComparison
 import net.linspad.atlasphone.running.ghost.GhostPoint
@@ -142,6 +143,28 @@ class GhostEngineTest {
         val r = s.snapshot(50_500).reading!!
         // 50 s wall - 30 s pause = 20 s moving, 80 m: exactly the ghost's pace -> level
         assertEquals(0.0, r.timeGapS!!, 0.6)
+    }
+
+    @Test fun fieldIsRankedByFinishingTimeAndPositionCountsRunnersAhead() {
+        fun at(id: String, mps: Double, secs: Int) = GhostProfile(id, route.routeId, 1, (0..secs).map { GhostPoint(it.toDouble(), it * mps, null) })
+        val fast = at("a", 5.0, 200)          // finishes in 200 s
+        val slow = at("c", 2.5, 400)          // 400 s
+        val field = listOf(slow, fast, ghost) // ghost (main) = 4 m/s, 250 s
+        assertEquals(mapOf("a" to 1, ghost.runId to 2, "c" to 3), FieldRanking.ranks(field))
+        val s = GhostSession(route, ghost, 0, listOf(slow, fast, ghost))
+        for (i in 0..20) s.addFix(i * 1000L, lat(i * 4.4), 10.0, 5.0, emptyList())      // me: 88 m at t=20
+        val live = s.snapshot(20_500)
+        assertEquals(3, live.fieldSize)
+        assertEquals(mapOf(1 to 100.0, 2 to 80.0, 3 to 50.0), live.field.associate { it.rank to it.progressM })
+        assertEquals(listOf(2), live.field.filter { it.isMain }.map { it.rank })
+        assertEquals(2, live.position)        // only the 5 m/s runner is ahead of me
+        assertEquals(2, live.mainRank)
+    }
+
+    @Test fun progressNowHoldsAtTheEndsOfAProfile() {
+        assertEquals(0.0, GhostComparison.progressNow(ghost, -5.0), 1e-9)
+        assertEquals(400.0, GhostComparison.progressNow(ghost, 100.5), 1e-9 + 2.0)
+        assertEquals(1000.0, GhostComparison.progressNow(ghost, 999.0), 1e-9)
     }
 
     @Test fun fixWithPoorAccuracyIsIgnored() {

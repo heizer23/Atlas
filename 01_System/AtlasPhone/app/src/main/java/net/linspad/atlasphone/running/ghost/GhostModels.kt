@@ -44,9 +44,11 @@ data class GhostProfile(
     val routeId: String,
     val geometryVersion: Int,
     val points: List<GhostPoint>,
+    /** Server derivation version of the profile (2 = idle start trimmed); a cached profile of another version is re-downloaded. */
+    val algoVersion: Int = 1,
 ) {
     fun toJson(): String = JSONObject()
-        .put("run_id", runId).put("route_id", routeId).put("geometry_version", geometryVersion)
+        .put("run_id", runId).put("route_id", routeId).put("geometry_version", geometryVersion).put("algo_version", algoVersion)
         .put("points", JSONArray(points.map { JSONArray(listOf(it.t, it.s, it.hr ?: JSONObject.NULL)) }))
         .toString()
 
@@ -57,7 +59,7 @@ data class GhostProfile(
                 a.getJSONArray(i).let { GhostPoint(it.getDouble(0), it.getDouble(1), if (it.isNull(2)) null else it.getDouble(2)) }
             }
             require(pts.size >= 2) { "ghost profile needs at least two points" }
-            return GhostProfile(o.getString("run_id"), o.getString("route_id"), o.getInt("geometry_version"), pts)
+            return GhostProfile(o.getString("run_id"), o.getString("route_id"), o.getInt("geometry_version"), pts, o.optInt("algo_version", 1))
         }
         fun fromJson(json: String) = fromJson(JSONObject(json))
     }
@@ -69,7 +71,7 @@ data class LibraryRoute(val routeId: String, val name: String, val geometryVersi
 /** A completed run that can be a ghost on [routeId]: everything the picker shows, no samples. */
 data class LibraryRun(
     val runId: String, val routeId: String, val startedAtMillis: Long, val movingS: Double?, val distanceM: Double?,
-    val category: String?, val avgHr: Double?, val geometryVersion: Int,
+    val category: String?, val avgHr: Double?, val geometryVersion: Int, val algoVersion: Int = 1,
 )
 
 /** All routes and all qualified runs per route, as served by `GET /native/library` and cached for offline selection. */
@@ -82,7 +84,7 @@ data class Library(val routes: List<LibraryRoute>, val runs: List<LibraryRun>) {
         .put("runs", JSONArray(runs.map { JSONObject().put("run_id", it.runId).put("route_id", it.routeId)
             .put("started_at_millis", it.startedAtMillis).put("moving_s", it.movingS ?: JSONObject.NULL)
             .put("distance_m", it.distanceM ?: JSONObject.NULL).put("category", it.category ?: JSONObject.NULL)
-            .put("avg_hr", it.avgHr ?: JSONObject.NULL).put("geometry_version", it.geometryVersion) }))
+            .put("avg_hr", it.avgHr ?: JSONObject.NULL).put("geometry_version", it.geometryVersion).put("algo_version", it.algoVersion) }))
         .toString()
 
     companion object {
@@ -96,7 +98,7 @@ data class Library(val routes: List<LibraryRoute>, val runs: List<LibraryRun>) {
                 (0 until r.length()).map { r.getJSONObject(it).let { x -> LibraryRoute(x.getString("route_id"), x.getString("name"), x.getInt("geometry_version"), x.getDouble("reference_distance_m")) } },
                 (0 until u.length()).map { u.getJSONObject(it).let { x ->
                     LibraryRun(x.getString("run_id"), x.getString("route_id"), startedAt(x), x.d("moving_s"), x.d("distance_m"),
-                        if (x.isNull("category")) null else x.getString("category"), x.d("avg_hr"), x.getInt("geometry_version"))
+                        if (x.isNull("category")) null else x.getString("category"), x.d("avg_hr"), x.getInt("geometry_version"), x.optInt("algo_version", 1))
                 } },
             )
         }

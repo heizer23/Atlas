@@ -1,7 +1,12 @@
 package net.linspad.atlasphone.running.live
 
+import net.linspad.atlasphone.running.ghost.FieldMarker
 import net.linspad.atlasphone.running.ghost.RoutePoint
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.exp
+import kotlin.math.sin
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
@@ -144,27 +149,42 @@ class PaceSmoother(private val alpha: Double = 0.3) {
 
 // ── Local map ────────────────────────────────────────────────────────────────
 
-/** Metres east/north of the runner. */
+/** Metres to the right / up of the runner on the screen (the map is heading-up). */
 data class MapXY(val east: Double, val north: Double)
 
+/** A kilometre mark on the route ([km] = distance along the route, e.g. 3.0) at its screen position. */
+class KmMark(val km: Double, val at: MapXY)
+
 /**
- * Local map around the runner (runner at the origin). [route] is the route window near the runner; [ghost] is the
- * ghost's position, clamped to the view edge when it is further than [radiusM] ([ghostClamped]).
+ * Heading-up map model around the runner (runner at the origin). The screen is [radiusM] metres to either side of the
+ * runner; [aheadM] / [behindM] are how far it reaches up / down (they depend on the screen aspect). [route] is the route
+ * window, [markers] and [kmMarks] only what falls inside the screen: anything outside is not drawn.
  */
 class LocalMapView(
     val route: List<MapXY>,
     val runner: MapXY,
-    val ghost: MapXY?,
-    val ghostClamped: Boolean,
+    val markers: List<MapMarker>,
     val radiusM: Double,
+    val aheadM: Double,
+    val behindM: Double,
+    val kmMarks: List<KmMark>,
 )
+
+/** A field runner on the map: [rank] by finishing time (the screen draws 1-9 as digits, others as dots). */
+class MapMarker(val rank: Int, val at: MapXY, val isMain: Boolean)
 
 object LocalMap {
     const val MIN_RADIUS_M = 120.0
     const val MAX_RADIUS_M = 400.0
-    /** Route shown behind and ahead of the runner (progress metres). */
-    const val BEHIND_M = 150.0
-    const val AHEAD_M = 300.0
+    const val BEARING_LOOKAHEAD_M = 40.0
+    /** The runner sits at 68% of the screen height: this share of the height is ahead of them, the rest behind. */
+    private const val AHEAD_SHARE = 0.68
+    /** Route metres drawn per screen metre (the route winds, so its length exceeds the straight distance). */
+    private const val ROUTE_SLACK = 1.6
+    /** Share of the half width / reach inside which a marker is drawn (keeps the marker body on screen). */
+    private const val EDGE = 0.92
+    /** The raced ghost may use this share of the reach before the map zooms out for it. */
+    private const val COMFORT = 0.8
 
     private const val METRES_PER_DEG = PI / 180.0 * 6_371_000.0
 
@@ -179,27 +199,106 @@ object LocalMap {
         return RoutePoint(a.lat + (b.lat - a.lat) * u, a.lon + (b.lon - a.lon) * u, s)
     }
 
-    private fun xy(p: RoutePoint, origin: RoutePoint): MapXY {
-        val k = cos(Math.toRadians(origin.lat))
-        return MapXY((p.lon - origin.lon) * METRES_PER_DEG * k, (p.lat - origin.lat) * METRES_PER_DEG)
+    /** Direction of the route at [progressM], degrees clockwise from north (looks [BEARING_LOOKAHEAD_M] ahead, or back at the end). */
+    fun routeBearingDeg(points: List<RoutePoint>, progressM: Double): Double {
+        val end = points.last().cumM
+        val (a, b) = if (progressM + BEARING_LOOKAHEAD_M <= end) pointAt(points, progressM) to pointAt(points, progressM + BEARING_LOOKAHEAD_M)
+        else pointAt(points, end - BEARING_LOOKAHEAD_M) to pointAt(points, end)
+        val d = xy(b, a, 0.0)
+        return Math.toDegrees(atan2(d.east, d.north))
     }
 
-    fun build(points: List<RoutePoint>, runnerProgressM: Double, ghostProgressM: Double?): LocalMapView {
+    /** Metres east/north of [origin], rotated so that [headingDeg] (clockwise from north) points up on the screen. */
+    private fun xy(p: RoutePoint, origin: RoutePoint, headingDeg: Double): MapXY {
+        val k = cos(Math.toRadians(origin.lat))
+        val e = (p.lon - origin.lon) * METRES_PER_DEG * k
+        val n = (p.lat - origin.lat) * METRES_PER_DEG
+        val h = Math.toRadians(headingDeg)
+        return MapXY(e * cos(h) - n * sin(h), e * sin(h) + n * cos(h))
+    }
+
+    /**
+     * [headingDeg]: the direction that points to the top of the map (0 = north up). [aspect] = screen height / width.
+     * The zoom follows the raced ghost (it stays in view up to [MAX_RADIUS_M]); other runners simply drop off the screen.
+     */
+    fun build(points: List<RoutePoint>, runnerProgressM: Double, field: List<FieldMarker>, headingDeg: Double = 0.0, aspect: Double = 1.0): LocalMapView {
         val me = pointAt(points, runnerProgressM)
-        val window = points.filter { it.cumM >= runnerProgressM - BEHIND_M && it.cumM <= runnerProgressM + AHEAD_M }
+        val placed = field.map { it to xy(pointAt(points, it.progressM), me, headingDeg) }
+        val main = placed.firstOrNull { it.first.isMain }?.second
+        val radius = if (main == null) MIN_RADIUS_M else {
+            val needed = max(
+                abs(main.east) / COMFORT,
+                if (main.north >= 0) main.north / (AHEAD_SHARE * 2 * aspect * COMFORT) else -main.north / ((1 - AHEAD_SHARE) * 2 * aspect * COMFORT),
+            )
+            min(MAX_RADIUS_M, max(MIN_RADIUS_M, needed))
+        }
+        val ahead = AHEAD_SHARE * 2 * aspect * radius
+        val behind = (1 - AHEAD_SHARE) * 2 * aspect * radius
+        fun inside(p: MapXY) = abs(p.east) <= radius * EDGE && p.north <= ahead * EDGE && p.north >= -behind * EDGE
+
+        val from = runnerProgressM - behind * ROUTE_SLACK
+        val to = runnerProgressM + ahead * ROUTE_SLACK
         // Vertices outside the window are replaced by interpolated end points so the line starts and ends cleanly.
         val line = ArrayList<MapXY>()
-        line.add(xy(pointAt(points, runnerProgressM - BEHIND_M), me))
-        window.forEach { line.add(xy(it, me)) }
-        line.add(xy(pointAt(points, runnerProgressM + AHEAD_M), me))
+        line.add(xy(pointAt(points, from), me, headingDeg))
+        points.filter { it.cumM > from && it.cumM < to }.forEach { line.add(xy(it, me, headingDeg)) }
+        line.add(xy(pointAt(points, to), me, headingDeg))
 
-        val ghostRaw = ghostProgressM?.let { xy(pointAt(points, it), me) }
-        val dist = ghostRaw?.let { hypot(it.east, it.north) }
-        val radius = if (dist == null) MIN_RADIUS_M else min(MAX_RADIUS_M, max(MIN_RADIUS_M, dist * 1.25))
-        val clamped = dist != null && dist > radius * 0.92
-        val ghost = if (ghostRaw == null || dist == null) null
-        else if (clamped) MapXY(ghostRaw.east / dist * radius * 0.92, ghostRaw.north / dist * radius * 0.92)
-        else ghostRaw
-        return LocalMapView(line, MapXY(0.0, 0.0), ghost, clamped, radius)
+        val markers = placed.filter { inside(it.second) }.map { MapMarker(it.first.rank, it.second, it.first.isMain) }
+        val km = ArrayList<KmMark>()
+        var k = Math.ceil(max(from, 1.0) / 1000.0).toInt()
+        while (k * 1000.0 <= min(to, points.last().cumM)) {
+            val at = xy(pointAt(points, k * 1000.0), me, headingDeg)
+            if (inside(at)) km.add(KmMark(k.toDouble(), at))
+            k++
+        }
+        return LocalMapView(line, MapXY(0.0, 0.0), markers, radius, ahead, behind, km)
+    }
+}
+
+/** Heart rate along the route (x = progress metres) for the distance-aligned comparison graph. */
+object HrByDistance {
+    const val STEP_M = 20.0
+
+    /** Folds (progress, bpm) points into [STEP_M] buckets (mean progress, mean bpm), ordered by progress. */
+    class Accumulator {
+        private val buckets = java.util.TreeMap<Int, DoubleArray>()      // index -> [sum s, sum hr, n]
+        fun add(progressM: Double, bpm: Double) {
+            val b = buckets.getOrPut((progressM / STEP_M).toInt()) { DoubleArray(3) }
+            b[0] += progressM; b[1] += bpm; b[2] += 1.0
+        }
+        fun snapshot(): List<Pair<Double, Double>> = buckets.values.map { it[0] / it[2] to it[1] / it[2] }
+    }
+
+    fun bucket(points: List<Pair<Double, Double>>): List<Pair<Double, Double>> =
+        Accumulator().also { acc -> points.forEach { acc.add(it.first, it.second) } }.snapshot()
+
+    /** The bpm axis: [lo, hi] on multiples of 10 covering all values and [target], at least [MIN_SPAN] wide. */
+    fun axis(values: List<Double>, target: Double?): Pair<Int, Int> {
+        val all = values + listOfNotNull(target)
+        if (all.isEmpty()) return 120 to 170
+        var lo = Math.floor(all.min() / 10.0).toInt() * 10
+        var hi = Math.ceil(all.max() / 10.0).toInt() * 10
+        while (hi - lo < MIN_SPAN) { if (hi - lo < MIN_SPAN) hi += 10; if (hi - lo < MIN_SPAN) lo -= 10 }
+        return lo to hi
+    }
+    const val MIN_SPAN = 40
+}
+
+/**
+ * Slow low-pass on a compass angle so the rotating map does not jiggle. Moves along the shortest arc with time constant
+ * [tauS] and ignores target changes smaller than [deadbandDeg]. [angleDeg] is continuous (not wrapped to 0..360), so it can
+ * be animated without a jump when the heading crosses north.
+ */
+class HeadingSmoother(private val tauS: Double = 5.0, private val deadbandDeg: Double = 4.0) {
+    var angleDeg: Double = 0.0; private set
+    private var started = false
+
+    fun update(targetDeg: Double, dtS: Double): Double {
+        if (!started) { angleDeg = targetDeg; started = true; return angleDeg }
+        var diff = (targetDeg - angleDeg) % 360.0
+        if (diff > 180.0) diff -= 360.0 else if (diff < -180.0) diff += 360.0
+        if (Math.abs(diff) >= deadbandDeg) angleDeg += diff * (1.0 - exp(-dtS.coerceAtLeast(0.0) / tauS))
+        return angleDeg
     }
 }

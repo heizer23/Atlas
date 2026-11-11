@@ -27,13 +27,13 @@ import java.time.format.DateTimeFormatter
 
 private val DATE = DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.systemDefault())
 
-private fun describe(r: LibraryRun): String =
-    listOfNotNull(DATE.format(Instant.ofEpochMilli(r.startedAtMillis)), fmtDuration(r.movingS), r.category, r.avgHr?.let { "avg HR %.0f".format(it) })
+private fun describe(r: LibraryRun, rank: Int?): String =
+    listOfNotNull(rank?.let { "#$it" }, DATE.format(Instant.ofEpochMilli(r.startedAtMillis)), fmtDuration(r.movingS), r.category, r.avgHr?.let { "avg HR %.0f".format(it) })
         .joinToString(" · ")
 
 /**
- * Race any earlier run on a route, chosen on the phone from the local library (works offline). Ghosts whose category
- * equals what this run would be ("4 km · HR 140") are listed first so like-for-like efforts are easy to pick.
+ * Race any earlier run on a route, chosen on the phone from the local library (works offline). The chosen run is the
+ * raced ghost; every other run on the route appears on the minimap. #n is the rank by finishing time (1 = fastest).
  */
 @Composable
 internal fun RaceCard(controller: RunController, tick: Int, targetHr: Int?, start: (() -> Unit) -> Unit, onError: (String?) -> Unit) {
@@ -56,10 +56,11 @@ internal fun RaceCard(controller: RunController, tick: Int, targetHr: Int?, star
                 val wanted = HrTarget.category(targetHr, route.referenceDistanceM)
                 val runs = library.runsOn(route.routeId).sortedWith(compareByDescending<LibraryRun> { wanted != null && it.category == wanted }.thenByDescending { it.startedAtMillis })
                 QuickPicks(runs.minByOrNull { it.movingS ?: Double.MAX_VALUE }, runs.maxByOrNull { it.startedAtMillis }) { ghostId = it }
+                val ranks = controller.fieldRanks(route.routeId)
                 runs.take(30).forEach { r ->
                     val sel = r.runId == ghostId
                     val ready = controller.raceReady(r)
-                    Pick(sel, { ghostId = r.runId }) { Text(describe(r) + if (ready) "" else "  (not downloaded)", fontSize = 14.sp) }
+                    Pick(sel, { ghostId = r.runId }) { Text(describe(r, ranks[r.runId]) + if (ready) "" else "  (not downloaded)", fontSize = 14.sp) }
                 }
                 val chosen = runs.firstOrNull { it.runId == ghostId }
                 if (chosen != null && !controller.raceReady(chosen)) Text("This ghost is not on the phone yet: refresh with Atlas reachable.", color = Color(0xFFFFC107))
