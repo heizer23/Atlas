@@ -179,6 +179,9 @@ async def run_turn(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=ATLAS_ROOT,
+            # stream-json emits one event per line; tool results can exceed
+            # asyncio's 64 KiB default and raise LimitOverrunError in readline().
+            limit=64 * 1024 * 1024,
         )
         _active.process = proc
 
