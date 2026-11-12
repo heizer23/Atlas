@@ -27,6 +27,7 @@ FSRS still schedules the next interval from the lapse.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from psycopg2.extras import Json
@@ -36,6 +37,12 @@ from platform_errorhandling import api_error
 
 RATINGS = ("again", "hard", "good", "easy")
 MAX_FOLLOWUPS = 2
+
+# A retry within this window of the previous review of the same item replaces
+# that review in the FSRS state (the earlier one stays in recall_reviews as
+# history). Otherwise "again" then "good" a few hours later is scheduled as two
+# reviews and inflates difficulty.
+SAME_SESSION_WINDOW = timedelta(hours=12)
 
 # Shipped in unguided packages as `recall_grading`; frontend/prompts.ts renders
 # the rules from it. Keep in step with validate_evidence().
@@ -165,8 +172,16 @@ def apply_recall_review(
     cur.execute("select now() as now")
     now = cur.fetchone()["now"]
 
+    # prev_raw_state: FSRS state before the last review ({} = fresh card, null =
+    # not replaceable, e.g. seeded from legacy). Inside the window the new rating
+    # replaces the last review: schedule from that earlier state instead.
+    collapse = bool(
+        row and row["prev_raw_state"] is not None and row["last_reviewed_at"]
+        and now - row["last_reviewed_at"] < SAME_SESSION_WINDOW
+    )
+    base = row["prev_raw_state"] if collapse else (row["raw_state"] if row else None)
     result = recall_scheduler().review(
-        rating, row["last_reviewed_at"] if row else None, now, {"raw_state": row["raw_state"]} if row else None
+        rating, row["last_reviewed_at"] if row else None, now, {"raw_state": base} if base else None
     )
     was_established = bool(row and row["established_at"])
     successful = rating != "again"
@@ -176,22 +191,23 @@ def apply_recall_review(
         cur.execute(
             """
             update essaycards.recall_state
-            set raw_state = %s, last_rating = %s, last_reviewed_at = %s, next_due_at = %s,
+            set raw_state = %s, prev_raw_state = case when %s then prev_raw_state else %s end,
+                last_rating = %s, last_reviewed_at = %s, next_due_at = %s,
                 established_at = coalesce(established_at, case when %s then %s end),
                 review_count = review_count + 1, lapse_count = lapse_count + %s, updated_at = now()
             where id = %s
             """,
-            (Json(result.extra_state["raw_state"]), rating, now, result.next_due_at,
-             successful, now, 1 if lapse else 0, row["id"]),
+            (Json(result.extra_state["raw_state"]), collapse, Json(row["raw_state"]), rating, now,
+             result.next_due_at, successful, now, 1 if lapse else 0, row["id"]),
         )
         state_id = row["id"]
     else:
         cur.execute(
             """
             insert into essaycards.recall_state
-                (scope, essay_id, section_id, raw_state, established_at, last_rating, last_reviewed_at,
-                 next_due_at, review_count, lapse_count, source)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, 1, 0, 'review')
+                (scope, essay_id, section_id, raw_state, prev_raw_state, established_at, last_rating,
+                 last_reviewed_at, next_due_at, review_count, lapse_count, source)
+            values (%s, %s, %s, %s, '{}'::jsonb, %s, %s, %s, %s, 1, 0, 'review')
             returning id
             """,
             (scope, essay_id, section_id, Json(result.extra_state["raw_state"]),

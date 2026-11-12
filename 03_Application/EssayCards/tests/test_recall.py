@@ -161,6 +161,26 @@ def test_overdue_item_is_due_and_review_reschedules_from_server_time(client):
     assert st["next_due_at"] > datetime.now(timezone.utc) + timedelta(days=1)  # grew past the 1-day floor
 
 
+def test_same_session_retry_replaces_the_earlier_review_in_fsrs_state(client):
+    _import(client, _section_entry(_recall("again", missing=["a"], followups=1)))
+    _import(client, _section_entry(_recall("good")))
+    st = _state()
+    assert st["review_count"] == 2 and st["established_at"] is not None
+    assert st["raw_state"]["difficulty"] < 4  # scheduled as a first Good, not again-then-good
+    n = run_sql("select count(*) n from essaycards.recall_reviews where section_id = %s", (SECTION_LOCKED,))[0]["n"]
+    assert n == 2  # both assessments stay as history
+
+
+def test_retry_after_the_window_is_a_separate_review(client):
+    _import(client, _section_entry(_recall("again", missing=["a"], followups=1)))
+    run_sql(
+        "update essaycards.recall_state set last_reviewed_at = now() - interval '2 days' where section_id = %s",
+        (SECTION_LOCKED,),
+    )
+    _import(client, _section_entry(_recall("good")))
+    assert _state()["raw_state"]["difficulty"] > 5  # again's difficulty carried over
+
+
 def test_examined_at_from_the_reply_never_drives_scheduling(client):
     entry = _section_entry(_recall("good"))
     entry["examined_at"] = "2001-01-01T00:00:00Z"

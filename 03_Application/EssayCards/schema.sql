@@ -997,4 +997,6 @@ alter table essaycards.recall_reviews add column if not exists nugget_versions_a
 
 create index if not exists ix_recall_reviews_state on essaycards.recall_reviews(recall_state_id, reviewed_at desc);
 
+alter table essaycards.recall_state add column if not exists prev_raw_state jsonb;
+
 commit;
