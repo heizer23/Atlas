@@ -480,6 +480,17 @@ runningtracker-tailnet-status:
 	@sudo tailscale serve status
 	@echo "Funnel must be OFF:"; sudo tailscale funnel status || true
 
+# ClaudeTerminal: host tmux bridge (loopback :8031) exposed ONLY via tailnet serve on the same HTTPS port, path-limited.
+# Funnel must stay off. Not executed by the implementer; run by the human.
+claudeterm-install:
+	bash ClaudeTerminal/install.sh
+
+claudeterm-tailnet-up:
+	sudo tailscale serve --bg --https=$(RUNNINGTRACKER_TAILNET_PORT) --set-path=/claudeterm http://127.0.0.1:8031/claudeterm
+
+claudeterm-tailnet-down:
+	sudo tailscale serve --https=$(RUNNINGTRACKER_TAILNET_PORT) --set-path=/claudeterm off
+
 # endregion
 
 

@@ -22,3 +22,19 @@ AppRegistry.register({
     { id: 'console-main', label: 'Console', path: '/console', order: 1 },
   ],
 });
+
+// Terminal: xterm.js on a host tmux session via the tailnet-only bridge (01_System/ClaudeTerminal).
+AppRegistry.register({
+  appId: 'claudeterminal',
+  label: 'Terminal',
+  basePath: '/terminal',
+  component: React.lazy(() => import('./TerminalEntry')),
+
+  mobilePrimaryNav: [
+    { id: 'terminal-main', label: 'Terminal', path: '/terminal', order: 2 },
+  ],
+
+  desktopNav: [
+    { id: 'terminal-main', label: 'Terminal', path: '/terminal', order: 2 },
+  ],
+});

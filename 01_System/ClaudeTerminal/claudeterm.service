@@ -1,0 +1,15 @@
+[Unit]
+Description=ClaudeTerminal bridge (browser terminal -> host tmux, loopback only)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/Prod/Atlas/01_System/ClaudeTerminal/claudeterm_bridge.py
+Restart=on-failure
+# Restarting the bridge must not kill a tmux server that was first started under it.
+KillMode=process
+# Login shells inside tmux get a normal PATH; nvm/claude come from the user's own profile.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=false
+
+[Install]
+WantedBy=default.target

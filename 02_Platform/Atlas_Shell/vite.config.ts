@@ -34,6 +34,8 @@ export default defineConfig({
       'react-markdown':  path.resolve(__dirname, 'node_modules/react-markdown'),
       'unist-util-visit': path.resolve(__dirname, 'node_modules/unist-util-visit'),
       'qrcode.react':    path.resolve(__dirname, 'node_modules/qrcode.react'),
+      '@xterm/xterm':    path.resolve(__dirname, 'node_modules/@xterm/xterm'),
+      '@xterm/addon-fit': path.resolve(__dirname, 'node_modules/@xterm/addon-fit'),
     },
   },
   server: {
