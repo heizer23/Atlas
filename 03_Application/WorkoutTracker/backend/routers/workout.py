@@ -153,12 +153,19 @@ class ExerciseSummary(BaseModel):
     prev_weight_kg: float | None
     prev_date: str | None
     weight_changed: bool                       # prev exists and weight differs (NULL == NULL is unchanged)
+    same_weight_count: int                     # earlier finished occurrences at exactly this weight (NULL == NULL)
+    weight_rank: int | None                    # 1 = most reps among those and today; None = no earlier at this weight
+    best_reps: int | None                      # most reps among the earlier same-weight occurrences
+    best_date: str | None                      # date of that best (most recent when tied)
 
 
 class SessionSummary(BaseModel):
+    split: str
     duration_sec: int | None                   # None = session has no recorded start/finish
-    avg_duration_sec: int | None               # mean of earlier finished sessions; None = no history
+    avg_duration_sec: int | None               # mean of earlier timed finished sessions of the same split; None = none
     avg_count: int
+    last_duration_sec: int | None              # most recent earlier timed finished session of the same split
+    last_date: str | None
     exercises: list[ExerciseSummary]
 
 
@@ -225,20 +232,30 @@ _REPS_SQL = "COALESCE(set1_reps,0)+COALESCE(set2_reps,0)+COALESCE(set3_reps,0)+C
 
 
 def session_summary(cur: Any, session_id: str) -> SessionSummary:
-    """Durations (this session vs. mean of earlier finished ones) and per-exercise reps vs. the most
-    recent earlier finished occurrence of the same exercise (case-insensitive)."""
-    cur.execute("SELECT EXTRACT(EPOCH FROM finished_at - started_at)::int AS sec FROM workout.workout_session "
-                "WHERE workout_id = %s", (session_id,))
-    duration = (cur.fetchone() or {}).get("sec")
+    """Duration vs. earlier timed finished sessions of the SAME split (case/space-insensitive; mean and
+    most recent), and per exercise: reps vs. the most recent earlier occurrence (case-insensitive name),
+    plus the rank among earlier occurrences at exactly the same weight. Legacy sessions have no recorded
+    times, so they never count toward durations."""
+    cur.execute("SELECT split, workout_date, EXTRACT(EPOCH FROM finished_at - started_at)::int AS sec "
+                "FROM workout.workout_session WHERE workout_id = %s", (session_id,))
+    me = cur.fetchone() or {}
     cur.execute("SELECT AVG(EXTRACT(EPOCH FROM finished_at - started_at))::int AS avg, COUNT(*) AS n "
                 "FROM workout.workout_session WHERE status = 'finished' AND workout_id <> %s "
-                "AND finished_at IS NOT NULL", (session_id,))
+                "AND finished_at IS NOT NULL AND lower(btrim(split)) = lower(btrim(%s))",
+                (session_id, me.get("split")))
     avg = cur.fetchone()
+    cur.execute("SELECT workout_date::text AS d, EXTRACT(EPOCH FROM finished_at - started_at)::int AS sec "
+                "FROM workout.workout_session WHERE status = 'finished' AND workout_id <> %s "
+                "AND finished_at IS NOT NULL AND lower(btrim(split)) = lower(btrim(%s)) "
+                "ORDER BY workout_date DESC, finished_at DESC LIMIT 1",
+                (session_id, me.get("split")))
+    last = cur.fetchone() or {}
     cur.execute(
         f"""
-        SELECT l.exercise, l.weight_kg, {_REPS_SQL} AS reps, p.prev_reps, p.prev_weight, p.prev_date::text AS prev_date,
-               p.workout_log_id IS NOT NULL AS has_prev
-        FROM workout.workout_log l
+        SELECT l.exercise, l.weight_kg, l.reps, p.prev_reps, p.prev_weight, p.prev_date::text AS prev_date,
+               p.workout_log_id IS NOT NULL AS has_prev,
+               w.n AS same_n, w.better, w.best_reps, w.best_date::text AS best_date
+        FROM (SELECT *, {_REPS_SQL} AS reps FROM workout.workout_log WHERE workout_id = %s AND status = 'done') l
         LEFT JOIN LATERAL (
             SELECT o.workout_log_id, o.workout_date AS prev_date, o.weight_kg AS prev_weight,
                    {_REPS_SQL.replace('set', 'o.set')} AS prev_reps
@@ -249,7 +266,19 @@ def session_summary(cur: Any, session_id: str) -> SessionSummary:
               AND (o.workout_date, o.created_at, o.workout_log_id) < (l.workout_date, l.created_at, l.workout_log_id)
             ORDER BY o.workout_date DESC, o.created_at DESC, o.workout_log_id DESC LIMIT 1
         ) p ON true
-        WHERE l.workout_id = %s AND l.status = 'done'
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE h.reps > l.reps) AS better, MAX(h.reps) AS best_reps,
+                   (ARRAY_AGG(h.workout_date ORDER BY h.reps DESC, h.workout_date DESC))[1] AS best_date
+            FROM (
+                SELECT o.workout_date, {_REPS_SQL.replace('set', 'o.set')} AS reps
+                FROM workout.workout_log o
+                LEFT JOIN workout.workout_session os ON os.workout_id = o.workout_id
+                WHERE lower(o.exercise) = lower(l.exercise) AND o.status = 'done'
+                  AND o.weight_kg IS NOT DISTINCT FROM l.weight_kg
+                  AND o.workout_id <> l.workout_id AND COALESCE(os.status, 'finished') = 'finished'
+                  AND (o.workout_date, o.created_at, o.workout_log_id) < (l.workout_date, l.created_at, l.workout_log_id)
+            ) h
+        ) w ON true
         ORDER BY l.created_at, l.workout_log_id
         """,
         (session_id,),
@@ -261,8 +290,13 @@ def session_summary(cur: Any, session_id: str) -> SessionSummary:
         prev_weight_kg=float(r["prev_weight"]) if r["prev_weight"] is not None else None,
         prev_date=r["prev_date"],
         weight_changed=bool(r["has_prev"]) and r["weight_kg"] != r["prev_weight"],
+        same_weight_count=r["same_n"],
+        weight_rank=r["better"] + 1 if r["same_n"] else None,
+        best_reps=r["best_reps"], best_date=r["best_date"],
     ) for r in cur.fetchall()]
-    return SessionSummary(duration_sec=duration, avg_duration_sec=avg["avg"], avg_count=avg["n"], exercises=ex)
+    return SessionSummary(split=me.get("split", ""), duration_sec=me.get("sec"),
+                          avg_duration_sec=avg["avg"], avg_count=avg["n"],
+                          last_duration_sec=last.get("sec"), last_date=last.get("d"), exercises=ex)
 
 
 def dataset_response(dataset: Dataset) -> JSONResponse:

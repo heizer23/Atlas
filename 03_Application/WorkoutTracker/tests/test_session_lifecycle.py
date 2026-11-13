@@ -239,3 +239,23 @@ def test_finish_summary_compares_with_last_occurrence_and_flags_weight_change(cl
     assert by["Row"]["weight_changed"] is True and by["Row"]["prev_weight_kg"] == 30.0
     assert by["Squat"]["prev_reps"] is None and by["Squat"]["weight_changed"] is False
     assert s["duration_sec"] is not None and s["avg_duration_sec"] is None
+
+
+def test_finish_summary_duration_is_per_split_and_rank_is_per_weight(client, seed, db_conn):
+    seed(A, "2026-05-01", "Pull", [("Row", 30, [10, 10], None)])
+    seed(B, "2026-06-01", "Pull", [("Row", 30, [12, 12], None)])
+    seed("00000000-0000-0000-0000-0000000000c3", "2026-06-10", "Pull", [("Row", 35, [20], None)])
+    # Timed earlier sessions: Pull 60 min, Push 10 min (Push must not affect the Pull comparison).
+    with db_conn.cursor() as cur:
+        for wid, split, d, mins in ((A, "Pull", "2026-05-01", 60), ("00000000-0000-0000-0000-0000000000d4", "Push", "2026-06-05", 10)):
+            cur.execute("INSERT INTO workout.workout_session (workout_id, split, workout_date, status, started_at, finished_at) "
+                        "VALUES (%s,%s,%s,'finished', %s::date + interval '9 hours', %s::date + interval '9 hours' + %s * interval '1 minute') "
+                        "ON CONFLICT DO NOTHING", (wid, split, d, d, d, mins))
+    sid = rows(client.post("/api/workout/sessions/start", json={"split": "Pull"}))[0]["id"]
+    client.post(f"/api/workout/sessions/{sid}/exercises", json={"exercise": "Row", "status": "done", "weight_kg": 30, "set1_reps": 11, "set2_reps": 11})
+    s = client.post(f"/api/workout/sessions/{sid}/finish").json()["summary"]
+    assert s["split"] == "Pull" and s["avg_count"] == 1 and s["avg_duration_sec"] == 3600
+    assert s["last_duration_sec"] == 3600 and s["last_date"] == "2026-05-01"
+    row = s["exercises"][0]  # 22 reps vs 20 (May) and 24 (June) at 30 kg; the 35 kg session is ignored
+    assert row["same_weight_count"] == 2 and row["weight_rank"] == 2
+    assert row["best_reps"] == 24 and row["best_date"] == "2026-06-01"

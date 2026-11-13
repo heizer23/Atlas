@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import YearCalendar from "./YearCalendar";
 import { MUTED, MonthlyRace, PRIMARY, StreakRanking, useReducedMotion } from "./ProgressCharts";
+import { fmtDate } from "./workoutShared";
 import { formatDuration, type Celebration, type SessionSummary } from "./progressModel";
 
 const NEXT = ["See my year →", "See my month →", "See my streak →", "Done"];
@@ -28,26 +29,36 @@ function useCountUp(target: number, animate: boolean, ms = 900): number {
   return v;
 }
 
+const TILE = { flex: 1, minWidth: 0, padding: 10, borderRadius: 14, background: "var(--md-sys-color-surface-container)", textAlign: "center" } as const;
+
+const ord = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10 > 3 ? 0 : n % 10]}`;
+
 const kg = (w: number | null) => (w == null ? "no weight" : `${w} kg`);
 
 function SessionSummaryStep({ s, animate, headingId }: { s: SessionSummary; animate: boolean; headingId: string }) {
   const dur = useCountUp(Math.round((s.duration_sec ?? 0) / 60), animate);
   const faster = s.duration_sec != null && s.avg_duration_sec != null && s.duration_sec < s.avg_duration_sec;
+  const fasterLast = s.duration_sec != null && s.last_duration_sec != null && s.duration_sec < s.last_duration_sec;
   const maxReps = Math.max(1, ...s.exercises.flatMap((e) => [e.reps, e.prev_reps ?? 0]));
   return (
     <>
       <h2 id={headingId} style={{ margin: 0, fontSize: 22, fontWeight: 600, textAlign: "center" }}>This workout</h2>
-      <div style={{ display: "flex", gap: 10 }}>
-        <div className={animate ? "wt-welcome" : undefined} style={{ flex: 1, padding: 12, borderRadius: 14, background: "var(--md-sys-color-surface-container)", textAlign: "center" }}>
-          <div style={{ fontSize: 12, color: MUTED }}>Total time</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: PRIMARY }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <div className={animate ? "wt-welcome" : undefined} style={{ ...TILE }}>
+          <div style={{ fontSize: 12, color: MUTED }}>{s.split} today</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: PRIMARY }}>
             {s.duration_sec == null ? "–" : dur < 60 ? `${dur} min` : formatDuration(dur * 60)}
           </div>
         </div>
-        <div className={animate ? "wt-welcome" : undefined} style={{ flex: 1, padding: 12, borderRadius: 14, background: "var(--md-sys-color-surface-container)", textAlign: "center", animationDelay: "120ms" }}>
+        <div className={animate ? "wt-welcome" : undefined} style={{ ...TILE, animationDelay: "120ms" }}>
           <div style={{ fontSize: 12, color: MUTED }}>Average{s.avg_count ? ` (${s.avg_count})` : ""}</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{s.avg_duration_sec == null ? "–" : formatDuration(s.avg_duration_sec)}</div>
-          {faster && <div className={animate ? "wt-pop" : undefined} style={{ fontSize: 12, color: "#1E8E4E", animationDelay: "900ms" }}>⚡ faster than usual</div>}
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{s.avg_duration_sec == null ? "–" : formatDuration(s.avg_duration_sec)}</div>
+          {faster && <div className={animate ? "wt-pop" : undefined} style={{ fontSize: 12, color: "#1E8E4E", animationDelay: "900ms" }}>⚡ faster</div>}
+        </div>
+        <div className={animate ? "wt-welcome" : undefined} style={{ ...TILE, animationDelay: "240ms" }}>
+          <div style={{ fontSize: 12, color: MUTED }}>Last{s.last_date ? ` · ${fmtDate(s.last_date)}` : ""}</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{s.last_duration_sec == null ? "–" : formatDuration(s.last_duration_sec)}</div>
+          {fasterLast && <div className={animate ? "wt-pop" : undefined} style={{ fontSize: 12, color: "#1E8E4E", animationDelay: "1000ms" }}>⚡ faster</div>}
         </div>
       </div>
       <ul style={{ flex: 1, minHeight: 0, overflowY: "auto", listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -72,12 +83,21 @@ function SessionSummaryStep({ s, animate, headingId }: { s: SessionSummary; anim
                   <span style={{ width: 26, textAlign: "right", fontWeight: 600 }}>{v}</span>
                 </div>
               ))}
-              {e.weight_changed ? (
+              {e.weight_changed && (
                 <div className={animate ? "wt-pop" : undefined} style={{ marginTop: 4, fontSize: 12, fontWeight: 600, color: "#9A5B00", animationDelay: `${900 + i * 90}ms` }}>
                   ⚖ Weight changed: {kg(e.prev_weight_kg)} → {kg(e.weight_kg)} (reps not directly comparable)
                 </div>
-              ) : e.prev_reps != null && e.weight_kg != null ? (
-                <div style={{ marginTop: 4, fontSize: 12, color: MUTED }}>Same weight: {kg(e.weight_kg)}</div>
+              )}
+              {e.weight_rank != null ? (
+                <div className={animate ? "wt-pop" : undefined} style={{ marginTop: 4, fontSize: 12, color: MUTED, animationDelay: `${950 + i * 90}ms` }}>
+                  <b style={{ color: e.weight_rank === 1 ? "#1E8E4E" : undefined }}>{e.weight_rank === 1 ? "🏆 Best" : `${ord(e.weight_rank)} best`}</b>
+                  {` of ${e.same_weight_count + 1} at ${kg(e.weight_kg)}`}
+                  {e.weight_rank === 1
+                    ? ` · beat ${e.best_reps} on ${e.best_date ? fmtDate(e.best_date) : "?"}`
+                    : ` · best was ${e.best_reps} on ${e.best_date ? fmtDate(e.best_date) : "?"}`}
+                </div>
+              ) : e.weight_changed ? (
+                <div style={{ marginTop: 4, fontSize: 12, color: MUTED }}>First time at {kg(e.weight_kg)}</div>
               ) : null}
             </li>
           );

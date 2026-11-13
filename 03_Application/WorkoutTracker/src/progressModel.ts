@@ -47,12 +47,19 @@ export interface ExerciseSummary {
   prev_weight_kg: number | null;
   prev_date: string | null;
   weight_changed: boolean;
+  same_weight_count: number;
+  weight_rank: number | null;
+  best_reps: number | null;
+  best_date: string | null;
 }
 
 export interface SessionSummary {
+  split: string;
   duration_sec: number | null;
   avg_duration_sec: number | null;
   avg_count: number;
+  last_duration_sec: number | null;
+  last_date: string | null;
   exercises: ExerciseSummary[];
 }
 
