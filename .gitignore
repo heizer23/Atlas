@@ -45,3 +45,6 @@ dist/
 
 # Dev reference images
 DevImages/
+
+# DB backups (kept on disk + offsite, not in git)
+02_Platform/Postgres/*.dump
