@@ -2,6 +2,8 @@ package net.linspad.atlasphone.running.ghost
 
 import net.linspad.atlasphone.running.PauseRecord
 import net.linspad.atlasphone.running.live.HrByDistance
+import net.linspad.atlasphone.running.recap.FinishStanding
+import net.linspad.atlasphone.running.recap.FinishStandings
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -248,6 +250,16 @@ class GhostSession(
         if (clock.inPause(tsMillis, pauses)) return
         lastFixMillis = tsMillis
         tracker.addFix(clock.movingS(tsMillis, pauses), lat, lon, accuracyM)
+    }
+
+    /**
+     * ST1 at the end of the run: null when no fix was ever matched; otherwise the standing at the last matched fix.
+     * GPS_LOST / OFF_COURSE status does not matter here. [previousRunId] = the most recent library run on the route.
+     */
+    fun finalStanding(previousRunId: String?): FinishStanding? {
+        val s = tracker.lastProgressM ?: return null
+        val t = tracker.lastMovingS ?: return null
+        return FinishStandings.compute(profile, everyone, previousRunId, t, s, route.referenceDistanceM)
     }
 
     fun snapshot(nowMillis: Long): GhostLive {

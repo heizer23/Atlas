@@ -66,21 +66,23 @@ internal fun zoneText(zone: HrZone, hr: Int?, target: Int?): String = when (zone
  * reconnect (the monitor already retries automatically); the run keeps recording without it.
  */
 @Composable
-internal fun HrCard(m: LiveMetrics, hrState: String, targetHr: Int?, onReconnect: () -> Unit) {
-    val zone = if (targetHr == null && m.currentHr != null) HrZone.NEAR else HrTarget.zone(m.currentHr, targetHr)
-    val color = if (targetHr == null && m.currentHr != null) Color.White else zoneColor(zone)
+internal fun HrCard(m: LiveMetrics, hrDisplay: Double?, hrState: String, targetHr: Int?, onReconnect: () -> Unit) {
+    // The shown value is the smoothed display value (HR2), rounded; the target zone uses the same number.
+    val shown = hrDisplay?.let { Math.round(it).toInt() }
+    val zone = if (targetHr == null && shown != null) HrZone.NEAR else HrTarget.zone(shown, targetHr)
+    val color = if (targetHr == null && shown != null) Color.White else zoneColor(zone)
     Column(Modifier.fillMaxWidth().background(PanelBg).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             Column {
                 Text("Heart rate")
-                Text(m.currentHr?.toString() ?: DASH, fontSize = 64.sp, color = color)
+                Text(shown?.toString() ?: DASH, fontSize = 64.sp, color = color)
             }
             if (targetHr != null) Column {
                 Text("Target")
                 Text("$targetHr", fontSize = 40.sp, color = Color.White)
             }
         }
-        if (targetHr != null) Text(zoneText(zone, m.currentHr, targetHr), fontSize = 20.sp, color = color)
+        if (targetHr != null) Text(zoneText(zone, shown, targetHr), fontSize = 20.sp, color = color)
         if (m.currentHr == null) {
             val state = hrState.lowercase().replace('_', ' ')
             Text("HR sensor: $state. Recording continues without it.", color = Amber)

@@ -63,19 +63,20 @@ class LiveHistory(private val windowS: Double = 600.0) {
     private val hrByProgress = HrByDistance.Accumulator()
     private var rolling: Double? = null
 
-    fun record(m: LiveMetrics, ghost: GhostLive?) {
+    /** [hrDisplay] = the smoothed HR display value (HR2); the default keeps the raw current reading. */
+    fun record(m: LiveMetrics, ghost: GhostLive?, hrDisplay: Double? = m.currentHr?.toDouble()) {
         val t = m.movingS
         rolling = m.rollingPaceSPerKm
         lastSmoothed = smoother.update(m.currentPaceSPerKm)
         lastSmoothed?.let { pace.add(t, it) }
-        m.currentHr?.let { hr.add(t, it.toDouble()) }
+        hrDisplay?.let { hr.add(t, it) }
         val r = ghost?.reading
         if (ghost != null && ghost.status == GhostStatus.ON_COURSE && r != null) {
             val s = ghost.progressM
             if (s != null && r.leadM != null) momentum.add(t, s, r.leadM)
             r.ghostHrAtPosition?.let { ghostHr.add(t, it) }
             r.timeGapS?.let { gapTrend.add(t, it) }
-            if (s != null) m.currentHr?.let { hrByProgress.add(s, it.toDouble()) }
+            if (s != null) hrDisplay?.let { hrByProgress.add(s, it) }
         }
         lastT = t
     }

@@ -2,12 +2,14 @@ package net.linspad.atlasphone.running
 
 import net.linspad.atlasphone.mobile.model.RawHeartRate
 import net.linspad.atlasphone.mobile.model.RawLocation
+import net.linspad.atlasphone.running.recap.RecapData
+import net.linspad.atlasphone.running.recap.RecoverySummary
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
-/** Lifecycle: PREPARED -> RECORDING <-> PAUSED -> COMPLETED_LOCAL -> PENDING_UPLOAD -> SYNCED (see [RunLifecycle]). */
-enum class RunState { PREPARED, RECORDING, PAUSED, COMPLETED_LOCAL, PENDING_UPLOAD, SYNCED }
+/** Lifecycle: PREPARED -> RECORDING <-> PAUSED -> [RECOVERY ->] COMPLETED_LOCAL -> PENDING_UPLOAD -> SYNCED (see [RunLifecycle]). */
+enum class RunState { PREPARED, RECORDING, PAUSED, RECOVERY, COMPLETED_LOCAL, PENDING_UPLOAD, SYNCED }
 
 /** One manual pause; open while [endedAtMillis] is null. Offsets are seconds on the phone's monotonic clock since run start. */
 data class PauseRecord(
@@ -17,7 +19,7 @@ data class PauseRecord(
     val endedElapsedS: Double?,
 )
 
-/** Initial stats computed on the phone with RunMetrics (the server recomputes authoritative series and splits). */
+/** Initial stats computed on the phone with RunMetrics (the server recomputes authoritative series and splits). Running phase only. */
 data class RunSummary(
     val elapsedS: Double,
     val movingS: Double,
@@ -47,6 +49,12 @@ data class RunMeta(
     /** Target heart rate chosen before the start, and the equivalent-effort category derived from it ("4 km · HR 140"). */
     val targetHr: Int? = null,
     val category: String? = null,
+    /** End of the running phase (null = no recovery phase); [finishedAtMillis] then means "training ended". */
+    val runFinishedAtMillis: Long? = null,
+    /** HRR1 result, set at Finish Training (null without recovery or HR). */
+    val recovery: RecoverySummary? = null,
+    /** Display copy for the offline recap; the raw record stays in the capture / Postgres. */
+    val recap: RecapData? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("captureId", captureId)
@@ -74,6 +82,9 @@ data class RunMeta(
         .put("ghostRunId", ghostRunId ?: JSONObject.NULL)
         .put("targetHr", targetHr ?: JSONObject.NULL)
         .put("category", category ?: JSONObject.NULL)
+        .put("runFinishedAtMillis", runFinishedAtMillis ?: JSONObject.NULL)
+        .put("recovery", recovery?.toJson() ?: JSONObject.NULL)
+        .put("recap", recap?.toJson() ?: JSONObject.NULL)
         .toString()
 
     companion object {
@@ -101,6 +112,10 @@ data class RunMeta(
                 ghostRunId = if (o.has("ghostRunId")) o.optStr("ghostRunId") else null,
                 targetHr = if (o.has("targetHr") && !o.isNull("targetHr")) o.getInt("targetHr") else null,
                 category = if (o.has("category")) o.optStr("category") else null,
+                // Keys added in Sprint02: old metas do not have them.
+                runFinishedAtMillis = if (o.has("runFinishedAtMillis")) o.optL("runFinishedAtMillis") else null,
+                recovery = if (o.has("recovery") && !o.isNull("recovery")) RecoverySummary.fromJson(o.getJSONObject("recovery")) else null,
+                recap = if (o.has("recap") && !o.isNull("recap")) RecapData.fromJson(o.getJSONObject("recap")) else null,
             )
         }
     }

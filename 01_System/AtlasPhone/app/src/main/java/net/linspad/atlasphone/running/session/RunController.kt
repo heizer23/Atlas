@@ -20,6 +20,7 @@ import net.linspad.atlasphone.running.RunEvent
 import net.linspad.atlasphone.running.RunLifecycle
 import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.RunState
+import net.linspad.atlasphone.running.RunSummary
 import net.linspad.atlasphone.running.SampleDecoder
 import net.linspad.atlasphone.running.auth.TokenStore
 import net.linspad.atlasphone.running.ghost.FieldRanking
@@ -27,6 +28,14 @@ import net.linspad.atlasphone.running.ghost.GhostCache
 import net.linspad.atlasphone.running.ghost.GhostLive
 import net.linspad.atlasphone.running.ghost.GhostSession
 import net.linspad.atlasphone.running.ghost.Library
+import net.linspad.atlasphone.running.hr.HrPoint
+import net.linspad.atlasphone.running.hr.HrSmoothing
+import net.linspad.atlasphone.running.recap.RecapBuilder
+import net.linspad.atlasphone.running.recap.RecoveryLive
+import net.linspad.atlasphone.running.recap.RecoveryMetrics
+import net.linspad.atlasphone.running.recap.RecoveryConfig
+import net.linspad.atlasphone.running.recap.RecoveryTracker
+import net.linspad.atlasphone.running.settings.RunSettings
 import net.linspad.atlasphone.running.ghost.LibraryRun
 import net.linspad.atlasphone.running.live.HrTarget
 import net.linspad.atlasphone.running.live.LiveHistory
@@ -44,6 +53,10 @@ import net.linspad.atlasphone.running.sync.UploadScheduler
 class LiveRunState(
     val meta: RunMeta, val metrics: LiveMetrics, val gpsState: String, val hrState: String, val ghost: GhostLive? = null,
     val trends: LiveTrends = LiveTrends.EMPTY,
+    /** Non-null only in RECOVERY. */
+    val recovery: RecoveryLive? = null,
+    /** HR2 live value (smoothed per the user's setting); null = no valid heart rate (never 0). */
+    val hrDisplay: Double? = null,
 ) {
     val targetHr: Int? get() = meta.targetHr
 }
@@ -57,12 +70,22 @@ enum class GhostReadiness { NONE, READY, MISSING }
  * Persists RunMeta on every transition; the server never starts, pauses or stops a run.
  */
 class RunController private constructor(private val app: Application) {
-    private class Active(var meta: RunMeta, val acc: RunMetricsAccumulator, val monoStartMs: Long?, val jobs: List<Job>, val ghost: GhostSession?, val history: LiveHistory = LiveHistory())
+    private class Active(
+        var meta: RunMeta, val acc: RunMetricsAccumulator, val monoStartMs: Long?, val jobs: List<Job>, val ghost: GhostSession?,
+        val history: LiveHistory = LiveHistory(),
+        /** The GPS collector; cancelled alone at Finish Run while HR and the publisher keep running. Null when recovered into RECOVERY. */
+        val locationJob: Job? = null,
+        /** Set while in RECOVERY: the only consumer of HR then (the running accumulator no longer gets it). */
+        var recovery: RecoveryTracker? = null,
+        /** Recent raw HR readings for the display smoothing (a few seconds). */
+        val hrRecent: ArrayDeque<HrPoint> = ArrayDeque(),
+    )
 
     private val platform = MobilePlatform.get(app)
     private val store get() = platform.store
     val tokens: TokenStore by lazy { TokenStore.create(app) }
     private val ghostCache = GhostCache(java.io.File(app.noBackupFilesDir, "ghost"))
+    private val settings = RunSettings.create(app)
 
     private val lock = Any()
     private var active: Active? = null
@@ -111,23 +134,35 @@ class RunController private constructor(private val app: Application) {
         return GhostSession(route, profile, meta.startedAtMillis, others)
     }
 
-    private fun attach(meta: RunMeta, acc: RunMetricsAccumulator, monoStartMs: Long?, ghost: GhostSession?) {
-        val jobs = listOf(
-            platform.scope.launch {
-                platform.location.samples.collect { fix ->
-                    synchronized(lock) {
-                        active?.let { a ->
-                            a.acc.addFix(fix)
-                            a.ghost?.addFix(fix.timestampMillis, fix.latitude, fix.longitude, fix.accuracyMeters?.toDouble(), a.meta.pauses)
-                        }
+    /** [recovery] non-null = attach to an already finished run in RECOVERY: no GPS collector, HR goes to the tracker. */
+    private fun attach(meta: RunMeta, acc: RunMetricsAccumulator, monoStartMs: Long?, ghost: GhostSession?, recovery: RecoveryTracker? = null) {
+        val locationJob = if (recovery != null) null else platform.scope.launch {
+            platform.location.samples.collect { fix ->
+                synchronized(lock) {
+                    active?.let { a ->
+                        a.acc.addFix(fix)
+                        a.ghost?.addFix(fix.timestampMillis, fix.latitude, fix.longitude, fix.accuracyMeters?.toDouble(), a.meta.pauses)
                     }
                 }
-            },
-            platform.scope.launch { platform.heartRate.samples.collect { synchronized(lock) { active?.acc?.addHeartRate(it) } } },
+            }
+        }
+        val jobs = listOfNotNull(
+            locationJob,
+            platform.scope.launch { platform.heartRate.samples.collect { onHeartRate(it) } },
             platform.scope.launch { while (isActive) { publish(); delay(1000) } },
         )
-        active = Active(meta, acc, monoStartMs, jobs, ghost)
+        active = Active(meta, acc, monoStartMs, jobs, ghost, locationJob = locationJob, recovery = recovery)
         publish()
+    }
+
+    /** RECORDING/PAUSED: the running accumulator; RECOVERY: the recovery tracker only (no pollution of running averages). */
+    private fun onHeartRate(sample: RawHeartRate) {
+        synchronized(lock) {
+            val a = active ?: return
+            a.hrRecent.addLast(HrPoint(sample.timestampMillis, sample.bpm))
+            while (a.hrRecent.isNotEmpty() && a.hrRecent.first().tsMillis < sample.timestampMillis - HR_RECENT_MS) a.hrRecent.removeFirst()
+            if (a.meta.state == RunState.RECOVERY) a.recovery?.addHeartRate(HrPoint(sample.timestampMillis, sample.bpm)) else a.acc.addHeartRate(sample)
+        }
     }
 
     private fun publish() {
@@ -136,8 +171,10 @@ class RunController private constructor(private val app: Application) {
                 val now = System.currentTimeMillis()
                 val metrics = it.acc.snapshot(now)
                 val ghost = it.ghost?.snapshot(now)
-                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost) // no history while paused
-                LiveRunState(it.meta, metrics, platform.location.state.value.name, platform.heartRate.state.value.name, ghost, it.history.snapshot())
+                val hrDisplay = HrSmoothing.valueAt(it.hrRecent.toList(), settings.hrSmoothing(), now, centered = false)
+                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost, hrDisplay) // no history while paused
+                LiveRunState(it.meta, metrics, platform.location.state.value.name, platform.heartRate.state.value.name, ghost, it.history.snapshot(),
+                    it.recovery?.snapshot(now), hrDisplay)
             }
         }
         _live.value = live
@@ -177,8 +214,13 @@ class RunController private constructor(private val app: Application) {
     private fun closeOpenPause(pauses: List<PauseRecord>, nowMillis: Long, offsetS: Double): List<PauseRecord> =
         pauses.map { if (it.endedAtMillis == null) it.copy(endedAtMillis = nowMillis, endedElapsedS = offsetS) else it }
 
+    /** The most recent library run on the route (by start time): the "previous run" of ST1. */
+    private fun previousRunId(routeId: String?): String? =
+        routeId?.let { id -> ghostCache.library().runsOn(id).maxByOrNull { it.startedAtMillis }?.runId }
+
     /**
-     * Stop, drain the buffer, store metadata, compute the initial stats, move to pending_upload and enqueue the upload.
+     * Legacy one-step finish (a run without live heart rate, O1): stop, drain the buffer, store metadata, compute the
+     * initial stats and the recap, move to pending_upload and enqueue the upload.
      * A short delay lets in-flight samples reach the buffer before the recorder stops.
      */
     suspend fun finish(): RunMeta {
@@ -195,15 +237,100 @@ class RunController private constructor(private val app: Application) {
                 platform.stopAll() // recorder.stop() marks the capture finished; GPS and HR are released
                 active = null
                 val (locations, heartRates) = loadSamples(a.meta.captureId)
-                var summary = RunMetrics.summarize(locations, heartRates, pauses, a.meta.startedAtMillis, now)
-                // Durations come from the monotonic clock (T1); wall time is the fallback after a recovery.
-                if (a.monoStartMs != null) {
-                    val pausedS = pauses.sumOf { (it.endedElapsedS ?: it.startedElapsedS) - it.startedElapsedS }
-                    val moving = (elapsed - pausedS).coerceAtLeast(0.0)
-                    summary = summary.copy(elapsedS = elapsed, movingS = moving,
-                        avgPaceSPerKm = if (summary.distanceM > 0 && moving > 0) moving / (summary.distanceM / 1000.0) else null)
-                }
-                val local = a.meta.copy(state = RunState.COMPLETED_LOCAL, finishedAtMillis = now, pauses = pauses, summary = summary)
+                val summary = runningSummary(a, locations, heartRates, pauses, now, elapsed)
+                val recap = RecapBuilder.build(locations, heartRates, pauses, null, a.ghost?.finalStanding(previousRunId(a.meta.routeId)))
+                val local = a.meta.copy(state = RunState.COMPLETED_LOCAL, finishedAtMillis = now, pauses = pauses, summary = summary, recap = recap)
+                store.putRunMeta(local.captureId, local.toJson())
+                val pending = local.copy(state = RunLifecycle.next(RunState.COMPLETED_LOCAL, RunEvent.QUEUE_UPLOAD)!!)
+                store.putRunMeta(pending.captureId, pending.toJson())
+                pending to pending.captureId
+            }
+            _live.value = null
+            UploadScheduler.enqueue(app, runId, replace = true)
+            meta
+        }
+    }
+
+    /** A1 summary of the samples given; durations come from the monotonic clock (T1) when this process started the run. */
+    private fun runningSummary(
+        a: Active, locations: List<RawLocation>, heartRates: List<RawHeartRate>, pauses: List<PauseRecord>, endMillis: Long, elapsed: Double,
+    ): RunSummary {
+        var summary = RunMetrics.summarize(locations, heartRates, pauses, a.meta.startedAtMillis, endMillis)
+        if (a.monoStartMs != null) {
+            val pausedS = pauses.sumOf { (it.endedElapsedS ?: it.startedElapsedS) - it.startedElapsedS }
+            val moving = (elapsed - pausedS).coerceAtLeast(0.0)
+            summary = summary.copy(elapsedS = elapsed, movingS = moving,
+                avgPaceSPerKm = if (summary.distanceM > 0 && moving > 0) moving / (summary.distanceM / 1000.0) else null)
+        }
+        return summary
+    }
+
+    /**
+     * Finish Run (RS1): the running phase ends now. Distance, time and pace are frozen, GPS stops (location only; recorder, HR and
+     * the foreground service keep running) and the run moves to RECOVERY. The final running summary and ghost standing are
+     * persisted here and never recomputed at Finish Training.
+     */
+    suspend fun finishRun(): RunMeta {
+        // The running phase ends at the button press; samples that arrive during the drain are stored but not counted.
+        val t0 = System.currentTimeMillis()
+        val monoNow = SystemClock.elapsedRealtime()
+        synchronized(lock) {
+            val a = active ?: error("No active run")
+            RunLifecycle.next(a.meta.state, RunEvent.FINISH_RUN) ?: error("This run cannot be finished")
+        }
+        delay(DRAIN_MS)
+        return withContext(Dispatchers.IO) {
+            val meta = synchronized(lock) {
+                val a = active ?: error("No active run")
+                val state = RunLifecycle.next(a.meta.state, RunEvent.FINISH_RUN) ?: error("This run cannot be finished")
+                a.locationJob?.cancel() // GPS collector and ghost feed stop; HR collector and publisher stay
+                val elapsed = if (a.monoStartMs != null) (monoNow - a.monoStartMs) / 1000.0 else (t0 - a.meta.startedAtMillis) / 1000.0
+                val pauses = closeOpenPause(a.meta.pauses, t0, elapsed)
+                platform.location.stop() // not stopAll: recorder, HR and the foreground service continue
+                val (allLocations, allHeartRates) = loadSamples(a.meta.captureId)
+                val locations = allLocations.filter { it.timestampMillis <= t0 }
+                val heartRates = allHeartRates.filter { it.timestampMillis <= t0 }
+                val summary = runningSummary(a, locations, heartRates, pauses, t0, elapsed)
+                val standing = a.ghost?.finalStanding(previousRunId(a.meta.routeId))
+                val recap = RecapBuilder.build(locations, heartRates, pauses, t0, standing)
+                val next = a.meta.copy(state = state, pauses = pauses, summary = summary, finishedAtMillis = null, runFinishedAtMillis = t0, recap = recap)
+                store.putRunMeta(next.captureId, next.toJson())
+                val seed = allHeartRates.filter { it.timestampMillis >= t0 - (RecoveryConfig.END_BEFORE_S * 1000).toLong() }.map { HrPoint(it.timestampMillis, it.bpm) }
+                a.meta = next
+                a.recovery = RecoveryTracker(t0, seed)
+                next
+            }
+            publish()
+            meta
+        }
+    }
+
+    /**
+     * Finish Training: ends the recovery phase. Stops everything, computes HRR (HRR1) over all stored HR, rebuilds the recap
+     * (standing is carried over from RunMeta.recap), moves to pending_upload and enqueues the upload. The running summary is kept.
+     */
+    suspend fun finishTraining(): RunMeta {
+        synchronized(lock) {
+            val a = active ?: error("No active run")
+            RunLifecycle.next(a.meta.state, RunEvent.FINISH_TRAINING) ?: error("Training can only be finished from the recovery phase")
+        }
+        delay(DRAIN_MS)
+        return withContext(Dispatchers.IO) {
+            val (meta, runId) = synchronized(lock) {
+                val a = active ?: error("No active run")
+                RunLifecycle.next(a.meta.state, RunEvent.FINISH_TRAINING) ?: error("Training can only be finished from the recovery phase")
+                val t0 = a.meta.runFinishedAtMillis ?: error("Run has no end of running")
+                a.jobs.forEach { it.cancel() }
+                val tEnd = System.currentTimeMillis()
+                platform.stopAll() // recorder.stop() marks the capture finished
+                active = null
+                val captureThere = store.info(a.meta.captureId) != null
+                val (locations, heartRates) = loadSamples(a.meta.captureId)
+                val hr = heartRates.map { HrPoint(it.timestampMillis, it.bpm) }
+                // Without the local capture the Finish Run recap stays as it is (upload then reports the missing capture).
+                val recovery = if (captureThere && hr.isNotEmpty()) RecoveryMetrics.compute(hr, t0, tEnd) else null
+                val recap = if (captureThere) RecapBuilder.build(locations, heartRates, a.meta.pauses, t0, a.meta.recap?.standing) else a.meta.recap
+                val local = a.meta.copy(state = RunState.COMPLETED_LOCAL, finishedAtMillis = tEnd, recovery = recovery, recap = recap)
                 store.putRunMeta(local.captureId, local.toJson())
                 val pending = local.copy(state = RunLifecycle.next(RunState.COMPLETED_LOCAL, RunEvent.QUEUE_UPLOAD)!!)
                 store.putRunMeta(pending.captureId, pending.toJson())
@@ -238,7 +365,9 @@ class RunController private constructor(private val app: Application) {
         val activeId = synchronized(lock) { active?.meta?.captureId }
         val diagnosticId = platform.recorder.active.value?.id // a capture of the Sprint 01 test screen is not interrupted
         val metas = store.listRunMeta().map(RunMeta::fromJson)
-        val interrupted = metas.filter { (it.state == RunState.RECORDING || it.state == RunState.PAUSED) && it.captureId != activeId }
+        val interrupted = metas.filter {
+            (it.state == RunState.RECORDING || it.state == RunState.PAUSED || it.state == RunState.RECOVERY) && it.captureId != activeId
+        }
         val known = metas.map { it.captureId }.toSet()
         val orphans = store.openCaptures()
             .filter { it.id !in known && it.id != activeId && it.id != diagnosticId }
@@ -252,6 +381,7 @@ class RunController private constructor(private val app: Application) {
             check(active == null) { "A run is already active" }
             val meta0 = interruptedRuns().firstOrNull { it.captureId == runId } ?: error("Not an interrupted run")
             val info = store.info(runId) ?: error("Capture is missing")
+            if (meta0.state == RunState.RECOVERY) { recoverRecovery(meta0); return }
             val state = RunLifecycle.next(if (store.getRunMeta(runId) == null) null else meta0.state, RunEvent.RECOVER)!!
             val lastTs = if (info.lastSequence > 0) store.fetch(runId, info.lastSequence - 1, 1).lastOrNull()?.timestampMillis else null
             val pauseStart = (lastTs ?: info.startedAtMillis).coerceAtLeast(meta0.startedAtMillis)
@@ -271,6 +401,23 @@ class RunController private constructor(private val app: Application) {
             attach(meta, acc, null, ghost)
             platform.ensureForegroundService(app)
         }
+    }
+
+    /**
+     * Interrupted RECOVERY (flow step 15): the running result is already persisted. Reopen the capture, do NOT start GPS,
+     * reconnect HR best-effort, rebuild the tracker from the stored HR and resume the recovery screen. Never finalized here.
+     */
+    private fun recoverRecovery(meta0: RunMeta) {
+        val t0 = meta0.runFinishedAtMillis ?: error("Run has no end of running")
+        val state = RunLifecycle.next(meta0.state, RunEvent.RECOVER)!! // RECOVERY
+        val meta = meta0.copy(state = state)
+        platform.recorder.start(meta.captureId)
+        platform.heartRate.connectLast()
+        val seed = loadSamples(meta.captureId).second.filter { it.timestampMillis >= t0 - (RecoveryConfig.END_BEFORE_S * 1000).toLong() }
+            .map { HrPoint(it.timestampMillis, it.bpm) }
+        store.putRunMeta(meta.captureId, meta.toJson())
+        attach(meta, RunMetricsAccumulator(meta.startedAtMillis, meta.pauses), null, null, RecoveryTracker(t0, seed))
+        platform.ensureForegroundService(app)
     }
 
     /** Explicit user discard: deletes the capture even though samples are unacknowledged. */
@@ -414,6 +561,8 @@ class RunController private constructor(private val app: Application) {
 
     companion object {
         private const val DRAIN_MS = 400L
+        /** How much raw HR is kept for the display smoothing (covers the 10 s window). */
+        private const val HR_RECENT_MS = 12_000L
         @Volatile private var instance: RunController? = null
 
         fun get(context: Context): RunController =

@@ -42,6 +42,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import net.linspad.atlasphone.running.RecoveryGate
 import net.linspad.atlasphone.running.ghost.GhostLive
 import net.linspad.atlasphone.running.ghost.GhostStatus
 import net.linspad.atlasphone.running.session.LiveRunState
@@ -91,18 +92,20 @@ internal fun GhostRaceScreen(
                     Text(ghost.position?.toString() ?: DASH, style = Big, fontSize = 52.sp)
                     if (ghost.position != null) Text(" / ${ghost.fieldSize + 1}", style = Big.copy(color = Soft), fontSize = 28.sp, modifier = Modifier.padding(bottom = 6.dp))
                 }
-                HrPair(m.currentHr, reading?.ghostHrAtPosition)
+                HrPair(live.hrDisplay, reading?.ghostHrAtPosition)
             }
             StatusLines(live, ghost, paused, gpsText, gpsGood, onReconnectHr)
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 Spacer(Modifier.weight(1f))
-                HrDistanceChart(trends, ghost, live.targetHr, reading?.ghostHrAtPosition, m.currentHr, Modifier.width(158.dp).fillMaxHeight().padding(top = 8.dp, bottom = 8.dp))
+                HrDistanceChart(trends, ghost, live.targetHr, reading?.ghostHrAtPosition, live.hrDisplay, Modifier.width(158.dp).fillMaxHeight().padding(top = 8.dp, bottom = 8.dp))
             }
             BottomStats(m, trends, reading?.timeGapS)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (paused) Button(modifier = Modifier.weight(1f).height(40.dp), onClick = onResume) { Text("Resume") }
                 else OutlinedButton(modifier = Modifier.weight(1f).height(40.dp), onClick = onPause) { Text("Pause") }
-                OutlinedButton(modifier = Modifier.weight(1f).height(40.dp), enabled = !finishing, onClick = onFinish) { Text("Finish") }
+                OutlinedButton(modifier = Modifier.weight(1f).height(40.dp), enabled = !finishing, onClick = onFinish) {
+                    Text(if (RecoveryGate.offersRecovery(m.currentHr)) "Finish Run" else "Finish") // O1: recovery only with a live HR
+                }
             }
         }
     }
@@ -112,11 +115,11 @@ internal fun GhostRaceScreen(
 
 /** "♥ 142 vs ♥ 149": my heart rate (red) and the raced ghost's at my route position (blue). */
 @Composable
-private fun HrPair(mine: Int?, ghostAtSpot: Double?) {
+private fun HrPair(mine: Double?, ghostAtSpot: Double?) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("♥", color = HrRed, fontSize = 26.sp)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(mine?.toString() ?: DASH, style = Big, fontSize = 40.sp)
+            Text(fmtBpm(mine), style = Big, fontSize = 40.sp)
             Text("bpm", color = Soft, fontSize = 13.sp)
         }
         Text("vs", color = Soft, fontSize = 15.sp)
@@ -289,7 +292,7 @@ private fun DrawScope.digit(paint: android.graphics.Paint, rank: Int, at: Offset
  * Mine covers the part run so far; the ghost's covers its whole run, faded and dashed beyond my position. No frame, legend or title.
  */
 @Composable
-private fun HrDistanceChart(trends: LiveTrends, ghost: GhostLive, targetHr: Int?, ghostNow: Double?, myNow: Int?, modifier: Modifier) {
+private fun HrDistanceChart(trends: LiveTrends, ghost: GhostLive, targetHr: Int?, ghostNow: Double?, myNow: Double?, modifier: Modifier) {
     val my = trends.hrByProgress
     val gh = ghost.ghostHrProfile
     val len = ghost.routeLengthM
@@ -337,7 +340,7 @@ private fun HrDistanceChart(trends: LiveTrends, ghost: GhostLive, targetHr: Int?
         }
         trace(my, HrRed, false)
 
-        myNow?.let { drawCircle(Color.White, 4.5f.dp.toPx(), Offset(x(it.toDouble()), y(myS))); drawCircle(HrRed, 3.dp.toPx(), Offset(x(it.toDouble()), y(myS))) }
+        myNow?.let { drawCircle(Color.White, 4.5f.dp.toPx(), Offset(x(it), y(myS))); drawCircle(HrRed, 3.dp.toPx(), Offset(x(it), y(myS))) }
         ghostNow?.let { drawCircle(Color.White, 4.5f.dp.toPx(), Offset(x(it), y(myS))); drawCircle(GhostBlue, 3.dp.toPx(), Offset(x(it), y(myS))) }
     }
 }

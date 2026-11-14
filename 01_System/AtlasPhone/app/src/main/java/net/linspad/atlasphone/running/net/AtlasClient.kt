@@ -146,6 +146,8 @@ class AtlasClient(
         meta.category?.let { body.put("category", it) }
         meta.routeId?.let { body.put("route_id", it) }
         meta.ghostRunId?.let { body.put("ghost_run_id", it) }
+        // Omitted (never null) without a recovery phase: an old server rejects unknown keys, see invariant C1 (deploy the server first).
+        meta.runFinishedAtMillis?.let { body.put("run_finished_at", SampleJson.iso(it)) }
         return call("POST", "/runs/$runId/finish", body) { o ->
             val ranges = o.getJSONArray("missing_seq_ranges").let { a -> (0 until a.length()).map { a.getJSONObject(it).let { r -> r.getLong("start")..r.getLong("end") } } }
             val mismatched = o.getJSONArray("count_mismatch").let { a -> (0 until a.length()).map { a.getJSONObject(it).getString("stream") } }

@@ -1,7 +1,5 @@
 package net.linspad.atlasphone.running.ui
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,7 +23,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -41,6 +38,7 @@ import net.linspad.atlasphone.mobile.heartrate.HeartRateMonitor
 import net.linspad.atlasphone.mobile.permissions.Capability
 import net.linspad.atlasphone.mobile.permissions.PermissionStatus
 import net.linspad.atlasphone.running.live.HrTarget
+import net.linspad.atlasphone.running.RecoveryGate
 import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.RunState
 import net.linspad.atlasphone.running.ghost.GhostLive
@@ -48,6 +46,8 @@ import net.linspad.atlasphone.running.ghost.GhostStatus
 import net.linspad.atlasphone.running.session.GhostReadiness
 import net.linspad.atlasphone.running.session.LiveRunState
 import net.linspad.atlasphone.running.session.RunController
+import net.linspad.atlasphone.running.hr.HrSmoothingMode
+import net.linspad.atlasphone.running.settings.RunSettings
 
 // ── Formatting (display only) ────────────────────────────────────────────────
 
@@ -119,6 +119,8 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
     var targetBpm by remember { mutableIntStateOf(prefs.getInt("target_hr", HrTarget.DEFAULT_BPM)) }
     fun saveTarget() { prefs.edit().putBoolean("target_on", targetOn).putInt("target_hr", targetBpm).apply() }
     val targetHr = if (targetOn) targetBpm else null
+    val settings = remember { RunSettings.create(context) }
+    var smoothing by remember { mutableStateOf(settings.hrSmoothing()) }
     val gps by platform.location.state.collectAsState()
     val hrState by platform.heartRate.state.collectAsState()
     val hrLatest by platform.heartRate.latest.collectAsState()
@@ -150,6 +152,7 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
                     Text("Interrupted run found", style = MaterialTheme.typography.titleMedium)
                     Text("The app was closed while recording. Nothing is finalized automatically.")
                     interrupted.forEach { r ->
+                        if (r.state == RunState.RECOVERY) Text("Recovery phase after ${fmtKm(r.summary?.distanceM)} (the running result is saved).")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { runCatching { controller.recover(r.captureId) }.onFailure { message = "Cannot recover: ${it.message}" } }) { Text("Recover") }
                             OutlinedButton(onClick = { confirmDiscard = r.captureId }) { Text("Discard") }
@@ -200,6 +203,19 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
                     }
                     Text("Category: ${HrTarget.category(targetBpm, null)} (a route adds its length, e.g. 4 km · HR $targetBpm)")
                 }
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Heart-rate display", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(HrSmoothingMode.RAW to "Raw", HrSmoothingMode.ROLLING_5S to "5 s", HrSmoothingMode.ROLLING_10S to "10 s").forEach { (mode, label) ->
+                        if (mode == smoothing) Button(onClick = {}) { Text(label) }
+                        else OutlinedButton(onClick = { settings.setHrSmoothing(mode); smoothing = mode }) { Text(label) }
+                    }
+                }
+                Text("Smoothing changes only what is shown. Recorded data and recovery values are not affected.", color = Color(0xFF9E9E9E))
             }
         }
 
@@ -269,6 +285,7 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
     val context = LocalContext.current
     val platform = remember { MobilePlatform.get(context) }
     var confirmFinish by remember { mutableStateOf(false) }
+    var confirmRecovery by remember { mutableStateOf(false) } // RecoveryGate answer at the moment Finish was pressed
     var finishing by remember { mutableStateOf(false) }
     val paused = live.meta.state == RunState.PAUSED
     val m = live.metrics
@@ -279,12 +296,27 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
         else -> "GPS: good (%.0f m)".format(m.lastAccuracyM)
     }
 
+    val smoothing = remember { RunSettings.create(context) }.hrSmoothing()
+    val recoveryOffered = RecoveryGate.offersRecovery(m.currentHr)
     val ghost = live.ghost
-    if (ghost != null) {
+    if (live.meta.state == RunState.RECOVERY) {
+        // Running is frozen; only the recovery screen is shown (it has its own Finish Training button).
+        RecoveryScreen(live, smoothing,
+            onReconnectHr = { ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) } },
+            onFinishTraining = {
+                finishing = true
+                scope.launch {
+                    // IllegalStateException = illegal transition: ignore, the screen refreshes from the live state.
+                    runCatching { controller.finishTraining() }.onSuccess { onFinished(it) }
+                    finishing = false
+                }
+            },
+            finishing = finishing)
+    } else if (ghost != null) {
         // Ghost race: full-screen heading-up map with the stats laid over it.
         GhostRaceScreen(live, ghost, paused, finishing, gpsText, gpsGood = live.gpsState == "TRACKING" && (m.lastAccuracyM ?: 99f) <= 30f,
             onReconnectHr = { ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) } },
-            onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmFinish = true })
+            onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmRecovery = recoveryOffered; confirmFinish = true })
     } else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Free run: scrolling cockpit; Pause / Finish stay pinned below it.
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -298,7 +330,7 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
                 Column { Text("Distance"); Text(fmtKm(m.distanceM), fontSize = 40.sp) }
             }
             Text("moving ${fmtDuration(m.movingS)}")
-            HrCard(m, live.hrState, live.targetHr) {
+            HrCard(m, live.hrDisplay, live.hrState, live.targetHr) {
                 ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) }
             }
             PaceCard(m, live.trends)
@@ -307,55 +339,31 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (paused) Button(modifier = Modifier.weight(1f), onClick = { controller.resume() }) { Text("Resume", fontSize = 22.sp) }
             else OutlinedButton(modifier = Modifier.weight(1f), onClick = { controller.pause() }) { Text("Pause", fontSize = 22.sp) }
-            OutlinedButton(modifier = Modifier.weight(1f), enabled = !finishing, onClick = { confirmFinish = true }) { Text("Finish", fontSize = 22.sp) }
+            OutlinedButton(modifier = Modifier.weight(1f), enabled = !finishing, onClick = { confirmRecovery = recoveryOffered; confirmFinish = true }) {
+                Text(if (recoveryOffered) "Finish Run" else "Finish", fontSize = 22.sp) // O1: recovery only with a live HR
+            }
         }
     }
 
-    if (confirmFinish) {
+    if (confirmFinish && live.meta.state != RunState.RECOVERY) {
         AlertDialog(
             onDismissRequest = { confirmFinish = false },
             title = { Text("Finish this run?") },
-            text = { Text("Recording stops. The run is then synced to Atlas when it is reachable.") },
+            text = {
+                Text(if (confirmRecovery) "Distance and time stop now and GPS is switched off. Heart rate keeps recording so your recovery can be measured; you finish the training afterwards."
+                else "Recording stops. The run is then synced to Atlas when it is reachable.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmFinish = false; finishing = true
-                    scope.launch { val meta = controller.finish(); finishing = false; onFinished(meta) }
-                }) { Text("Finish") }
+                    scope.launch {
+                        runCatching { if (confirmRecovery) controller.finishRun() else controller.finish() }
+                            .onSuccess { if (!confirmRecovery) onFinished(it) } // finishRun does not navigate: the live state is now RECOVERY
+                        finishing = false
+                    }
+                }) { Text(if (confirmRecovery) "Finish Run" else "Finish") }
             },
             dismissButton = { TextButton(onClick = { confirmFinish = false }) { Text("Keep running") } },
         )
-    }
-}
-
-// ── Summary ──────────────────────────────────────────────────────────────────
-
-/** Short summary after finishing; shows clearly whether the run is already synced to Atlas. */
-@Composable
-fun SummaryScreen(meta: RunMeta, onDone: () -> Unit = {}) {
-    val context = LocalContext.current
-    val controller = remember { RunController.get(context) }
-    val current by produceState(meta, meta.captureId) {
-        while (true) { controller.meta(meta.captureId)?.let { value = it }; delay(2000) }
-    }
-    val s = current.summary
-    val synced = current.state == RunState.SYNCED
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Run finished", style = MaterialTheme.typography.headlineMedium)
-        Text(fmtKm(s?.distanceM), fontSize = 48.sp)
-        Text("Time ${fmtDuration(s?.elapsedS)}   Moving ${fmtDuration(s?.movingS)}")
-        Text("Average pace ${fmtPace(s?.avgPaceSPerKm)}   Average HR ${s?.avgHr?.let { "%.0f".format(it) } ?: DASH}")
-        Text(
-            if (synced) "Synced to Atlas" else "Pending sync",
-            Modifier.fillMaxWidth().background(if (synced) Color(0xFF2E7D32) else Color(0xFFFFC107)).padding(12.dp),
-            color = if (synced) Color.White else Color.Black, fontSize = 22.sp,
-        )
-        if (!synced) Text(current.lastError ?: "Waiting for Atlas. Start Tailscale on this phone; the run is kept and syncs automatically.")
-        if (current.needsRepair) Text("This phone must be paired again before it can sync.")
-        if (!synced) OutlinedButton(onClick = { controller.retrySync() }) { Text("Retry sync") }
-        if (synced) Button(onClick = {
-            // atlas:// is handled by MainActivity (TWA); no bridge, no credentials in the link.
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("atlas://running/history/${current.captureId}")))
-        }) { Text("Open in Atlas") }
-        OutlinedButton(onClick = onDone) { Text("Done") }
     }
 }

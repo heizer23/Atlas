@@ -24,6 +24,11 @@ class RunLifecycleTest {
         (null to RunEvent.RECOVER) to RunState.PAUSED,                     // recovery enters paused
         (RunState.RECORDING to RunEvent.RECOVER) to RunState.PAUSED,
         (RunState.PAUSED to RunEvent.RECOVER) to RunState.PAUSED,
+        // Sprint02: the recovery phase
+        (RunState.RECORDING to RunEvent.FINISH_RUN) to RunState.RECOVERY,
+        (RunState.PAUSED to RunEvent.FINISH_RUN) to RunState.RECOVERY,
+        (RunState.RECOVERY to RunEvent.FINISH_TRAINING) to RunState.COMPLETED_LOCAL,
+        (RunState.RECOVERY to RunEvent.RECOVER) to RunState.RECOVERY,      // an interrupted recovery stays a recovery
     )
 
     @Test fun allEventsAppliedToAllStates() {
@@ -41,6 +46,24 @@ class RunLifecycleTest {
         }
         assertEquals(RunState.SYNCED, s)
         assertNull(RunLifecycle.next(RunState.SYNCED, RunEvent.START)) // a synced run cannot be restarted
+    }
+
+    @Test fun recoveryPathWalksTheWholeLifecycleAndIllegalCombinationsAreRejected() {
+        var s: RunState? = null
+        for (e in listOf(RunEvent.START, RunEvent.PAUSE, RunEvent.RESUME, RunEvent.FINISH_RUN, RunEvent.RECOVER, RunEvent.FINISH_TRAINING, RunEvent.QUEUE_UPLOAD, RunEvent.SYNCED)) {
+            s = RunLifecycle.next(s, e)!!
+        }
+        assertEquals(RunState.SYNCED, s)
+        assertNull(RunLifecycle.next(RunState.RECOVERY, RunEvent.FINISH_RUN))
+        assertNull(RunLifecycle.next(RunState.RECORDING, RunEvent.FINISH_TRAINING))
+        assertNull(RunLifecycle.next(RunState.SYNCED, RunEvent.FINISH_RUN))
+        assertNull(RunLifecycle.next(RunState.RECOVERY, RunEvent.FINISH))          // the one-step finish never applies to a recovery
+        assertNull(RunLifecycle.next(RunState.RECOVERY, RunEvent.PAUSE))
+    }
+
+    @Test fun recoveryGateOffersRecoveryOnlyWithALiveHeartRate() {
+        assertEquals(true, RecoveryGate.offersRecovery(142))
+        assertEquals(false, RecoveryGate.offersRecovery(null))
     }
 
     @Test fun runMetaSurvivesAJsonRoundTrip() {

@@ -24,6 +24,7 @@ import net.linspad.atlasphone.mobile.permissions.Capability
 import net.linspad.atlasphone.mobile.permissions.PermissionStatus
 import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.session.RunController
+import net.linspad.atlasphone.running.settings.RunSettings
 import net.linspad.atlasphone.running.sync.UploadScheduler
 
 private enum class Page { HOME, PAIRING, SUMMARY }
@@ -91,7 +92,7 @@ class RunningActivity : ComponentActivity() {
         var summary by remember { mutableStateOf<RunMeta?>(null) }
         when (page) {
             Page.PAIRING -> PairingScreen(onPaired = { page = Page.HOME }, onSkip = { page = Page.HOME })
-            Page.SUMMARY -> summary?.let { SummaryScreen(it, onDone = { page = Page.HOME }) } ?: run { page = Page.HOME }
+            Page.SUMMARY -> summary?.let { RecapScreen(it, RunSettings.create(this@RunningActivity).hrSmoothing(), onDone = { page = Page.HOME }) } ?: run { page = Page.HOME }
             Page.HOME -> RunningScreen(
                 controller = controller,
                 ensurePermission = { capability, action -> withPermission(capability, explicitRetry = true, action = action) },

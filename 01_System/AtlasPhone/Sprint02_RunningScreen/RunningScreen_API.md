@@ -61,7 +61,7 @@ verification, R1 resume cursors) and `backend/routers/native.py`. The native API
 
 ## Lifecycle (`RunLifecycle`, `RunModels`)
 
-`prepared -> recording <-> paused -> completed_local -> pending_upload -> synced`. A Free Run enters at `recording`; recovery of an
+`prepared -> recording <-> paused -> [recovery ->] completed_local -> pending_upload -> synced` (`recovery` since RunningTracker Sprint02, see below). A Free Run enters at `recording`; recovery of an
 interrupted capture enters at `paused`. Illegal transitions return `null`. The state lives in `RunMeta`, persisted as JSON in the new
 `CaptureStore.run_meta` table (key = capture id = server run id). **[tested: JVM]** (all events x all states, JSON round trip).
 
@@ -70,6 +70,32 @@ interrupted capture enters at `paused`. Illegal transitions return `null`. The s
 **[tested: JVM]**. Sample payloads gained a nullable `elapsedRealtimeNanos` (monotonic stamp) for location and heart-rate samples;
 existing captures stay valid (draft section 3 check: the stamps were missing and are now additive). Mapping **[tested: JVM]**,
 `Location.elapsedRealtimeNanos` / `SystemClock.elapsedRealtimeNanos()` at notification arrival **[built]**.
+
+## Run finish, recovery and recap (RunningTracker Sprint02)
+
+Design: `03_Application/RunningTracker/Sprint02_RunFinishAndRecovery/` (invariants P1, L1, RS1, HR1, HR2, HRR1, ST1, C1).
+
+- **Lifecycle.** New state `RECOVERY`, new events `FINISH_RUN` (RECORDING|PAUSED -> RECOVERY), `FINISH_TRAINING` (RECOVERY -> COMPLETED_LOCAL) and
+  `RECOVER` from RECOVERY (stays RECOVERY). The one-step `FINISH` stays and is used when `RecoveryGate.offersRecovery(currentHr)` is false (no live
+  heart rate at the button press): the button then reads "Finish" and no recovery phase starts. **[tested: JVM]**
+- **Finish Run** (`RunController.finishRun`): GPS stops (`location.stop()` only; recorder, HR and foreground service continue), the final running
+  `RunSummary`, splits and ghost standing are persisted once; `RunMeta.runFinishedAtMillis` = end of running, `finishedAtMillis` stays null until
+  Finish Training. **Finish Training** (`finishTraining`): `stopAll`, HRR over all stored HR, recap rebuilt (standing carried over), upload enqueued;
+  the running summary is not recomputed. Controller flows **[built]**, summary/recap assembly **[tested: JVM]** (`RecapBuilderTest`).
+- **RunMeta keys** (all optional, old metas decode): `runFinishedAtMillis`, `recovery` (HRR scalars), `recap` (standing, running-phase splits and max
+  HR, 1-second-bucket HR series over running + recovery). **[tested: JVM]** (`RunMetaCompatTest`)
+- **HR smoothing** is display only (`hr/HrSmoothing.kt`): Raw / 5 s (default) / 10 s, setting `hr_smoothing` in SharedPreferences
+  `atlas_run_settings`, never uploaded. Invalid readings (0, outside 30..230, isolated spike) are gaps, never 0. **[tested: JVM]**; the home-panel
+  selector and the live screens using `LiveRunState.hrDisplay` are **[built]**.
+- **HRR** (`recap/RecoveryMetrics`): HR_end, HR_60, HR_120 as medians in fixed windows around the run end, HRR = HR_end - HR_x, null when not
+  computable; same values as the server through `tests/fixtures/recovery_golden.json`. **[tested: JVM]** `RecoveryTracker` (live values, 15 minute
+  reminder) **[tested: JVM]**.
+- **Finish body**: `run_finished_at` (ISO-8601 UTC) only when `runFinishedAtMillis` is set, omitted otherwise. **[tested: JVM]**
+  **Deploy order (C1): the server must be deployed before a phone build that sends this key** (an old server answers 422 and the run stays pending).
+- **Screens** (`ui/RecoveryScreen`, `ui/RecapScreen`, replaces the old summary): **[built]**, **[unverified]** on hardware.
+
+Unverified until a real run: foreground-service behaviour with GPS stopped and the screen locked (HR must keep arriving, OQ5), H10 disconnect during
+recovery, kill during recovery then Recover, no location sample after the run end on the server, recap rendering and smoothing selector on the phone.
 
 ## Metrics (`metrics/RunMetrics.kt`)
 
@@ -181,9 +207,12 @@ Do not mark any of these passed unless performed on the real phone.
 - [ ] QR scan with the Google code scanner.
 - [ ] Tailnet: `tailscale serve` mount (path-limited, Funnel off), HTTPS certificate trusted by the phone, public Cloudflare name answers 404 for `/api/runningtracker/native/*` (the shell proxy part is verified by automated tests: 404).
 - [ ] Ghost race: prepare a run on Stadtpark Small with ghost "fastest" in Atlas, refresh on the phone (Ghost ready), go offline, run it, finish, sync; the new run appears as a ghost candidate.
+- [ ] Sprint02: Finish Run with an H10 -> recovery screen (HR60/HR120 appear at about 60 s / 120 s, reminder after 15 min) -> Finish Training -> recap; also a run without H10 (plain Finish), kill during recovery (Recover/Discard), H10 off for 30 s during recovery, and server samples show no location after the run end.
 - [ ] Optional spike (draft section 6): `intent://` "Start Run" from the TWA. **Not built in this sprint**; if built later it must be an activity-alias accepting only a short id matching the prepared-run alphabet and only pre-selecting a prepared run. Result: none (not attempted).
 
 ## Test results (automated, development host)
 
 `JAVA_HOME=~/toolchain/jdk17 ANDROID_HOME=~/toolchain/android-sdk bash ./gradlew :app:assembleDebug :app:testDebugUnitTest`:
 72 tests, 0 failures (30 Sprint 01 unchanged + 32 running + 10 ghost: engine and parity 8, client 2). `:app:lintDebug`: no errors.
+
+Sprint02 (RunningTracker run finish and recovery) JVM run: `:app:testDebugUnitTest` 115 tests, 0 failures (adds HrSmoothing, RecoveryMetrics/Tracker with the shared golden file, FinishStanding, RecapBuilder, RunMeta compatibility, lifecycle and finish-body tests).

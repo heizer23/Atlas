@@ -98,6 +98,15 @@ class AtlasClientTest {
         assertEquals(1800.0, body.getDouble("elapsed_s"), 0.0)
     }
 
+    @Test fun finishBodyCarriesTheRunEndOnlyWhenSet() {
+        val t = FakeTransport { ok("""{"result":"complete","run_id":"r","verified_counts":{"location":1,"heart_rate":0},"missing_seq_ranges":[],"count_mismatch":[],"high_seq":{"location":1,"heart_rate":0},"contiguous_seq":1}""") }
+        client(t).finish("r", finishedMeta(), StreamCountsLocal(1, 0), 1, 0)
+        client(t).finish("r", finishedMeta().copy(runFinishedAtMillis = 1_700_001_700_000), StreamCountsLocal(1, 0), 1, 0)
+        val without = JSONObject(t.requests[0].body!!); val with = JSONObject(t.requests[1].body!!)
+        assertFalse("omitted, not null", without.has("run_finished_at"))
+        assertEquals("2023-11-14T22:41:40.000Z", with.getString("run_finished_at"))
+    }
+
     @Test fun statusCodesMapToResults() {
         fun call(status: Int, body: String = "{}") = client(FakeTransport { HttpResponse(status, body) }).begin("r", 0)
         assertEquals(AtlasResult.Unauthorized, call(401))
