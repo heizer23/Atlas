@@ -52,6 +52,21 @@ services:
     networks:
       - atlas-net
 
+  speech-test:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/Speech/Dockerfile
+    container_name: atlas-speech-test
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9070:8000"
+    environment:
+      SPEECH_TMP_DIR:   /tmp/speech
+    tmpfs:
+      - /tmp/speech:size=64m
+    networks:
+      - atlas-net
+
   linking-engine-test:
     build:
       context: ../..

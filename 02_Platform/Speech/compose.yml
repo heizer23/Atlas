@@ -1,0 +1,39 @@
+services:
+  speech:
+    build:
+      context: ../..
+      dockerfile: 02_Platform/Speech/Dockerfile
+    container_name: atlas-speech
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8070:8000"
+    environment:
+      SPEECH_OPENAI_KEY:           ${AtlasSpeech:-}
+      SPEECH_MODEL:                ${SPEECH_MODEL:-gpt-transcribe}
+      SPEECH_FALLBACK_MODEL:       ${SPEECH_FALLBACK_MODEL:-gpt-4o-transcribe}
+      SPEECH_CHUNK_TIMESLICE_MS:   ${SPEECH_CHUNK_TIMESLICE_MS:-15000}
+      SPEECH_MAX_CHUNK_BYTES:      ${SPEECH_MAX_CHUNK_BYTES:-2097152}
+      SPEECH_MAX_TOTAL_BYTES:      ${SPEECH_MAX_TOTAL_BYTES:-20971520}
+      SPEECH_MAX_CHUNKS:           ${SPEECH_MAX_CHUNKS:-80}
+      SPEECH_MAX_DURATION_S:       ${SPEECH_MAX_DURATION_S:-600}
+      SPEECH_MAX_ACTIVE:           ${SPEECH_MAX_ACTIVE:-4}
+      SPEECH_IDLE_TTL_S:           ${SPEECH_IDLE_TTL_S:-900}
+      SPEECH_UPSTREAM_TIMEOUT_S:   ${SPEECH_UPSTREAM_TIMEOUT_S:-120}
+      SPEECH_FFMPEG_TIMEOUT_S:     ${SPEECH_FFMPEG_TIMEOUT_S:-60}
+      SPEECH_TMP_DIR:              /tmp/speech
+      SPEECH_BUDGET_PATH:          /data/budget.json
+      SPEECH_DAILY_AUDIO_S:        ${SPEECH_DAILY_AUDIO_S:-3600}
+      SPEECH_HOURLY_TRANSCRIPTIONS: ${SPEECH_HOURLY_TRANSCRIPTIONS:-30}
+    volumes:
+      - speech-data:/data
+    tmpfs:
+      - /tmp/speech:size=64m
+    networks:
+      - atlas-net
+
+volumes:
+  speech-data:
+
+networks:
+  atlas-net:
+    external: true

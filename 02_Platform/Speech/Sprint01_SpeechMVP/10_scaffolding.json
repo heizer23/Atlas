@@ -1,0 +1,581 @@
+{
+  "component_name": "speech",
+  "target_root": "02_Platform/Speech",
+  "note": "Files outside target_root (platform-ui, ClaudeConsole, nginx, Makefile, test compose) are owned by this sprint; paths are repo-root relative. 01_System/secrets.env is human-edited only and intentionally not listed.",
+  "directories": [
+    "02_Platform/Speech",
+    "02_Platform/Speech/app",
+    "02_Platform/Speech/app/routers",
+    "02_Platform/Speech/config",
+    "02_Platform/Speech/docs",
+    "02_Platform/Speech/tests"
+  ],
+  "files": [
+    {
+      "path": "02_Platform/Speech/pyproject.toml",
+      "stub_kind": "toml",
+      "role": "Dependencies: fastapi>=0.115, uvicorn[standard]>=0.32, pydantic>=2.0, httpx>=0.27; test extras pytest (mirror how ClaudeConsole/StorageTracker make pytest available in their image)."
+    },
+    {
+      "path": "02_Platform/Speech/Dockerfile",
+      "stub_kind": "dockerfile",
+      "role": "python:3.12-slim + apt ffmpeg (no recommends, clean apt lists); copy 02_Platform/packages to /platform_packages with PYTHONPATH, pip install -e ., copy app/ and config/; CMD uvicorn app.main:app on 0.0.0.0:8000. Build context is repo root."
+    },
+    {
+      "path": "02_Platform/Speech/compose.yml",
+      "stub_kind": "compose",
+      "role": "Service speech, container_name atlas-speech, restart unless-stopped, ports 127.0.0.1:8070:8000 (never 0.0.0.0), network atlas-net external, environment WhisperKey and SPEECH_API_TOKEN passed through from the --env-file values, SPEECH_MODEL / SPEECH_FALLBACK_MODEL / limit variables with the SpeechSettings defaults via ${VAR:-default}, tmpfs mount at SpeechSettings.tmp_dir with a size cap, no volumes, no Postgres variables."
+    },
+    {
+      "path": "02_Platform/Speech/CLAUDE.md",
+      "stub_kind": "markdown",
+      "role": "App-local guidance: purpose, audio leaves Atlas to OpenAI, secrets (WhisperKey, SPEECH_API_TOKEN) and where they live, limits, port 8070/9070, run/rebuild commands (make speech-*; rebuild shell image after nginx.conf change), live-API verification results, fallback-model deprecation date."
+    },
+    {
+      "path": "02_Platform/Speech/config/vocabulary.json",
+      "stub_kind": "json",
+      "role": "Default vocabulary: object with prompt (string), keywords (list of strings), languages (list of ISO 639-1 codes). Seed: empty prompt, empty keywords, languages [\"en\"]. Application-specific vocabulary is passed per request by the consumer, never added here."
+    },
+    {
+      "path": "02_Platform/Speech/docs/Manual_Accuracy_Checklist.md",
+      "stub_kind": "markdown",
+      "role": "Manual checklist (not tooling). Sections: (1) setup: reference script of ~60-90 s containing numbers, proper nouns, product/tool names, a deliberate pause and a long sentence spanning a 15 s chunk boundary; (2) run matrix: desktop Chrome, Android Chrome over HTTPS, with and without pause/resume, with and without per-request keywords; (3) record per run: word error estimate by eye, count of vocabulary terms correct out of total, words lost or duplicated at each chunk boundary, response metrics (audio_duration_ms vs client_duration_ms delta, stop_to_transcript_ms, chunk_count); (4) pass criteria echoing the draft acceptance criteria (duration delta small, no boundary loss, typed text preserved); (5) results table template."
+    },
+    {
+      "path": "02_Platform/Speech/app/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/config.py",
+      "stub_kind": "python_module",
+      "role": "Declares the only runtime settings and defaults. Reads environment once; never logs secrets.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "SpeechSettings",
+          "pattern": "data_model",
+          "fields": [
+            "whisper_key: str  (env WhisperKey, default empty; repr/str masked)",
+            "api_token: str  (env SPEECH_API_TOKEN, default empty = fail closed)",
+            "model: str  (env SPEECH_MODEL, default gpt-transcribe)",
+            "fallback_model: str  (env SPEECH_FALLBACK_MODEL, default gpt-4o-transcribe)",
+            "allowed_mime_types: tuple[str, ...]  (fixed: audio/webm, audio/ogg, audio/mp4)",
+            "chunk_timeslice_ms: int  (env SPEECH_CHUNK_TIMESLICE_MS, default 15000; advertised to client)",
+            "max_chunk_bytes: int  (env SPEECH_MAX_CHUNK_BYTES, default 2097152)",
+            "max_total_bytes: int  (env SPEECH_MAX_TOTAL_BYTES, default 20971520; must stay below OpenAI 25 MB file limit)",
+            "max_chunks: int  (env SPEECH_MAX_CHUNKS, default 80; valid indices are 0..max_chunks-1)",
+            "max_duration_s: int  (env SPEECH_MAX_DURATION_S, default 600)",
+            "max_active_recordings: int  (env SPEECH_MAX_ACTIVE, default 4)",
+            "idle_ttl_s: int  (env SPEECH_IDLE_TTL_S, default 900)",
+            "upstream_timeout_s: int  (env SPEECH_UPSTREAM_TIMEOUT_S, default 120)",
+            "ffmpeg_timeout_s: int  (env SPEECH_FFMPEG_TIMEOUT_S, default 60)",
+            "tmp_dir: str  (env SPEECH_TMP_DIR, default /tmp/speech; tmpfs mount)",
+            "vocabulary_path: str  (default config/vocabulary.json next to app/)"
+          ],
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "get_settings",
+          "pattern": "factory",
+          "methods": [
+            {
+              "name": "get_settings",
+              "visibility": "public",
+              "args": [],
+              "returns": "SpeechSettings",
+              "purpose": "Cached settings accessor; also the FastAPI dependency overridden in tests."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/errors.py",
+      "stub_kind": "python_module",
+      "role": "Declares the error code set, its HTTP statuses and one exception type; converts to the platform ApiError envelope.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "SpeechErrorCode",
+          "pattern": "enum",
+          "members": {
+            "UNAUTHORIZED": 401,
+            "SPEECH_NOT_CONFIGURED": 503,
+            "UNSUPPORTED_MIME": 415,
+            "TOO_MANY_RECORDINGS": 429,
+            "RECORDING_NOT_FOUND": 404,
+            "RECORDING_BUSY": 409,
+            "CHUNK_INDEX_INVALID": 400,
+            "TOO_MANY_CHUNKS": 413,
+            "CHUNK_TOO_LARGE": 413,
+            "RECORDING_TOO_LARGE": 413,
+            "CHUNK_CONFLICT": 409,
+            "MISSING_CHUNKS": 409,
+            "RECORDING_TOO_LONG": 413,
+            "INVALID_AUDIO": 422,
+            "TRANSCRIPTION_FAILED": 502,
+            "TRANSCRIPTION_TIMEOUT": 504
+          },
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "SpeechError",
+          "pattern": "exception",
+          "methods": [
+            {
+              "name": "__init__",
+              "visibility": "public",
+              "args": ["code: str", "message: str", "detail: object | None = None"],
+              "returns": "None",
+              "purpose": "Carries one SpeechErrorCode member; status comes from the enum mapping."
+            },
+            {
+              "name": "to_response",
+              "visibility": "public",
+              "args": [],
+              "returns": "JSONResponse",
+              "purpose": "Return platform_errorhandling api_error with the mapped status."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/models.py",
+      "stub_kind": "python_module",
+      "role": "Pydantic request/response records (the typed-record contract; no Dataset).",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "CreateRecordingRequest",
+          "pattern": "data_model",
+          "fields": ["mime_type: str  (base type, codecs parameter allowed and ignored)"],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "Limits",
+          "pattern": "data_model",
+          "fields": ["chunk_timeslice_ms: int", "max_chunk_bytes: int", "max_total_bytes: int", "max_chunks: int", "max_duration_s: int"],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "CreateRecordingResponse",
+          "pattern": "data_model",
+          "fields": ["recording_id: str", "limits: Limits"],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "ChunkAck",
+          "pattern": "data_model",
+          "fields": ["recording_id: str", "index: int", "chunks_received: int", "total_bytes: int"],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "StopRequest",
+          "pattern": "data_model",
+          "fields": [
+            "expected_chunks: int  (>= 1)",
+            "client_duration_ms: int  (recording time excluding pauses, >= 0)",
+            "prompt: str | None  (omitted = config default, empty string = clear, value = replace)",
+            "keywords: list[str] | None  (omitted = default, [] = clear, list = replace)",
+            "languages: list[str] | None  (omitted = default, [] = clear (auto-detect), list = replace)"
+          ],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "Metrics",
+          "pattern": "data_model",
+          "fields": [
+            "audio_duration_ms: int  (decoded duration of reassembled file)",
+            "client_duration_ms: int  (echo)",
+            "duration_delta_ms: int  (audio_duration_ms - client_duration_ms)",
+            "chunk_count: int",
+            "total_bytes: int",
+            "upload_ms: int  (sum of server-observed chunk body receive times)",
+            "assemble_ms: int",
+            "api_ms: int  (OpenAI call, including fallback attempt)",
+            "server_total_ms: int  (stop request received to response built)"
+          ],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "TranscriptResult",
+          "pattern": "data_model",
+          "fields": [
+            "recording_id: str",
+            "transcript: str  (may be empty for silence)",
+            "model_used: str",
+            "fallback_used: bool",
+            "languages: list[str] | None  (as reported by the model, if any)",
+            "metrics: Metrics"
+          ],
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/auth.py",
+      "stub_kind": "python_module",
+      "role": "Speech-token gate used as a router dependency.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "require_speech_token",
+          "pattern": "dependency",
+          "methods": [
+            {
+              "name": "require_speech_token",
+              "visibility": "public",
+              "args": ["request: Request", "settings: SpeechSettings = Depends(get_settings)"],
+              "returns": "None",
+              "purpose": "Raise SpeechError SPEECH_NOT_CONFIGURED when api_token empty; UNAUTHORIZED when header X-Atlas-Speech-Token mismatches (hmac.compare_digest). Never logs the header."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/recordings.py",
+      "stub_kind": "python_module",
+      "role": "Ephemeral recording registry and chunk files under tmp_dir. Single owner of recording lifecycle and deletion.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "RecordingState",
+          "pattern": "data_model",
+          "fields": [
+            "recording_id: str",
+            "mime_type: str",
+            "status: str  (open | finalizing)",
+            "chunk_sizes: dict[int, int]",
+            "total_bytes: int",
+            "upload_ms: int",
+            "created_at: float",
+            "last_activity: float",
+            "cancelled: bool"
+          ],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "RecordingStore",
+          "pattern": "service",
+          "methods": [
+            {"name": "__init__", "visibility": "public", "args": ["settings: SpeechSettings"], "returns": "None", "purpose": "Create tmp_dir and remove anything left in it (startup sweep)."},
+            {"name": "create", "visibility": "public", "args": ["mime_type: str"], "returns": "RecordingState", "purpose": "Enforce allowlist and active cap, allocate id and directory."},
+            {"name": "get", "visibility": "public", "args": ["recording_id: str"], "returns": "RecordingState", "purpose": "Return state or raise RECORDING_NOT_FOUND."},
+            {"name": "write_chunk", "visibility": "public", "args": ["recording_id: str", "index: int", "stream: AsyncIterator[bytes]", "content_type: str | None"], "returns": "ChunkAck", "purpose": "Implements receive_chunk rules incl. caps, idempotency, conflict, total-cap deletion, receive-time accounting."},
+            {"name": "begin_finalize", "visibility": "public", "args": ["recording_id: str", "expected_chunks: int", "client_duration_ms: int"], "returns": "list[Path]", "purpose": "open->finalizing under a per-recording lock; duration pre-check; return ordered chunk paths or raise MISSING_CHUNKS (status restored to open) / RECORDING_BUSY / RECORDING_TOO_LONG (deleted)."},
+            {"name": "end_finalize", "visibility": "public", "args": ["recording_id: str", "retain: bool"], "returns": "None", "purpose": "retain=True restores status open and touches last_activity (upstream failure); retain=False deletes files and state. Always deletes when cancelled flag set."},
+            {"name": "cancel", "visibility": "public", "args": ["recording_id: str"], "returns": "None", "purpose": "Idempotent discard; if finalizing only sets cancelled."},
+            {"name": "delete", "visibility": "public", "args": ["recording_id: str"], "returns": "None", "purpose": "Remove directory and state unconditionally."},
+            {"name": "reap_idle", "visibility": "public", "args": ["now: float"], "returns": "int", "purpose": "Delete recordings idle beyond idle_ttl_s; return count. Called by the periodic task in main.py."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_store",
+          "pattern": "factory",
+          "methods": [
+            {"name": "get_store", "visibility": "public", "args": [], "returns": "RecordingStore", "purpose": "Process-wide singleton accessor; FastAPI dependency."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/audio.py",
+      "stub_kind": "python_module",
+      "role": "Concatenation and ffmpeg interaction.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "AssembledAudio",
+          "pattern": "data_model",
+          "fields": ["path: Path", "size_bytes: int", "duration_ms: int", "mime_type: str", "assemble_ms: int"],
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "assemble",
+          "pattern": "function",
+          "methods": [
+            {"name": "assemble", "visibility": "public", "args": ["chunk_paths: list[Path]", "mime_type: str", "work_dir: Path", "settings: SpeechSettings"], "returns": "AssembledAudio", "purpose": "Byte-concatenate in given order, remux with ffmpeg -c copy, measure decoded duration (decode to null muxer; do not trust container header), raise INVALID_AUDIO on failure/zero duration or RECORDING_TOO_LONG above max_duration_s. Subprocess is time-limited by ffmpeg_timeout_s and never shell-interpolated."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/vocabulary.py",
+      "stub_kind": "python_module",
+      "role": "Default vocabulary loading, per-field override resolution, model-specific parameter mapping.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "Vocabulary",
+          "pattern": "data_model",
+          "fields": ["prompt: str", "keywords: list[str]", "languages: list[str]"],
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "load_defaults",
+          "pattern": "function",
+          "methods": [
+            {"name": "load_defaults", "visibility": "public", "args": ["path: str"], "returns": "Vocabulary", "purpose": "Read vocabulary.json; missing file or fields yield empty values, languages default [\"en\"]."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "resolve",
+          "pattern": "function",
+          "methods": [
+            {"name": "resolve", "visibility": "public", "args": ["defaults: Vocabulary", "prompt: str | None", "keywords: list[str] | None", "languages: list[str] | None"], "returns": "Vocabulary", "purpose": "Per field: None keeps default, empty clears, value replaces."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "to_form_fields",
+          "pattern": "function",
+          "methods": [
+            {"name": "to_form_fields", "visibility": "public", "args": ["model: str", "vocab: Vocabulary"], "returns": "list[tuple[str, str]]", "purpose": "model gpt-transcribe: native prompt, keywords, languages fields (encoding verified live, see architecture open_questions). Any other model: keywords folded into prompt text, prompt truncated to a conservative length for the 224-token limit, single language hint only when exactly one language is given."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/transcriber.py",
+      "stub_kind": "python_module",
+      "role": "OpenAI call with model fallback. The only module that reads whisper_key.",
+      "public_objects": [
+        {
+          "kind": "class",
+          "name": "TranscriptionOutcome",
+          "pattern": "data_model",
+          "fields": ["text: str", "model_used: str", "fallback_used: bool", "languages: list[str] | None", "api_ms: int"],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "Transcriber",
+          "pattern": "service",
+          "methods": [
+            {"name": "__init__", "visibility": "public", "args": ["settings: SpeechSettings"], "returns": "None", "purpose": "Hold settings; httpx client created per call or lazily."},
+            {"name": "transcribe", "visibility": "public", "args": ["audio: AssembledAudio", "vocab: Vocabulary"], "returns": "TranscriptionOutcome", "purpose": "Primary model first; on upstream client-error rejecting model/params retry once with fallback_model; timeout raises TRANSCRIPTION_TIMEOUT; other upstream errors raise TRANSCRIPTION_FAILED. Error messages and logs never include the key or response bodies containing it."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "get_transcriber",
+          "pattern": "factory",
+          "methods": [
+            {"name": "get_transcriber", "visibility": "public", "args": ["settings: SpeechSettings = Depends(get_settings)"], "returns": "Transcriber", "purpose": "FastAPI dependency; tests override it with a fake."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/routers/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/routers/speech.py",
+      "stub_kind": "python_module",
+      "role": "Route handlers for the four recording endpoints. Router prefix /api/speech; all routes depend on require_speech_token. Maps internal_flow steps 2-10; converts SpeechError to ApiError.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "router",
+          "pattern": "fastapi_router",
+          "methods": [
+            {"name": "create_recording", "visibility": "public", "args": ["body: CreateRecordingRequest"], "returns": "CreateRecordingResponse (201)", "purpose": "POST /recordings."},
+            {"name": "upload_chunk", "visibility": "public", "args": ["recording_id: str", "index: int", "request: Request"], "returns": "ChunkAck (200)", "purpose": "PUT /recordings/{recording_id}/chunks/{index}; reads raw request.stream() with cap, no multipart."},
+            {"name": "stop_recording", "visibility": "public", "args": ["recording_id: str", "body: StopRequest"], "returns": "TranscriptResult (200)", "purpose": "POST /recordings/{recording_id}/stop; always ends via end_finalize (retain only for upstream failures)."},
+            {"name": "cancel_recording", "visibility": "public", "args": ["recording_id: str"], "returns": "204", "purpose": "DELETE /recordings/{recording_id}."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/app/main.py",
+      "stub_kind": "python_module",
+      "role": "FastAPI entrypoint: logging/exception handlers (platform_errorhandling, same try-import pattern as PreferenceStore), SpeechError handler, router include, GET /health, startup creating the store (sweep) and the 60 s reaper task, shutdown cancelling it. CORS not needed (same-origin via nginx); do not add it.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "app",
+          "pattern": "fastapi_app",
+          "methods": []
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/tests/__init__.py",
+      "stub_kind": "python_module",
+      "role": "Package marker.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/tests/conftest.py",
+      "stub_kind": "python_module",
+      "role": "TestClient, settings override (token set, small limits, temp dir), fake Transcriber capturing received vocabulary/model, ffmpeg-generated sine webm fixture and a byte-splitting helper. No database.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Speech/tests/test_speech.py",
+      "stub_kind": "python_module",
+      "role": "One test per scenario in 10_test_spec.md (backend scenarios).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/platform-ui/api/speechClient.ts",
+      "change": "new",
+      "stub_kind": "typescript_module",
+      "role": "Browser-side API wrapper and token store. All calls via apiFetch (headers option overrides Content-Type for binary chunk bodies and adds X-Atlas-Speech-Token). Mirrors backend records.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "SPEECH_TOKEN_STORAGE_KEY",
+          "pattern": "constant",
+          "value": "atlas.speech.token",
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "SpeechTypes",
+          "pattern": "type_declarations",
+          "fields": ["Limits", "CreateRecordingResponse", "ChunkAck", "StopPayload", "Metrics", "TranscriptResult (same field sets as backend app/models.py)", "ClientMetrics { stop_to_transcript_ms: number; final_upload_ms: number }", "VocabularyOverride { prompt?: string; keywords?: string[]; languages?: string[] }"],
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "speechToken",
+          "pattern": "token_store",
+          "methods": [
+            {"name": "getSpeechToken", "visibility": "public", "args": [], "returns": "string | null", "purpose": "Read localStorage; null on empty or storage failure."},
+            {"name": "setSpeechToken", "visibility": "public", "args": ["token: string"], "returns": "void", "purpose": "Persist trimmed token."},
+            {"name": "clearSpeechToken", "visibility": "public", "args": [], "returns": "void", "purpose": "Remove it (called after UNAUTHORIZED)."}
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "speechApi",
+          "pattern": "api_wrapper",
+          "methods": [
+            {"name": "createRecording", "visibility": "public", "args": ["mimeType: string"], "returns": "Promise<CreateRecordingResponse | ApiError>", "purpose": "POST /speech/recordings."},
+            {"name": "uploadChunk", "visibility": "public", "args": ["recordingId: string", "index: number", "blob: Blob", "signal?: AbortSignal"], "returns": "Promise<ChunkAck | ApiError>", "purpose": "PUT chunk with the blob's own type as Content-Type."},
+            {"name": "stopRecording", "visibility": "public", "args": ["recordingId: string", "payload: StopPayload", "signal?: AbortSignal"], "returns": "Promise<TranscriptResult | ApiError>", "purpose": "POST stop."},
+            {"name": "cancelRecording", "visibility": "public", "args": ["recordingId: string"], "returns": "Promise<void>", "purpose": "DELETE; result ignored (best effort)."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/platform-ui/hooks/useRecorder.ts",
+      "change": "new",
+      "stub_kind": "typescript_module",
+      "role": "Headless recorder state machine (internal_flow step 12). Never throws; failures surface through state and error.",
+      "public_objects": [
+        {
+          "kind": "constant",
+          "name": "RecorderState",
+          "pattern": "string_union",
+          "members": ["idle", "recording", "paused", "uploading", "transcribing", "needs_token", "error"],
+          "methods": []
+        },
+        {
+          "kind": "class",
+          "name": "RecorderOptions",
+          "pattern": "data_model",
+          "fields": ["onTranscript: (result: TranscriptResult & ClientMetrics) => void", "vocabulary?: VocabularyOverride", "onBusyChange?: (busy: boolean) => void"],
+          "methods": []
+        },
+        {
+          "kind": "function",
+          "name": "useRecorder",
+          "pattern": "react_hook",
+          "methods": [
+            {
+              "name": "useRecorder",
+              "visibility": "public",
+              "args": ["options: RecorderOptions"],
+              "returns": "{ state: RecorderState; elapsedMs: number; error: string | null; supported: boolean; unsupportedReason: string | null; start(): Promise<void>; pause(): void; resume(): void; stop(): Promise<void>; cancel(): void; retry(): Promise<void> }",
+              "purpose": "start: secure-context and MediaRecorder check, pick supported mime from the backend allowlist, getUserMedia, create recording, MediaRecorder.start(timeslice from limits) once. stop: recorder.stop, drain upload queue (sequential, 3 attempts with backoff per chunk), POST stop, deliver result with ClientMetrics, release tracks, clear buffers. retry: re-run upload-missing + stop from buffered chunks after needs_token or a retained-upstream-failure error. cancel: from any active state, release mic, abort in-flight, DELETE, clear buffers. Unmount cancels. Auto-stop at limits.max_duration_s. onBusyChange(true) while state is not idle/error/needs_token."
+            }
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/platform-ui/components/RecorderButton.tsx",
+      "change": "new",
+      "stub_kind": "tsx_module",
+      "role": "Default-exported presentational control over useRecorder: mic button (start/stop), pause/resume and cancel while active, elapsed mm:ss, inline error text, inline token entry shown on needs_token (saves via setSpeechToken then retry()), neutral 'No speech detected' notice for empty transcript. Inline styles with theme tokens as ShellEntry.tsx; no new visual language.",
+      "public_objects": [
+        {
+          "kind": "function",
+          "name": "RecorderButton",
+          "pattern": "react_component_default_export",
+          "methods": [
+            {"name": "RecorderButton", "visibility": "public", "args": ["props: { onTranscript: (text: string, result: TranscriptResult & ClientMetrics) => void; vocabulary?: VocabularyOverride; disabled?: boolean; onBusyChange?: (busy: boolean) => void }"], "returns": "JSX.Element", "purpose": "Does not call onTranscript for empty transcripts; logs metrics to console.info."}
+          ]
+        }
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/ClaudeConsole/src/ShellEntry.tsx",
+      "change": "changed",
+      "stub_kind": "tsx_module",
+      "role": "Add inputRef on the message input, mount RecorderButton beside the existing mic, insertAtCaret helper (live selectionStart/End, end if unavailable, space-separated, caret restored, input focused), serverRecording busy state mutually disabling both mic buttons. Existing Web Speech code, handleSend and WebSocket logic unchanged; handleSend is never called from the transcript path. Default export and shellConfig.ts registration untouched (R-CON-BP-06 verified).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "02_Platform/Atlas_Shell/nginx.conf",
+      "change": "changed",
+      "stub_kind": "nginx_conf",
+      "role": "Add location /api/speech using the same lazy-resolver pattern (set $upstream_speech atlas-speech:8000), client_max_body_size 3m (> max_chunk_bytes), proxy_read_timeout 150s (> upstream_timeout_s), standard Host/X-Real-IP/X-Forwarded-For headers; no auth header stripping. Place with the other platform blocks. Requires shell image rebuild."
+    },
+    {
+      "path": "01_System/Makefile",
+      "change": "changed",
+      "stub_kind": "makefile",
+      "role": "Add a 'Platform: Speech' region with SPEECH_DIR, SPEECH_COMPOSE (uses ENV_FILES) and speech-build/up/down/logs/reboot targets, same shape as pref-*."
+    },
+    {
+      "path": "01_System/test/compose.test.yml",
+      "change": "changed",
+      "stub_kind": "compose",
+      "role": "Add speech-test (Platform section): build 02_Platform/Speech/Dockerfile, container atlas-speech-test, 127.0.0.1:9070:8000, environment SPEECH_API_TOKEN only (no WhisperKey, no PG vars), tmpfs temp dir, network atlas-net."
+    }
+  ]
+}

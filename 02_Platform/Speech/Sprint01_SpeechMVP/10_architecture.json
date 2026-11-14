@@ -1,0 +1,328 @@
+{
+  "component_name": "speech",
+  "layer": "02_Platform",
+  "source_definition": "00_draft.md",
+  "summary": "Reusable speech-to-text capability: a token-gated FastAPI service that reassembles chunked MediaRecorder audio per recording id and transcribes it via OpenAI, plus a shared recorder hook/component in Atlas_Shell platform-ui.",
+  "classification": {
+    "why_platform": "Audio capture, chunk reassembly, upload limits and a vendor transcription call are generic technical capabilities with no domain meaning; any Atlas application can mount the recorder and receive plain text. What the text means, where it is inserted and whether it is submitted stays in the consuming application (ClaudeConsole owns insertion and never auto-submits).",
+    "non_goals": [
+      "Progressive/windowed transcription, overlap merge, context feeding (Sprint02_ProgressiveTranscription)",
+      "Auto-submit of transcripts",
+      "Integrations in applications other than ClaudeConsole",
+      "Streaming/realtime transcription API",
+      "Accuracy/vocabulary/boundary measurement tooling (manual checklist only)",
+      "Persisting audio or transcripts",
+      "Removing the existing browser Web Speech dictation in ClaudeConsole"
+    ]
+  },
+  "contracts": {
+    "consumes": [
+      "OpenAI audio transcription HTTP endpoint (model per SpeechSettings; credential env var WhisperKey, injected by compose from 01_System/secrets.env)",
+      "ffmpeg binary in the container (remux, validity check, duration measurement)",
+      "platform_errorhandling: api_error envelope, logging, exception handlers",
+      "platform-ui api/client.ts apiFetch (all browser calls; no raw fetch)"
+    ],
+    "provides": [
+      "Per-recording-id chunk intake that reassembles chunks into ONE audio file in index order and rejects gaps",
+      "One transcript per recording at stop, with instrumentation returned in the response and logged",
+      "Cancel that discards server-side audio; idle recordings are reaped; all temp audio is deleted after transcription, cancel, validity/limit rejection, or idle timeout",
+      "Vocabulary resolution: config defaults overridable per request; model-specific mapping of keywords/languages",
+      "Shared recorder UI primitive (hook + button component) that emits ~15 s chunks from one uninterrupted MediaRecorder and supports pause, resume, cancel",
+      "Limits advertised to the client at recording creation so UI limits equal server limits"
+    ],
+    "invariants": [
+      "OpenAI key is read only inside the backend process; it never appears in any response, log line, or frontend bundle",
+      "Every endpoint except the liveness probe requires the speech token; fail closed when the token is not configured",
+      "The container publishes only on 127.0.0.1 and is reachable from browsers only through the shell nginx /api/speech route",
+      "Audio exists only in the tmpfs temp directory and is removed by every terminal path (success, cancel, limit/validity rejection, idle timeout, startup sweep). Exception: after an upstream transcription failure the recording is retained for client retry until idle timeout",
+      "Reassembled file is the byte concatenation of chunks 0..N-1 in index order; a missing index is never papered over",
+      "MediaRecorder is never stopped to cut chunks; chunking is timeslice-only",
+      "Transcript is delivered to the consumer callback; the component never writes it anywhere and never submits anything"
+    ],
+    "failure_modes": [
+      "UNAUTHORIZED / SPEECH_NOT_CONFIGURED: consumer must prompt for the token (UNAUTHORIZED) or surface a configuration error (SPEECH_NOT_CONFIGURED)",
+      "UNSUPPORTED_MIME, TOO_MANY_RECORDINGS: recording creation refused; nothing to clean up",
+      "RECORDING_NOT_FOUND: expired (idle timeout), cancelled, or service restarted; consumer starts a new recording",
+      "CHUNK_TOO_LARGE, TOO_MANY_CHUNKS, RECORDING_TOO_LARGE, RECORDING_TOO_LONG: limit exceeded; RECORDING_TOO_LARGE and RECORDING_TOO_LONG end the recording and delete audio; CHUNK_TOO_LARGE leaves it open",
+      "CHUNK_CONFLICT: same index re-sent with different size; consumer treats as fatal for that recording",
+      "MISSING_CHUNKS: stop refused; recording retained; consumer re-uploads the listed indices and retries stop",
+      "INVALID_AUDIO: reassembled bytes are not decodable; recording deleted",
+      "TRANSCRIPTION_FAILED / TRANSCRIPTION_TIMEOUT: upstream error after any model fallback; recording retained for consumer retry until idle timeout",
+      "RECORDING_BUSY: stop already in progress for this id",
+      "Empty transcript (silence) is a SUCCESS with empty text, not a failure; consumer shows a neutral notice",
+      "Client-side: microphone permission denied, insecure context, MediaRecorder unsupported, chunk upload failing after retries; hook reports these via its error state and never throws"
+    ]
+  },
+  "shared_views": {
+    "consumes": [
+      "ApiError envelope (platform_contracts / UI_Data_Contract.md) for all error responses"
+    ],
+    "provides": [
+      "Typed record TranscriptResult (declared in 10_scaffolding.json, app/models.py and platform-ui api/speechClient.ts). No Dataset is produced: no GET endpoint returns UI-visible rows, so R-CON-BP-04 read-endpoint rules do not apply and exposed_surfaces carries no row_shape. All mutation endpoints return typed records, 204, or ApiError"
+    ]
+  },
+  "interfaces": {
+    "consumes": [
+      "POST https://api.openai.com/v1/audio/transcriptions (multipart)",
+      "apiFetch (platform-ui) for every browser-to-backend call; Content-Type header override per call for binary chunk bodies"
+    ],
+    "provides": [
+      "HTTP API under /api/speech (token header required except health)",
+      "Python: FastAPI app app.main:app",
+      "UI: useRecorder hook and RecorderButton component under Atlas_Shell platform-ui; imported by consumers through the @platform-ui alias as default (component) / named (hook) exports, matching the existing consumer pattern in 03_Application/ClaudeConsole/src/ShellEntry.tsx"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/speech/recordings",
+        "purpose": "Create a recording; returns recording id and the effective limits"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/speech/recordings/{recording_id}/chunks/{index}",
+        "purpose": "Upload one chunk (raw bytes body); idempotent per index"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/speech/recordings/{recording_id}/stop",
+        "purpose": "Verify completeness, reassemble, transcribe, delete audio, return TranscriptResult"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "DELETE /api/speech/recordings/{recording_id}",
+        "purpose": "Cancel and discard; idempotent (unknown id also yields success)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /health",
+        "purpose": "Unauthenticated liveness; host-local only, not proxied by nginx"
+      },
+      {
+        "type": "ui_component",
+        "name": "RecorderButton (default export)",
+        "purpose": "Mic control with record/pause/resume/cancel, elapsed time, inline error and one-time token entry"
+      },
+      {
+        "type": "ui_hook",
+        "name": "useRecorder",
+        "purpose": "Headless recorder state machine for consumers that need custom UI"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 1,
+      "name": "authenticate",
+      "description": "Every non-health request: fail closed when speech token is unset (SPEECH_NOT_CONFIGURED), constant-time compare against X-Atlas-Speech-Token (UNAUTHORIZED). Runs before any body is read.",
+      "inputs": ["request headers", "SpeechSettings.api_token"],
+      "outputs": ["authorized request or ApiError"]
+    },
+    {
+      "step": 2,
+      "name": "create_recording",
+      "description": "Reject when WhisperKey unset (SPEECH_NOT_CONFIGURED), mime outside allowlist (UNSUPPORTED_MIME) or active recordings at cap (TOO_MANY_RECORDINGS). Otherwise allocate id, per-id temp dir, in-memory RecordingState (status open) and return id plus limits.",
+      "inputs": ["mime_type", "SpeechSettings", "RecordingStore"],
+      "outputs": ["recording_id", "limits"]
+    },
+    {
+      "step": 3,
+      "name": "receive_chunk",
+      "description": "Look up open recording (RECORDING_NOT_FOUND / RECORDING_BUSY if finalizing). Validate index (non-negative, below chunk cap else TOO_MANY_CHUNKS) and Content-Type base type equals recording mime. Stream body with a byte cap (CHUNK_TOO_LARGE). Same index already stored: identical size is a no-op success, different size is CHUNK_CONFLICT. Add size to running total; over total cap deletes the recording (RECORDING_TOO_LARGE). Write file, accumulate server-observed body receive time, touch last_activity.",
+      "inputs": ["recording_id", "index", "body stream", "Content-Type"],
+      "outputs": ["ChunkAck"]
+    },
+    {
+      "step": 4,
+      "name": "cancel_recording",
+      "description": "Delete directory and state for the id; unknown id succeeds. If status is finalizing, set cancelled flag; files are removed by step 10 (never mid-process).",
+      "inputs": ["recording_id"],
+      "outputs": ["204"]
+    },
+    {
+      "step": 5,
+      "name": "stop_validate",
+      "description": "Atomically move status open to finalizing (RECORDING_BUSY otherwise; retained-after-failure recordings are re-enterable). Reject client_duration_ms above max duration (RECORDING_TOO_LONG, delete). Require chunk indices 0..expected_chunks-1 all present and nothing beyond; otherwise MISSING_CHUNKS with the missing indices, status back to open, audio retained.",
+      "inputs": ["recording_id", "StopRequest", "RecordingState"],
+      "outputs": ["validated chunk list"]
+    },
+    {
+      "step": 6,
+      "name": "assemble",
+      "description": "Concatenate chunk files in index order into one file, remux without re-encoding through ffmpeg (repairs missing duration header, proves decodability), measure decoded duration. Non-zero ffmpeg exit or zero duration: INVALID_AUDIO, delete. Measured duration above max duration: RECORDING_TOO_LONG, delete. Reassembled size over OpenAI file limit is prevented by the total-bytes cap in step 3.",
+      "inputs": ["chunk files", "mime_type"],
+      "outputs": ["AssembledAudio (path, size, duration_ms)", "assemble_ms"]
+    },
+    {
+      "step": 7,
+      "name": "resolve_vocabulary",
+      "description": "Per field, an omitted request field takes the config default, an empty value clears it, a provided value replaces it. Then map to the chosen model's parameter form (native prompt/keywords/languages vs prompt-with-folded-keywords plus single language hint).",
+      "inputs": ["StopRequest vocabulary fields", "config/vocabulary.json defaults", "model name"],
+      "outputs": ["TranscriptionRequest"]
+    },
+    {
+      "step": 8,
+      "name": "transcribe",
+      "description": "Call OpenAI with the primary model. If the upstream rejects the model or its parameters (client error), retry once with the fallback model and fallback parameter mapping and record model_used. Timeout: TRANSCRIPTION_TIMEOUT. Any other upstream error: TRANSCRIPTION_FAILED with no audio deletion (retained for retry). Key is added only to the outbound Authorization header.",
+      "inputs": ["AssembledAudio", "TranscriptionRequest", "SpeechSettings"],
+      "outputs": ["text", "model_used", "fallback_used", "api_ms"]
+    },
+    {
+      "step": 9,
+      "name": "build_result",
+      "description": "Assemble TranscriptResult with metrics (server timings, audio duration, chunk count, bytes, delta against client-reported duration) and log it without transcript text.",
+      "inputs": ["text", "timings", "RecordingState", "StopRequest"],
+      "outputs": ["TranscriptResult"]
+    },
+    {
+      "step": 10,
+      "name": "cleanup",
+      "description": "Delete directory and state on every terminal outcome of steps 5-9 and 4 except MISSING_CHUNKS and upstream failures (which retain). Cancelled-while-finalizing recordings are deleted here and the result is discarded.",
+      "inputs": ["RecordingState"],
+      "outputs": ["removed temp files"]
+    },
+    {
+      "step": 11,
+      "name": "reap_idle",
+      "description": "Background task: every minute delete recordings whose last activity exceeds the idle TTL, including retained-after-failure ones. Startup sweep removes everything left in the temp directory.",
+      "inputs": ["RecordingStore", "SpeechSettings.idle_ttl_s"],
+      "outputs": ["removed temp files"]
+    },
+    {
+      "step": 12,
+      "name": "client_record",
+      "description": "Hook: create recording, start one MediaRecorder with timeslice, queue each dataavailable blob for sequential upload with bounded retry, pause/resume via MediaRecorder, requestData on pause. Auto-stop at advertised max duration. Stop: stop recorder, drain queue, call stop, deliver TranscriptResult plus client metrics (stop-to-transcript latency). MISSING_CHUNKS: re-upload from in-memory chunks, retry stop once. Cancel: stop tracks, abort in-flight requests, delete on server, drop buffered chunks. UNAUTHORIZED: state needs_token, buffered chunks kept so a corrected token resumes via retry.",
+      "inputs": ["RecorderOptions", "speech token", "getUserMedia stream"],
+      "outputs": ["RecorderApi state", "onTranscript callback"]
+    },
+    {
+      "step": 13,
+      "name": "consumer_insert",
+      "description": "ClaudeConsole onTranscript: insert text into the input at the live caret position (end if no selection info), separating from neighbours by a space when needed, preserving all existing text, moving the caret after the insertion, focusing the input. handleSend is never invoked. While server recording or transcription is active the existing browser dictation button is disabled, and vice versa.",
+      "inputs": ["TranscriptResult.transcript", "input element ref", "current input value"],
+      "outputs": ["updated input value"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error envelope, logging setup, exception handlers (same pattern as PreferenceStore)"},
+      {"component": "02_Platform/Atlas_Shell/platform-ui/api/client.ts", "role": "apiFetch used for all browser calls; not modified"},
+      {"component": "02_Platform/Atlas_Shell (nginx.conf, Dockerfile build)", "role": "/api/speech proxy route; frontend files ship inside the shell build (platform-ui is already covered by the shell COPY, no Dockerfile change)"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "fastapi", "role": "HTTP framework", "reuse_existing": true},
+      {"name": "uvicorn[standard]", "role": "ASGI server", "reuse_existing": true},
+      {"name": "pydantic", "role": "request/response models", "reuse_existing": true},
+      {"name": "httpx", "role": "async multipart call to OpenAI. Chosen over the OpenAI SDK because gpt-transcribe parameters (keywords, languages) may lag SDK typing", "reuse_existing": false},
+      {"name": "ffmpeg (apt package in image)", "role": "remux, decodability check, duration measurement", "reuse_existing": false}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any Postgres/database dependency (state is ephemeral)",
+      "Importing from 03_Application or any application-specific code (upward dependency)",
+      "Calling other Atlas services",
+      "Reusing ATLAS_SERVICE_TOKEN as the browser credential (cross-service secret must not reach a browser)",
+      "Exposing the OpenAI key, or any variable derived from it, to the frontend, responses or logs",
+      "Publishing the container on any interface other than 127.0.0.1",
+      "Raw fetch in frontend files (apiFetch only)",
+      "Modifying platform-ui/api/client.ts",
+      "Mounting audio to a persistent volume"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": false,
+    "schema_artifact": null,
+    "persistence_type": "none (ephemeral audio in a tmpfs mount, in-memory RecordingState; allowed operational state per R-CON-BP-03; losing it only aborts in-flight recordings)"
+  },
+  "deferrals": {
+    "platform_implementer": [
+      "Create 02_Platform/Speech per 10_scaffolding.json: app modules, Dockerfile (python:3.12-slim + ffmpeg, PYTHONPATH /platform_packages as PreferenceStore), pyproject, compose.yml (127.0.0.1:8070:8000, tmpfs temp dir, env WhisperKey and SPEECH_API_TOKEN passed from the compose env files, SPEECH_* limit vars with defaults), config/vocabulary.json, CLAUDE.md",
+      "Compose conventions: container atlas-speech on atlas-net; run via 01_System/Makefile speech-* targets that use ENV_FILES (config.env + secrets.env) exactly like pref-*; add the targets",
+      "Add a /api/speech location block to 02_Platform/Atlas_Shell/nginx.conf with a client_max_body_size above the chunk limit and a proxy_read_timeout above the upstream timeout; after editing, rebuild the shell image (nginx.conf is baked in; docker cp of dist is insufficient), see ClaudeConsole CLAUDE.md note",
+      "Add speech-test service to 01_System/test/compose.test.yml following the existing -test convention (127.0.0.1:9070:8000, SPEECH_API_TOKEN passed, WhisperKey deliberately NOT passed, no Postgres env); tests stub the transcriber via the dependency hook so no OpenAI call is made",
+      "Before finishing, verify against the live API with a short real recording: (a) gpt-transcribe accepts the keywords/languages multipart encoding, (b) fallback model path triggers on a deliberately invalid primary model id, (c) Chrome MediaRecorder webm remuxed by ffmpeg is accepted; record outcomes in 02_Platform/Speech/CLAUDE.md",
+      "Write 02_Platform/Speech/CLAUDE.md: audio is sent to OpenAI; token + key handling; limits; port 8070; fallback-model deprecation date",
+      "Write docs/Manual_Accuracy_Checklist.md as specified in 10_scaffolding.json",
+      "Logging: never log headers, token, key, or transcript text; set httpx/httpcore loggers to WARNING"
+    ],
+    "ui_implementer": [
+      "Implement platform-ui/api/speechClient.ts, hooks/useRecorder.ts, components/RecorderButton.tsx per scaffolding; follow theme tokens and existing inline-style conventions of ShellEntry.tsx / UI_DesignLanguage.md; no visual decisions beyond those",
+      "RecorderButton: default export; shows token entry inline when the hook reports needs_token; persists token via the speechClient token store; offers pause/resume/cancel while active; shows elapsed time and a neutral notice on empty transcript",
+      "Edit 03_Application/ClaudeConsole/src/ShellEntry.tsx: add an input ref, mount RecorderButton next to the existing mic button (existing Web Speech code left untouched), implement caret-aware insertion, mutual disabling with the browser dictation, never call handleSend. shellConfig.ts and shell Dockerfile need no change (verified: lazy default-export ShellEntry, platform-ui covered by shell COPY)",
+      "Pass consumer vocabulary (ClaudeConsole-specific keywords such as product/tool names) from ShellEntry as RecorderOptions, not from Speech config",
+      "Do not use ErrorCard without checking its prop contract (it takes an ApiError via 'error'); RecorderButton renders its own inline error text"
+    ],
+    "test_writer": [
+      "Backend pytest per 10_test_spec.md scenarios, in-container (docker exec atlas-speech-test pytest tests/ -v), TestClient with the transcriber dependency overridden by a fake that records the request it received",
+      "conftest generates a short valid webm with ffmpeg lavfi sine and splits it at arbitrary byte offsets to exercise reassembly",
+      "Limits tests lower the limits through settings overrides instead of sending 20 MiB",
+      "Assert OpenAI key and token never appear in responses or captured log output",
+      "[UI — manual] scenarios are manual; MediaRecorder is not available in jsdom, so no Vitest file is required"
+    ],
+    "reviewer": [
+      "Authentication decision and its stated residual risks (see open_questions) accepted or rejected explicitly",
+      "No path leaves audio on disk after terminal outcomes, and the retained-after-upstream-failure exception is bounded by idle TTL",
+      "Every error code in SpeechErrorCode is reachable from an internal_flow step and covered by a test scenario",
+      "Declare-once: signatures, enum values and defaults live only in 10_scaffolding.json",
+      "nginx location is not shadowed by an existing prefix and does not weaken the /api/runningtracker/native 404 rule"
+    ]
+  },
+  "deferred_decisions": [
+    "Progressive transcription, partial transcripts and context feeding (Sprint02); chunk format and recording-state fields are kept compatible but not designed for it",
+    "Whether the browser Web Speech dictation in ClaudeConsole is removed after the server path proves better",
+    "Per-user/per-device tokens and rate limiting beyond the active-recordings cap",
+    "Fallback after fallback-model shutdown (2027-02-26 per OpenAI docs)"
+  ],
+  "risks": [
+    {
+      "risk": "Speech token is a bearer secret held in browser localStorage and typed once per device; extractable by XSS or a shared device",
+      "impact": "Attacker with token can spend OpenAI credit up to the limits; mitigated by size/duration/concurrency caps, localhost-only port, rotation by editing secrets.env and recreating the container"
+    },
+    {
+      "risk": "Public Cloudflare route to atlas-shell may be ungated (EssayCards audit M6 unresolved) and the rest of Atlas, including ClaudeConsole with bypassPermissions, is unauthenticated",
+      "impact": "Speech token protects only Speech; overall perimeter exposure is unchanged and is a System-layer concern outside this sprint"
+    },
+    {
+      "risk": "Chrome streaming webm has no duration header; OpenAI or ffmpeg may mis-handle raw concatenation",
+      "impact": "Transcription rejected or truncated; mitigated by mandatory ffmpeg remux in assemble and the live verification deferral"
+    },
+    {
+      "risk": "Fallback models (gpt-4o-transcribe, whisper-1) are deprecated by OpenAI with shutdown 2027-02-26",
+      "impact": "Fallback path stops working then; primary gpt-transcribe unaffected"
+    },
+    {
+      "risk": "Ephemeral in-memory state: container restart or idle reap loses an in-flight recording",
+      "impact": "Consumer sees RECORDING_NOT_FOUND and the dictation is lost; acceptable for MVP, hook keeps chunks buffered but the server copy is gone"
+    },
+    {
+      "risk": "Long final upload plus transcription on mobile networks exceeds nginx/proxy timeouts",
+      "impact": "Spurious 504 on stop; recording retained, so retry works"
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "RESOLVED (draft Q1, authentication). Observed structure: no browser-facing Atlas route has user authentication; the shell nginx adds none; Cloudflare tunnel ingress is remotely managed and whether Cloudflare Access gates it cannot be verified from the repo (EssayCards audit M6 open); Tailscale is the private admin/native-API transport (RunningTracker precedent), not an auth layer for the browser shell; ATLAS_SERVICE_TOKEN exists but is service-to-service for non-proxied internal paths. Decision: a dedicated shared secret env SPEECH_API_TOKEN, sent as header X-Atlas-Speech-Token, constant-time compared, fail closed when unset; held by the browser in localStorage after one-time entry. CONFLICT surfaced per R-OPS-BP-01: the draft says only WhisperKey exists, but this decision requires one NEW secret in 01_System/secrets.env which only the human may add; also this is the first browser-held credential in Atlas, and it does not gate any other Atlas route. Rejected: relying on perimeter alone (unverifiable); reusing ATLAS_SERVICE_TOKEN (would put a cross-service secret in a browser).",
+      "owner": "product"
+    },
+    {
+      "question": "RESOLVED (draft Q2, model id). OpenAI docs (developers.openai.com speech-to-text, checked 2026-11-11) list gpt-transcribe as current and recommended, with native prompt, keywords, languages (array, replaces singular language). This contradicts the draft assumption that keywords must be folded into the prompt: that folding applies only to the fallback models. Default SPEECH_MODEL gpt-transcribe, fallback SPEECH_FALLBACK_MODEL gpt-4o-transcribe (whisper-1 is the documented alternative; both deprecated, shutdown 2027-02-26). Exact defaults are declared in 10_scaffolding.json SpeechSettings.",
+      "owner": "architecture"
+    },
+    {
+      "question": "Human action required before implementation can be verified: add SPEECH_API_TOKEN (long random value) to 01_System/secrets.env; WhisperKey already exists. Implementer must not edit or print secrets.env.",
+      "owner": "product"
+    },
+    {
+      "question": "Multipart encoding for array fields keywords and languages on gpt-transcribe is not specified in the fetched docs page; implementer determines it by a live call (repeated field first, JSON-array string second) and records the answer in CLAUDE.md.",
+      "owner": "implementer"
+    },
+    {
+      "question": "ClaudeConsole: keep both mic buttons (this design) or replace the Web Speech button once server transcription is validated?",
+      "owner": "product"
+    },
+    {
+      "question": "Port choice: 8070 (host) and 9070 (test) are unused in all compose files and config.env at design time; implementer re-greps before claiming them.",
+      "owner": "implementer"
+    }
+  ]
+}

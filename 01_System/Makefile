@@ -701,6 +701,32 @@ pref-schema:
 # endregion
 
 
+# region --- Platform: Speech
+SPEECH_DIR=../02_Platform/Speech
+
+SPEECH_COMPOSE=docker compose \
+	-f $(SPEECH_DIR)/compose.yml \
+	$(ENV_FILES)
+
+speech-build:
+	$(SPEECH_COMPOSE) build
+
+speech-up:
+	$(SPEECH_COMPOSE) up -d
+
+speech-down:
+	$(SPEECH_COMPOSE) down
+
+speech-logs:
+	$(SPEECH_COMPOSE) logs -f
+
+speech-reboot:
+	$(SPEECH_COMPOSE) down
+	$(SPEECH_COMPOSE) up -d
+
+# endregion
+
+
 # region --- Application: NumericSeries
 NUMERIC_DIR=../03_Application/NumericSeries
 
@@ -832,6 +858,7 @@ net-connect:
 	@docker network connect atlas-net atlas-label-engine      2>/dev/null || true
 	@docker network connect atlas-net atlas-linking-engine    2>/dev/null || true
 	@docker network connect atlas-net atlas-preference-store  2>/dev/null || true
+	@docker network connect atlas-net atlas-speech            2>/dev/null || true
 	@docker network connect atlas-net atlas-numeric-series    2>/dev/null || true
 	@docker network connect atlas-net atlas-storagetracker    2>/dev/null || true
 	@docker network connect atlas-net atlas-calendar          2>/dev/null || true
@@ -863,6 +890,7 @@ up:
 	$(MAKE) label-build      label-up
 	$(MAKE) pref-schema
 	$(MAKE) pref-build       pref-up
+	$(MAKE) speech-build     speech-up
 	$(MAKE) linking-build    linking-up
 	$(MAKE) numeric-schema
 	$(MAKE) numeric-build    numeric-up
@@ -891,6 +919,7 @@ down:
 	-$(MAKE) essaycards-down
 	-$(MAKE) numeric-down
 	-$(MAKE) linking-down
+	-$(MAKE) speech-down
 	-$(MAKE) pref-down
 	-$(MAKE) label-down
 	-$(MAKE) cal-app-down
