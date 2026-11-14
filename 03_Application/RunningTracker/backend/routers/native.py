@@ -203,6 +203,8 @@ def finish(run_id: str, body: FinishRequest, device: DeviceContext = Depends(req
             run = _owned_run(cur, rid, device)
             if body.finished_at < run["started_at"]:
                 raise AppError("VALIDATION_ERROR", "finished_at must not be before started_at.", 422)
+            if body.run_finished_at is not None and body.run_finished_at < run["started_at"]:
+                raise AppError("VALIDATION_ERROR", "run_finished_at must not be before started_at.", 422)
 
             if run["status"] == "complete":
                 # Idempotent: same answer; recompute only when the algorithm version changed.
@@ -217,11 +219,11 @@ def finish(run_id: str, body: FinishRequest, device: DeviceContext = Depends(req
             cur.execute(
                 """
                 update runningtracker.runs
-                set finished_at = %s, elapsed_s = %s, moving_s = %s, distance_m = %s,
+                set finished_at = %s, elapsed_s = %s, moving_s = %s, distance_m = %s, run_finished_at = %s,
                     category = coalesce(category, nullif(btrim(%s), '')), updated_at = now()
                 where id = %s
                 """,
-                (body.finished_at, body.elapsed_s, body.moving_s, body.distance_m, body.category, rid),
+                (body.finished_at, body.elapsed_s, body.moving_s, body.distance_m, body.run_finished_at, body.category, rid),
             )
             # Route / ghost chosen on the phone. Only fills an empty route; ids that do not exist are ignored.
             route_id, ghost_id = _opt_uuid(body.route_id), _opt_uuid(body.ghost_run_id)

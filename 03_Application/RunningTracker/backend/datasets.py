@@ -125,7 +125,32 @@ def _label(t_s: float) -> str:
 def series_dataset(metric: str, points: list[list[float]]) -> Dataset:
     rows = [{"id": str(i), "t_s": p[0], "t_label": _label(p[0]), "value": p[1]}
             for i, p in enumerate(sorted(points, key=lambda p: p[0]))]
-    return _dataset("run_series", "Pace" if metric == "pace" else "Heart rate", SERIES_SCHEMA, rows)
+    label = {"pace": "Pace", "heart_rate": "Heart rate", "recovery_hr": "Recovery heart rate"}[metric]
+    return _dataset("run_series", label, SERIES_SCHEMA, rows)
+
+
+RECOVERY_SCHEMA = [
+    _col("run_finished_at", "Run end", "date"),
+    _col("recovery_s", "Recovery (s)", "number"),
+    _col("hr_end", "HR end", "number"),
+    _col("hr_60", "HR 60 s", "number"),
+    _col("hr_120", "HR 120 s", "number"),
+    _col("hrr60", "HRR60", "number"),
+    _col("hrr120", "HRR120", "number"),
+]
+
+
+def recovery_dataset(run_id: str, run_finished_at: Optional[datetime], finished_at: Optional[datetime],
+                     recovery: Optional[dict]) -> Dataset:
+    """One RecoveryRow, or an empty Dataset (total 0) when the run has no recovery phase."""
+    if recovery is None or run_finished_at is None or finished_at is None:
+        return _dataset("run_recovery", "Recovery", RECOVERY_SCHEMA, [], total=0)
+    row = {
+        "id": run_id, "run_finished_at": run_finished_at,
+        "recovery_s": (finished_at - run_finished_at).total_seconds(),
+        **{k: recovery.get(k) for k in ("hr_end", "hr_60", "hr_120", "hrr60", "hrr120")},
+    }
+    return _dataset("run_recovery", "Recovery", RECOVERY_SCHEMA, [row])
 
 
 def _ghost_label(r: dict) -> Optional[str]:

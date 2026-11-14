@@ -127,6 +127,14 @@ class FinishRequest(_Strict):
     # Route and ghost the phone raced against (chosen on the phone, no prepared run); unknown ids are ignored.
     route_id: Optional[str] = None
     ghost_run_id: Optional[str] = None
+    # End of the running phase (phone UTC). Omitted/None = no recovery phase (legacy behaviour).
+    run_finished_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def _run_end_ordered(self) -> "FinishRequest":
+        if self.run_finished_at is not None and self.run_finished_at > self.finished_at:
+            raise ValueError("run_finished_at must not be after finished_at")
+        return self
 
 
 class SeqRange(BaseModel):

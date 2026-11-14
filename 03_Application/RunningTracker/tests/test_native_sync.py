@@ -3,8 +3,8 @@
 from datetime import datetime, timedelta, timezone
 
 from tests.conftest import (
-    NEW_RUN, PREPARED_EXPIRED, PREPARED_FRESH, RUN_COMPLETE, RUN_GAP, RUN_REVOKED_COMPLETE,
-    RUN_REVOKED_UPLOADING, TOKEN_1, TOKEN_3, auth, DEVICE_1,
+    NEW_RUN, PREPARED_EXPIRED, PREPARED_FRESH, RUN_COMPLETE, RUN_GAP, RUN_RECOVERY, RUN_RECOVERY_UPLOAD,
+    RUN_REVOKED_COMPLETE, RUN_REVOKED_UPLOADING, TOKEN_1, TOKEN_3, auth, DEVICE_1,
 )
 
 NATIVE = "/api/runningtracker/native"
@@ -222,7 +222,7 @@ def test_finish_verifies_and_completes(client, db_conn):
     assert run["status"] == "complete" and run["distance_m"] == 520.0
     assert _row(db_conn, "select count(*) as n from runningtracker.run_pauses where run_id = %s", NEW_RUN)[0]["n"] == 2
     metrics = _row(db_conn, "select algo_version, server_distance_m from runningtracker.run_metrics where run_id = %s", NEW_RUN)
-    assert len(metrics) == 1 and metrics[0]["algo_version"] == 1 and metrics[0]["server_distance_m"] > 0
+    assert len(metrics) == 1 and metrics[0]["algo_version"] == 2 and metrics[0]["server_distance_m"] > 0
 
     again = finish(client, NEW_RUN, body)
     assert again.status_code == 200 and again.json()["result"] == "complete"
@@ -324,3 +324,129 @@ def test_finish_links_route_and_library_lists_qualified_runs(client, db_conn):
     finish(client, NEW_RUN, {**finish_body(10, 10, 0), "route_id": route_id, "ghost_run_id": "not-a-uuid"})
     got = _row(db_conn, "select route_id, ghost_run_id from runningtracker.runs where id = %s", NEW_RUN)[0]
     assert str(got["route_id"]) == route_id and got["ghost_run_id"] is None
+
+
+# ── Sprint02: run end (run_finished_at) ──────────────────────────────────────
+
+W = "/api/runningtracker"
+UP_T0 = datetime(2026, 1, 14, 8, 0, 0, tzinfo=timezone.utc)   # fix-run-recovery-upload: GPS 1..300 s, HR 1..450 s
+
+
+def up_body(**extra):
+    """Finish body of fix-run-recovery-upload: running 300 s, training ended 450 s after the start."""
+    body = {
+        "finished_at": iso(UP_T0 + timedelta(seconds=450)), "elapsed_s": 300.0, "moving_s": 300.0, "distance_m": 1196.0,
+        "last_seq": 750, "expected_counts": {"location": 300, "heart_rate": 450}, "pauses": [],
+    }
+    body.update(extra)
+    return body
+
+
+def run_end(seconds=300):
+    return iso(UP_T0 + timedelta(seconds=seconds))
+
+
+def test_finish_with_run_end_stores_it_and_clips_running_statistics(client, db_conn):
+    r = finish(client, RUN_RECOVERY_UPLOAD, up_body(run_finished_at=run_end()))
+    assert r.status_code == 200
+    out = r.json()
+    assert out["result"] == "complete"
+    assert out["verified_counts"] == {"location": 300, "heart_rate": 450}  # recovery-phase HR is stored and verified
+    run = _row(db_conn, "select run_finished_at, status from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]
+    assert run["status"] == "complete" and run["run_finished_at"] == UP_T0 + timedelta(seconds=300)
+    m = _row(db_conn, "select avg_hr, max_hr, hr_series, splits, server_distance_m, pace_series, recovery "
+                      "from runningtracker.run_metrics where run_id = %s", RUN_RECOVERY_UPLOAD)[0]
+    # all-session average would be < 150 (recovery readings are 150 down to 120); running-only is exactly 150
+    assert m["avg_hr"] == 150 and m["max_hr"] == 150
+    assert m["hr_series"] and max(p[0] for p in m["hr_series"]) <= 300 and all(p[1] == 150 for p in m["hr_series"])
+    assert m["splits"] and all(sp["avg_hr"] == 150 for sp in m["splits"])
+    assert 1190 < m["server_distance_m"] < 1200 and m["pace_series"]
+    assert (m["recovery"]["hr_end"], m["recovery"]["hr_60"], m["recovery"]["hr_120"]) == (150, 138, 126)
+    assert _row(db_conn, "select count(*) as n from runningtracker.run_samples where run_id = %s and stream = 'heart_rate'",
+                RUN_RECOVERY_UPLOAD)[0]["n"] == 450
+    rec = _rows_of(client.get(f"{W}/runs/{RUN_RECOVERY_UPLOAD}/recovery"))
+    assert len(rec) == 1 and rec[0]["recovery_s"] == 150 and rec[0]["hrr60"] == 12
+    hr_series = _rows_of(client.get(f"{W}/runs/{RUN_RECOVERY_UPLOAD}/series", params={"metric": "heart_rate"}))
+    assert hr_series and max(p["t_s"] for p in hr_series) <= 300  # no recovery readings in the heart_rate series
+
+
+def _rows_of(r):
+    assert r.status_code == 200, r.text
+    return r.json()["rows"]
+
+
+def test_finish_without_run_end_behaves_as_before(client, db_conn):
+    r = finish(client, RUN_RECOVERY_UPLOAD, up_body())
+    assert r.status_code == 200 and r.json()["result"] == "complete"
+    run = _row(db_conn, "select run_finished_at from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]
+    assert run["run_finished_at"] is None
+    m = _row(db_conn, "select avg_hr, max_hr, hr_series, recovery from runningtracker.run_metrics where run_id = %s", RUN_RECOVERY_UPLOAD)[0]
+    assert m["recovery"] is None  # SQL NULL, not JSON null
+    assert m["avg_hr"] < 150 and max(p[0] for p in m["hr_series"]) > 300  # nothing clipped: recovery readings are included
+    rec = client.get(f"{W}/runs/{RUN_RECOVERY_UPLOAD}/recovery").json()
+    assert rec["rows"] == [] and rec["meta"]["total"] == 0
+
+
+def test_run_end_before_the_start_is_rejected(client, db_conn):
+    r = finish(client, RUN_RECOVERY_UPLOAD, up_body(run_finished_at=iso(UP_T0 - timedelta(seconds=1))))
+    assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_ERROR"
+    run = _row(db_conn, "select status, finished_at, run_finished_at, distance_m from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]
+    assert run == {"status": "uploading", "finished_at": None, "run_finished_at": None, "distance_m": None}
+
+
+def test_run_end_after_the_training_end_is_rejected(client, db_conn):
+    r = finish(client, RUN_RECOVERY_UPLOAD, up_body(run_finished_at=run_end(451)))
+    assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_ERROR"
+    run = _row(db_conn, "select status, finished_at, run_finished_at from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]
+    assert run == {"status": "uploading", "finished_at": None, "run_finished_at": None}
+
+
+def test_repeated_finish_of_a_complete_run_keeps_the_stored_run_end(client, db_conn):
+    start = datetime(2026, 1, 12, 8, 0, 0, tzinfo=timezone.utc)
+    body = {"finished_at": iso(start + timedelta(seconds=900)), "elapsed_s": 600.0, "moving_s": 600.0, "distance_m": 2396.0,
+            "last_seq": 1480, "expected_counts": {"location": 600, "heart_rate": 880}, "pauses": [],
+            "run_finished_at": iso(start + timedelta(seconds=600))}
+    q_run = "select finished_at, run_finished_at from runningtracker.runs where id = %s"
+    q_metrics = "select * from runningtracker.run_metrics where run_id = %s"
+    run_before, metrics_before = _row(db_conn, q_run, RUN_RECOVERY)[0], _row(db_conn, q_metrics, RUN_RECOVERY)[0]
+    first = finish(client, RUN_RECOVERY, body)
+    other = finish(client, RUN_RECOVERY, {**body, "run_finished_at": iso(start + timedelta(seconds=720))})
+    for r in (first, other):
+        assert r.status_code == 200 and r.json()["result"] == "complete"
+        assert r.json()["verified_counts"] == {"location": 600, "heart_rate": 880}
+    assert _row(db_conn, q_run, RUN_RECOVERY)[0] == run_before
+    assert _row(db_conn, q_metrics, RUN_RECOVERY)[0] == metrics_before  # algo_version current: no recompute
+
+
+def test_replay_recomputes_a_legacy_run_without_inventing_recovery(client, db_conn):
+    from backend.metrics import PauseRow, SampleRow, compute_metrics
+    with db_conn.cursor() as cur:
+        cur.execute("select started_at from runningtracker.runs where id = %s", (RUN_COMPLETE,))
+        started = cur.fetchone()["started_at"]
+        cur.execute("select stream, seq, sample_ts, payload from runningtracker.run_samples where run_id = %s order by seq", (RUN_COMPLETE,))
+        rows = cur.fetchall()
+        cur.execute("select started_at, ended_at from runningtracker.run_pauses where run_id = %s", (RUN_COMPLETE,))
+        pauses = [PauseRow(p["started_at"], p["ended_at"]) for p in cur.fetchall()]
+    mk = lambda stream: [SampleRow(r["seq"], r["sample_ts"], r["payload"]) for r in rows if r["stream"] == stream]
+    legacy = compute_metrics(mk("location"), mk("heart_rate"), pauses, started)  # algorithm as of ALGO_VERSION 1
+
+    assert _row(db_conn, "select algo_version from runningtracker.run_metrics where run_id = %s", RUN_COMPLETE)[0]["algo_version"] == 1
+    body = {"finished_at": iso(started + timedelta(seconds=600)), "elapsed_s": 600.0, "moving_s": 540.0, "distance_m": 2000.0,
+            "last_seq": 40, "expected_counts": {"location": 20, "heart_rate": 20}, "pauses": []}
+    r = finish(client, RUN_COMPLETE, body)
+    assert r.status_code == 200 and r.json()["result"] == "complete"
+    m = _row(db_conn, "select * from runningtracker.run_metrics where run_id = %s", RUN_COMPLETE)[0]
+    assert m["algo_version"] == 2 and m["recovery"] is None
+    assert abs(m["server_distance_m"] - legacy.server_distance_m) < 1e-6
+    assert m["avg_hr"] == legacy.avg_hr and m["max_hr"] == legacy.max_hr
+    assert m["splits"] == legacy.splits and m["pace_series"] == legacy.pace_series and m["hr_series"] == legacy.hr_series
+    assert _row(db_conn, "select run_finished_at from runningtracker.runs where id = %s", RUN_COMPLETE)[0]["run_finished_at"] is None
+    assert client.get(f"{W}/runs/{RUN_COMPLETE}/recovery").json()["rows"] == []
+
+
+def test_old_phone_body_is_accepted_and_unknown_keys_are_not(client, db_conn):
+    bad = finish(client, RUN_RECOVERY_UPLOAD, up_body(surprise=1))
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert _row(db_conn, "select status from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]["status"] == "uploading"
+    ok = finish(client, RUN_RECOVERY_UPLOAD, up_body())
+    assert ok.status_code == 200 and ok.json()["result"] == "complete"

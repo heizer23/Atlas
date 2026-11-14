@@ -8,6 +8,7 @@
 -- runs      fix-run-complete c1..01 (device-1, 20 samples per stream, one pause, metrics)
 --           fix-run-gap      c1..02 (device-1, uploading, seq 5-8 missing)
 --           fix-run-revoked-uploading c1..03 (device-2, uploading)   fix-run-revoked-complete c1..04 (device-2, complete)
+--           (Sprint02 recovery runs c1..05, c1..06, c1..07: see the block at the end of this file)
 -- codes     fix-code-active 'FIXACTV2'   fix-code-expired 'FIXEXPD2'   fix-code-used 'FIXUSED2'
 
 insert into runningtracker.devices (id, name, token_hash, created_at, last_used_at, revoked_at) values
@@ -69,3 +70,64 @@ insert into runningtracker.pairing_codes (code_hash, created_at, expires_at, use
  (encode(sha256('FIXACTV2'::bytea), 'hex'), now(), now() + interval '5 minutes', null, null),
  (encode(sha256('FIXEXPD2'::bytea), 'hex'), now() - interval '1 hour', now() - interval '55 minutes', null, null),
  (encode(sha256('FIXUSED2'::bytea), 'hex'), now() - interval '10 minutes', now() + interval '4 minutes', now() - interval '9 minutes', 'd1000000-0000-0000-0000-000000000001');
+
+-- ── Sprint02_RunFinishAndRecovery ────────────────────────────────────────────
+-- fix-run-recovery        c1..05 complete, device-1. started 2026-01-12 08:00:00, run_finished_at +600 s, finished_at +900 s.
+--                         GPS 1..600 s (4 m/s north); HR 1..900 s with a spike (200 bpm at +599 s), a gap at +731..+750 s,
+--                         150 bpm while running, then 150 - (t-600)/5 (integer division); counts 600 / 880, last_seq 1480. Golden: hr_end 150, hr_60 138, hr_120 126.
+-- fix-run-recovery-nohr   c1..06 complete, device-1. run_finished_at +300 s, finished_at +480 s, GPS only, recovery all null.
+-- fix-run-recovery-upload c1..07 uploading, device-1. started 2026-01-14 08:00:00; GPS 1..300 s (seq 1..300), HR 1..450 s (seq 301..750):
+--                         150 bpm to +300 s, then 150 - (t-300)/5. Finish not yet called (run_finished_at +300 s, finished_at +450 s).
+insert into runningtracker.runs (id, run_type, status, started_at, finished_at, run_finished_at, elapsed_s, moving_s, distance_m, device_id, created_at) values
+ ('c1000000-0000-0000-0000-000000000005', 'continuous', 'complete',  '2026-01-12 08:00:00+00', '2026-01-12 08:15:00+00', '2026-01-12 08:10:00+00', 600, 600, 2396, 'd1000000-0000-0000-0000-000000000001', '2026-01-12 08:16:00+00'),
+ ('c1000000-0000-0000-0000-000000000006', 'continuous', 'complete',  '2026-01-13 08:00:00+00', '2026-01-13 08:08:00+00', '2026-01-13 08:05:00+00', 300, 300, 1180, 'd1000000-0000-0000-0000-000000000001', '2026-01-13 08:09:00+00'),
+ ('c1000000-0000-0000-0000-000000000007', 'continuous', 'uploading', '2026-01-14 08:00:00+00', null, null, null, null, null, 'd1000000-0000-0000-0000-000000000001', '2026-01-14 08:00:00+00');
+
+-- fix-run-recovery samples: locations seq 1..600 (= t), heart rate seq 601..1480 (880 readings, contiguous across the gap)
+insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload)
+select 'c1000000-0000-0000-0000-000000000005', 'location', n, timestamptz '2026-01-12 08:00:00+00' + n * interval '1 second',
+       jsonb_build_object('type', 'location.sample', 'timestamp', to_char(timestamptz '2026-01-12 08:00:00+00' + n * interval '1 second', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                          'latitude', 52.0 + (4.0 * n) / 111194.9266, 'longitude', 13.0, 'accuracyMeters', 5.0,
+                          'speedMetersPerSecond', null, 'altitudeMeters', null, 'bearingDegrees', null, 'elapsedRealtimeNanos', null)
+from generate_series(1, 600) as n;
+
+insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload)
+select 'c1000000-0000-0000-0000-000000000005', 'heart_rate', 600 + row_number() over (order by n), timestamptz '2026-01-12 08:00:00+00' + n * interval '1 second',
+       jsonb_build_object('type', 'heartRate.sample', 'timestamp', to_char(timestamptz '2026-01-12 08:00:00+00' + n * interval '1 second', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                          'bpm', case when n = 599 then 200 when n <= 600 then 150 else 150 - (n - 600) / 5 end,
+                          'rrIntervalsMs', null, 'source', 'bluetooth', 'elapsedRealtimeNanos', null)
+from generate_series(1, 900) as n
+where n not between 731 and 750;
+
+-- stored metrics: running-phase values only (avg = (599 * 150 + 200) / 600); curve value is a plausible 150 - k, steps 135/140/145 absent (gap)
+insert into runningtracker.run_metrics (run_id, algo_version, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery)
+select 'c1000000-0000-0000-0000-000000000005', 2, 2396, 150.0833333, 200, '[]'::jsonb,
+       '[[10, 250.0]]'::jsonb, '[[5, 150.0], [10, 150.0]]'::jsonb,
+       jsonb_build_object('hr_end', 150, 'hr_60', 138, 'hr_120', 126, 'hrr60', 12, 'hrr120', 24,
+                          'curve', (select jsonb_agg(jsonb_build_array(5 * k, 150 - k) order by k) from generate_series(0, 60) as k where 5 * k not in (135, 140, 145)));
+
+-- fix-run-recovery-nohr: GPS every 5 s, no heart rate
+insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload)
+select 'c1000000-0000-0000-0000-000000000006', 'location', n / 5, timestamptz '2026-01-13 08:00:00+00' + n * interval '1 second',
+       jsonb_build_object('type', 'location.sample', 'timestamp', to_char(timestamptz '2026-01-13 08:00:00+00' + n * interval '1 second', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                          'latitude', 52.0 + (4.0 * n) / 111194.9266, 'longitude', 13.0, 'accuracyMeters', 5.0)
+from generate_series(5, 300, 5) as n;
+
+insert into runningtracker.run_metrics (run_id, algo_version, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery) values
+ ('c1000000-0000-0000-0000-000000000006', 2, 1180, null, null, '[]'::jsonb, '[[10, 250.0]]'::jsonb, '[]'::jsonb,
+  '{"hr_end": null, "hr_60": null, "hr_120": null, "hrr60": null, "hrr120": null, "curve": []}'::jsonb);
+
+-- fix-run-recovery-upload: all samples stored (running GPS + HR, recovery-phase HR); finish not yet called
+insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload)
+select 'c1000000-0000-0000-0000-000000000007', 'location', n, timestamptz '2026-01-14 08:00:00+00' + n * interval '1 second',
+       jsonb_build_object('type', 'location.sample', 'timestamp', to_char(timestamptz '2026-01-14 08:00:00+00' + n * interval '1 second', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                          'latitude', 52.0 + (4.0 * n) / 111194.9266, 'longitude', 13.0, 'accuracyMeters', 5.0,
+                          'speedMetersPerSecond', null, 'altitudeMeters', null, 'bearingDegrees', null, 'elapsedRealtimeNanos', null)
+from generate_series(1, 300) as n;
+
+insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload)
+select 'c1000000-0000-0000-0000-000000000007', 'heart_rate', 300 + n, timestamptz '2026-01-14 08:00:00+00' + n * interval '1 second',
+       jsonb_build_object('type', 'heartRate.sample', 'timestamp', to_char(timestamptz '2026-01-14 08:00:00+00' + n * interval '1 second', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                          'bpm', case when n <= 300 then 150 else 150 - (n - 300) / 5 end,
+                          'rrIntervalsMs', null, 'source', 'bluetooth', 'elapsedRealtimeNanos', null)
+from generate_series(1, 450) as n;

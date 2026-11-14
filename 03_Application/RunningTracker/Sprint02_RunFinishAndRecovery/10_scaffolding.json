@@ -1,0 +1,489 @@
+{
+  "sprint_note": "Delta-only scaffolding: lists only files created or changed by Sprint02 (backend recovery/HRR, additive schema, web recovery card, and the AtlasPhone run-finish/recovery/recap code); everything not listed is unchanged. Constants are declared once here (config.py for Python, HrConfig/RecoveryConfig for Kotlin with the same names and values).",
+  "component_name": "runningtracker",
+  "target_root": "03_Application/RunningTracker",
+  "cross_layer_note": "Backend and web live under 03_Application/RunningTracker. Native files live under 01_System/AtlasPhone (package net.linspad.atlasphone, abbreviated PH below = 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running and PT = 01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running; the paths in files[] are always written out in full). change=new files do not exist yet, change=changed files exist.",
+  "directories": [
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/hr",
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/recap",
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/settings"
+  ],
+  "files": [
+    {
+      "path": "03_Application/RunningTracker/schema.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Runtime copy of 10_schema.sql (single canonical runtime path, R-CON-BP-07): adds runs.run_finished_at, constraint ck_runs_run_finished_at, run_metrics.recovery. Idempotent.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/config.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Single home of server constants. ALGO_VERSION changes from 1 to 2 (usages: backend/routers/native.py, backend/metrics.py, tests/test_metrics.py, tests/test_native_sync.py). New HR/recovery constants below (HR1/HRR1 in 10_architecture.json).",
+      "public_objects": [
+        {"kind": "constant", "name": "ALGO_VERSION", "pattern": "constant", "methods": [], "value": "2 (CHANGED from 1: recomputes complete runs on the next finish replay)"},
+        {"kind": "constant", "name": "HR_VALID_MIN_BPM", "pattern": "constant", "methods": [], "value": "30"},
+        {"kind": "constant", "name": "HR_VALID_MAX_BPM", "pattern": "constant", "methods": [], "value": "230"},
+        {"kind": "constant", "name": "HR_SPIKE_MAX_BPM_PER_S", "pattern": "constant", "methods": [], "value": "40.0"},
+        {"kind": "constant", "name": "HRR_END_BEFORE_S", "pattern": "constant", "methods": [], "value": "3.0"},
+        {"kind": "constant", "name": "HRR_END_AFTER_S", "pattern": "constant", "methods": [], "value": "2.0"},
+        {"kind": "constant", "name": "HRR_POINT_HALF_WINDOW_S", "pattern": "constant", "methods": [], "value": "3.0"},
+        {"kind": "constant", "name": "HRR_MIN_VALID_SAMPLES", "pattern": "constant", "methods": [], "value": "2"},
+        {"kind": "constant", "name": "HRR_T1_S", "pattern": "constant", "methods": [], "value": "60.0"},
+        {"kind": "constant", "name": "HRR_T2_S", "pattern": "constant", "methods": [], "value": "120.0"},
+        {"kind": "constant", "name": "RECOVERY_CURVE_STEP_S", "pattern": "constant", "methods": [], "value": "5.0"},
+        {"kind": "constant", "name": "RECOVERY_CURVE_WINDOW_S", "pattern": "constant", "methods": [], "value": "5.0"}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/recovery.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Pure implementation of HR1 (validity) and HRR1 (recovery metrics + curve). No database, no clock. Imported by metrics.py (so it must not import metrics.py: inputs are plain (timestamp, bpm) tuples).",
+      "public_objects": [
+        {"kind": "function", "name": "valid_hr_points", "pattern": "validator", "methods": [{"name": "valid_hr_points", "visibility": "public", "args": ["points: list[tuple[datetime, float]]"], "returns": "list[tuple[datetime, float]]", "purpose": "Apply HR1 (range check, then isolated-spike rule) to time-ordered points; returns the valid points; never alters values."}]},
+        {"kind": "function", "name": "compute_recovery", "pattern": "service", "methods": [{"name": "compute_recovery", "visibility": "public", "args": ["points: list[tuple[datetime, float]]", "run_finished_at: datetime", "training_end: datetime"], "returns": "dict", "purpose": "HRR1: returns {hr_end, hr_60, hr_120, hrr60, hrr120, curve} where the scalars are float|None and curve is [[t_s_since_run_finished_at, bpm], ...]; points = all raw HR samples of the run (running + recovery), unfiltered."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/metrics.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "A1 plus RS2 clipping and the recovery object. Usages of changed symbols found by grep: compute_metrics (metrics.recompute_and_store, tests/test_metrics.py:21), recompute_and_store (routers/native.py x2, fit_import.py:135, tests/test_metrics.py:81,85), MetricsResult (metrics.py only).",
+      "public_objects": [
+        {"kind": "class", "name": "MetricsResult", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["server_distance_m: float", "avg_hr: Optional[float]", "max_hr: Optional[int]", "splits: list[dict]", "pace_series: list[list[float]]", "hr_series: list[list[float]]", "recovery: Optional[dict] = None"], "returns": "MetricsResult", "purpose": "CHANGED: adds recovery (None when run_finished_at is None)."}]},
+        {"kind": "function", "name": "compute_metrics", "pattern": "service", "methods": [{"name": "compute_metrics", "visibility": "public", "args": ["locations: list[SampleRow]", "heart_rates: list[SampleRow]", "pauses: list[PauseRow]", "started_at: datetime", "run_finished_at: Optional[datetime] = None", "finished_at: Optional[datetime] = None"], "returns": "MetricsResult", "purpose": "CHANGED: when run_finished_at is set, drop locations and heart rates with ts > run_finished_at before A1 (RS2) and compute recovery via recovery.compute_recovery using finished_at as training end; when None behave exactly as ALGO_VERSION 1. finished_at None with run_finished_at set -> recovery None."}]},
+        {"kind": "function", "name": "recompute_and_store", "pattern": "repository", "methods": [{"name": "recompute_and_store", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "None", "purpose": "CHANGED: also loads runs.run_finished_at and runs.finished_at, passes them to compute_metrics, and upserts run_metrics.recovery (pass Json(obj) for an object, plain None for SQL NULL; never Json(None))."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/models.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Wire records. FinishRequest gains the optional run_finished_at (extra keys stay forbidden: deploy order C1).",
+      "public_objects": [
+        {"kind": "class", "name": "FinishRequest", "pattern": "data_model", "methods": [
+          {"name": "__init__", "visibility": "public", "args": ["finished_at: datetime", "elapsed_s: float", "moving_s: float", "distance_m: float", "last_seq: int", "expected_counts: StreamCounts", "pauses: list[PauseIn]", "dropped: int = 0", "category: Optional[str] = None", "route_id: Optional[str] = None", "ghost_run_id: Optional[str] = None", "run_finished_at: Optional[datetime] = None"], "returns": "FinishRequest", "purpose": "CHANGED: run_finished_at = end of the running phase (phone UTC); omitted/None = no recovery phase. Model validator: run_finished_at > finished_at -> ValueError (422)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/native.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "finish(): after the existing finished_at >= started_at check, reject run_finished_at < runs.started_at with 422 VALIDATION_ERROR before any write; for non-complete runs add run_finished_at to the summary UPDATE (value or NULL); complete-run replay leaves stored values untouched and recomputes from them. No other native route changes.",
+      "public_objects": [
+        {"kind": "function", "name": "finish", "pattern": "router", "methods": [{"name": "finish", "visibility": "public", "args": ["run_id: str", "body: FinishRequest", "device: DeviceContext"], "returns": "FinishResponse", "purpose": "CHANGED behavior only (see surface POST /native/runs/{id}/finish); signature unchanged."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/runs.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Adds GET /runs/{id}/recovery and series metric recovery_hr (Literal gains 'recovery_hr'; the _metrics_column helper stays the only reader of run_metrics columns).",
+      "public_objects": [
+        {"kind": "function", "name": "get_recovery", "pattern": "router", "methods": [{"name": "get_recovery", "visibility": "public", "args": ["run_id: str"], "returns": "JSONResponse", "purpose": "NEW: GET /runs/{id}/recovery (Dataset | ApiError)."}]},
+        {"kind": "function", "name": "get_series", "pattern": "router", "methods": [{"name": "get_series", "visibility": "public", "args": ["run_id: str", "metric: Literal['pace','heart_rate','recovery_hr']"], "returns": "JSONResponse", "purpose": "CHANGED: recovery_hr reads run_metrics.recovery->'curve'."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/datasets.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Dataset builders. recovery_dataset implements RecoveryRow (declared in 10_architecture.json exposed_surfaces); series_dataset labels metric recovery_hr 'Recovery heart rate'.",
+      "public_objects": [
+        {"kind": "function", "name": "recovery_dataset", "pattern": "mapper", "methods": [{"name": "recovery_dataset", "visibility": "public", "args": ["run_id: str", "run_finished_at: Optional[datetime]", "finished_at: Optional[datetime]", "recovery: Optional[dict]"], "returns": "Dataset", "purpose": "NEW: single RecoveryRow Dataset, or an empty Dataset (object_type 'run_recovery', total 0) when recovery is None."}]},
+        {"kind": "function", "name": "series_dataset", "pattern": "mapper", "methods": [{"name": "series_dataset", "visibility": "public", "args": ["metric: str", "points: list[list[float]]"], "returns": "Dataset", "purpose": "CHANGED label mapping only: pace -> 'Pace', heart_rate -> 'Heart rate', recovery_hr -> 'Recovery heart rate'; signature unchanged."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures/recovery_golden.json",
+      "change": "new",
+      "stub_kind": "json",
+      "role": "Golden vectors for HR1/HRR1 (inputs: (timestamp, bpm) points, run_finished_at, training_end; expected: valid-point set, hr_end, hr_60, hr_120, hrr60, hrr120, curve). Read by pytest (backend/recovery.py) AND the Kotlin RecoveryMetricsTest/HrSmoothingTest (path relative to 01_System/AtlasPhone as for metrics_golden.json). Tolerance 0.01 bpm.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Extend (do not remove existing rows): complete run fix-run-recovery (run_finished_at set, HR samples straddling it, metrics with recovery), complete run fix-run-recovery-nohr (run_finished_at set, no HR samples), complete legacy run fix-run-complete keeps run_metrics.algo_version 1 and run_finished_at NULL, uploading run fix-run-recovery-upload (samples after run_finished_at, finish not yet called).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_recovery.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Pure HR1/HRR1 scenarios from recovery_golden.json (valid points, spike, sparse, early end, curve, no HR).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_metrics.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Line 91 asserts algo_version == 2; add RS2 clipping scenarios (running-only avg/max/series/distance, legacy run unchanged).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_native_sync.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Line 225 asserts algo_version == 2; add finish scenarios with run_finished_at (valid, invalid ordering, omitted, replay, recompute of the legacy fixture, old-body compatibility, V1 counts include recovery samples).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_web_api.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Add GET /runs/{id}/recovery and series recovery_hr scenarios (row, empty Dataset, 404, 422 for an unknown metric).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/RunDetailPage.tsx",
+      "change": "changed",
+      "stub_kind": "react_component",
+      "role": "Adds a Recovery card after the HR chart: fetches /runningtracker/runs/{id}/recovery and /series?metric=recovery_hr alongside the existing four requests (an ApiError in the new requests shows the existing ErrorCard); renders nothing when the recovery Dataset has no row; shows HR end/60/120 and HRR60/HRR120 as whole bpm ('-' for null, never 0), a LineChart of recovery_hr (x t_label, y value, avg) and the copy 'HRR is the drop after exercise, not the return to resting heart rate.'. Existing cards unchanged.",
+      "public_objects": [
+        {"kind": "function", "name": "RunDetailPage", "pattern": "view", "methods": [{"name": "RunDetailPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "CHANGED: adds the Recovery card."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/ui/running_web.spec.ts",
+      "change": "changed",
+      "stub_kind": "playwright_spec",
+      "role": "Add [UI] scenarios of 10_test_spec.md for the Recovery card with stubbed API responses (existing pattern).",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/hr/HrSmoothing.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure, Android-free HR1 validity + HR2 display smoothing. Constants have the same names/values as backend/config.py (HR_VALID_MIN_BPM, HR_VALID_MAX_BPM, HR_SPIKE_MAX_BPM_PER_S) plus the phone-only ones below; validity parity is verified with recovery_golden.json.",
+      "public_objects": [
+        {"kind": "class", "name": "HrSmoothingMode", "pattern": "enum", "methods": [], "values": "RAW, ROLLING_5S, ROLLING_10S (default ROLLING_5S)"},
+        {"kind": "class", "name": "HrPoint", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["tsMillis: Long", "bpm: Int"], "returns": "HrPoint", "purpose": "One raw HR reading (timestamp = sample timestamp, UTC epoch ms)."}]},
+        {"kind": "class", "name": "SmoothedPoint", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["tsMillis: Long", "bpm: Double?"], "returns": "SmoothedPoint", "purpose": "Display value; bpm null = gap (never 0)."}]},
+        {"kind": "constant", "name": "HrConfig", "pattern": "constant", "methods": [], "value": "object: VALID_MIN_BPM=30, VALID_MAX_BPM=230, SPIKE_MAX_BPM_PER_S=40.0 (same as backend/config.py); ROLLING_5S_S=5.0, ROLLING_10S_S=10.0, RAW_TOLERANCE_S=2.0 (HR_RAW_TOLERANCE_S), GAP_BREAK_S=5.0 (HR_GAP_BREAK_S), RECAP_BUCKET_S=1.0 (HR_RECAP_BUCKET_S)"},
+        {"kind": "constant", "name": "HrSmoothing", "pattern": "service", "methods": [
+          {"name": "validSamples", "visibility": "public", "args": ["samples: List<HrPoint>"], "returns": "List<HrPoint>", "purpose": "HR1 on time-ordered samples: range check then isolated-spike rule; returns the valid ones unchanged."},
+          {"name": "valueAt", "visibility": "public", "args": ["samples: List<HrPoint>", "mode: HrSmoothingMode", "atMillis: Long", "centered: Boolean"], "returns": "Double?", "purpose": "HR2 value at a time: mean of valid samples in the mode's window (trailing (t-n,t] or centered); RAW = nearest valid sample within RAW_TOLERANCE_S; null when no valid sample (never 0)."},
+          {"name": "series", "visibility": "public", "args": ["samples: List<HrPoint>", "mode: HrSmoothingMode"], "returns": "List<SmoothedPoint>", "purpose": "One point per input sample, centered window; RAW = the sample's own bpm if valid else null; null where the window has no valid sample."},
+          {"name": "isGap", "visibility": "public", "args": ["prevTsMillis: Long", "nextTsMillis: Long"], "returns": "Boolean", "purpose": "True when the time between consecutive samples exceeds GAP_BREAK_S (charts break the line)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/recap/RecapModels.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Persisted recap data types (JSON via org.json, nulls tolerated, used inside RunMeta.toJson/fromJson). Authoritative definitions of every new RunMeta key payload.",
+      "public_objects": [
+        {"kind": "class", "name": "RecoverySummary", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["hrEnd: Double?", "hr60: Double?", "hr120: Double?", "hrr60: Double?", "hrr120: Double?"], "returns": "RecoverySummary", "purpose": "HRR1 scalars (all nullable, never 0 for missing)."},
+          {"name": "toJson", "visibility": "public", "args": [], "returns": "JSONObject", "purpose": "Serialize."},
+          {"name": "fromJson", "visibility": "public", "args": ["o: JSONObject"], "returns": "RecoverySummary", "purpose": "Deserialize (companion)."}
+        ]},
+        {"kind": "class", "name": "FinishStanding", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["position: Int", "fieldSize: Int", "overtaken: Int", "routeCompleted: Boolean", "routeTimeS: Double?", "rivalBeaten: Boolean", "rivalMarginS: Double?", "rivalTimeS: Double", "personalRecord: Boolean", "previousRunRank: Int?", "beatPreviousRun: Boolean?"], "returns": "FinishStanding", "purpose": "ST1 result persisted at Finish Run; displayed as position / (fieldSize + 1)."},
+          {"name": "toJson", "visibility": "public", "args": [], "returns": "JSONObject", "purpose": "Serialize."},
+          {"name": "fromJson", "visibility": "public", "args": ["o: JSONObject"], "returns": "FinishStanding", "purpose": "Deserialize (companion)."}
+        ]},
+        {"kind": "class", "name": "RecapData", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["standing: FinishStanding?", "splits: List<SplitInfo>", "maxHr: Int?", "hrSeries: List<HrPoint>"], "returns": "RecapData", "purpose": "Everything the recap needs offline: standing (null without ghost), running-phase per-km splits, running-phase max HR, HR mean per RECAP_BUCKET_S over running + recovery (absolute timestamps; empty without HR)."},
+          {"name": "toJson", "visibility": "public", "args": [], "returns": "JSONObject", "purpose": "Serialize."},
+          {"name": "fromJson", "visibility": "public", "args": ["o: JSONObject"], "returns": "RecapData", "purpose": "Deserialize (companion)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/recap/RecoveryMetrics.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure Kotlin implementation of HRR1 scalars (constants as in backend/config.py: HRR_END_BEFORE_S, HRR_END_AFTER_S, HRR_POINT_HALF_WINDOW_S, HRR_MIN_VALID_SAMPLES, HRR_T1_S, HRR_T2_S; declared in a RecoveryConfig object). Parity with backend/recovery.py via recovery_golden.json. The curve is server-only.",
+      "public_objects": [
+        {"kind": "constant", "name": "RecoveryConfig", "pattern": "constant", "methods": [], "value": "object: END_BEFORE_S=3.0, END_AFTER_S=2.0, POINT_HALF_WINDOW_S=3.0, MIN_VALID_SAMPLES=2, T1_S=60.0, T2_S=120.0 (same values as the backend HRR_* constants); REMINDER_MS=900000 (RECOVERY_REMINDER_MS, phone only)"},
+        {"kind": "constant", "name": "RecoveryMetrics", "pattern": "service", "methods": [
+          {"name": "compute", "visibility": "public", "args": ["hr: List<HrPoint>", "runFinishedAtMillis: Long", "trainingEndMillis: Long"], "returns": "RecoverySummary", "purpose": "HRR1: valid points via HrSmoothing.validSamples, median point values, null rules, hrr = hr_end - hr_x."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/recap/RecoveryTracker.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Live accumulator for the recovery screen; the only consumer of HR samples while in RECOVERY (the RunMetricsAccumulator no longer receives them). Pure; clock passed in.",
+      "public_objects": [
+        {"kind": "class", "name": "RecoveryLive", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["secondsSinceRunEnd: Double", "summary: RecoverySummary", "points: List<HrPoint>", "lastHr: Int?", "reminderDue: Boolean"], "returns": "RecoveryLive", "purpose": "What RecoveryScreen renders; points = raw readings from runFinishedAt - END_BEFORE_S on (smoothed by the UI per HR2)."}]},
+        {"kind": "class", "name": "RecoveryTracker", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["runFinishedAtMillis: Long", "seed: List<HrPoint>"], "returns": "RecoveryTracker", "purpose": "seed = stored HR readings with ts >= runFinishedAt - END_BEFORE_S (also used to rebuild after process death)."},
+          {"name": "addHeartRate", "visibility": "public", "args": ["point: HrPoint"], "returns": "Unit", "purpose": "Append a reading (readings with bpm < 1 are kept raw, HR1 decides validity later)."},
+          {"name": "snapshot", "visibility": "public", "args": ["nowMillis: Long"], "returns": "RecoveryLive", "purpose": "RecoveryMetrics.compute with trainingEnd = nowMillis; lastHr = newest reading not older than A1.LIVE_HR_STALE_MS else null; reminderDue = now - runFinishedAt >= REMINDER_MS."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/recap/FinishStanding.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure ST1 computation (uses FieldRanking and GhostComparison unchanged).",
+      "public_objects": [
+        {"kind": "constant", "name": "FinishStandings", "pattern": "service", "methods": [
+          {"name": "compute", "visibility": "public", "args": ["main: GhostProfile", "field: List<GhostProfile>", "previousRunId: String?", "myMovingS: Double", "myProgressM: Double", "routeLengthM: Double"], "returns": "FinishStanding", "purpose": "ST1: field includes main (deduplicated by runId); routeCompleted uses GhostConfig.BACK_TOLERANCE_M; position, overtaken, rival result, personalRecord, previousRunRank, beatPreviousRun exactly as in ST1."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/recap/RecapBuilder.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure assembly of RecapData (flow step build_recap). Running-phase clipping at runFinishedAtMillis for splits/maxHr; hrSeries over all given HR.",
+      "public_objects": [
+        {"kind": "constant", "name": "RecapBuilder", "pattern": "mapper", "methods": [
+          {"name": "build", "visibility": "public", "args": ["locations: List<RawLocation>", "heartRates: List<RawHeartRate>", "pauses: List<PauseRecord>", "runFinishedAtMillis: Long?", "standing: FinishStanding?"], "returns": "RecapData", "purpose": "splits = RunMetrics.splits over locations/HR with ts <= runFinishedAtMillis (all when null); maxHr = max bpm >= 1 of those HR (null if none); hrSeries = per-RECAP_BUCKET_S mean of all heartRates with bpm >= 1; standing passed through."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/settings/RunSettings.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Phone-local display setting hr_smoothing (SharedPreferences atlas_run_settings, not secret, not uploaded). Store behind a tiny interface so JVM tests need no Android.",
+      "public_objects": [
+        {"kind": "class", "name": "SettingsStore", "pattern": "interface", "methods": [
+          {"name": "getString", "visibility": "public", "args": ["key: String"], "returns": "String?", "purpose": "Read."},
+          {"name": "putString", "visibility": "public", "args": ["key: String", "value: String"], "returns": "Unit", "purpose": "Write."}
+        ]},
+        {"kind": "class", "name": "RunSettings", "pattern": "repository", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["store: SettingsStore"], "returns": "RunSettings", "purpose": "Wraps a store."},
+          {"name": "hrSmoothing", "visibility": "public", "args": [], "returns": "HrSmoothingMode", "purpose": "Stored mode; ROLLING_5S when unset or unknown."},
+          {"name": "setHrSmoothing", "visibility": "public", "args": ["mode: HrSmoothingMode"], "returns": "Unit", "purpose": "Persist the mode name."},
+          {"name": "create", "visibility": "public", "args": ["context: Context"], "returns": "RunSettings", "purpose": "Companion factory backed by SharedPreferences atlas_run_settings."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/RunModels.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "RunState gains RECOVERY; RunMeta gains three optional trailing params (positional callers in tests/UploadWorker keep compiling). toJson writes them only as JSON keys runFinishedAtMillis, recovery, recap (null -> JSON null); fromJson tolerates missing keys (old metas) and keeps all existing behavior. RunSummary is unchanged and means running phase only.",
+      "public_objects": [
+        {"kind": "class", "name": "RunState", "pattern": "enum", "methods": [], "values": "PREPARED, RECORDING, PAUSED, RECOVERY (NEW), COMPLETED_LOCAL, PENDING_UPLOAD, SYNCED"},
+        {"kind": "class", "name": "RunMeta", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["captureId: String", "state: RunState", "preparedShortId: String?", "title: String?", "startedAtMillis: Long", "finishedAtMillis: Long?", "pauses: List<PauseRecord>", "summary: RunSummary?", "uploadCursor: Long", "lastError: String?", "needsRepair: Boolean", "routeId: String? = null", "ghostRunId: String? = null", "targetHr: Int? = null", "category: String? = null", "runFinishedAtMillis: Long? = null", "recovery: RecoverySummary? = null", "recap: RecapData? = null"], "returns": "RunMeta", "purpose": "CHANGED: last three params new. runFinishedAtMillis = end of running (null = no recovery phase); recovery = HRR1 result (null until Finish Training / without HR); recap = RecapData."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/RunLifecycle.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Pure state machine. Existing event semantics unchanged (usages found by grep: RunController, UploadWorker, RunLifecycleTest). New events and RecoveryGate below; a free run still enters at RECORDING.",
+      "public_objects": [
+        {"kind": "class", "name": "RunEvent", "pattern": "enum", "methods": [], "values": "START, PAUSE, RESUME, FINISH, QUEUE_UPLOAD, SYNCED, RECOVER, FINISH_RUN (NEW), FINISH_TRAINING (NEW)"},
+        {"kind": "constant", "name": "RunLifecycle", "pattern": "state_machine", "methods": [
+          {"name": "next", "visibility": "public", "args": ["state: RunState?", "event: RunEvent"], "returns": "RunState?", "purpose": "CHANGED: adds FINISH_RUN: RECORDING|PAUSED -> RECOVERY; FINISH_TRAINING: RECOVERY -> COMPLETED_LOCAL; RECOVER: RECOVERY -> RECOVERY (in addition to null|RECORDING|PAUSED -> PAUSED); every other combination stays null (illegal)."}
+        ]},
+        {"kind": "constant", "name": "RecoveryGate", "pattern": "validator", "methods": [
+          {"name": "offersRecovery", "visibility": "public", "args": ["currentHr: Int?"], "returns": "Boolean", "purpose": "O1: true iff a live HR reading exists (LiveMetrics.currentHr != null, already staleness-gated); false -> the UI offers plain Finish (FINISH), true -> Finish Run (FINISH_RUN)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ghost/GhostEngine.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Only GhostSession gains finalStanding; FieldRanking, GhostComparison and all existing members are unchanged (O3).",
+      "public_objects": [
+        {"kind": "class", "name": "GhostSession", "pattern": "service", "methods": [
+          {"name": "finalStanding", "visibility": "public", "args": ["previousRunId: String?"], "returns": "FinishStanding?", "purpose": "NEW: null when the tracker has no matched fix (WAITING_FOR_START); otherwise FinishStandings.compute with the last matched fix (tracker.lastMovingS/lastProgressM), the main profile, the deduplicated field and route.referenceDistanceM; GPS_LOST/OFF_COURSE status does not matter."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/live/LiveHistory.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "The HR series (and hrByProgress) record the display value instead of the raw reading. Usages found by grep: RunController.publish only.",
+      "public_objects": [
+        {"kind": "class", "name": "LiveHistory", "pattern": "service", "methods": [
+          {"name": "record", "visibility": "public", "args": ["m: LiveMetrics", "ghost: GhostLive?", "hrDisplay: Double? = m.currentHr?.toDouble()"], "returns": "Unit", "purpose": "CHANGED: hrDisplay (smoothed per HR2) is what is added to the HR series; default keeps old behavior."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/session/RunController.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Run owner. Adds Finish Run / Finish Training and the RECOVERY branches; the legacy finish keeps its behavior and additionally stores the recap. Flow steps 10-16 of 10_architecture.json. The private Active class gains a nullable RecoveryTracker and a short raw-HR window (private, same file).",
+      "public_objects": [
+        {"kind": "class", "name": "LiveRunState", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["meta: RunMeta", "metrics: LiveMetrics", "gpsState: String", "hrState: String", "ghost: GhostLive? = null", "trends: LiveTrends = LiveTrends.EMPTY", "recovery: RecoveryLive? = null", "hrDisplay: Double? = null"], "returns": "LiveRunState", "purpose": "CHANGED: recovery non-null only in RECOVERY; hrDisplay = HR2 live value (null = no valid HR)."}
+        ]},
+        {"kind": "class", "name": "RunController", "pattern": "service", "methods": [
+          {"name": "finishRun", "visibility": "public", "args": [], "returns": "suspend RunMeta", "purpose": "NEW flow step 10 (RS1). Throws IllegalStateException when RunLifecycle.next(state, FINISH_RUN) is null; state unchanged then."},
+          {"name": "finishTraining", "visibility": "public", "args": [], "returns": "suspend RunMeta", "purpose": "NEW flow step 12. Throws IllegalStateException unless state is RECOVERY. Result is PENDING_UPLOAD and the upload is enqueued."},
+          {"name": "finish", "visibility": "public", "args": [], "returns": "suspend RunMeta", "purpose": "CHANGED: unchanged lifecycle/behavior (flow step 13), additionally persists RunMeta.recap (RecapBuilder with standing from GhostSession.finalStanding); recovery and runFinishedAtMillis stay null."},
+          {"name": "interruptedRuns", "visibility": "public", "args": [], "returns": "List<RunMeta>", "purpose": "CHANGED: also includes persisted metas in state RECOVERY that are not the active run."},
+          {"name": "recover", "visibility": "public", "args": ["runId: String"], "returns": "Unit", "purpose": "CHANGED: for a meta in RECOVERY use flow step 15 (no GPS start, rebuild RecoveryTracker from stored HR, reattach); other states unchanged."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/net/AtlasClient.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "finish(...) signature unchanged; the request body additionally contains run_finished_at (SampleJson.iso of RunMeta.runFinishedAtMillis) only when that value is non-null (omit, never send null). Usages of finish found by grep: UploadWorker.kt:73, AtlasClientTest.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RecoveryScreen.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Compose recovery screen (see exposed_surfaces RecoveryScreen). Reads LiveRunState.recovery, RunSettings.hrSmoothing; reuses LiveCockpit.Sparkline/Line (internal, same module).",
+      "public_objects": [
+        {"kind": "function", "name": "RecoveryScreen", "pattern": "view", "methods": [{"name": "RecoveryScreen", "visibility": "public", "args": ["live: LiveRunState", "smoothing: HrSmoothingMode", "onReconnectHr: () -> Unit", "onFinishTraining: () -> Unit", "finishing: Boolean"], "returns": "Unit (@Composable)", "purpose": "Renders flow step 11 output; Finish Training goes through a confirm dialog."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RecapScreen.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Compose recap (see exposed_surfaces RecapScreen); replaces SummaryScreen: the SummaryScreen composable is removed from RunningScreen.kt (usage found by grep: RunningActivity.kt only) and its basic-facts body (distance, times, avg pace, avg HR, sync banner, retry, Open in Atlas) lives in RecapScreen as the fallback used when RunMeta.recap is null.",
+      "public_objects": [
+        {"kind": "function", "name": "RecapScreen", "pattern": "view", "methods": [{"name": "RecapScreen", "visibility": "public", "args": ["meta: RunMeta", "smoothing: HrSmoothingMode", "onDone: () -> Unit"], "returns": "Unit (@Composable)", "purpose": "Polls RunController.meta for sync state like the old summary; builds blocks only from persisted RunMeta data."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RunningScreen.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "RecordingPanel: Finish button/dialog depends on RecoveryGate (Finish Run vs Finish); when live.meta.state == RECOVERY render RecoveryScreen instead of the cockpit; interrupted banner (HomePanel) lists RECOVERY runs; smoothing selector on the home panel (RunSettings); SummaryScreen composable removed (moved into RecapScreen, see its role).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RunningActivity.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Page.SUMMARY hosts RecapScreen; onFinished callback unchanged (receives the RunMeta returned by finish/finishTraining; finishRun does not navigate, the screen switches because live state is RECOVERY).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/LiveCockpit.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "HrCard shows the smoothed display value; target-zone logic uses the same value rounded.",
+      "public_objects": [
+        {"kind": "function", "name": "HrCard", "pattern": "view", "methods": [{"name": "HrCard", "visibility": "public", "args": ["m: LiveMetrics", "hrDisplay: Double?", "hrState: String", "targetHr: Int?", "onReconnect: () -> Unit"], "returns": "Unit (@Composable)", "purpose": "CHANGED: hrDisplay added (call sites: RunningScreen.kt RecordingPanel, this file)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/GhostRaceScreen.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "HrPair and HrDistanceChart receive live.hrDisplay instead of m.currentHr (call sites lines ~94 and ~99); the 'no HR' status test (line ~143) keeps using the raw currentHr; Finish button text/dialog follows RecoveryGate via the existing onFinish callback.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md",
+      "change": "changed",
+      "stub_kind": "markdown",
+      "role": "Document RECOVERY state, FINISH_RUN/FINISH_TRAINING, RecoveryGate, HR smoothing setting, recap data (RunMeta keys), finish body field run_finished_at and the deploy-order note; status tags [tested: JVM] / [built] / [unverified]; hardware items stay [unverified].",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/HrSmoothingTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "HR1 validity/spike vs recovery_golden.json; window edges, gaps stay null, RAW vs rolling, trailing vs centered, isGap.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RecoveryMetricsTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "HRR1 scalars vs recovery_golden.json (normal, sparse, early end, no HR) and RecoveryTracker snapshots/reminder.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/FinishStandingTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "ST1: completed vs partial route, ties, PR, previous-run rank, rival beaten/margin, empty field behavior, no standing without a matched fix; FieldRanking unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RecapBuilderTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "Running-phase clipping of splits/maxHr/avg inputs, hrSeries buckets, no-HR run, recovery excluded from summary values.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RunMetaCompatTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "Old RunMeta JSON (without the new keys) decodes; new keys round-trip; RunSettings default/unknown value fallback.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RunLifecycleTest.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_test",
+      "role": "Extend the legal-transition table and the all-states x all-events sweep for RECOVERY, FINISH_RUN, FINISH_TRAINING, RECOVER-from-RECOVERY; RecoveryGate cases; full new path RECORDING -> RECOVERY -> COMPLETED_LOCAL -> PENDING_UPLOAD -> SYNCED.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/AtlasClientTest.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_test",
+      "role": "Finish body contains run_finished_at only when RunMeta.runFinishedAtMillis is set (omitted otherwise).",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

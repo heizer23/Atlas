@@ -214,3 +214,57 @@ test('[UI] prepare a run on a route with a ghost: latest, fastest or a specific 
   await page.getByRole('button', { name: 'Prepare run' }).click();
   await expect.poll(() => created).toEqual({ title: null, route_id: 'r-1', ghost: 'fastest' });
 });
+
+
+test('run detail shows the Recovery card', async ({ page }) => {
+  await page.route('**/api/runningtracker/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/runningtracker', '');
+    const metric = url.searchParams.get('metric');
+    if (path === `/runs/${RUN_SYNCED}`) return json(route, dataset('run', [run({})]));
+    if (path === `/runs/${RUN_SYNCED}/splits`) return json(route, dataset('run_split', [
+      { id: '1', km: 1, distance_m: 1000, duration_s: 340, pace_s_per_km: 340, avg_hr: 150, partial: false }]));
+    if (path === `/runs/${RUN_SYNCED}/recovery`) return json(route, dataset('run_recovery', [
+      { id: RUN_SYNCED, run_finished_at: '2030-01-07T08:30:00Z', recovery_s: 180, hr_end: 172, hr_60: 150, hr_120: 138, hrr60: 22, hrr120: 34 }]));
+    if (path === `/runs/${RUN_SYNCED}/series` && metric === 'recovery_hr') return json(route, series(8));
+    if (path === `/runs/${RUN_SYNCED}/series`) return json(route, series(8));
+    return json(route, dataset('x', []));
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  const card = page.getByTestId('recovery-card');
+  await expect(card).toBeVisible();
+  await expect(page.getByTestId('hrr60')).toHaveText('22 bpm');
+  await expect(page.getByTestId('hrr120')).toHaveText('34 bpm');
+  await expect(card).toContainText('172 bpm');
+  await expect(card).toContainText('150 bpm');
+  await expect(card).toContainText('138 bpm');
+  await expect(card.locator('svg').first()).toBeVisible();                       // recovery chart
+  await expect(card).toContainText('HRR is the drop after exercise, not the return to resting heart rate.');
+  await expect(page.getByTestId('pace-chart').locator('svg').first()).toBeVisible(); // existing cards are still there
+  await expect(page.getByTestId('hr-chart').locator('svg').first()).toBeVisible();
+  await expect(page.getByTestId('splits').locator('tbody tr')).toHaveCount(1);
+  await expect(page.getByLabel('Comment')).toHaveValue('tempo');
+});
+
+test('run detail hides the Recovery card without recovery and shows null values as a dash', async ({ page }) => {
+  let withRow = false;
+  await page.route('**/api/runningtracker/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/runningtracker', '');
+    if (path === `/runs/${RUN_SYNCED}`) return json(route, dataset('run', [run({})]));
+    if (path === `/runs/${RUN_SYNCED}/recovery`) return json(route, dataset('run_recovery', withRow ? [
+      { id: RUN_SYNCED, run_finished_at: '2030-01-07T08:30:00Z', recovery_s: 30, hr_end: 170, hr_60: null, hr_120: null, hrr60: null, hrr120: null }] : []));
+    return json(route, dataset('x', []));
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  await expect(page.getByTestId('pace-chart')).toBeVisible();
+  await expect(page.getByTestId('recovery-card')).toHaveCount(0);
+  await expect(page.getByText(/error/i)).toHaveCount(0);
+
+  withRow = true;
+  await page.reload();
+  await expect(page.getByTestId('recovery-card')).toBeVisible();
+  await expect(page.getByTestId('hrr60')).toHaveText('–');
+  await expect(page.getByTestId('hrr120')).toHaveText('–');
+  await expect(page.getByTestId('recovery-card')).toContainText('170 bpm');
+});

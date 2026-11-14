@@ -1,7 +1,9 @@
--- RunningTracker Sprint01_RecordAndSync -- private application schema.
+-- RunningTracker Sprint02_RunFinishAndRecovery -- private application schema.
+-- sprint_note: seeded from the runtime schema.sql (03_Application/RunningTracker/schema.sql, the clean snapshot; Sprint01's
+-- 10_schema.sql is stale) and extended additively. Everything marked [NEW] is this sprint's change; the rest is unchanged.
 -- Runtime canonical path: 03_Application/RunningTracker/schema.sql (copy of this file; executed idempotently at startup).
 -- Private tables: not a cross-application contract. Other components must never query schema `runningtracker`.
--- Time columns: run times (started_at, finished_at, pause stamps, sample_ts) are phone-reported UTC (persisted domain time);
+-- Time columns: run times (started_at, finished_at, run_finished_at, pause stamps, sample_ts) are phone-reported UTC (persisted domain time);
 -- created_at / expires_at / last_used_at / used_at / locked_at / failed_at / revoked_at are server time (now()).
 
 begin;
@@ -164,3 +166,25 @@ create index if not exists ix_run_route_progress_route on runningtracker.run_rou
 -- Ghost chosen when a run is prepared (resolved to a concrete run at preparation time; null = no ghost).
 alter table runningtracker.runs add column if not exists ghost_run_id uuid
     references runningtracker.runs(id) on delete set null;
+
+-- [NEW] Sprint02: end of the RUNNING phase (phone-reported UTC, persisted domain time). Everything between run_finished_at and
+-- finished_at is the recovery phase (HR only). NULL = legacy run or a run without recovery phase: the whole run is running.
+-- elapsed_s / moving_s / distance_m above keep their meaning and now describe the running phase only.
+alter table runningtracker.runs add column if not exists run_finished_at timestamptz;
+
+-- [NEW] Sprint02: ordering rule started_at <= run_finished_at <= finished_at (finished_at may still be null on a row that never finished).
+do $$
+begin
+    if not exists (select 1 from pg_constraint where conname = 'ck_runs_run_finished_at') then
+        alter table runningtracker.runs
+            add constraint ck_runs_run_finished_at
+            check (run_finished_at is null
+                   or (started_at is not null and run_finished_at >= started_at
+                       and (finished_at is null or run_finished_at <= finished_at)));
+    end if;
+end $$;
+
+-- [NEW] Sprint02: derived recovery metrics, recomputable from run_samples + runs.run_finished_at + runs.finished_at.
+-- SQL NULL (not JSON null) = no recovery phase. Object shape (declared once in 10_architecture.json exposed_surfaces, RecoveryRow/series):
+-- {"hr_end": n|null, "hr_60": n|null, "hr_120": n|null, "hrr60": n|null, "hrr120": n|null, "curve": [[t_s_since_run_finished_at, bpm], ...]}
+alter table runningtracker.run_metrics add column if not exists recovery jsonb;

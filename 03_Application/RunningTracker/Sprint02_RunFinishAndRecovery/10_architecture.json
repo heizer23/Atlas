@@ -1,0 +1,343 @@
+{
+  "sprint_note": "Splits run completion into Finish Run (running frozen, GPS off, HR continues in a RECOVERY phase) and Finish Training, adds HRR60/HRR120 + recovery curve, display-only HR smoothing, a data-backed recap screen and additive server fields (runs.run_finished_at, run_metrics.recovery); delta-only artifact (see open_questions OQ3).",
+  "component_name": "runningtracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Stores, verifies and presents runs recorded natively by AtlasPhone; this sprint adds a distinct recovery phase after the run (heart-rate recovery metrics, recap with ghost standing) while keeping running statistics and raw samples unpolluted.",
+  "classification": {
+    "why_application": "Running-domain meaning only: where the running phase ends, what counts as heart-rate recovery (HRR), which ghost standing/achievements are genuine. Cross-layer (as Sprint01): the native lifecycle/recap code lives in 01_System/AtlasPhone, its behavior is defined here. No reusable platform capability is added.",
+    "non_goals": [
+      "Cadence, metronome, live chart rework (roadmap Sprint 2)",
+      "Ghost names/colors/league, virtual pacers (roadmap Sprint 3)",
+      "Standalone packaging / first-run experience (roadmap Sprint 4)",
+      "Workout integration, any AI processing",
+      "Server-side smoothing modes (Raw/Rolling10s are phone display settings only)",
+      "System notifications for the recovery reminder (in-screen only)",
+      "Backfilling recovery for existing runs (they stay recovery = null)"
+    ],
+    "not_platform": "HRR rules, the run/recovery boundary and ghost standing are meaningful only to running. HR smoothing is a pure function used by running screens only; if a second app needs it, promotion to 02_Platform is a separate decision. No Dataset/contract change in Blueprint or Platform."
+  },
+  "contracts": {
+    "consumes": [
+      "Everything declared by Sprint01_RecordAndSync/10_architecture.json (Dataset contract, ApiError envelope, device-token native auth, V1 verification, A1 metrics, Mobile Platform API); unchanged unless named below",
+      "02_Platform/packages/platform_contracts/contracts.py (Dataset, DatasetMeta, ColumnSchema)",
+      "01_System/AtlasPhone MobilePlatform: platform.location.stop(), platform.heartRate.samples/state/reconnect(), platform.recorder (capture stays open during RECOVERY), platform.stopAll(), platform.ensureForegroundService",
+      "Existing ghost engine on the phone: FieldRanking.ranks (unchanged, O3), GhostComparison, GhostSession, GhostCache.library() (offline)"
+    ],
+    "provides": [
+      "Recovery is a distinct phase: pace, distance, running time, avg HR, max HR, pace/HR series and splits never include samples after the run end (runs.run_finished_at / RunMeta.runFinishedAtMillis).",
+      "Raw samples are never modified or dropped: recovery HR samples are stored and uploaded like any other sample; V1 verification counts them.",
+      "HRR60/HRR120 are comparable between runs: one fixed computation (invariant HRR1), identical on phone and server, null (never 0, never extrapolated) when not computable.",
+      "Existing runs stay valid: run_finished_at NULL and run_metrics.recovery NULL mean 'no recovery recorded'; their numbers are unchanged.",
+      "The recap works offline, with and without an H10, from persisted RunMeta data only; blocks without data are omitted, not shown as zero.",
+      "Atlas stays the history owner and the phone the live-run owner; the server never starts, finishes or ends a recovery."
+    ],
+    "invariants": [
+      "P1 (phase model, draft D1): one capture, one sample stream. runFinishedAt (RunMeta.runFinishedAtMillis phone-side, runs.run_finished_at server-side) is a time boundary inside that stream. finishedAt keeps meaning 'training ended'. runFinishedAt NULL = no recovery phase, whole run is running. Ordering startedAt <= runFinishedAt <= finishedAt (enforced by schema constraint ck_runs_run_finished_at and by 422 VALIDATION_ERROR on finish).",
+      "L1 (lifecycle, draft D2/O1/O2): states and events are declared in scaffolding RunLifecycle. New transitions: FINISH_RUN RECORDING|PAUSED -> RECOVERY; FINISH_TRAINING RECOVERY -> COMPLETED_LOCAL; RECOVER RECOVERY -> RECOVERY. FINISH (RECORDING|PAUSED -> COMPLETED_LOCAL) stays and is the only way to end a run without recovery. The UI offers Finish Run (-> RECOVERY) only when RecoveryGate.offersRecovery is true (a live HR reading exists at the button press), otherwise plain Finish. RECOVERY ends only through FINISH_TRAINING or an explicit Discard; there is no auto-finalize and no timeout. After ~15 minutes (RECOVERY_REMINDER_MS) the recovery screen shows an in-screen reminder, nothing else changes.",
+      "RS1 (running summary frozen, draft D3): at Finish Run the phone computes and persists the final running RunSummary and the ghost standing from samples with timestamp <= runFinishedAt, closes an open pause at runFinishedAt, stops GPS (location.stop only) and the location job, keeps recorder + HR + foreground service running. No location sample may be stored after runFinishedAt + drain (RunController waits DRAIN_MS before location.stop). FINISH_TRAINING never recomputes the running summary. runs.elapsed_s/moving_s/distance_m are therefore running-phase values; runs.finished_at - runs.run_finished_at is the recovery duration.",
+      "RS2 (server clipping): compute_metrics uses only samples with timestamp <= run_finished_at when it is set (locations: distance/pace/splits; heart rate: avg_hr, max_hr, hr_series, split avg_hr). When run_finished_at is NULL nothing is clipped and results equal ALGO_VERSION 1 output. ALGO_VERSION is bumped so complete runs recompute on the next finish replay (existing replay rule); a recompute of a legacy run changes nothing except algo_version.",
+      "HR1 (heart-rate validity, display + metrics; declared once here, constants in backend/config.py and Kotlin HrConfig with equal values): a sample is range-valid iff HR_VALID_MIN_BPM <= bpm <= HR_VALID_MAX_BPM. A range-valid sample that has both a previous and a next range-valid neighbor is a spike iff |bpm - prev|/max(dt_prev,1s) > HR_SPIKE_MAX_BPM_PER_S AND |bpm - next|/max(dt_next,1s) > HR_SPIKE_MAX_BPM_PER_S (an isolated spike, not a step change; first/last sample are never spikes; neighbors are the range-valid neighbors, not recursive). Valid = range-valid and not spike. Invalid samples are treated as missing for smoothed/recovery computations only; raw stays intact. Missing is never 0: windows without a valid sample yield null/gap. Pre-existing A1 rule 'bpm >= 1' for avg_hr/max_hr is unchanged (HR1 does not alter running avg/max).",
+      "HR2 (display smoothing, draft D6): HrSmoothingMode RAW | ROLLING_5S | ROLLING_10S, default ROLLING_5S, persisted locally (SharedPreferences atlas_run_settings, key hr_smoothing; phone-only, never sent to Atlas). ROLLING_n = mean of valid samples in the window of n seconds (time window, not sample count); trailing (t-n, t] for live values, centered [t-n/2, t+n/2] for recorded series. RAW = the sample's own value if valid when drawing a series, and the nearest valid sample within HR_RAW_TOLERANCE_S when asked for a value at a time. A chart treats a null point or a time gap > HR_GAP_BREAK_S between consecutive samples as a line break. Smoothing never alters stored data and is never uploaded.",
+      "HRR1 (recovery metrics; authoritative definition, implemented twice: Kotlin RecoveryMetrics and Python backend/recovery.py; parity enforced by tests/fixtures/recovery_golden.json read by both test suites): t0 = runFinishedAt, tEnd = trainingEnd (phone: finishedAt or 'now' for live display; server: runs.finished_at). Input = all heart-rate samples of the run (running + recovery, pauses ignored), filtered by HR1. point_value(a, b) = median of valid samples with a <= ts <= b (even count: mean of the two middle values), null if fewer than HRR_MIN_VALID_SAMPLES valid samples lie in [a, b] or if b > tEnd (window not fully observed). hr_end = point_value(t0 - HRR_END_BEFORE_S, t0 + HRR_END_AFTER_S). hr_60 = point_value(t0 + HRR_T1_S - HRR_POINT_HALF_WINDOW_S, t0 + HRR_T1_S + HRR_POINT_HALF_WINDOW_S); hr_120 likewise with HRR_T2_S. hrr60 = hr_end - hr_60, hrr120 = hr_end - hr_120 (positive = drop), null when either operand is null. Values are doubles; the UI rounds to whole bpm. Curve (server only; phone plots RecapData.hrSeries with the user's smoothing): for k = 0,1,2,... with t0 + k*RECOVERY_CURVE_STEP_S <= tEnd, value = mean of valid samples with ts in [tau - RECOVERY_CURVE_WINDOW_S/2, tau + RECOVERY_CURVE_WINDOW_S/2] and ts <= tEnd; windows with no valid sample are omitted (no zero-fill); stored as [t_s since run_finished_at, bpm]. The curve ignores the user's smoothing setting so runs stay comparable. HRR is the drop after exercise, not the return to resting heart rate (UI copy).",
+      "ST1 (ghost standing, draft D9/O3; computed on the phone at Finish Run, persisted in RunMeta.recap.standing; FieldRanking is used unchanged): only when the run has a GhostSession whose tracker has at least one matched fix; otherwise standing = null and the recap omits the block. (my moving time myT, progress myS) = last matched fix; field = all cached profiles on the route (main ghost included, deduplicated); fieldSize = number of ghost runs. routeCompleted = myS >= routeLengthM - GhostConfig.BACK_TOLERANCE_M. If routeCompleted: position = 1 + count(field runs whose profile duration (last point t) < myT) (ties favor the runner), routeTimeS = myT. Else position = 1 + count(field runs with GhostComparison.progressNow(profile, myT) > myS) (same mechanism as the live position) and routeTimeS = null. Display is position / (fieldSize + 1). overtaken = fieldSize - (position - 1) (ghosts behind at the final fix). rivalBeaten (rival = main ghost): routeCompleted ? main duration > myT : GhostComparison.compare(main, myT, myS).leadM > 0; rivalMarginS = routeCompleted ? abs(main duration - myT) : abs(compare.timeGapS) or null; rivalTimeS = main duration. Achievements are derived only from these facts: personalRecord = routeCompleted && fieldSize >= 1 && position == 1; previousRun = most recent library run on the route by startedAtMillis; beatPreviousRun = routeCompleted && previous profile cached ? previous duration > myT : null; previousRunRank = FieldRanking.ranks(field)[previousRun] or null. If a fact is null/false the achievement is not shown. myT is untrimmed moving time while profile durations have the idle start trimmed (PROGRESS_ALGO_VERSION 2), so the comparison is conservative (never a false PR); see OQ1.",
+      "T2 (time authority, R-CON-AL-06): runFinishedAt, finishedAt and all HRR windows use persisted phone-reported UTC sample/run timestamps; the server never reads its own clock for them (same as Sprint01 T1). The live recovery clock on the phone is wall time since runFinishedAt for display and the reminder; persisted values come from sample timestamps and finishedAt only.",
+      "Q2 (query behavior, R-CON-AL-01/-02): see query on each exposed surface. Both new/changed read surfaces take no pagination, have deterministic ordering, define the empty case (empty Dataset, total 0) and the unknown-run case (404 NOT_FOUND) for every state of a run (uploading, complete with recovery, complete without recovery, legacy).",
+      "C1 (compatibility / deploy order): all schema and wire changes are additive and nullable. FinishRequest forbids unknown keys, therefore the server MUST be deployed before a phone build that sends run_finished_at (a new phone against an old server would get 422 on finish). An old phone build against the new server keeps working (field omitted = legacy behavior). RunMeta JSON gains optional keys (runFinishedAtMillis, recovery, recap); RunMeta.fromJson tolerates their absence (old metas) and the RECOVERY state value is only written by this sprint's code.",
+      "P2 (durable state, R-CON-BP-03): Postgres: runs.run_finished_at, run_metrics.recovery (10_schema.sql, owner RunningTracker, lifecycle = recomputable/derived for recovery, phone-reported for run_finished_at). Phone: RunMeta in CaptureStore.run_meta (existing table, additive JSON keys; deleted with the capture) and SharedPreferences atlas_run_settings (hr_smoothing, not secret, not uploaded). RunMeta.recap exists because local samples are purged after a verified sync, while the recap must render from persisted data; it holds a 1-second-bucket mean HR series (HR_RECAP_BUCKET_S) plus splits, so it is a display copy, not the raw record (raw stays in capture/Postgres).",
+      "N3 (no regression): the existing Free Run, prepared run, ghost race, recover/discard, upload and V1 paths behave as before when FINISH_RUN is not used; RunLifecycleTest transitions for the old events stay valid; MobilePlatform public API, TWA and FCM are untouched."
+    ],
+    "failure_modes": [
+      "VALIDATION_ERROR (422) on POST /native/runs/{id}/finish: run_finished_at earlier than runs.started_at or later than finished_at. The phone shows the existing finish error path (stays pending_upload with lastError); consumer must fix the clock/meta, not retry blindly.",
+      "VALIDATION_ERROR (422) from an OLD server for the new key run_finished_at (deploy-order violation, C1): phone keeps the run pending_upload with a visible error; resolution is deploying the server.",
+      "NOT_FOUND (404) GET /runs/{id}/recovery and /series for an unknown run (unchanged envelope).",
+      "VALIDATION_ERROR (422) GET /runs/{id}/series with metric outside pace|heart_rate|recovery_hr.",
+      "Recovery HR gaps (H10 disconnects/battery): the curve has gaps, hr_60/hr_120/hrr values become null; Finish Training stays possible; recap shows 'not available', never 0.",
+      "Finish Training immediately after Finish Run (< HRR_END_AFTER_S or < t+window): all HRR values null by HRR1; run is saved normally.",
+      "Illegal lifecycle event (e.g. FINISH_RUN while COMPLETED_LOCAL, FINISH_TRAINING outside RECOVERY): RunLifecycle.next returns null, RunController leaves state unchanged and throws IllegalStateException that the UI treats as 'ignore, refresh state'.",
+      "Process death / app kill during RECOVERY: run is offered Recover (resume recovery screen, HR reconnect best-effort) or Discard; the running summary was already persisted at Finish Run; never auto-finalized.",
+      "Local capture missing at Finish Training: recovery and hrSeries are null, standing/splits from Finish Run remain; upload then reports 'Local capture is missing' (existing behavior).",
+      "No ghost session or no matched fix: standing = null, recap omits position/overtaken/rival and achievements.",
+      "Sample count growth: recovery HR adds ~1 sample/s to a capture; V1 counts them; a 15+ minute recovery is normal."
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "AtlasPhone MobilePlatform (see contracts.consumes); CaptureStore.fetch/info for sample replay at Finish Training and recovery",
+      "platform-ui: apiFetch, Dataset types, LineChart (web run detail)"
+    ],
+    "provides": [
+      "Native documentation update: 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md (RECOVERY state, Finish Run / Finish Training, HRR, smoothing setting, recap, finish body field), tags [tested: JVM] / [built] / [unverified]",
+      "Kotlin controller API: RunController.finishRun / finishTraining (declared in 10_scaffolding.json)",
+      "Compose screens RecoveryScreen and RecapScreen (native, not Dataset: R-CON-BP-04 governs HTTP read endpoints only)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/native/runs/{id}/finish",
+        "change": "changed",
+        "purpose": "Existing verified finish; gains the optional end of the running phase.",
+        "ui_contract": "none (machine-to-machine, exempt from Dataset; typed record FinishResponse | ApiError, unchanged)",
+        "exposure": "tailnet only; Bearer device token (unchanged, Sprint01 D1/E1)",
+        "query": "Body FinishRequest + optional run_finished_at (ISO-8601 UTC). Omitted/null = legacy behavior (run_finished_at NULL, no recovery). Provided = must satisfy started_at <= run_finished_at <= finished_at else 422 VALIDATION_ERROR. For a run that is not yet complete every finish call overwrites run_finished_at with the body value (null when omitted), like the other summary fields. For a run that is already complete the stored run_finished_at/finished_at are never changed (idempotent replay); the body value is ignored; recompute (when stored algo_version != ALGO_VERSION) uses the stored values. On result 'complete' metrics are computed per RS2/HRR1 and run_metrics.recovery is written (SQL NULL when run_finished_at is NULL, otherwise the object shape declared on GET /runs/{id}/series metric recovery_hr and GET /runs/{id}/recovery). 'incomplete' leaves status uploading, metrics untouched."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs/{id}/recovery",
+        "change": "new",
+        "purpose": "Heart-rate recovery summary of a run for the run detail.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No params. Single-row Dataset (RecoveryRow) when run_metrics.recovery is not NULL; empty Dataset (total 0) when the run has no recovery phase (legacy run, finished without recovery, or still uploading / no metrics); 404 ApiError if the run does not exist. Time basis: stored phone UTC.",
+        "row_shape": "RecoveryRow: id:string (= run id), run_finished_at:date, recovery_s:number (finished_at - run_finished_at in seconds), hr_end:number|null, hr_60:number|null, hr_120:number|null, hrr60:number|null, hrr120:number|null. object_type 'run_recovery'. No row_actions."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs/{id}/series",
+        "change": "changed",
+        "purpose": "Adds metric recovery_hr; heart_rate now covers the running phase only.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Param metric: pace | heart_rate | recovery_hr (required; anything else/missing -> 422). Unchanged for pace. heart_rate: for a run with run_finished_at the series stops at run_finished_at (RS2); legacy runs unchanged. recovery_hr: points = recovery.curve, x = seconds since run_finished_at (0 = end of running), value = bpm (SeriesRow shape of Sprint01; t_label formatted by the existing label function); ordered by t_s ASC; empty Dataset when recovery is NULL or the curve is empty; 404 if the run does not exist. Chart mapping as for the other metrics (x t_label, y value, aggregation avg).",
+        "row_shape": "SeriesRow (unchanged, declared in Sprint01_RecordAndSync/10_architecture.json exposed_surfaces; object_type 'run_series', label 'Recovery heart rate' for recovery_hr)."
+      },
+      {
+        "type": "kotlin_api",
+        "name": "RunController.finishRun / finishTraining / finish / recover",
+        "change": "changed",
+        "purpose": "Phone run end flows; signatures in 10_scaffolding.json (running/session/RunController.kt).",
+        "ui_contract": "none (in-process API)"
+      },
+      {
+        "type": "ui_screen",
+        "name": "RecoveryScreen (phone, Compose)",
+        "change": "new",
+        "purpose": "Shown while state == RECOVERY: running result recap line, time since run end, current (smoothed) HR, HR_end/HR60/HR120/HRR60/HRR120 as they become available, recovery HR graph, consistency guidance, 15-minute reminder, Finish Training button, HR connection state with Reconnect.",
+        "ui_contract": "none (native)"
+      },
+      {
+        "type": "ui_screen",
+        "name": "RecapScreen (phone, Compose)",
+        "change": "new",
+        "purpose": "Replaces the 'Run finished' card (SummaryScreen). Primary: distance, running time, avg pace, position n/N, ghosts overtaken, rival beaten + margin. Secondary: HR profile (smoothed), avg/max HR (running phase), HRR60/HRR120, pace evolution (splits), comparison to selected ghost. Genuine achievements only (ST1). Sync status and retry stay as in the old card. Works offline, with/without H10.",
+        "ui_contract": "none (native)"
+      },
+      {
+        "type": "ui_screen",
+        "name": "Run detail page (web, existing RunDetailPage)",
+        "change": "changed",
+        "purpose": "Adds a Recovery card (HRR60/HRR120, HR end/60/120, recovery curve, 'drop after exercise' copy) from GET /runs/{id}/recovery and series metric recovery_hr; nothing shown for runs without recovery.",
+        "ui_contract": "Dataset | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 7,
+      "change": "changed",
+      "name": "finish_run (server, delta to Sprint01 step 7)",
+      "description": "Additionally validate run_finished_at (P1) before any write, store it with the other summary fields on non-complete runs (complete runs: unchanged), and call recompute_and_store, which now reads runs.run_finished_at and runs.finished_at and passes them to compute_metrics; runs.run_metrics.recovery is SQL NULL when run_finished_at is NULL.",
+      "inputs": ["FinishRequest.run_finished_at", "runs.started_at", "FinishRequest.finished_at", "run_samples", "run_pauses"],
+      "outputs": ["FinishResponse (unchanged)", "runs.run_finished_at", "run_metrics.recovery"]
+    },
+    {
+      "step": 8,
+      "change": "changed",
+      "name": "serve_history (delta to Sprint01 step 8)",
+      "description": "Add the recovery endpoint (reads run_metrics.recovery and runs.run_finished_at/finished_at; builds one RecoveryRow or an empty Dataset) and series metric recovery_hr (reads recovery.curve). heart_rate series and RunRow avg_hr/max_hr read the clipped run_metrics values; no other read changes.",
+      "inputs": ["run id", "metric", "run_metrics", "runs"],
+      "outputs": ["Dataset | ApiError"]
+    },
+    {
+      "step": 9,
+      "change": "changed",
+      "name": "phone_record_and_sync (delta to Sprint01 step 9)",
+      "description": "Interrupted-run detection and Recover also cover state RECOVERY (see step 15); upload sends run_finished_at in the finish body when RunMeta.runFinishedAtMillis is set; everything else in the sync flow is unchanged.",
+      "inputs": ["RunMeta", "CaptureStore"],
+      "outputs": ["finish body incl. run_finished_at"]
+    },
+    {
+      "step": 10,
+      "change": "new",
+      "name": "phone_finish_run",
+      "description": "Precondition: state RECORDING|PAUSED (RunLifecycle FINISH_RUN) and a live HR reading (RecoveryGate) - otherwise the UI uses step 13. t0 = now; wait DRAIN_MS; cancel GPS/ghost/accumulator jobs; close an open pause at t0; location.stop() only (recorder, HR, foreground service stay); load stored samples, keep only ts <= t0 for the running summary (RunMetrics.summarize, monotonic elapsed/moving exactly as the legacy finish); build the partial recap (step 14: standing, splits, maxHr, running part of hrSeries); persist RunMeta {state RECOVERY, runFinishedAtMillis = t0, finishedAtMillis = null, summary, recap}; start a RecoveryTracker seeded with HR samples from t0 - HRR_END_BEFORE_S; HR collector now feeds the tracker, not the accumulator (no HR pollution of the running averages); publish LiveRunState with recovery set.",
+      "inputs": ["active run", "CaptureStore samples", "GhostSession", "monotonic clock", "GhostCache.library()"],
+      "outputs": ["RunMeta in RECOVERY", "LiveRunState.recovery"]
+    },
+    {
+      "step": 11,
+      "change": "new",
+      "name": "phone_recovery_phase",
+      "description": "Every second publish RecoveryLive from the RecoveryTracker: seconds since t0, smoothed HR (HR2, trailing, user mode), hr_end/hr_60/hr_120/hrr60/hrr120 computed by HRR1 with tEnd = now (values appear once their window is complete), raw recovery points for the graph, reminderDue (RECOVERY_REMINDER_MS since t0). HR disconnect: state shown, Reconnect button reuses platform.heartRate.reconnect(); the recovery clock keeps running. No state change except through FINISH_TRAINING or Discard.",
+      "inputs": ["platform.heartRate.samples", "RecoveryTracker", "RunSettings.hrSmoothing", "wall clock"],
+      "outputs": ["RecoveryLive"]
+    },
+    {
+      "step": 12,
+      "change": "new",
+      "name": "phone_finish_training",
+      "description": "Precondition: state RECOVERY (FINISH_TRAINING). Wait DRAIN_MS; cancel jobs; platform.stopAll() (recorder.stop marks the capture finished); tEnd = now; reload all stored samples; recovery = RecoveryMetrics.compute(all HR, t0, tEnd) (HRR1); rebuild recap fully (step 14, incl. recovery part of hrSeries), carrying standing over from the persisted RunMeta.recap.standing and never calling GhostSession.finalStanding (also on the recovered path of step 15, where no GhostSession exists); persist RunMeta {state COMPLETED_LOCAL, finishedAtMillis = tEnd, recovery, recap}, then QUEUE_UPLOAD -> PENDING_UPLOAD, enqueue UploadWorker (same path as the legacy finish); the running summary is not recomputed.",
+      "inputs": ["RunMeta in RECOVERY", "RunMeta.recap.standing", "CaptureStore samples", "wall clock"],
+      "outputs": ["RunMeta PENDING_UPLOAD with recovery and recap", "enqueued upload"]
+    },
+    {
+      "step": 13,
+      "change": "changed",
+      "name": "phone_finish_without_recovery",
+      "description": "Legacy FINISH path (no live HR at the button press, O1): behavior unchanged (stopAll, summary, COMPLETED_LOCAL -> PENDING_UPLOAD, enqueue), runFinishedAtMillis stays null, recovery stays null; additionally builds recap (step 14) before the active run is released so the recap also works for runs without H10.",
+      "inputs": ["active run", "CaptureStore samples", "GhostSession"],
+      "outputs": ["RunMeta PENDING_UPLOAD with recap (recovery null)"]
+    },
+    {
+      "step": 14,
+      "change": "new",
+      "name": "build_recap",
+      "description": "Pure assembly of RecapData: standing (ST1) from GhostSession.finalStanding at Finish Run and in the legacy finish (null without ghost), and carried over from the persisted RunMeta.recap.standing at Finish Training and on the recovered path (finalStanding is never called there), splits from RunMetrics.splits over running-phase samples, maxHr = max bpm >= 1 of running-phase HR (null without HR), hrSeries = mean of raw HR per HR_RECAP_BUCKET_S over the whole session (running + recovery, empty without HR; absolute timestamps as in HrPoint). Called with running-phase data at Finish Run, with all samples at Finish Training and in the legacy finish.",
+      "inputs": ["samples", "pauses", "runFinishedAtMillis?", "standing?"],
+      "outputs": ["RecapData"]
+    },
+    {
+      "step": 15,
+      "change": "new",
+      "name": "recover_interrupted_recovery",
+      "description": "interruptedRuns() additionally returns persisted metas in state RECOVERY that are not active. recover(runId) for such a run: RunLifecycle RECOVER (RECOVERY -> RECOVERY); recorder.start(runId) reopens the capture, location is NOT started, HR reconnect is best-effort; RecoveryTracker is rebuilt from stored HR samples with ts >= t0 - HRR_END_BEFORE_S; recovery screen resumes. Discard works as before. The legacy RECORDING/PAUSED recovery branch is unchanged.",
+      "inputs": ["RunMeta", "CaptureStore"],
+      "outputs": ["resumed recovery screen | discarded run"]
+    },
+    {
+      "step": 16,
+      "change": "new",
+      "name": "hr_display_smoothing",
+      "description": "Live cockpit, ghost race HR graphs/values, recovery screen and recap read the user's HrSmoothingMode through HrSmoothing (HR2). RunController keeps a short window of recent raw HR points per active run to produce LiveRunState.hrDisplay; LiveHistory records hrDisplay for its HR series; recap/recovery charts smooth recorded points centered. Nothing is written back to samples, RunMeta.summary or the server.",
+      "inputs": ["raw HR points", "RunSettings.hrSmoothing"],
+      "outputs": ["display values and chart series"]
+    },
+    {
+      "step": 17,
+      "change": "new",
+      "name": "compute_recovery_server",
+      "description": "Inside compute_metrics: when run_finished_at is set, apply RS2 clipping for the stored run HR values, and call compute_recovery(heart_rates, run_finished_at, finished_at) per HRR1 with the unclipped list of all HR samples (never the clipped list) and return the recovery object in MetricsResult; when run_finished_at is NULL return recovery None. recompute_and_store persists it into run_metrics.recovery (SQL NULL for None).",
+      "inputs": ["heart_rates", "run_finished_at", "finished_at"],
+      "outputs": ["MetricsResult.recovery"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "01_System/AtlasPhone", "role": "Native host: RunController, RunLifecycle, RunModels, ghost engine, Compose screens (file list in 10_scaffolding.json)"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset types for the new recovery surface"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error envelope (unchanged)"},
+      {"component": "02_Platform/Atlas_Shell/platform-ui", "role": "LineChart/apiFetch for the web recovery card (consumed only; no Shell file changes, no nginx change)"},
+      {"component": "02_Platform/Postgres (atlas-postgres)", "role": "schema runningtracker, additive columns"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "none new", "role": "No new Python, npm or Gradle dependency; JVM tests use the existing JUnit setup", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any change to the network exposure (no new port, no nginx change; native routes stay tailnet-only, Sprint01 D1/E1)",
+      "Domain logic (HRR, standing, smoothing) in 02_Platform",
+      "Deleting, rewriting or down-sampling raw samples; zero-filling missing heart rate anywhere",
+      "Server clock for run_finished_at, HRR windows or the recovery curve",
+      "Any AI/ML processing of runs; pre-building roadmap Sprint 2-4 features (cadence, audio, ghost identity, league)",
+      "Sending the HR smoothing setting to Atlas or storing it server-side",
+      "Auto-finalizing a RECOVERY run"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "runtime_schema_path": "03_Application/RunningTracker/schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Server first (C1), pure + tested before phone work: copy 10_schema.sql over schema.sql (additive; verify it re-runs idempotently); config.py new constants (ALGO_VERSION 1 -> 2 plus the HR/HRR constants listed in 10_scaffolding.json); new backend/recovery.py (HR1 validity incl. spike rule, HRR1 point values/curve); metrics.compute_metrics gains run_finished_at/finished_at (RS2 clipping, recovery in MetricsResult) and recompute_and_store reads/writes them (pass None for SQL NULL, never Json(None)); models.FinishRequest gains run_finished_at + ordering validator; native.finish stores it for non-complete runs, validates against runs.started_at, leaves complete runs untouched; runs router: GET /runs/{id}/recovery, series metric recovery_hr; datasets.recovery_dataset. Update every usage found by grep of the changed symbols: ALGO_VERSION (backend/routers/native.py, backend/metrics.py, tests/test_metrics.py:91 and tests/test_native_sync.py:225 assert algo_version == 1 -> 2), compute_metrics (backend/metrics.py recompute_and_store, tests/test_metrics.py), recompute_and_store (routers/native.py x2, backend/fit_import.py:135 - unchanged semantics because run_finished_at is NULL, tests/test_metrics.py); tests/fixtures.sql legacy run_metrics rows keep algo_version 1 on purpose (replay scenario).",
+      "Create tests/fixtures/recovery_golden.json (hand-checked vectors: normal recovery, sparse samples, spike, gap, training ended early, no HR, HR samples straddling t0) and make BOTH pytest and the Kotlin RecoveryMetricsTest read it (same oracle pattern as metrics_golden.json; path relative to 01_System/AtlasPhone as in Sprint01).",
+      "Phone, in this order, each step JVM-testable: (1) running/hr/HrSmoothing.kt + HrConfig; (2) running/recap/RecoveryMetrics.kt, RecoveryTracker.kt, FinishStanding pure compute; (3) RunModels.kt (RunState.RECOVERY, RunMeta new optional keys, tolerant fromJson, RecapModels JSON) + RunLifecycle.kt (events, RecoveryGate); (4) GhostEngine.kt GhostSession.finalStanding (FieldRanking untouched); (5) RunController finishRun/finishTraining/finish/recover/interruptedRuns, HR collector switch in RECOVERY, LiveRunState.recovery + hrDisplay, LiveHistory.record(hrDisplay); (6) AtlasClient.finish adds run_finished_at only when set; (7) RunSettings.kt; (8) screens. Keep the legacy finish path behavior-identical (N3).",
+      "Replace every use of the single FINISH button/dialog in RunningScreen.kt (RecordingPanel, GhostRaceScreen onFinish): button label/dialog depend on RecoveryGate.offersRecovery(live.metrics.currentHr); the Page.SUMMARY route in RunningActivity.kt now hosts RecapScreen; the RunningScreen interrupted banner lists RECOVERY runs with Recover/Discard; the live cockpit/ghost screens render live.hrDisplay instead of metrics.currentHr for the big HR value and the HR charts (HrCard, HrPair, HrDistanceChart call sites in LiveCockpit.kt/GhostRaceScreen.kt).",
+      "Existing tests to update (usages found by grep): RunLifecycleTest.kt (illegal-transition sweep over RunState.entries x RunEvent.entries must learn the new legal transitions; add RECOVERY cases), UploadPlannerTest/AtlasClientTest/GhostEngineTest construct RunMeta positionally - new RunMeta params must be appended with defaults so they compile unchanged.",
+      "Update 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md in the existing status-tag style; hardware items (H10 disconnect in recovery, GPS off while HR continues, kill during recovery, foreground-service type while GPS is stopped) stay [unverified] until a real run.",
+      "Web: RunDetailPage.tsx Recovery card (hidden when the recovery Dataset is empty; HRR rendered as whole bpm 'drop'; HR copy per HRR1 last sentence), format.ts helper only if needed; Playwright spec with stubbed API. Frontend deploy via the Stop hook; compose rebuild needs --env-file 01_System/secrets.env --env-file 01_System/config.env; deploy server before installing the new phone build (C1)."
+    ],
+    "ui_implementer": [
+      "RecoveryScreen.kt (Compose, same dark high-contrast style as RunningScreen, keep-screen-on already set by the activity): big smoothed HR, time since run end, HR_end/HR60/HR120/HRR60/HRR120 tiles showing a dash until available, recovery HR Sparkline (reuse LiveCockpit.Sparkline; break lines at nulls/gaps per HR2), plain guidance text 'Recover the same way every time - standing or walking gently.', HRR copy 'HRR is the drop after exercise, not the return to resting heart rate.', reminder banner when reminderDue, HR state + Reconnect, Finish Training button (confirm dialog), no auto-save.",
+      "RecapScreen.kt: strict hierarchy (primary block large: distance, running time, avg pace, 'n / N', overtaken, rival beaten + margin; secondary smaller: HR profile chart with smoothing, avg/max HR, HRR60/HRR120, splits-based pace evolution, rival comparison); achievements as plain text lines only when ST1 allows; exactly one static emphasis (e.g. accent colour on the best fact), no animation, no pop-ups; omit HR/HRR blocks without HR data; keep the sync status banner, retry and 'Open in Atlas' from the old SummaryScreen; when RunMeta.recap is null show the old basic facts from RunMeta.summary.",
+      "Smoothing setting: a three-way selector (Raw / 5 s / 10 s) on the home panel backed by RunSettings; default 5 s.",
+      "Web Recovery card in RunDetailPage.tsx using existing running.css classes only (no new visual language)."
+    ],
+    "test_writer": [
+      "Implement every scenario of 10_test_spec.md: pytest in atlas-runningtracker-test (extend fixtures.sql with fix- prefixed recovery runs), Playwright for [UI] (stubbed API), Kotlin JVM tests for [Phone JVM] scenarios, and list [UI - manual] scenarios as untested in the test report.",
+      "Server tests read tests/fixtures/recovery_golden.json; Kotlin RecoveryMetricsTest must read the same file (parity).",
+      "Do not write automated stand-ins that claim to verify hardware behavior (H10, locked screen, process kill on a device)."
+    ],
+    "reviewer": [
+      "Check FinishRequest/native.finish: no path changes stored finished_at/run_finished_at of a complete run; validation happens before any write; ALGO_VERSION bump does not alter legacy results.",
+      "Check recovery clipping really excludes post-run HR from avg_hr/max_hr/hr_series/split avg_hr and that raw sample counts/V1 are unaffected.",
+      "Check that the HR collector in RECOVERY no longer feeds RunMetricsAccumulator and that no location sample can be stored after t0 (location job cancelled, location.stop only).",
+      "Check recap never shows 0 for missing data and that every achievement is derivable from persisted facts (ST1); check FieldRanking is unchanged.",
+      "Check RunMeta.fromJson tolerates old JSON and the legacy finish path is behavior-identical; check there is no network exposure change.",
+      "Check declare-once: HR/HRR constants live in config.py and Kotlin HrConfig with equal values and are verified by the shared golden file."
+    ]
+  },
+  "deferred_decisions": [
+    "System (notification) reminder for a forgotten recovery; in-screen reminder only this sprint.",
+    "Whether recorded recovery should later be re-computable on the phone for old synced runs (they are not backfilled).",
+    "A persisted per-run HR smoothing preference on the server for the web charts (web charts use the server curve/series as-is).",
+    "Idle-start trimming of the runner's own finishing time for ST1 (OQ1).",
+    "Retention/downsampling of raw samples (inherited from Sprint01)."
+  ],
+  "risks": [
+    {
+      "risk": "Recovery keeps the foreground service, recorder and BLE alive after GPS stops; the service was declared with a location foreground-service type and its behavior with GPS stopped and screen locked is unverified on hardware.",
+      "impact": "Android may stop HR delivery during a long recovery; mitigated by gap-tolerant HRR (null, never 0) and the Recover path; hardware acceptance stays open."
+    },
+    {
+      "risk": "Kotlin and Python implement HR1/HRR1 separately (like A1).",
+      "impact": "Phone live/recap HRR could differ from the server value; limited by the shared recovery_golden.json and by treating the server as authoritative for the web while the phone shows its own persisted value."
+    },
+    {
+      "risk": "New phone build against an old server fails finish with 422 because FinishRequest forbids extra keys.",
+      "impact": "Run stays pending_upload with an error until the server is deployed; avoided by invariant C1 deploy order."
+    },
+    {
+      "risk": "RunMeta.recap carries a 1 s-bucket HR series; run_meta JSON is rewritten on every transition.",
+      "impact": "Larger run_meta rows (order of tens of KB per hour of HR) and slightly slower putRunMeta; accepted, bounded by one row per capture and deleted with it."
+    },
+    {
+      "risk": "ST1 compares the runner's untrimmed moving time with idle-start-trimmed profile durations.",
+      "impact": "Position/overtaken can be off by up to the idle start (about 10-15 s) near ties; PR and beat-previous are conservative (never claimed falsely)."
+    },
+    {
+      "risk": "avg_hr/max_hr in RunRow change meaning for new runs (running phase only).",
+      "impact": "History averages of new runs are no longer comparable with a hypothetical all-session value; intended by the product definition (recovery excluded from running averages)."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "OQ1 ST1 uses the untrimmed own moving time. Should the phone apply the same idle-start trim as the server (IDLE_START_* constants) so position/PR are exact? Default applied: conservative untrimmed; no false achievements.",
+      "owner": "product"
+    },
+    {
+      "question": "OQ2 Draft D7 says HRR points are null when 'training ended before t'; this design is stricter and deterministic (point value requires the whole window [t-3s, t+3s] to be observed, i.e. trainingEnd >= t+3s; hr_end requires trainingEnd >= t0+2s). Confirm acceptable (a Finish Training at 61 s gives no HR60).",
+      "owner": "product"
+    },
+    {
+      "question": "OQ3 Component 03_Application/RunningTracker has no 00_architecture/ baseline, and Sprint01's 10_architecture.json/10_scaffolding.json/10_schema.sql are stale versus the runtime (routes, ghost/native library endpoints, category, source, FIT import, run_route_progress exist only in code). This sprint's artifacts are therefore delta-only (the established sprint-diff convention) and 10_schema.sql was seeded from the runtime schema.sql. Recommend that sprint-close generates the canonical 00_architecture snapshot from the code plus both sprints.",
+      "owner": "architecture"
+    },
+    {
+      "question": "OQ4 .claude/supportDocs/atlas_dev_ref.md has no entry for RunningTracker (port 8029) or AtlasPhone, so dependency/overlap checks were done against the repository code directly; no naming or port conflict was found. Dev-ref update is a sprint-close task.",
+      "owner": "architecture"
+    },
+    {
+      "question": "OQ5 Foreground-service type (location) while GPS is stopped and only BLE HR runs: verify on a device that the 2+ minute recovery keeps receiving HR with the screen locked; if the OS stops it, a connectedDevice-only service start may be needed (out of scope to pre-build).",
+      "owner": "implementer"
+    }
+  ]
+}

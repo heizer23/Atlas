@@ -1,4 +1,4 @@
-"""Algorithm A1 (algo_version 1): pure computation plus persistence of run_metrics.
+"""Algorithm A1 (algo_version 2: RS2 clipping at run_finished_at + recovery object): pure computation plus persistence of run_metrics.
 
 The Kotlin RunMetrics in 01_System/AtlasPhone implements the same steps; tests/fixtures/metrics_golden.json
 is the shared oracle. Step numbers refer to invariant A1 in 10_architecture.json.
@@ -11,6 +11,7 @@ from typing import Optional
 
 from psycopg2.extras import Json
 
+from backend.recovery import compute_recovery
 from backend.config import (
     ACCURACY_MAX_M, ALGO_VERSION, MAX_SPEED_MPS, MIN_STEP_M, PARTIAL_SPLIT_MIN_M,
     SERIES_BUCKET_S, SMOOTHING_WINDOW_S, SPLIT_DISTANCE_M,
@@ -40,6 +41,7 @@ class MetricsResult:
     splits: list[dict] = field(default_factory=list)
     pace_series: list[list[float]] = field(default_factory=list)
     hr_series: list[list[float]] = field(default_factory=list)
+    recovery: Optional[dict] = None  # None when run_finished_at is None (no recovery phase)
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -63,7 +65,14 @@ def compute_metrics(
     heart_rates: list[SampleRow],
     pauses: list[PauseRow],
     started_at: datetime,
+    run_finished_at: Optional[datetime] = None,
+    finished_at: Optional[datetime] = None,
 ) -> MetricsResult:
+    # RS2: with a run end, only samples at or before it count for running statistics; recovery sees all HR.
+    all_heart_rates = heart_rates
+    if run_finished_at is not None:
+        locations = [s for s in locations if s.ts <= run_finished_at]
+        heart_rates = [s for s in heart_rates if s.ts <= run_finished_at]
     pauses = sorted(pauses, key=lambda p: p.started_at)
 
     def in_pause(ts: datetime) -> bool:
@@ -162,6 +171,12 @@ def compute_metrics(
         wall = (ts - started_at).total_seconds()
         hr_buckets.setdefault(int(wall // SERIES_BUCKET_S), []).append(bpm)
 
+    recovery = None
+    if run_finished_at is not None and finished_at is not None:
+        raw_hr = [(s.ts, s.payload.get("bpm")) for s in all_heart_rates]
+        raw_hr = [(ts, float(b)) for ts, b in raw_hr if isinstance(b, (int, float)) and not isinstance(b, bool)]
+        recovery = compute_recovery(raw_hr, run_finished_at, finished_at)
+
     return MetricsResult(
         server_distance_m=distance,
         avg_hr=avg_hr,
@@ -169,14 +184,16 @@ def compute_metrics(
         splits=splits,
         pace_series=[[b * SERIES_BUCKET_S, v] for b, v in sorted(pace_buckets.items())],
         hr_series=[[b * SERIES_BUCKET_S, sum(v) / len(v)] for b, v in sorted(hr_buckets.items())],
+        recovery=recovery,
     )
 
 
 def recompute_and_store(conn, run_id: str) -> None:
     """Load samples and pauses ordered by seq, run compute_metrics, upsert run_metrics with ALGO_VERSION."""
     with conn.cursor() as cur:
-        cur.execute("select started_at from runningtracker.runs where id = %s", (run_id,))
-        started_at = cur.fetchone()["started_at"]
+        cur.execute("select started_at, finished_at, run_finished_at from runningtracker.runs where id = %s", (run_id,))
+        run = cur.fetchone()
+        started_at = run["started_at"]
         cur.execute(
             "select stream, seq, sample_ts, payload from runningtracker.run_samples where run_id = %s order by seq",
             (run_id,),
@@ -188,17 +205,19 @@ def recompute_and_store(conn, run_id: str) -> None:
         cur.execute("select started_at, ended_at from runningtracker.run_pauses where run_id = %s", (run_id,))
         pauses = [PauseRow(r["started_at"], r["ended_at"]) for r in cur.fetchall()]
 
-        m = compute_metrics(locations, heart_rates, pauses, started_at)
+        m = compute_metrics(locations, heart_rates, pauses, started_at, run["run_finished_at"], run["finished_at"])
         cur.execute(
             """
             insert into runningtracker.run_metrics
-                (run_id, algo_version, computed_at, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series)
-            values (%s, %s, now(), %s, %s, %s, %s, %s, %s)
+                (run_id, algo_version, computed_at, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery)
+            values (%s, %s, now(), %s, %s, %s, %s, %s, %s, %s)
             on conflict (run_id) do update set
                 algo_version = excluded.algo_version, computed_at = excluded.computed_at,
                 server_distance_m = excluded.server_distance_m, avg_hr = excluded.avg_hr, max_hr = excluded.max_hr,
-                splits = excluded.splits, pace_series = excluded.pace_series, hr_series = excluded.hr_series
+                splits = excluded.splits, pace_series = excluded.pace_series, hr_series = excluded.hr_series,
+                recovery = excluded.recovery
             """,
             (run_id, ALGO_VERSION, m.server_distance_m, m.avg_hr, m.max_hr,
-             Json(m.splits), Json(m.pace_series), Json(m.hr_series)),
+             Json(m.splits), Json(m.pace_series), Json(m.hr_series),
+             Json(m.recovery) if m.recovery is not None else None),
         )

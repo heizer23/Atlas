@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from backend.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from backend.database import get_db
 from backend.datasets import (
-    ds_response, empty_dataset, runs_dataset, series_dataset, splits_dataset,
+    ds_response, empty_dataset, recovery_dataset, runs_dataset, series_dataset, splits_dataset,
 )
 from backend.models import RunPatch
 from backend.progress_store import recompute_progress
@@ -104,13 +104,32 @@ def get_splits(run_id: str) -> JSONResponse:
 
 
 @router.get("/{run_id}/series", response_model=None)
-def get_series(run_id: str, metric: Literal["pace", "heart_rate"]) -> JSONResponse:
+def get_series(run_id: str, metric: Literal["pace", "heart_rate", "recovery_hr"]) -> JSONResponse:
     rid = _uuid(run_id)
-    column = "pace_series" if metric == "pace" else "hr_series"
+    column = {"pace": "pace_series", "heart_rate": "hr_series", "recovery_hr": "recovery"}[metric]
     exists, points = _metrics_column(rid, column) if rid else (False, None)
     if not exists:
         return _not_found()
+    if metric == "recovery_hr":
+        points = (points or {}).get("curve") or []  # recovery is SQL NULL without a recovery phase
     return ds_response(series_dataset(metric, points or []))
+
+
+@router.get("/{run_id}/recovery", response_model=None)
+def get_recovery(run_id: str) -> JSONResponse:
+    """Single-row recovery Dataset; empty (total 0) without a recovery phase; 404 for an unknown run."""
+    rid = _uuid(run_id)
+    row = None
+    if rid:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select r.run_finished_at, r.finished_at, m.recovery from runningtracker.runs r "
+                    "left join runningtracker.run_metrics m on m.run_id = r.id where r.id = %s", (rid,))
+                row = cur.fetchone()
+    if row is None:
+        return _not_found()
+    return ds_response(recovery_dataset(rid, row["run_finished_at"], row["finished_at"], row["recovery"]))
 
 
 @router.patch("/{run_id}", response_model=None)

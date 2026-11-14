@@ -11,6 +11,7 @@ import { DASH, fmtDateTime, fmtDistance, fmtDuration, fmtHr, fmtPace, syncLabel 
 import type { RunRow } from './HistoryPage';
 import type { RouteRow } from './RoutesPage';
 
+interface RecoveryRow { id: string; run_finished_at: string; recovery_s: number; hr_end: number | null; hr_60: number | null; hr_120: number | null; hrr60: number | null; hrr120: number | null }
 interface SplitRow { id: string; km: number; distance_m: number; duration_s: number; pace_s_per_km: number; avg_hr: number | null; partial: boolean }
 
 export default function RunDetailPage() {
@@ -20,6 +21,8 @@ export default function RunDetailPage() {
   const [splits, setSplits] = useState<SplitRow[] | null>(null);
   const [pace, setPace] = useState<Dataset | null>(null);
   const [hr, setHr] = useState<Dataset | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryRow | null>(null);
+  const [recoveryHr, setRecoveryHr] = useState<Dataset | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [comment, setComment] = useState('');
   const [category, setCategory] = useState('');
@@ -28,13 +31,15 @@ export default function RunDetailPage() {
   const [newRoute, setNewRoute] = useState('');
 
   const load = useCallback(async () => {
-    const [r, s, p, h] = await Promise.all([
+    const [r, s, p, h, rc, rh] = await Promise.all([
       apiFetch<Dataset>(`/runningtracker/runs/${id}`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/splits`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=pace`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=heart_rate`),
+      apiFetch<Dataset>(`/runningtracker/runs/${id}/recovery`),
+      apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=recovery_hr`),
     ]);
-    for (const res of [r, s, p, h]) if (isApiError(res)) { setError(res); return; }
+    for (const res of [r, s, p, h, rc, rh]) if (isApiError(res)) { setError(res); return; }
     const rt = await apiFetch<Dataset>('/runningtracker/routes');
     if (!isApiError(rt)) setRoutes(rt.rows as unknown as RouteRow[]);
     const row = (r as Dataset).rows[0] as unknown as RunRow;
@@ -44,6 +49,8 @@ export default function RunDetailPage() {
     setSplits((s as Dataset).rows as unknown as SplitRow[]);
     setPace(p as Dataset);
     setHr(h as Dataset);
+    setRecovery(((rc as Dataset).rows[0] as unknown as RecoveryRow | undefined) ?? null);  // no row = no recovery phase
+    setRecoveryHr(rh as Dataset);
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -125,6 +132,24 @@ export default function RunDetailPage() {
           ? <LineChart dataset={hr} mapping={{ x: 't_label', y: 'value', aggregation: 'avg' }} options={{ title: 'Heart rate over time (bpm)' }} />
           : <span className="running-muted">No heart-rate data.</span>}
       </div>
+
+      {recovery && (
+        <div className="running-card" data-testid="recovery-card">
+          <strong>Recovery</strong>
+          <div className="running-stats">
+            <span><span className="running-muted">HRR60</span><div className="running-stat-value" data-testid="hrr60">{fmtHr(recovery.hrr60)}</div></span>
+            <span><span className="running-muted">HRR120</span><div className="running-stat-value" data-testid="hrr120">{fmtHr(recovery.hrr120)}</div></span>
+            <span><span className="running-muted">HR at run end</span><div className="running-stat-value">{fmtHr(recovery.hr_end)}</div></span>
+            <span><span className="running-muted">HR after 60 s</span><div className="running-stat-value">{fmtHr(recovery.hr_60)}</div></span>
+            <span><span className="running-muted">HR after 120 s</span><div className="running-stat-value">{fmtHr(recovery.hr_120)}</div></span>
+            <span><span className="running-muted">Recovery time</span><div className="running-stat-value">{fmtDuration(recovery.recovery_s)}</div></span>
+          </div>
+          {(recoveryHr?.rows.length ?? 0) > 0
+            ? <LineChart dataset={recoveryHr} mapping={{ x: 't_label', y: 'value', aggregation: 'avg' }} options={{ title: 'Recovery heart rate (bpm)' }} />
+            : <span className="running-muted">No recovery heart-rate data.</span>}
+          <span className="running-muted">HRR is the drop after exercise, not the return to resting heart rate.</span>
+        </div>
+      )}
 
       <div className="running-card">
         <strong>Splits</strong>

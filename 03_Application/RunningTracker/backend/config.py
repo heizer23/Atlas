@@ -25,7 +25,7 @@ MAX_BODY_BYTES = 2_000_000
 DEVICE_LAST_USED_THROTTLE_SECONDS = 60
 
 # Algorithm A1 (10_architecture.json invariants)
-ALGO_VERSION = 1
+ALGO_VERSION = 2  # 2: run_finished_at clipping + recovery object (Sprint02)
 ACCURACY_MAX_M = 30.0
 MIN_STEP_M = 1.0
 MAX_SPEED_MPS = 12.0
@@ -33,6 +33,20 @@ SMOOTHING_WINDOW_S = 10
 SPLIT_DISTANCE_M = 1000.0
 PARTIAL_SPLIT_MIN_M = 10.0
 SERIES_BUCKET_S = 5
+
+# Heart-rate validity HR1 and recovery HRR1 (same names/values in Kotlin HrConfig / RecoveryConfig;
+# parity enforced by tests/fixtures/recovery_golden.json)
+HR_VALID_MIN_BPM = 30
+HR_VALID_MAX_BPM = 230
+HR_SPIKE_MAX_BPM_PER_S = 40.0
+HRR_END_BEFORE_S = 3.0
+HRR_END_AFTER_S = 2.0
+HRR_POINT_HALF_WINDOW_S = 3.0
+HRR_MIN_VALID_SAMPLES = 2
+HRR_T1_S = 60.0
+HRR_T2_S = 120.0
+RECOVERY_CURVE_STEP_S = 5.0
+RECOVERY_CURVE_WINDOW_S = 5.0
 
 # Routes (geometry_version 1)
 ROUTE_GEOMETRY_VERSION = 1

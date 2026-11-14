@@ -1,6 +1,9 @@
 """Web list/detail/splits/series/PATCH/DELETE/prepared/devices/pairing-code scenarios (Dataset | ApiError)."""
 
-from tests.conftest import PREPARED_EXPIRED, PREPARED_FRESH, RUN_COMPLETE, RUN_GAP, RUN_REVOKED_COMPLETE, RUN_REVOKED_UPLOADING
+from tests.conftest import (
+    PREPARED_EXPIRED, PREPARED_FRESH, RUN_COMPLETE, RUN_GAP, RUN_RECOVERY, RUN_RECOVERY_NOHR, RUN_RECOVERY_UPLOAD,
+    RUN_REVOKED_COMPLETE, RUN_REVOKED_UPLOADING,
+)
 
 W = "/api/runningtracker"
 
@@ -18,8 +21,8 @@ def test_history_list_is_a_dataset_with_defined_ordering_and_defaults(client):
     assert body["meta"]["object_type"] == "run" and body["meta"]["row_actions"] == ["delete"]
     ids = [row["id"] for row in body["rows"]]
     # default: uploading + complete, newest started_at first, prepared excluded
-    assert ids == [RUN_GAP, RUN_COMPLETE, RUN_REVOKED_UPLOADING, RUN_REVOKED_COMPLETE]
-    assert body["meta"]["total"] == 4
+    assert ids == [RUN_RECOVERY_UPLOAD, RUN_RECOVERY_NOHR, RUN_RECOVERY, RUN_GAP, RUN_COMPLETE, RUN_REVOKED_UPLOADING, RUN_REVOKED_COMPLETE]
+    assert body["meta"]["total"] == 7
     by_id = {row["id"]: row for row in body["rows"]}
     assert by_id[RUN_GAP]["sync_state"] == "pending" and by_id[RUN_COMPLETE]["sync_state"] == "synced"
     complete = by_id[RUN_COMPLETE]
@@ -32,8 +35,8 @@ def test_history_list_is_a_dataset_with_defined_ordering_and_defaults(client):
     assert all(row["sync_state"] == "prepared" for row in prepared)
 
     page2 = client.get(f"{W}/runs", params={"page_size": 1, "page": 2}).json()
-    assert [row["id"] for row in page2["rows"]] == [RUN_COMPLETE]
-    assert page2["meta"]["total"] == 4 and page2["meta"]["page"] == 2 and page2["meta"]["page_size"] == 1
+    assert [row["id"] for row in page2["rows"]] == [RUN_RECOVERY_NOHR]
+    assert page2["meta"]["total"] == 7 and page2["meta"]["page"] == 2 and page2["meta"]["page_size"] == 1
 
     for bad in ({"page_size": 101}, {"status": "bogus"}, {"page": 0}):
         e = client.get(f"{W}/runs", params=bad)
@@ -141,3 +144,95 @@ def test_schema_is_idempotent(client, db_conn):
         for table, n in before.items():
             cur.execute(f"select count(*) as n from runningtracker.{table}")
             assert cur.fetchone()["n"] == n
+
+
+# ── Sprint02: recovery ───────────────────────────────────────────────────────
+
+def test_recovery_dataset_for_a_run_with_recovery(client):
+    r = client.get(f"{W}/runs/{RUN_RECOVERY}/recovery")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"meta", "schema", "rows"}
+    assert body["meta"]["object_type"] == "run_recovery" and body["meta"]["total"] == 1
+    assert {c["key"] for c in body["schema"]} >= {"run_finished_at", "recovery_s", "hr_end", "hr_60", "hr_120", "hrr60", "hrr120"}
+    row = body["rows"][0]
+    assert row["id"] == RUN_RECOVERY and row["recovery_s"] == 300
+    assert row["run_finished_at"].startswith("2026-01-12T08:10:00")
+    assert (row["hr_end"], row["hr_60"], row["hr_120"], row["hrr60"], row["hrr120"]) == (150, 138, 126, 12, 24)
+
+
+def test_recovery_dataset_is_empty_for_legacy_and_uploading_runs_and_404_for_unknown(client):
+    for run_id in (RUN_COMPLETE, RUN_RECOVERY_UPLOAD):
+        r = client.get(f"{W}/runs/{run_id}/recovery")
+        assert r.status_code == 200 and r.json()["rows"] == [] and r.json()["meta"]["total"] == 0
+    missing = client.get(f"{W}/runs/b1000000-0000-0000-0000-000000000009/recovery")
+    assert missing.status_code == 404 and missing.json()["error"]["code"] == "NOT_FOUND"
+    assert client.get(f"{W}/runs/not-a-uuid/recovery").status_code == 404
+
+
+def test_run_without_heart_rate_has_a_null_recovery_row_and_an_empty_series(client):
+    row = _rows(client.get(f"{W}/runs/{RUN_RECOVERY_NOHR}/recovery"))[0]
+    assert row["recovery_s"] == 180
+    assert all(row[k] is None for k in ("hr_end", "hr_60", "hr_120", "hrr60", "hrr120"))
+    series = client.get(f"{W}/runs/{RUN_RECOVERY_NOHR}/series", params={"metric": "recovery_hr"})
+    assert series.status_code == 200 and series.json()["rows"] == [] and series.json()["meta"]["total"] == 0
+
+
+def test_recovery_series_covers_the_recovery_phase_without_zero_filling(client):
+    series = client.get(f"{W}/runs/{RUN_RECOVERY}/series", params={"metric": "recovery_hr"})
+    assert series.status_code == 200 and series.json()["meta"]["label"] == "Recovery heart rate"
+    rows = series.json()["rows"]
+    ts = [p["t_s"] for p in rows]
+    assert ts[0] == 0 and ts[-1] == 300 and ts == sorted(ts)
+    assert all(t % 5 == 0 for t in ts)
+    assert not {135, 140, 145} & set(ts)  # the 20 s heart-rate gap: absent, not zero, not interpolated
+    assert all(p["value"] > 0 for p in rows)
+    assert rows == sorted(rows, key=lambda p: p["t_label"])
+
+
+def test_series_metric_validation(client):
+    for metric in ("recovery_hr", "heart_rate", "pace"):
+        assert client.get(f"{W}/runs/{RUN_RECOVERY}/series", params={"metric": metric}).status_code == 200
+    for params in ({"metric": "cadence"}, {}):
+        r = client.get(f"{W}/runs/{RUN_RECOVERY}/series", params=params)
+        assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_history_averages_exclude_recovery(client):
+    rows = {r["id"]: r for r in _rows(client.get(f"{W}/runs"))}
+    rec = rows[RUN_RECOVERY]
+    assert abs(rec["avg_hr"] - 150.0833333) < 1e-6 and rec["max_hr"] == 200  # stored running-phase values, not all-session
+    assert rec["distance_m"] == 2396 and rec["moving_s"] == 600
+    assert rows[RUN_COMPLETE]["avg_hr"] == 160 and rows[RUN_COMPLETE]["distance_m"] == 2000  # unchanged from Sprint01
+    detail = _rows(client.get(f"{W}/runs/{RUN_RECOVERY}"))[0]
+    assert detail["avg_hr"] == rec["avg_hr"] and detail["max_hr"] == 200
+
+
+def test_recomputing_a_recovery_run_gives_the_golden_hrr_values(client, db_conn):
+    from backend.database import get_db, init_pool
+    import backend.database as db_module
+    from backend.metrics import recompute_and_store
+    if db_module._pool is None:
+        init_pool()
+    with get_db() as conn:
+        recompute_and_store(conn, RUN_RECOVERY)
+        conn.commit()
+    with db_conn.cursor() as cur:
+        cur.execute("select avg_hr, max_hr, hr_series, recovery from runningtracker.run_metrics where run_id = %s", (RUN_RECOVERY,))
+        m = cur.fetchone()
+    rec = m["recovery"]
+    assert (rec["hr_end"], rec["hr_60"], rec["hr_120"]) == (150, 138, 126)
+    assert abs(rec["hrr60"] - 12) < 0.01 and abs(rec["hrr120"] - 24) < 0.01
+    curve_t = [p[0] for p in rec["curve"]]
+    assert curve_t[0] == 0 and curve_t[-1] == 300 and not {135, 140, 145} & set(curve_t)
+    assert max(p[0] for p in m["hr_series"]) <= 600  # running-phase HR series stops at the run end
+    assert m["max_hr"] == 200  # A1 'bpm >= 1' rule is unchanged: the spike still counts for running max
+
+
+def test_deleting_a_recovery_run_removes_its_recovery_data(client, db_conn):
+    assert client.delete(f"{W}/runs/{RUN_RECOVERY}").status_code == 200
+    with db_conn.cursor() as cur:
+        for table in ("run_samples", "run_metrics"):
+            cur.execute(f"select count(*) as n from runningtracker.{table} where run_id = %s", (RUN_RECOVERY,))
+            assert cur.fetchone()["n"] == 0, table
+    assert client.get(f"{W}/runs/{RUN_RECOVERY}/recovery").status_code == 404
