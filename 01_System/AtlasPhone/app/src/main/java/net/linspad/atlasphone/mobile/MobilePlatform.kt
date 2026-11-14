@@ -13,13 +13,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import net.linspad.atlasphone.mobile.audio.ClickEngine
 import net.linspad.atlasphone.mobile.capture.CaptureRecorder
 import net.linspad.atlasphone.mobile.capture.CaptureStore
 import net.linspad.atlasphone.mobile.heartrate.HeartRateMonitor
 import net.linspad.atlasphone.mobile.location.LocationTracker
 import net.linspad.atlasphone.mobile.location.TrackingState
 import net.linspad.atlasphone.mobile.permissions.PermissionManager
+import net.linspad.atlasphone.mobile.service.QuickAction
 import net.linspad.atlasphone.mobile.service.RecordingService
+import net.linspad.atlasphone.mobile.steps.StepDetector
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
@@ -48,7 +51,10 @@ class MobilePlatform private constructor(app: Application) {
     val location = LocationTracker(app, permissions, ::log)
     val heartRate = HeartRateMonitor(app, permissions, ::log)
     val store = CaptureStore(app)
-    val recorder = CaptureRecorder(store, scope, Dispatchers.IO, location.samples, heartRate.samples)
+    val steps = StepDetector(app, permissions, ::log)
+    val click = ClickEngine(::log)
+    val quickAction = QuickAction()
+    val recorder = CaptureRecorder(store, scope, Dispatchers.IO, location.samples, heartRate.samples, steps.samples)
 
     /** True while GPS tracking, a sensor connection or a capture is running. */
     val active: Flow<Boolean> = combine(location.state, heartRate.state, recorder.active) { loc, hr, cap ->
@@ -71,6 +77,9 @@ class MobilePlatform private constructor(app: Application) {
 
     /** Stops GPS, disconnects the sensor and ends the capture. Stored samples stay in the buffer. */
     fun stopAll() {
+        steps.stop()
+        click.stop()
+        quickAction.set(null, null)
         recorder.stop()
         location.stop()
         heartRate.disconnect()

@@ -74,6 +74,7 @@ private val Big = TextStyle(fontWeight = FontWeight.SemiBold, fontFeatureSetting
 internal fun GhostRaceScreen(
     live: LiveRunState, ghost: GhostLive, paused: Boolean, finishing: Boolean, gpsText: String, gpsGood: Boolean,
     onReconnectHr: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onFinish: () -> Unit,
+    onCycleMetronome: () -> Unit = {}, onUseManualCadence: () -> Unit = {}, onManualCadence: (Int) -> Unit = {}, onClickVolume: (Float) -> Unit = {},
 ) {
     val m = live.metrics
     val trends = live.trends
@@ -95,11 +96,14 @@ internal fun GhostRaceScreen(
                 HrPair(live.hrDisplay, reading?.ghostHrAtPosition)
             }
             StatusLines(live, ghost, paused, gpsText, gpsGood, onReconnectHr)
+            MetronomeChip(live.metronome, live.cadenceSpm, onCycle = onCycleMetronome, onUseManual = onUseManualCadence,
+                onManualSpm = onManualCadence, onVolume = onClickVolume)
             Row(Modifier.weight(1f).fillMaxWidth()) {
-                Spacer(Modifier.weight(1f))
+                // Left: gap, gaining/losing arrow, gap history and the 20 s pace beside the ghost's; right: heart rate by position.
+                RaceGapPanel(reading?.timeGapS, trends, m.racePaceSPerKm, Modifier.weight(1f).padding(top = 8.dp, end = 8.dp))
                 HrDistanceChart(trends, ghost, live.targetHr, reading?.ghostHrAtPosition, live.hrDisplay, Modifier.width(158.dp).fillMaxHeight().padding(top = 8.dp, bottom = 8.dp))
             }
-            BottomStats(m, trends, reading?.timeGapS)
+            BottomStats(m, trends)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (paused) Button(modifier = Modifier.weight(1f).height(40.dp), onClick = onResume) { Text("Resume") }
                 else OutlinedButton(modifier = Modifier.weight(1f).height(40.dp), onClick = onPause) { Text("Pause") }
@@ -158,7 +162,7 @@ private fun StatusLines(live: LiveRunState, ghost: GhostLive, paused: Boolean, g
 // ── Bottom row ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun BottomStats(m: LiveMetrics, trends: LiveTrends, gapS: Double?) {
+private fun BottomStats(m: LiveMetrics, trends: LiveTrends) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(paceValue(trends.smoothedPaceSPerKm), style = Big, fontSize = 34.sp)
@@ -169,7 +173,6 @@ private fun BottomStats(m: LiveMetrics, trends: LiveTrends, gapS: Double?) {
                 Text("%.2f".format(m.distanceM / 1000.0), style = Big, fontSize = 34.sp)
                 Text(" km", color = Soft, fontSize = 16.sp, modifier = Modifier.padding(bottom = 4.dp))
             }
-            GapLine(gapS, trends.gapChangeS)
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(fmtDuration(m.elapsedS), style = Big, fontSize = 34.sp)
@@ -180,7 +183,7 @@ private fun BottomStats(m: LiveMetrics, trends: LiveTrends, gapS: Double?) {
 
 /** "+0:18" = ahead of the ghost, "−0:18" = behind (green / red), with the 20-30 s trend arrow. */
 @Composable
-private fun GapLine(gapS: Double?, change: Double?) {
+internal fun GapLine(gapS: Double?, change: Double?) {
     if (gapS == null) { Text(DASH, color = Soft, fontSize = 18.sp); return }
     val ahead = gapS < 0
     val level = Math.abs(gapS) < 1.0

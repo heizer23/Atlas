@@ -216,3 +216,15 @@ Do not mark any of these passed unless performed on the real phone.
 72 tests, 0 failures (30 Sprint 01 unchanged + 32 running + 10 ghost: engine and parity 8, client 2). `:app:lintDebug`: no errors.
 
 Sprint02 (RunningTracker run finish and recovery) JVM run: `:app:testDebugUnitTest` 115 tests, 0 failures (adds HrSmoothing, RecoveryMetrics/Tracker with the shared golden file, FinishStanding, RecapBuilder, RunMeta compatibility, lifecycle and finish-body tests).
+
+## Sprint03 additions (cadence, metronome, live racing)
+
+Design of record: `03_Application/RunningTracker/Sprint03_CadenceAndLiveRacing/10_architecture.json` (S1, CAD1, CAD2, GB1, MET1, RC1, REL1, C2).
+
+- Upload: step samples ride the existing `PUT /samples` with stream `step`. `expected_counts.step` is sent only when > 0 (omitted, never 0/null). Deploy order (C2): the server must be deployed before a phone build that uploads steps.
+- Ghost profile: `GET /native/runs/{id}/ghost-profile` gains `cadence_by_progress` (`[[bucket_start_m, spm], ...]`, 20 m buckets, or null). `GhostProfile.cadenceByProgress` decodes missing/null as "no cadence recorded for this ghost"; nothing is derived from speed.
+- Cadence: `CadenceEstimator` (CAD1) mirrors `backend/cadence.py`, parity through `tests/fixtures/cadence_golden.json`. The phone uses it for the live "you N" display only; the server value is stored and authoritative.
+- Metronome: `MetronomeMode` OFF / MATCH_GHOST / ATTACK_102 / MANUAL, `MetronomeController` (1 Hz tick -> `TargetSmoother` -> `ClickEngine`), notification action "Click: <mode>" calls the same `cycleMode`. Settings keys in `atlas_run_settings`: `metronome_mode`, `manual_cadence_spm`, `click_volume`. The click stops at Finish Run, Finish and Discard (not kept during recovery).
+- Race screen: lower area = `RaceGapPanel` (gap, gaining/losing arrow, gap history, 20 s pace next to the ghost's pace on the same section) | existing `HrDistanceChart`. `MetronomeChip` on the race screen and in the free-run cockpit.
+- Permission flow: starting a run asks LOCATION, then ACTIVITY_RECOGNITION once at first use (the run starts whatever the answer); a denial shows "Cadence is not recorded (activity permission denied)" on the home panel.
+- Status: pure logic, storage, client mapping `[tested: JVM]`; Compose screens `[built]`; sensor, audio, notification action, screen-off behavior `[unverified]` until a real run.

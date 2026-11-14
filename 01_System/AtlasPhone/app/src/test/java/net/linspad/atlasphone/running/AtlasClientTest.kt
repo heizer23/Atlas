@@ -84,6 +84,30 @@ class AtlasClientTest {
         assertEquals(52.5, samples.getJSONObject(0).getJSONObject("payload").getDouble("latitude"), 0.0)
     }
 
+    @Test fun stepStreamIsSentAndCountedOnlyWhenPresent() {
+        val t = FakeTransport { ok("""{"stored":1,"duplicates":0,"high_seq":{"location":0,"heart_rate":0,"step":1},"contiguous_seq":1,"result":"complete","run_id":"r","verified_counts":{"location":1,"heart_rate":0,"step":2},"missing_seq_ranges":[],"count_mismatch":[]}""") }
+        client(t).putSamples("r", listOf(CaptureSample("r", 1, Stream.STEP, 0, """{"type":"step.sample","timestamp":"2026-01-01T00:00:00.000Z"}""")))
+        assertEquals("step", JSONObject(t.requests[0].body!!).getJSONArray("samples").getJSONObject(0).getString("stream"))
+        client(t).finish("r", finishedMeta(), StreamCountsLocal(1, 0), 1, 0)
+        client(t).finish("r", finishedMeta(), StreamCountsLocal(1, 0, 2), 1, 0)
+        val without = JSONObject(t.requests[1].body!!).getJSONObject("expected_counts"); val with = JSONObject(t.requests[2].body!!).getJSONObject("expected_counts")
+        assertFalse("omitted, not 0 or null", without.has("step"))
+        assertEquals(2, with.getInt("step")); assertEquals(1, with.getInt("location")); assertEquals(0, with.getInt("heart_rate"))
+    }
+
+    @Test fun ghostProfileDecodesWithAndWithoutCadenceAndRoundTrips() {
+        val base = """"run_id":"g","route_id":"r","geometry_version":1,"algo_version":2,"points":[[0,0,null],[10,40,150]]"""
+        val missing = net.linspad.atlasphone.running.ghost.GhostProfile.fromJson(JSONObject("{$base}"))
+        val nullKey = net.linspad.atlasphone.running.ghost.GhostProfile.fromJson(JSONObject("{$base,\"cadence_by_progress\":null}"))
+        val withList = net.linspad.atlasphone.running.ghost.GhostProfile.fromJson(JSONObject("{$base,\"cadence_by_progress\":[[0,168.5],[20,170.0]]}"))
+        assertNull(missing.cadenceByProgress); assertNull(nullKey.cadenceByProgress)
+        assertEquals(listOf(0.0 to 168.5, 20.0 to 170.0), withList.cadenceByProgress)
+        val again = net.linspad.atlasphone.running.ghost.GhostProfile.fromJson(withList.toJson())
+        assertEquals(withList, again)
+        assertEquals(missing.points, withList.points)
+        assertNull(net.linspad.atlasphone.running.ghost.GhostProfile.fromJson(missing.toJson()).cadenceByProgress)
+    }
+
     @Test fun finishBodyCarriesSummaryPausesAndCounts() {
         val t = FakeTransport { ok("""{"result":"incomplete","run_id":"r","verified_counts":{"location":1,"heart_rate":0},"missing_seq_ranges":[{"start":5,"end":8}],"count_mismatch":[{"stream":"heart_rate","expected":3,"stored":0}],"high_seq":{"location":1,"heart_rate":0},"contiguous_seq":4}""") }
         val r = client(t).finish("r", finishedMeta(), StreamCountsLocal(10, 3), 20, 2) as AtlasResult.Success

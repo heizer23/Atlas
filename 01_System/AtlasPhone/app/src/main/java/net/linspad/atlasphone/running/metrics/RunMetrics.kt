@@ -32,6 +32,10 @@ object A1 {
     const val ROLLING_PACE_WINDOW_S = 120.0
     const val ROLLING_PACE_MIN_S = 20.0
     const val ROLLING_PACE_MIN_M = 20.0
+    /** Live display only: short "you right now" pace of the race screen (the 120 s rolling pace above stays unchanged). */
+    const val RACE_PACE_WINDOW_S = 20.0
+    const val RACE_PACE_MIN_S = 15.0
+    const val RACE_PACE_MIN_M = 15.0
 }
 
 data class SplitInfo(
@@ -55,6 +59,8 @@ data class LiveMetrics(
     val lastAccuracyM: Float?,
     /** Average pace over the last 2 minutes of moving time (live display only). */
     val rollingPaceSPerKm: Double? = null,
+    /** Average pace over the last 20 s of moving time (race screen); null when too little movement. */
+    val racePaceSPerKm: Double? = null,
 )
 
 fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -156,6 +162,17 @@ class RunMetricsAccumulator(private val startedAtMillis: Long, initialPauses: Li
         return if (dt >= A1.ROLLING_PACE_MIN_S && dd >= A1.ROLLING_PACE_MIN_M) dt / dd * 1000.0 else null
     }
 
+    /** Same computation as [rollingPace] over [A1.RACE_PACE_WINDOW_S], with its own minimum span. */
+    private fun racePace(): Double? {
+        val last = points.lastOrNull() ?: return null
+        val threshold = last.moving - A1.RACE_PACE_WINDOW_S
+        var lo = points.lastIndex
+        while (lo > 0 && points[lo - 1].moving >= threshold) lo--
+        val first = points[lo]
+        val dt = last.moving - first.moving; val dd = last.dist - first.dist
+        return if (dt >= A1.RACE_PACE_MIN_S && dd >= A1.RACE_PACE_MIN_M) dt / dd * 1000.0 else null
+    }
+
     fun snapshot(nowMillis: Long): LiveMetrics {
         val elapsed = max(0.0, (nowMillis - startedAtMillis) / 1000.0)
         val paused = pauses.sumOf { p ->
@@ -168,11 +185,12 @@ class RunMetricsAccumulator(private val startedAtMillis: Long, initialPauses: Li
         val fresh = !(last == null || openPause || nowMillis - last.tsMillis > A1.LIVE_PACE_STALE_MS)
         val current = if (fresh) paceAt(points.lastIndex) else null
         val rolling = if (fresh) rollingPace() else null
+        val race = if (fresh) racePace() else null
         val lastHr = hr.lastOrNull()?.takeIf { nowMillis - it.first <= A1.LIVE_HR_STALE_MS }
         return LiveMetrics(
             distanceM = distance, currentPaceSPerKm = current,
             avgPaceSPerKm = if (distance > 0 && moving > 0) moving / (distance / 1000.0) else null,
-            movingS = moving, elapsedS = elapsed, currentHr = lastHr?.second, avgHr = avgHr, lastAccuracyM = lastAccuracy, rollingPaceSPerKm = rolling,
+            movingS = moving, elapsedS = elapsed, currentHr = lastHr?.second, avgHr = avgHr, lastAccuracyM = lastAccuracy, rollingPaceSPerKm = rolling, racePaceSPerKm = race,
         )
     }
 

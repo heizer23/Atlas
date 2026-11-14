@@ -11,7 +11,7 @@ import { fmtDateTime, fmtDistance, fmtDuration, fmtHr, fmtPace, syncLabel } from
 export interface RunRow {
   id: string; status: string; sync_state: string; started_at: string | null; finished_at: string | null;
   elapsed_s: number | null; moving_s: number | null; distance_m: number | null; avg_pace_s_per_km: number | null;
-  avg_hr: number | null; max_hr: number | null; category: string | null; route_id: string | null; route_name: string | null; comment: string | null; device_name: string | null;
+  avg_hr: number | null; max_hr: number | null; avg_cadence_spm: number | null; category: string | null; route_id: string | null; route_name: string | null; comment: string | null; device_name: string | null;
   location_count: number; hr_count: number;
 }
 

@@ -47,6 +47,8 @@ import net.linspad.atlasphone.running.session.GhostReadiness
 import net.linspad.atlasphone.running.session.LiveRunState
 import net.linspad.atlasphone.running.session.RunController
 import net.linspad.atlasphone.running.hr.HrSmoothingMode
+import net.linspad.atlasphone.running.metronome.MetronomeConfig
+import net.linspad.atlasphone.running.metronome.MetronomeMode
 import net.linspad.atlasphone.running.settings.RunSettings
 
 // ── Formatting (display only) ────────────────────────────────────────────────
@@ -121,6 +123,8 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
     val targetHr = if (targetOn) targetBpm else null
     val settings = remember { RunSettings.create(context) }
     var smoothing by remember { mutableStateOf(settings.hrSmoothing()) }
+    var manualSpm by remember { mutableIntStateOf(settings.manualCadenceSpm()) }
+    var volume by remember { mutableStateOf(settings.clickVolume()) }
     val gps by platform.location.state.collectAsState()
     val hrState by platform.heartRate.state.collectAsState()
     val hrLatest by platform.heartRate.latest.collectAsState()
@@ -216,6 +220,27 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
                     }
                 }
                 Text("Smoothing changes only what is shown. Recorded data and recovery values are not affected.", color = Color(0xFF9E9E9E))
+            }
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Cadence and click", style = MaterialTheme.typography.titleMedium)
+                val activityStatus = platform.permissions.status(Capability.ACTIVITY_RECOGNITION, context as? android.app.Activity)
+                if (activityStatus == PermissionStatus.DENIED || activityStatus == PermissionStatus.BLOCKED) {
+                    Text("Cadence is not recorded (activity permission denied)", color = Color(0xFFFFC107))
+                    OutlinedButton(onClick = { ensurePermission(Capability.ACTIVITY_RECOGNITION) { tick++ } }) { Text("Allow activity recognition") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { manualSpm = (manualSpm - 1).coerceAtLeast(MetronomeConfig.MIN_TARGET_SPM.toInt()); settings.setManualCadenceSpm(manualSpm) }) { Text("−") }
+                    Text("Manual cadence $manualSpm spm", fontSize = 18.sp)
+                    OutlinedButton(onClick = { manualSpm = (manualSpm + 1).coerceAtMost(MetronomeConfig.MAX_TARGET_SPM.toInt()); settings.setManualCadenceSpm(manualSpm) }) { Text("+") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { volume = (volume - 0.05f).coerceAtLeast(0f); settings.setClickVolume(volume) }) { Text("−") }
+                    Text("Click volume ${(volume * 100).toInt()} %", fontSize = 18.sp)
+                    OutlinedButton(onClick = { volume = (volume + 0.05f).coerceAtMost(1f); settings.setClickVolume(volume) }) { Text("+") }
+                }
             }
         }
 
@@ -316,7 +341,9 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
         // Ghost race: full-screen heading-up map with the stats laid over it.
         GhostRaceScreen(live, ghost, paused, finishing, gpsText, gpsGood = live.gpsState == "TRACKING" && (m.lastAccuracyM ?: 99f) <= 30f,
             onReconnectHr = { ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) } },
-            onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmRecovery = recoveryOffered; confirmFinish = true })
+            onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmRecovery = recoveryOffered; confirmFinish = true },
+            onCycleMetronome = { controller.cycleMetronome() }, onUseManualCadence = { controller.selectMetronomeMode(MetronomeMode.MANUAL) },
+            onManualCadence = { controller.setManualCadence(it) }, onClickVolume = { controller.setClickVolume(it) })
     } else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Free run: scrolling cockpit; Pause / Finish stay pinned below it.
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -334,6 +361,10 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
                 ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) }
             }
             PaceCard(m, live.trends)
+            // Free run: no ghost session, so the chip offers Off / Manual only.
+            MetronomeChip(live.metronome, live.cadenceSpm, onCycle = { controller.cycleMetronome() },
+                onUseManual = { controller.selectMetronomeMode(MetronomeMode.MANUAL) },
+                onManualSpm = { controller.setManualCadence(it) }, onVolume = { controller.setClickVolume(it) })
             Text(gpsText)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

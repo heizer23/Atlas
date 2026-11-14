@@ -25,7 +25,7 @@ MAX_BODY_BYTES = 2_000_000
 DEVICE_LAST_USED_THROTTLE_SECONDS = 60
 
 # Algorithm A1 (10_architecture.json invariants)
-ALGO_VERSION = 2  # 2: run_finished_at clipping + recovery object (Sprint02)
+ALGO_VERSION = 3  # 3: cadence (Sprint03; no steps => cadence NULL, all else unchanged); 2: run_finished_at clipping + recovery object
 ACCURACY_MAX_M = 30.0
 MIN_STEP_M = 1.0
 MAX_SPEED_MPS = 12.0
@@ -47,6 +47,22 @@ HRR_T1_S = 60.0
 HRR_T2_S = 120.0
 RECOVERY_CURVE_STEP_S = 5.0
 RECOVERY_CURVE_WINDOW_S = 5.0
+
+# Cadence CAD1 (same CAD_* names/values in Kotlin CadenceConfig; parity enforced by tests/fixtures/cadence_golden.json)
+CADENCE_ALGO_VERSION = 1
+CAD_MIN_SPM = 100.0           # plausible running cadence lower bound; interval upper bound = 60 / CAD_MIN_SPM
+CAD_MAX_SPM = 230.0           # interval lower bound = 60 / CAD_MAX_SPM
+CAD_WINDOW_N = 8
+CAD_MIN_INTERVALS = 4
+CAD_NORMAL_TOL = 0.25
+CAD_MISSED_TOL = 0.15
+CAD_GAP_FACTOR = 2.5
+CAD_GAP_S = 2.0
+CAD_REANCHOR_IRREGULAR = 6
+CAD_SERIES_STEP_S = 5.0       # equals SERIES_BUCKET_S: same x axis as the pace/HR series
+CAD_PROFILE_MIN_CONF = 0.3
+CAD_PROFILE_MAX_AGE_S = 5.0
+CAD_PROGRESS_BUCKET_M = 20.0
 
 # Routes (geometry_version 1)
 ROUTE_GEOMETRY_VERSION = 1

@@ -1,0 +1,391 @@
+{
+  "sprint_note": "Adds a raw step stream, the CAD1 cadence estimator (server authoritative, phone mirror), run_metrics.cadence and ghost cadence_by_progress, a sample-accurate quiet metronome (Off / Match Ghost / Attack +2% / Manual) with a one-tap toggle, the race-screen left panel delta (gap history, 20 s pace, ghost section pace) and a web cadence stat/card; delta-only artifact (Sprint01/02 convention, see open_questions OQ6).",
+  "component_name": "runningtracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md",
+  "summary": "Records the runner's steps, derives a robust cadence per run and per route position, lets the phone play a quiet metronome that matches or slightly attacks the raced ghost's recorded cadence, and presents a clearer live gap/pace/heart-rate racing view while keeping GPS and heart-rate recording unaffected.",
+  "classification": {
+    "why_application": "Running-domain meaning only: what a plausible cadence is, how missed step detections are tolerated without inventing steps, which ghost cadence applies at a route position, what 'match' and 'attack' mean. Cross-layer (as Sprint01/02): the native capture/audio/screen code lives in 01_System/AtlasPhone and its behavior is defined here. The only reusable pieces (step sensor listener, click audio output, one generic notification action) are deliberately domain-free device capabilities added to the existing Mobile Platform next to location and heart rate; everything with cadence/ghost meaning stays in package running.* and backend/.",
+    "non_goals": [
+      "Ghost names/colors/identity, league, virtual pacers (roadmap Sprint 3)",
+      "Standalone packaging / first-run experience (roadmap Sprint 4)",
+      "Voice announcements, workout integration, any AI/ML processing",
+      "Backfilling cadence for existing runs (they stay cadence = NULL, 'no cadence recorded')",
+      "Deriving any cadence from speed or GPS, or inventing steps in raw storage",
+      "Audio-focus handling, ducking or pausing other audio",
+      "Cadence statistics in the phone recap or the history list (web run detail only)",
+      "Server-side or cross-device sync of metronome settings"
+    ],
+    "not_platform": "Cadence estimation rules, ghost-cadence lookup and metronome targets are meaningful only to running. StepDetector, ClickEngine and QuickAction contain no running meaning (raw sensor events, a click at a given tempo, one labelled notification action) and are placed in the Mobile Platform exactly like LocationTracker/HeartRateMonitor; no change to 02_Platform, to the Dataset contract or to Blueprint."
+  },
+  "contracts": {
+    "consumes": [
+      "Everything declared by Sprint01_RecordAndSync/10_architecture.json and Sprint02_RunFinishAndRecovery/10_architecture.json (Dataset contract, ApiError envelope, device-token native auth, V1 verification, A1 metrics, RS2 running-phase clipping, ghost profile/progress, Mobile Platform API); unchanged unless named below",
+      "02_Platform/packages/platform_contracts/contracts.py (Dataset, DatasetMeta, ColumnSchema)",
+      "01_System/AtlasPhone MobilePlatform: recorder (capture stays open through pause and recovery), location, heartRate, ensureForegroundService, stopAll, permissions",
+      "Android SensorManager TYPE_STEP_DETECTOR (permission ACTIVITY_RECOGNITION, API >= 29) and AudioTrack (no permission)",
+      "Existing phone ghost engine: GhostSession/GhostLive (progressM, reading.timeGapS), GhostCache.profile(), GhostComparison time-at-progress lookup"
+    ],
+    "provides": [
+      "Raw step events are stored unmodified as stream 'step' (one sample per step, event-time timestamp) and verified by V1 like location and heart rate; a run without steps (old phone, permission denied, no sensor) is unaffected in every other value.",
+      "Cadence is recalculable: run_metrics.cadence is derived data (CAD1, cadence.algo) and can be recomputed from the raw steps at any time; the raw rows are never changed by processing.",
+      "Missing cadence is never zero and never invented: gaps are absent series points / null values; no cadence is derived from speed; a ghost without recorded cadence is reported as such.",
+      "Server and phone compute CAD1 identically for the same steps (shared cadence_golden.json); the server value is the stored, authoritative one.",
+      "The metronome keeps time independently of UI refresh (sample-count scheduling on its own audio thread), changes target smoothly (slew limit), mixes with other audio (no audio focus request) and stops at Finish Run.",
+      "Existing runs, ghosts and phone builds without steps keep working: all schema and wire changes are additive and nullable/defaulted.",
+      "Step capture, metronome and chart updates never delay or block GPS/heart-rate recording (D7 reliability guard, invariant REL1)."
+    ],
+    "invariants": [
+      "S1 (step stream, draft D1/O1): one sample per detected step, HTTP stream name 'step', payload exactly SampleJson.step (type 'step.sample', captureId, sequence, timestamp, elapsedRealtimeNanos). payload.timestamp = sensor EVENT time as UTC (RawStep.timestampMillis, converted by StepDetector.toRaw so hardware batching does not shift it); the server uses run_samples.sample_ts, never arrival order or seq, for steps. Steps share the capture's single sequence counter with the other streams (V1 contiguity unchanged). Steps are recorded only while the phone is RECORDING: StepDetector is started at run start and Resume and stopped at Pause, Finish Run, legacy Finish, Discard and stopAll (so pauses and the recovery phase record no steps); the server additionally ignores steps outside [started_at, running end] and inside run_pauses (belt and braces, CAD1 step 1). Permission denied or no sensor: no step stream, nothing else changes, the home panel states it.",
+      "CAD1 (cadence estimator, draft D2; authoritative definition, implemented twice: Python backend/cadence.py and Kotlin CadenceEstimator; constants in scaffolding config.py / CadenceConfig; parity by tests/fixtures/cadence_golden.json). Input: step timestamps, pause intervals, run start, evaluation instant tau. (1) Kept steps = distinct timestamps within the running phase (>= started_at, <= running end = run_finished_at else finished_at else last step) and not inside any pause [start, end); steps on different sides of a pause are in different segments and never form an interval; state is reset at every segment start. (2) Causal replay: only steps with ts <= tau are known. The interval d_j = ts_j - ts_(j-1) (seconds) inside a segment is processed when step j+1 of the same segment is known (one-step lag; the last interval of a segment is never processed). (3) Window W = the last CAD_WINDOW_N accepted entries (interval value, corrected flag). M = median of W values (even count: mean of the two middle values) when len(W) >= CAD_MIN_INTERVALS, else undefined. (4) Classify d_j: GAP if d_j > CAD_GAP_S or (M defined and d_j > CAD_GAP_FACTOR*M): W is cleared, irregular streak = 0, previous-normal = false. Else if M undefined (warm-up): NORMAL iff 60/CAD_MAX_SPM <= d_j <= 60/CAD_MIN_SPM, else IRREGULAR. Else (M defined): NORMAL if |d_j - M| <= CAD_NORMAL_TOL*M; MISSED if |d_j - 2M| <= CAD_MISSED_TOL*2M AND the previous processed interval was NORMAL AND |d_(j+1) - M| <= CAD_NORMAL_TOL*M (next interval normal relative to the same M) - a MISSED interval adds two entries (d_j/2, corrected) and is never applied for multiples of 3 or more; otherwise IRREGULAR. NORMAL adds (d_j, not corrected). NORMAL and MISSED reset the irregular streak; IRREGULAR increments it, is excluded from W, and CAD_REANCHOR_IRREGULAR consecutive IRREGULAR intervals clear W (cadence re-anchors, e.g. running into walking). previous-normal is true only after a NORMAL interval. (5) Value at tau: null (gap) if no step <= tau in the current segment, or tau - (newest step <= tau) > CAD_GAP_S, or len(W) < CAD_MIN_INTERVALS; else spm = 60/M and conf = clamp(1 - 2*cv, 0, 1) * (1 - 0.5*corrected_fraction) with cv = population stdev / mean of the W values and corrected_fraction = corrected entries / len(W). spm is rounded to 0.1 and conf to 0.01. (6) Series: tau_k = started_at + k*CAD_SERIES_STEP_S while tau_k <= running end; a point {t = k*CAD_SERIES_STEP_S, spm, conf} exists only where the value is not null (gaps are absent). avg_spm = arithmetic mean of the series spm values rounded to 0.1, null when the series is empty. No steps are ever synthesised in raw storage; the 'two steps' of a MISSED interval exist only inside the estimator. Live phone display (LiveRunState.cadenceSpm) evaluates CAD1 over only the last LIVE_LOOKBACK_S seconds of steps and is a display approximation of the stored series.",
+      "CAD2 (stored cadence, draft D3): run_metrics.cadence is SQL NULL iff the running phase contains no kept step (S1/CAD1 step 1); otherwise the object {avg_spm: number|null, series: [{t, spm, conf}, ...], algo: CADENCE_ALGO_VERSION} (empty series + avg_spm null is valid: steps existed but none was usable). It is computed in compute_metrics for complete runs only, together with the other metrics, from the unclipped step rows restricted by CAD1 step 1. ALGO_VERSION is bumped so complete runs recompute on the next finish replay (existing rule); a legacy run recomputes to cadence NULL and otherwise unchanged values. Time authority: persisted phone UTC sample timestamps; series x = seconds since runs.started_at (same x basis as pace_series/hr_series); the server never reads its own clock (R-CON-AL-06).",
+      "GB1 (ghost cadence by progress, draft D3): when a run is matched onto its route (recompute_progress, which runs after recompute_and_store in the finish path and after a route link), run_route_progress.cadence_by_progress = [[bucket_start_m, spm], ...] derived as: take the run_metrics.cadence series points with conf >= CAD_PROFILE_MIN_CONF as (started_at + t, spm); for every PRE-trim profile point (moving time t, progress s) take the series point whose moving time (pauses removed, points inside pauses dropped) is nearest to t and within CAD_PROFILE_MAX_AGE_S, else no value; bucket by floor(s / CAD_PROGRESS_BUCKET_M); bucket value = mean of the values of its points rounded to 0.1; empty buckets are absent; ascending bucket_start_m. SQL NULL when cadence is NULL, the series is empty or no bucket results. Idle-start trimming does not change progress, so the bucket axis equals the profile's route position axis. Never derived from speed or from HR. If CADENCE_ALGO_VERSION changes, route-linked runs need recompute_progress (deferred decision).",
+      "MET1 (metronome, draft D4/O2-O5; all constants in scaffolding MetronomeConfig/ClickConfig): modes MetronomeMode OFF | MATCH_GHOST | ATTACK_102 | MANUAL, default OFF on first use, mode/manual cadence/volume persisted locally in RunSettings and restored for the next run (an unavailable restored mode becomes OFF). rawTarget: MATCH_GHOST = ghost cadence at the runner's current route progress (GB1 lookup of the MAIN ghost's cached profile); ATTACK_102 = that value x ATTACK_FACTOR; MANUAL = the manual cadence (default 170); OFF = none; a value outside [MIN_TARGET_SPM, MAX_TARGET_SPM] counts as none. No ghost cadence (old ghost, no steps, progress unknown because waiting for start / off course / GPS lost): rawTarget is none and nothing is derived from speed; the chip states 'No cadence recorded for this ghost' (ghost known, list absent) and offers 'Use manual cadence' (selects MANUAL). TargetSmoother output: first raw value as is, then slew-limited to SLEW_SPM_PER_S, raw none holds the last output for HOLD_S then silence; reset on mode change. The 1 Hz publish tick computes the smoothed target and writes it atomically to ClickEngine; the audio thread never waits for it, so a stalled UI/publish leaves the last target playing (REL1). ClickEngine: streaming AudioTrack, pre-rendered short quiet click, beats scheduled by sample count with fractional accumulation (BeatScheduler), no timers, no audio-focus request (mixes with music/podcasts), default volume DEFAULT_VOLUME with a persisted volume setting. Lifecycle: starts at run start/recover only when mode != OFF (and on first switch to a non-OFF mode), stays alive through a pause but is silent while PAUSED (the tick hands target none to the engine and resets the smoother; it resumes from the raw target after Resume), stops at Finish Run, legacy Finish, Discard and stopAll (O4: not during recovery). Quick toggle: MetronomeChip on the race screen and the free-run cockpit (one tap = next available mode, MetronomeTarget.next) and one notification action on the foreground notification (QuickAction label 'Click: <mode>', O5) that calls the same cycleMode; both persist the mode.",
+      "RC1 (race screen delta, draft D5; display only, derived from data the engine already has): audited against roadmap section 3 on the existing code. Already implemented and only to be kept: map + portrait layout, current gap (GapLine, negative = ahead), gaining/losing arrow (GapTrend), my HR with HR2 smoothing (default 5 s) and ghost HR aligned by route position (hrByProgress / HrDistanceChart, ghostHrSeries), distinct user/ghost colours. NEW (the delta): (a) 1-2 minute gap history (LiveTrends.gapSeries, window GAP_HISTORY_S); (b) 20 s rolling pace as its own value (LiveMetrics.racePaceSPerKm, window RACE_PACE_WINDOW_S; the existing 120 s 'Last 2 min' rolling pace and A1.ROLLING_PACE_WINDOW_S stay unchanged); (c) ghost section pace (RaceChart.ghostSectionPace over the route section covered in the last RACE_PACE_WINDOW_S); (d) left/right split of the lower area: left = RaceGapPanel, right = existing HrDistanceChart. Gap and pace are never plotted on a shared axis (gap = line chart of seconds, paces = two text figures). Unknown values render as the existing dash, never 0.",
+      "REL1 (reliability guard, draft D7): StepDetector callbacks only emit into a buffered flow (no store access, no locking); CaptureRecorder collects steps on the IO dispatcher like the other streams; the RunController steps collector holds the controller lock only for an in-memory append; ClickEngine runs on its own URGENT_AUDIO thread fed from sample counts and two atomics; chart derivations run inside the existing 1 Hz publish and never on the sensor or audio threads. A drop in chart refresh must not change click timing (BeatSchedulerTest independence from buffer size and target hand-off tests).",
+      "T3 (time authority, R-CON-AL-06): all persisted times are phone-reported UTC (step event time converted on the phone; capture of the offset between event and arrival happens once at conversion). Server cadence/ghost-cadence derivations use only stored sample timestamps, pauses and runs.started_at/run_finished_at/finished_at. Metronome smoothing uses the phone wall clock passed into the pure functions for display/audio only; nothing persisted.",
+      "C2 (compatibility / deploy order): FinishRequest/SampleIn forbid unknown values, therefore the server MUST be deployed before a phone build that uploads step samples (stream 'step' would be 422 on an old server). The phone omits expected_counts.step when the step count is 0, so a new phone without steps still works against an old server. An old phone against the new server works unchanged (step omitted = 0; responses gain a 'step' key that the old phone's parser ignores). Cached ghost profiles without cadence_by_progress decode with null. RunMeta JSON is unchanged.",
+      "P3 (durable state, R-CON-BP-03): Postgres: run_samples rows with stream 'step' (raw, owner RunningTracker, same lifecycle as other samples), run_metrics.cadence and run_route_progress.cadence_by_progress (derived/recomputable), constraint ck_run_samples_stream (10_schema.sql, runtime copy 03_Application/RunningTracker/schema.sql). Phone: step samples in the CaptureStore buffer (existing durable buffer, purged after verified sync), captures.step_count (SQLite schema version 3, additive column), SharedPreferences atlas_run_settings keys metronome_mode, manual_cadence_spm, click_volume (not secret, never uploaded). The in-memory recent-step list, TargetSmoother and LiveHistory gap buffer are ephemeral display state (R-CON-BP-03 allowed operational state).",
+      "Q3 (query behavior, R-CON-AL-01/-02): see the query field of each exposed surface. Series metric cadence takes no pagination, orders by t ASC, has the empty case (empty Dataset, total 0 for a run with cadence NULL, an empty series, or still uploading) and the unknown-run case (404 NOT_FOUND) for every run state (uploading, complete with cadence, complete without steps, legacy). RunRow.avg_cadence_spm is null for the same cases.",
+      "N4 (no regression): the existing Free Run, prepared run, ghost race, recovery, upload, V1, HR smoothing and recap paths behave as before when no steps exist; the 120 s rolling pace, GapTrend, HrDistanceChart and ST1 standing are untouched; MobilePlatform's existing public members keep their signatures (only additions), TWA/FCM untouched."
+    ],
+    "failure_modes": [
+      "ACTIVITY_RECOGNITION denied/blocked or no step-detector sensor: StepDetector.state NO_PERMISSION / NO_SENSOR, no step samples, cadence NULL, MATCH/ATTACK modes of the user's own future runs unaffected (they depend on the GHOST's cadence), live user cadence shows a dash; the run records normally. Consumer: the home panel note; no retry loop.",
+      "Old ghost or ghost recorded without steps: cadence_by_progress null; modes MATCH_GHOST/ATTACK_102 stay silent and the chip shows 'No cadence recorded for this ghost' + 'Use manual cadence'; never a speed-derived fallback.",
+      "Ghost cadence gap at the current position (bucket gap, off course, GPS lost, waiting for start): raw target none; the previous smoothed target is held for HOLD_S then silence until data returns, then restarts from the new raw value.",
+      "ClickEngine cannot create/write the AudioTrack (ERROR state): metronome silent, chip shows the engine state, recording unaffected; user can toggle to retry.",
+      "No headphones connected: the click plays through whatever route the system chooses, including the phone speaker (no guard built, OQ5); user sets mode OFF or volume 0.",
+      "Another app takes the audio output exclusively or the system mutes background audio of the foreground service: click may stop; device verification item (OQ4), not detectable in JVM tests.",
+      "422 VALIDATION_ERROR on PUT /native/runs/{id}/samples with stream 'step' or on finish with expected_counts.step from an OLD server (deploy-order violation, C2): the phone keeps the run pending_upload with the existing visible error; resolution is deploying the server.",
+      "count_mismatch for stream 'step' at finish (expected vs stored): the existing V1 incomplete path (retry/resume), same handling as for the other streams.",
+      "Step samples outside the running phase or inside pauses reach the server (old buffer, clock skew): ignored by CAD1 step 1, still stored raw and counted by V1.",
+      "Steps present but too irregular (stumbling, walking mixed in, sensor misses > 2x): series partially or entirely absent, avg_spm null, never zero; web card shows 'No cadence recorded.' for an empty series.",
+      "404 NOT_FOUND GET /runs/{id}/series for an unknown run; 422 for a metric outside pace|heart_rate|recovery_hr|cadence (unchanged envelope).",
+      "Capture buffer full (maxUnackedPerCapture 100000 unacked per capture; ~17k samples/hour with steps): existing Overflow behavior (sample refused, counted in dropped), now reached after roughly 5.5 h instead of 8 h; surfaced through the existing dropped count.",
+      "Process death during a run: the click stops with the process; Recover (existing) restarts GPS/HR as before, StepDetector stays stopped until Resume (recover enters PAUSED), the metronome restarts from persisted mode at begin()."
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "AtlasPhone MobilePlatform (see contracts.consumes); CaptureStore.fetch/info for upload",
+      "platform-ui: apiFetch, Dataset types, LineChart (web run detail)"
+    ],
+    "provides": [
+      "Native documentation updates: 01_System/AtlasPhone/Sprint01_MobilePlatform/MobilePlatform_API.md (steps, click, quickAction, Stream.STEP, CaptureStore v3) and 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md (upload, ghost cadence, metronome, race screen), tags [tested: JVM] / [built] / [unverified]",
+      "Kotlin APIs: MobilePlatform.steps / click / quickAction, RunController.cycleMetronome / selectMetronomeMode / setManualCadence / setClickVolume (signatures in 10_scaffolding.json)",
+      "Compose controls MetronomeChip and RaceGapPanel (native, not Dataset: R-CON-BP-04 governs HTTP read endpoints only)"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "PUT /api/runningtracker/native/runs/{id}/samples",
+        "change": "changed",
+        "purpose": "Existing idempotent sample upload; accepts stream 'step'.",
+        "ui_contract": "none (machine-to-machine, exempt from Dataset; typed record SamplesResponse | ApiError, unchanged)",
+        "exposure": "tailnet only; Bearer device token (unchanged)",
+        "query": "SampleIn.stream gains 'step'; payload must carry payload.timestamp (ISO-8601 UTC) exactly like the other streams (S1). SamplesResponse.high_seq gains the key step (StreamCounts). Duplicates (run_id, stream, seq) are ignored as before."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/native/runs/{id}/finish",
+        "change": "changed",
+        "purpose": "Existing verified finish; V1 now covers three streams and the complete-run metrics include cadence.",
+        "ui_contract": "none (machine-to-machine; typed record FinishResponse | ApiError)",
+        "exposure": "tailnet only; Bearer device token (unchanged)",
+        "query": "expected_counts (StreamCounts) gains optional step (default 0; the phone omits it when 0, C2). FinishResponse.verified_counts and high_seq gain the key step. count_mismatch may name stream 'step'. On result 'complete', recompute_and_store writes run_metrics.cadence per CAD2 and recompute_progress writes cadence_by_progress per GB1. No other finish behavior changes (idempotent replay, run_finished_at rules of Sprint02)."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/native/runs/{id}/ghost-profile",
+        "change": "changed",
+        "purpose": "Ghost profile for the phone cache; gains the ghost's cadence along the route.",
+        "ui_contract": "none (machine-to-machine, exempt from Dataset)",
+        "exposure": "tailnet only; Bearer device token (unchanged)",
+        "query": "Unchanged parameters and 404 rule (qualified profiles only). Response gains key cadence_by_progress: array of [bucket_start_m, spm] pairs ascending by bucket_start_m (20 m buckets, empty buckets absent) or null (GB1: no usable cadence). Existing keys and the points shape are unchanged, so old phones ignore the new key.",
+        "row_shape": "cadence_by_progress: [[bucket_start_m: number, spm: number], ...] | null"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs and GET /api/runningtracker/runs/{id}",
+        "change": "changed",
+        "purpose": "Run list/detail Dataset gains the average cadence of the running phase.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Parameters, defaults, ordering and pagination unchanged (Sprint01). RunRow gains avg_cadence_spm: number|null (= run_metrics.cadence.avg_spm; null when cadence is NULL, avg_spm null, or the run has no metrics). New nullable column in RUN_SCHEMA (additive, non-breaking per R-CON-BP-04 stability rule).",
+        "row_shape": "RunRow (Sprint01) + avg_cadence_spm: number|null"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/runs/{id}/series",
+        "change": "changed",
+        "purpose": "Adds metric cadence.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Param metric: pace | heart_rate | recovery_hr | cadence (required; anything else/missing -> 422). cadence: points = run_metrics.cadence.series, x = seconds since started_at, value = spm (SeriesRow shape of Sprint01, object_type 'run_series', label 'Cadence'; t_label by the existing label function); ordered by t_s ASC; empty Dataset when cadence is NULL or the series is empty or the run has no metrics yet; 404 if the run does not exist. Confidence is not exposed. Chart mapping as for the other metrics (x t_label, y value, aggregation avg). Other metrics unchanged.",
+        "row_shape": "SeriesRow (unchanged, declared in Sprint01_RecordAndSync/10_architecture.json exposed_surfaces)"
+      },
+      {
+        "type": "kotlin_api",
+        "name": "MobilePlatform.steps / click / quickAction",
+        "change": "new",
+        "purpose": "Domain-free device capabilities (step events, click audio output, one notification action); signatures in 10_scaffolding.json (mobile/steps, mobile/audio, mobile/service).",
+        "ui_contract": "none (in-process API)"
+      },
+      {
+        "type": "kotlin_api",
+        "name": "RunController metronome members and LiveRunState.cadenceSpm / metronome",
+        "change": "changed",
+        "purpose": "Running-level control and state for the metronome and the live user cadence; signatures in 10_scaffolding.json (running/session/RunController.kt).",
+        "ui_contract": "none (in-process API)"
+      },
+      {
+        "type": "ui_screen",
+        "name": "Race screen left panel + MetronomeChip (phone, Compose)",
+        "change": "changed",
+        "purpose": "GhostRaceScreen: lower area split into RaceGapPanel (gap, trend arrow, 1-2 min gap history, 20 s pace, ghost section pace) and the existing HR chart; MetronomeChip (one-tap mode, target, 'no cadence recorded' notice with manual fallback, manual cadence stepper, volume). LiveCockpit hosts the chip for free runs (OFF/MANUAL).",
+        "ui_contract": "none (native)"
+      },
+      {
+        "type": "ui_screen",
+        "name": "Run detail page (web, existing RunDetailPage)",
+        "change": "changed",
+        "purpose": "Adds an 'Avg cadence' stat and a Cadence chart card from RunRow.avg_cadence_spm and series metric cadence; 'No cadence recorded.' when empty; nothing else changes. No new pages.",
+        "ui_contract": "Dataset | ApiError"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 7,
+      "change": "changed",
+      "name": "finish_run (server, delta to Sprint01 step 7 / Sprint02)",
+      "description": "V1 verification and the idempotent replay now consider three streams; on result 'complete' recompute_and_store additionally computes and stores run_metrics.cadence (step 19) and recompute_progress stores cadence_by_progress (step 20) after the metrics are written.",
+      "inputs": ["FinishRequest.expected_counts.step", "run_samples (incl. step)", "run_pauses", "runs.started_at/run_finished_at/finished_at"],
+      "outputs": ["FinishResponse (step keys)", "run_metrics.cadence", "run_route_progress.cadence_by_progress"]
+    },
+    {
+      "step": 8,
+      "change": "changed",
+      "name": "serve_history (delta to Sprint01 step 8)",
+      "description": "RunRow adds avg_cadence_spm; series adds metric cadence (reads run_metrics.cadence.series, empty Dataset on NULL/empty, 404 unknown run, 422 unknown metric).",
+      "inputs": ["run id", "metric", "run_metrics.cadence"],
+      "outputs": ["Dataset | ApiError"]
+    },
+    {
+      "step": 9,
+      "change": "changed",
+      "name": "phone_record_and_sync (delta to Sprint01 step 9)",
+      "description": "Upload batches are stream-agnostic, so step samples ride the existing PUT /samples flow (stream name from Stream.apiName); expected counts include the step count (omitted when 0); step samples are acknowledged and purged like the others.",
+      "inputs": ["CaptureStore samples", "CaptureInfo.stepCount"],
+      "outputs": ["PUT samples incl. step", "finish body expected_counts.step when > 0"]
+    },
+    {
+      "step": 18,
+      "change": "new",
+      "name": "phone_step_capture",
+      "description": "RunController.start (and resume) requests nothing itself: the UI start path asked ACTIVITY_RECOGNITION once at first use (result ignored for starting). RunController then calls platform.steps.start(); on false the run continues without steps. StepDetector emits RawStep (event time via toRaw) into a buffered flow; CaptureRecorder stores them as Stream.STEP with the shared sequence. pause(), finishRun(), finish(), discard() and stopAll call steps.stop() (flush then unregister). A RunController collector keeps the last LIVE_LOOKBACK_S seconds of step times in memory for step 25.",
+      "inputs": ["RunLifecycle events", "permission state", "SensorManager events"],
+      "outputs": ["step samples in the capture buffer", "recent step times"]
+    },
+    {
+      "step": 19,
+      "change": "new",
+      "name": "compute_cadence_server",
+      "description": "Inside compute_metrics: build the kept step list (CAD1 step 1) from step rows, run CAD1 series with end = run_finished_at else finished_at, derive avg_spm; result None (SQL NULL) when no kept step exists. recompute_and_store routes rows by stream (location / heart_rate / step) so step rows never enter heart-rate computations.",
+      "inputs": ["step rows", "run_pauses", "started_at", "run_finished_at", "finished_at"],
+      "outputs": ["MetricsResult.cadence"]
+    },
+    {
+      "step": 20,
+      "change": "new",
+      "name": "ghost_cadence_by_progress",
+      "description": "recompute_progress reads run_metrics.cadence, filters by CAD_PROFILE_MIN_CONF, passes (ts, spm) points to build_progress which derives cadence_by_progress per GB1 from the pre-trim profile; stored next to the profile (SQL NULL when absent); native_get_ghost_profile returns it as cadence_by_progress. Runs without route/without completed status keep the existing delete-row behavior.",
+      "inputs": ["run_metrics.cadence", "profile points", "run_pauses", "started_at"],
+      "outputs": ["run_route_progress.cadence_by_progress", "ghost-profile response key"]
+    },
+    {
+      "step": 21,
+      "change": "new",
+      "name": "phone_metronome_target",
+      "description": "Once per publish (1 Hz, RunController): ghost progress from GhostLive.progressM (null while waiting/off course/GPS lost) -> MetronomeTarget.ghostCadenceAt on the main ghost's cadenceByProgress -> MetronomeTarget.rawTarget(mode, ghost, manual) -> TargetSmoother.update -> ClickEngine.setTargetSpm (atomic) and MetronomeState into LiveRunState. While the run is PAUSED the tick hands target none (silence) to the engine and resets the smoother; mode OFF stops the engine.",
+      "inputs": ["GhostLive.progressM", "main ghost cadenceByProgress", "mode / manual cadence from RunSettings", "wall clock"],
+      "outputs": ["ClickEngine target", "MetronomeState"]
+    },
+    {
+      "step": 22,
+      "change": "new",
+      "name": "click_engine_audio",
+      "description": "ClickEngine thread: loop { read target + volume atomics; BeatScheduler.fill(buffer, frames, target); AudioTrack.write } with fractional-accumulation beat spacing; target null = silence; no audio focus; stop() releases the track. Independent of UI/publish timing.",
+      "inputs": ["target spm (atomic)", "volume (atomic)"],
+      "outputs": ["PCM click stream to the system audio output"]
+    },
+    {
+      "step": 23,
+      "change": "new",
+      "name": "metronome_quick_toggle",
+      "description": "MetronomeChip tap or the notification QuickAction calls RunController.cycleMetronome -> MetronomeController.cycleMode: MetronomeTarget.next(current, hasGhost), persist via RunSettings, reset smoother, start/stop engine, update the QuickAction label ('Click: <mode>'); the notice button calls selectMetronomeMode(MANUAL); manual cadence and volume setters persist and forward. Metronome stops (engine stop, QuickAction cleared) at finishRun, finish, discard, stopAll.",
+      "inputs": ["user tap", "notification action", "hasGhost", "RunSettings"],
+      "outputs": ["new mode (persisted)", "engine start/stop", "QuickAction label"]
+    },
+    {
+      "step": 24,
+      "change": "new",
+      "name": "race_chart_derivations",
+      "description": "Inside the existing publish: LiveHistory.record additionally appends the time gap to gapSeries (window GAP_HISTORY_S, only while ON_COURSE and not paused), keeps (moving s, progress m), and computes ghostSectionPaceSPerKm via RaceChart.ghostSectionPace(profile, progress RACE_PACE_WINDOW_S ago, progress now); LiveMetrics.racePaceSPerKm comes from the accumulator. RaceGapPanel renders them; HR side unchanged.",
+      "inputs": ["LiveMetrics", "GhostLive.reading.timeGapS/progressM", "main ghost profile"],
+      "outputs": ["LiveTrends.gapSeries / racePaceSPerKm / ghostSectionPaceSPerKm"]
+    },
+    {
+      "step": 25,
+      "change": "new",
+      "name": "live_user_cadence",
+      "description": "Display only: in publish, CadenceEstimator.at(recent step times, current pauses, now) -> LiveRunState.cadenceSpm (null = gap/warm-up/no steps); shown as 'you N' in the MetronomeChip. Never persisted, never uploaded, not used for the metronome target.",
+      "inputs": ["recent step times", "pauses", "wall clock"],
+      "outputs": ["LiveRunState.cadenceSpm"]
+    },
+    {
+      "step": 26,
+      "change": "new",
+      "name": "web_cadence_view",
+      "description": "RunDetailPage loads /series?metric=cadence with the existing requests, shows the Avg cadence stat from RunRow.avg_cadence_spm and the Cadence card (LineChart) or 'No cadence recorded.'; an ApiError in the new request shows the existing ErrorCard.",
+      "inputs": ["RunRow.avg_cadence_spm", "cadence series Dataset"],
+      "outputs": ["rendered stat and card"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "01_System/AtlasPhone", "role": "Native host: Mobile Platform additions (StepDetector, ClickEngine, QuickAction, CaptureStore v3, permissions, manifest) and running package code (file list in 10_scaffolding.json)"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset types (RunRow column, cadence series)"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error envelope (unchanged)"},
+      {"component": "02_Platform/Atlas_Shell/platform-ui", "role": "LineChart/apiFetch for the web cadence card (consumed only; no Shell file changes, no nginx change)"},
+      {"component": "02_Platform/Postgres (atlas-postgres)", "role": "schema runningtracker, additive constraint replacement and columns"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "none new", "role": "No new Python, npm or Gradle dependency; Android SDK classes SensorManager and AudioTrack only; JVM tests use the existing JUnit setup", "reuse_existing": true}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any change to network exposure (no new port, no nginx change; native routes stay tailnet-only)",
+      "Domain logic (CAD1, ghost cadence, metronome targets) in 02_Platform or inside the domain-free Mobile Platform classes",
+      "Audio-focus requests (AUDIOFOCUS_*), ducking or pausing other apps' audio (O2)",
+      "Any cadence derived from speed, GPS or heart rate; synthesising steps in raw storage; zero-filling missing cadence",
+      "New runtime permissions other than ACTIVITY_RECOGNITION; ACTIVITY_RECOGNITION requested before first use or repeatedly without a user tap",
+      "Deleting or rewriting raw step samples; backfilling cadence for old runs",
+      "Server clock for step/cadence time; uploading metronome settings",
+      "Pre-building roadmap Sprint 3-4 features (ghost names/colors/league, virtual pacers, standalone packaging)",
+      "Foreground-service type changes without device evidence (OQ4)"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "runtime_schema_path": "03_Application/RunningTracker/schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Order: (1) server pure logic + tests: copy 10_schema.sql over schema.sql (verify it re-runs idempotently on a database that already has the Sprint02 schema and on an empty one), config.py constants (ALGO_VERSION 2 -> 3 plus CAD_* and CADENCE_ALGO_VERSION), backend/cadence.py (CAD1 exactly as the invariant, causal single pass is fine as long as results equal the per-tau definition), tests/fixtures/cadence_golden.json (hand-checked vectors listed in the scaffolding role) and tests/test_cadence.py; (2) models.StreamCounts.step + SampleIn Literal, verification.py three streams, metrics.compute_metrics(steps=) + MetricsResult.cadence + recompute_and_store three-way stream split and cadence upsert (plain None for SQL NULL, never Json(None)), ghost.build_progress(cadence=) + ProgressResult.cadence_by_progress (GB1, from the pre-trim profile), progress_store.recompute_progress, native.native_get_ghost_profile key, runs.py/datasets.py (avg_cadence_spm, metric cadence); update every usage found by grep as listed in 10_scaffolding.json (ALGO_VERSION asserts in tests/test_metrics.py:93 and tests/test_native_sync.py:225,439; exact high_seq/verified_counts dict asserts in tests/test_native_sync.py lines 112,191,195,219,354,416 gain \"step\": 0); (3) server deployed (compose rebuild with --env-file 01_System/secrets.env --env-file 01_System/config.env) BEFORE any phone build that uploads steps (C2).",
+      "Phone, each step JVM-testable, in this order: (a) CadenceConfig + CadenceEstimator against the shared golden; MetronomeTarget/TargetSmoother/MetronomeMode; BeatScheduler; RaceChart.ghostSectionPace; (b) Samples.kt (Stream.STEP, apiName, RawStep, SampleJson.step), StepDetector.toRaw, CaptureStore v3 migration + counters + CaptureInfo.stepCount, CaptureRecorder steps collector, PermissionLogic ACTIVITY_RECOGNITION (verify PermissionManager treats an empty required list as granted), manifest permission + uses-feature; (c) AtlasClient (apiName, StreamCountsLocal.step, expected_counts.step omitted when 0), UploadWorker line 72, GhostModels cadenceByProgress (toJson/fromJson tolerant); (d) StepDetector (Android), ClickEngine (Android), QuickAction + RecordingService action, MobilePlatform wiring and stopAll; (e) RunSettings keys, MetronomeController, RunController wiring (start/pause/resume/finishRun/finish/discard/recover hooks, loadSamples `when` ignoring STEP, publish additions: cadenceSpm, metronome tick, racePace, gapSeries, ghost section pace), RunMetrics racePaceSPerKm (do not touch A1.ROLLING_PACE_WINDOW_S), LiveHistory additions; (f) screens (see ui_implementer). Keep sensor callbacks, audio thread and chart code off the recording path (REL1).",
+      "Audit task for the race screen BEFORE building RC1: re-verify against the code that the items listed as already implemented in RC1 are still present and behave as stated (gap sign, arrow, HR smoothing default 5 s, ghost HR by progress), and build only the delta (a)-(d). Record any difference in 00_Blueprint/Quality/agent_rule_evidence.md as an implementer_note; do not widen scope silently.",
+      "Update 01_System/AtlasPhone/Sprint01_MobilePlatform/MobilePlatform_API.md and 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md in the existing status-tag style; hardware items (real step detection, screen-off steps, click timing, headphone/music mixing, permission flows, GPS/HR continuity with steps and audio active) stay [unverified] until a real run.",
+      "Web: RunDetailPage.tsx cadence stat + card, HistoryPage.tsx RunRow interface field, Playwright stub for the new request added to every existing run-detail test; frontend deploy via the Stop hook (manual only for nginx/Dockerfile changes)."
+    ],
+    "ui_implementer": [
+      "MetronomeChip.kt: one-tap cycle chip, mode label, target spm, 'you N' when cadenceSpm known, notice 'No cadence recorded for this ghost' + 'Use manual cadence' button when MetronomeState.ghostHasCadence == false in a ghost mode, MANUAL -/+ stepper (MANUAL_STEP_SPM), small volume slider; touch targets sized for running; same dark palette as GhostRaceScreen; no animation.",
+      "RaceGapPanel.kt + GhostRaceScreen.kt: left panel per RC1 (gap value and arrow from existing GapLine, gap history line chart with zero line, colours GainGreen/LossRed, 20 s pace and ghost section pace as two text figures in min/km, dash for unknown); keep the existing HR chart on the right; show the gap only once. LiveCockpit.kt hosts the chip for free runs.",
+      "RunningScreen.kt: optional ACTIVITY_RECOGNITION request on first start (run starts regardless), denied note on the home panel, volume and manual cadence settings on the home panel.",
+      "Web: Avg cadence stat and Cadence card in RunDetailPage.tsx using existing running.css classes only (no new visual language)."
+    ],
+    "test_writer": [
+      "Implement every scenario of 10_test_spec.md: pytest in atlas-runningtracker-test (extend fixtures.sql with fix- prefixed cadence runs), Playwright for [UI] (stubbed API), Kotlin JVM tests for [Phone JVM] scenarios, and list [UI — manual] scenarios as untested in the test report.",
+      "Server and Kotlin CadenceEstimatorTest must read the same tests/fixtures/cadence_golden.json (parity).",
+      "Do not write automated stand-ins that claim to verify hardware behavior (step sensor, audio route, screen-off, music mixing, permission dialogs)."
+    ],
+    "reviewer": [
+      "Check CAD1 is implemented as defined (one-step lag, MISSED needs previous NORMAL and next NORMAL, no 3x correction, GAP clears the window, re-anchor after CAD_REANCHOR_IRREGULAR) and that no value is ever 0 or speed-derived anywhere (server, phone, ghost lookup, UI).",
+      "Check recompute_and_store splits rows by stream (a step row must never reach the heart-rate list) and RunController.loadSamples ignores Stream.STEP; check CaptureStore.append counter selection and the v2 -> v3 migration keep existing captures valid.",
+      "Check wire compatibility: expected_counts.step omitted when 0, no other new keys sent, ghost-profile consumers tolerate null/absent cadence_by_progress, deploy order C2 documented.",
+      "Check the metronome never requests audio focus, timing comes from sample counts (no Handler/Timer), the target hand-off is atomic, and the engine stops at Finish Run / Finish / Discard / stopAll.",
+      "Check declare-once: CAD_* constants only in config.py/CadenceConfig with equal values; no signature restated outside 10_scaffolding.json; the RC1 'already implemented' list matches the code.",
+      "Check no change to network exposure, no new permission besides ACTIVITY_RECOGNITION (requested at first use only), foreground service types unchanged."
+    ]
+  },
+  "deferred_decisions": [
+    "Speaker guard (mute the click when the output route is the phone speaker) and audio-route-change notifications (OQ5).",
+    "Whether cadence should appear in the phone recap, the history list or as a run-comparison metric.",
+    "Batching step samples (e.g. 1 s buckets) if upload size becomes a problem (O1 default is one sample per step, ~10k/h).",
+    "Recomputing cadence_by_progress of route-linked runs when CADENCE_ALGO_VERSION changes (needs a recompute_progress sweep); not needed while the algorithm version is 1.",
+    "A foreground-service type for audio (mediaPlayback) or for the step sensor (health), pending device evidence (OQ4).",
+    "Live cadence feedback beyond the display ('you N'), e.g. a cadence-vs-target indicator."
+  ],
+  "risks": [
+    {
+      "risk": "Step capture and audio rely on the foreground service (location|connectedDevice) while the screen is off; behavior of TYPE_STEP_DETECTOR delivery and of AudioTrack playback from that service is unverified on hardware.",
+      "impact": "Steps could stop arriving or the click could be muted with the screen locked; mitigated by gap-tolerant CAD1 (cadence NULL, run unaffected), the Recover path, and the manual device acceptance scenarios; no service type change until evidence exists."
+    },
+    {
+      "risk": "Kotlin and Python implement CAD1 separately (like A1 and HRR1).",
+      "impact": "Phone live cadence could differ from the stored server cadence; limited by the shared cadence_golden.json and by the server being authoritative; the live value is labelled display-only and uses a lookback approximation."
+    },
+    {
+      "risk": "The step sensor misses or double-reports steps on some devices; CAD1 corrects only isolated single misses.",
+      "impact": "Cadence series have gaps or reduced confidence on such devices; ghost-match is then silent for those ghosts rather than wrong (by design)."
+    },
+    {
+      "risk": "A new phone build against an old server fails on step upload (422) or on expected_counts.step.",
+      "impact": "Run stays pending_upload with a visible error; avoided by deploy order C2 (server first); a run without steps keeps working against an old server because step is omitted when 0."
+    },
+    {
+      "risk": "Raw step volume (~10k samples/hour) raises sample counts per run and upload size, and shortens the time until the 100k unacked buffer limit (about 5.5 h).",
+      "impact": "Larger uploads and a lower overflow threshold for very long runs; accepted (single user, runs far below the limit); batching is a deferred decision."
+    },
+    {
+      "risk": "The click is audible through the phone speaker if headphones are absent or disconnect mid-run (no speaker guard, OQ5).",
+      "impact": "Social annoyance only; mitigated by very low default volume, one-tap Off and the notification action."
+    },
+    {
+      "risk": "Persisting the metronome mode means the next run may start clicking without a fresh decision (OQ3).",
+      "impact": "Unexpected audio at run start; mitigated by a visible chip and the notification label; changeable to default OFF per run without schema impact."
+    },
+    {
+      "risk": "Replacing the run_samples stream constraint scans the table once on the first startup after deploy.",
+      "impact": "A short lock/validation delay at that startup; single-user data volume makes it negligible; the statement is idempotent afterwards."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "OQ1 Draft section 3/D2 gives the phone a CadenceEstimator but no phone consumer. This design uses it for a display-only 'you N' value in the MetronomeChip (live user cadence). Confirm, or drop LiveRunState.cadenceSpm and keep the Kotlin estimator only for parity tests. Default applied: shown in the chip, not persisted.",
+      "owner": "product"
+    },
+    {
+      "question": "OQ2 Draft modes are OFF | MATCH_GHOST | ATTACK_102 plus an 'offered' manual fallback for ghosts without cadence. This design models the fallback as a fourth mode MANUAL (default 170 spm, adjustable, persisted) so free runs without a ghost can also use a fixed click, and the one-tap cycle is OFF > MATCH_GHOST > ATTACK_102 > MANUAL (ghost modes omitted without a ghost session). Confirm. Default applied.",
+      "owner": "product"
+    },
+    {
+      "question": "OQ3 The metronome mode is persisted across runs (a returning runner usually wants the same mode). Alternative: always start OFF. Default applied: persisted, restored at run start, chip and notification label make the state visible.",
+      "owner": "product"
+    },
+    {
+      "question": "OQ4 Verify on a device (screen locked, music playing) that TYPE_STEP_DETECTOR events and the AudioTrack click keep flowing from the existing location|connectedDevice foreground service; if Android mutes the click or stops steps, a mediaPlayback/health service type may be needed (out of scope to pre-build).",
+      "owner": "implementer"
+    },
+    {
+      "question": "OQ5 No speaker guard is built (the click follows the system audio route). Confirm that a click on the phone speaker when headphones disconnect is acceptable for this sprint.",
+      "owner": "product"
+    },
+    {
+      "question": "OQ6 Component 03_Application/RunningTracker still has no 00_architecture/ baseline (carried from Sprint02 OQ3) and .claude/supportDocs/atlas_dev_ref.md has no RunningTracker/AtlasPhone entry (Sprint02 OQ4). These artifacts are therefore delta-only (established Sprint01/02 convention); the schema 10_schema.sql is a full copy seeded from the runtime schema.sql. No port or name conflict was found. Canonical-snapshot and dev-ref updates are sprint-close tasks.",
+      "owner": "architecture"
+    },
+    {
+      "question": "OQ7 Draft D3 sketched the stored series as ~1 Hz objects. This design evaluates CAD1 every CAD_SERIES_STEP_S = 5 s (same x basis and bucket as pace_series/hr_series, about 720 points per hour instead of 3600) and stores point objects {t, spm, conf}; live display evaluates on demand. Default applied; revert to a finer step only if the web chart needs it (changes only the constant, ALGO_VERSION bump).",
+      "owner": "architecture"
+    }
+  ]
+}

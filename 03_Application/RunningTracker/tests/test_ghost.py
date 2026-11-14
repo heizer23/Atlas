@@ -226,3 +226,28 @@ def test_progress_matches_the_shared_oracle_fixture():
     res = build_progress(f["geometry"], fixes, [], pauses, start)
     assert [[p[0], p[1]] for p in res.profile] == f["expected"]["profile"]
     assert (res.matched, res.off_course, res.qualified) == (f["expected"]["matched"], f["expected"]["off_course"], f["expected"]["qualified"])
+
+
+# ---- Sprint03: cadence_by_progress through the ghost-profile endpoint ----
+
+def test_ghost_profile_carries_cadence_by_progress(client):
+    from tests.conftest import RUN_CADENCE
+    client.post(f"{W}/routes", json={"run_id": RUN_CADENCE, "name": "Cad"})
+    body = client.get(f"{W}/native/runs/{RUN_CADENCE}/ghost-profile", headers=auth()).json()
+    cad = body["cadence_by_progress"]
+    assert cad and [b[0] for b in cad] == sorted(b[0] for b in cad) and all(b[0] % 20 == 0 for b in cad)
+    assert all(b[1] == 170.0 for b in cad) and len(body["points"]) >= 15
+
+
+def test_ghost_profile_cadence_is_null_without_usable_steps(client):
+    from tests.conftest import RUN_CADENCE_EMPTY
+    for rid in (RUN_COMPLETE, RUN_CADENCE_EMPTY):
+        client.post(f"{W}/routes", json={"run_id": rid, "name": f"R{rid[-2:]}"})
+        r = client.get(f"{W}/native/runs/{rid}/ghost-profile", headers=auth())
+        assert r.status_code == 200 and r.json()["cadence_by_progress"] is None and len(r.json()["points"]) >= 15
+
+
+def test_ghost_profile_auth_and_qualification_unchanged(client):
+    from tests.conftest import RUN_CADENCE
+    assert client.get(f"{W}/native/runs/{RUN_CADENCE}/ghost-profile", headers=auth()).status_code == 404   # no route -> not qualified
+    assert client.get(f"{W}/native/runs/{RUN_CADENCE}/ghost-profile").status_code == 401

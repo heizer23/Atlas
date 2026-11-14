@@ -61,7 +61,7 @@ data class PreparedRun(
     val id: String, val shortId: String, val title: String?, val plannedForMillis: Long?, val expiresAtMillis: Long,
     val routeId: String? = null, val ghostRunId: String? = null,
 )
-data class StreamCountsLocal(val location: Long, val heartRate: Long)
+data class StreamCountsLocal(val location: Long, val heartRate: Long, val step: Long = 0)
 data class BeginResult(val status: String, val contiguousSeq: Long)
 data class SamplesResult(val stored: Int, val duplicates: Int, val contiguousSeq: Long)
 data class FinishResult(
@@ -116,11 +116,11 @@ class AtlasClient(
             BeginResult(it.getString("status"), it.getLong("contiguous_seq"))
         }
 
-    /** Stream names are mapped to the server's `location` / `heart_rate`; the payload is the stored JSON unchanged. */
+    /** Stream names are the server's `location` / `heart_rate` / `step` (Stream.apiName); the payload is the stored JSON unchanged. */
     fun putSamples(runId: String, samples: List<CaptureSample>): AtlasResult<SamplesResult> {
         val arr = JSONArray()
         samples.forEach { s ->
-            arr.put(JSONObject().put("stream", if (s.stream == Stream.LOCATION) "location" else "heart_rate")
+            arr.put(JSONObject().put("stream", s.stream.apiName)
                 .put("seq", s.sequence).put("payload", JSONObject(s.json)))
         }
         return call("PUT", "/runs/$runId/samples", JSONObject().put("samples", arr)) {
@@ -141,7 +141,9 @@ class AtlasClient(
             .put("finished_at", SampleJson.iso(finishedAt))
             .put("elapsed_s", summary.elapsedS).put("moving_s", summary.movingS).put("distance_m", summary.distanceM)
             .put("last_seq", lastSeq)
-            .put("expected_counts", JSONObject().put("location", counts.location).put("heart_rate", counts.heartRate))
+            .put("expected_counts", JSONObject().put("location", counts.location).put("heart_rate", counts.heartRate)
+                // Omitted (never 0/null) without steps: an old server rejects unknown keys, see invariant C2 (deploy the server first).
+                .also { if (counts.step > 0) it.put("step", counts.step) })
             .put("pauses", pauses).put("dropped", dropped)
         meta.category?.let { body.put("category", it) }
         meta.routeId?.let { body.put("route_id", it) }

@@ -21,6 +21,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 RUN_SELECT = """
     select r.id, r.run_type, r.status, r.started_at, r.finished_at, r.elapsed_s, r.moving_s, r.distance_m,
            r.comment, r.category, r.route_id, rt.name as route_name, d.name as device_name, m.avg_hr, m.max_hr,
+           (m.cadence->>'avg_spm')::double precision as avg_cadence_spm,
            (select count(*) from runningtracker.run_samples s where s.run_id = r.id and s.stream = 'location') as location_count,
            (select count(*) from runningtracker.run_samples s where s.run_id = r.id and s.stream = 'heart_rate') as hr_count
     from runningtracker.runs r
@@ -104,14 +105,16 @@ def get_splits(run_id: str) -> JSONResponse:
 
 
 @router.get("/{run_id}/series", response_model=None)
-def get_series(run_id: str, metric: Literal["pace", "heart_rate", "recovery_hr"]) -> JSONResponse:
+def get_series(run_id: str, metric: Literal["pace", "heart_rate", "recovery_hr", "cadence"]) -> JSONResponse:
     rid = _uuid(run_id)
-    column = {"pace": "pace_series", "heart_rate": "hr_series", "recovery_hr": "recovery"}[metric]
+    column = {"pace": "pace_series", "heart_rate": "hr_series", "recovery_hr": "recovery", "cadence": "cadence"}[metric]
     exists, points = _metrics_column(rid, column) if rid else (False, None)
     if not exists:
         return _not_found()
     if metric == "recovery_hr":
         points = (points or {}).get("curve") or []  # recovery is SQL NULL without a recovery phase
+    if metric == "cadence":
+        points = [[p["t"], p["spm"]] for p in (points or {}).get("series") or []]  # SQL NULL = no steps recorded
     return ds_response(series_dataset(metric, points or []))
 
 

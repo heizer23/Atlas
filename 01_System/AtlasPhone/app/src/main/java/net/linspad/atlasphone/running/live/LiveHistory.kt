@@ -1,7 +1,9 @@
 package net.linspad.atlasphone.running.live
 
 import net.linspad.atlasphone.running.ghost.GhostLive
+import net.linspad.atlasphone.running.ghost.GhostProfile
 import net.linspad.atlasphone.running.ghost.GhostStatus
+import net.linspad.atlasphone.running.metrics.A1
 import net.linspad.atlasphone.running.metrics.LiveMetrics
 
 /** What the cockpit shows beyond the raw [LiveMetrics]. Series x = moving seconds. Everything unknown is null / empty. */
@@ -18,6 +20,12 @@ class LiveTrends(
     val hrByProgress: List<Pair<Double, Double>> = emptyList(),
     /** Change of the time gap to the ghost over the last ~25 s: negative = gaining / lead growing. Null until measurable. */
     val gapChangeS: Double? = null,
+    /** Time gap to the ghost over the last GAP_HISTORY_S (x moving s, y seconds, negative = ahead). Own axis, never shared with pace. */
+    val gapSeries: List<Pair<Double, Double>> = emptyList(),
+    /** Average pace over the last 20 s (LiveMetrics.racePaceSPerKm). */
+    val racePaceSPerKm: Double? = null,
+    /** The ghost's pace over the route section you covered in the last 20 s. */
+    val ghostSectionPaceSPerKm: Double? = null,
 ) {
     companion object { val EMPTY = LiveTrends(null, null, emptyList(), emptyList(), emptyList(), null, null) }
 }
@@ -62,11 +70,17 @@ class LiveHistory(private val windowS: Double = 600.0) {
     private val gapTrend = GapTrend()
     private val hrByProgress = HrByDistance.Accumulator()
     private var rolling: Double? = null
+    private var racePace: Double? = null
+    private var ghostSectionPace: Double? = null
+    private val gap = Series()
+    private val progressTrail = ArrayList<Pair<Double, Double>>()   // (moving s, progress m), last ~40 s while ON_COURSE
 
     /** [hrDisplay] = the smoothed HR display value (HR2); the default keeps the raw current reading. */
-    fun record(m: LiveMetrics, ghost: GhostLive?, hrDisplay: Double? = m.currentHr?.toDouble()) {
+    fun record(m: LiveMetrics, ghost: GhostLive?, hrDisplay: Double? = m.currentHr?.toDouble(), ghostProfile: GhostProfile? = null) {
         val t = m.movingS
         rolling = m.rollingPaceSPerKm
+        racePace = m.racePaceSPerKm
+        ghostSectionPace = null
         lastSmoothed = smoother.update(m.currentPaceSPerKm)
         lastSmoothed?.let { pace.add(t, it) }
         hrDisplay?.let { hr.add(t, it) }
@@ -75,13 +89,20 @@ class LiveHistory(private val windowS: Double = 600.0) {
             val s = ghost.progressM
             if (s != null && r.leadM != null) momentum.add(t, s, r.leadM)
             r.ghostHrAtPosition?.let { ghostHr.add(t, it) }
-            r.timeGapS?.let { gapTrend.add(t, it) }
+            r.timeGapS?.let { gapTrend.add(t, it); gap.add(t, it) }
+            if (s != null) {
+                progressTrail.add(t to s)
+                while (progressTrail.size > 1 && progressTrail.first().first < t - TRAIL_S) progressTrail.removeAt(0)
+                val back = progressTrail.lastOrNull { it.first <= t - A1.RACE_PACE_WINDOW_S }
+                if (back != null && ghostProfile != null) ghostSectionPace = RaceChart.ghostSectionPace(ghostProfile, back.second, s)
+            }
             if (s != null) hrDisplay?.let { hrByProgress.add(s, it) }
         }
         lastT = t
     }
 
     private var lastSmoothed: Double? = null
+    private companion object { const val TRAIL_S = 40.0 }
     private var lastT = 0.0
 
     fun snapshot(): LiveTrends {
@@ -93,6 +114,8 @@ class LiveHistory(private val windowS: Double = 600.0) {
             paceSeries = recent(pace), hrSeries = recent(hr), ghostHrSeries = recent(ghostHr),
             leadChange100mM = momentum.changeOver100m(), leadSecondsAgoM = momentum.leadSecondsAgo(),
             hrByProgress = hrByProgress.snapshot(), gapChangeS = gapTrend.change(),
+            gapSeries = gap.points().filter { it.first >= lastT - RaceConfig.GAP_HISTORY_S },
+            racePaceSPerKm = racePace, ghostSectionPaceSPerKm = ghostSectionPace,
         )
     }
 }

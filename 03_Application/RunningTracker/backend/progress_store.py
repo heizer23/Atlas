@@ -1,8 +1,10 @@
 """Persist route progress / ghost profile for a run (derived data; replaced on every recompute)."""
 
+from datetime import timedelta
+
 from psycopg2.extras import Json
 
-from backend.config import PROGRESS_ALGO_VERSION
+from backend.config import CAD_PROFILE_MIN_CONF, PROGRESS_ALGO_VERSION
 from backend.ghost import build_progress
 
 
@@ -31,22 +33,27 @@ def recompute_progress(conn, run_id: str) -> None:
                 hrs.append((s["sample_ts"], p["bpm"]))
         cur.execute("select started_at, ended_at from runningtracker.run_pauses where run_id = %s", (run_id,))
         pauses = [(r["started_at"], r["ended_at"]) for r in cur.fetchall()]
-        res = build_progress(run["geometry"], fixes, hrs, pauses, run["started_at"])
+        cur.execute("select cadence from runningtracker.run_metrics where run_id = %s", (run_id,))
+        m = cur.fetchone()
+        series = ((m["cadence"] or {}).get("series") or []) if m else []
+        cadence = [(run["started_at"] + timedelta(seconds=p["t"]), p["spm"]) for p in series if p["conf"] >= CAD_PROFILE_MIN_CONF]
+        res = build_progress(run["geometry"], fixes, hrs, pauses, run["started_at"], cadence)
         cur.execute(
             """
             insert into runningtracker.run_route_progress
                 (run_id, route_id, geometry_version, algo_version, qualified, reason, end_progress_m, coverage,
-                 matched_fixes, off_course_fixes, profile, computed_at)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                 matched_fixes, off_course_fixes, profile, cadence_by_progress, computed_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
             on conflict (run_id) do update set
                 route_id = excluded.route_id, geometry_version = excluded.geometry_version,
                 algo_version = excluded.algo_version, qualified = excluded.qualified, reason = excluded.reason,
                 end_progress_m = excluded.end_progress_m, coverage = excluded.coverage,
                 matched_fixes = excluded.matched_fixes, off_course_fixes = excluded.off_course_fixes,
-                profile = excluded.profile, computed_at = excluded.computed_at
+                profile = excluded.profile, cadence_by_progress = excluded.cadence_by_progress, computed_at = excluded.computed_at
             """,
             (run_id, run["route_id"], run["geometry_version"], PROGRESS_ALGO_VERSION, res.qualified, res.reason,
-             res.end_progress_m, res.coverage, res.matched, res.off_course, Json(res.profile)),
+             res.end_progress_m, res.coverage, res.matched, res.off_course, Json(res.profile),
+             Json(res.cadence_by_progress) if res.cadence_by_progress is not None else None),
         )
 
 

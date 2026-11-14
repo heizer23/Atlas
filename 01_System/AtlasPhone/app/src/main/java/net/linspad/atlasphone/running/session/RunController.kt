@@ -12,6 +12,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.linspad.atlasphone.mobile.MobilePlatform
+import net.linspad.atlasphone.mobile.model.CaptureSample
 import net.linspad.atlasphone.mobile.model.RawHeartRate
 import net.linspad.atlasphone.mobile.model.RawLocation
 import net.linspad.atlasphone.mobile.model.Stream
@@ -25,8 +26,12 @@ import net.linspad.atlasphone.running.SampleDecoder
 import net.linspad.atlasphone.running.auth.TokenStore
 import net.linspad.atlasphone.running.ghost.FieldRanking
 import net.linspad.atlasphone.running.ghost.GhostCache
+import net.linspad.atlasphone.running.cadence.CadenceConfig
+import net.linspad.atlasphone.running.cadence.CadenceEstimator
 import net.linspad.atlasphone.running.ghost.GhostLive
+import net.linspad.atlasphone.running.ghost.GhostProfile
 import net.linspad.atlasphone.running.ghost.GhostSession
+import net.linspad.atlasphone.running.ghost.GhostStatus
 import net.linspad.atlasphone.running.ghost.Library
 import net.linspad.atlasphone.running.hr.HrPoint
 import net.linspad.atlasphone.running.hr.HrSmoothing
@@ -41,6 +46,9 @@ import net.linspad.atlasphone.running.live.HrTarget
 import net.linspad.atlasphone.running.live.LiveHistory
 import net.linspad.atlasphone.running.live.LiveTrends
 import net.linspad.atlasphone.running.metrics.LiveMetrics
+import net.linspad.atlasphone.running.metronome.MetronomeController
+import net.linspad.atlasphone.running.metronome.MetronomeMode
+import net.linspad.atlasphone.running.metronome.MetronomeState
 import net.linspad.atlasphone.running.metrics.RunMetrics
 import net.linspad.atlasphone.running.metrics.RunMetricsAccumulator
 import net.linspad.atlasphone.running.net.AtlasClient
@@ -57,6 +65,10 @@ class LiveRunState(
     val recovery: RecoveryLive? = null,
     /** HR2 live value (smoothed per the user's setting); null = no valid heart rate (never 0). */
     val hrDisplay: Double? = null,
+    /** Live user cadence (display only, CAD1 over the last 30 s of steps); null = no valid cadence, never 0. */
+    val cadenceSpm: Double? = null,
+    /** Metronome chip state; null when no run is active or in RECOVERY. */
+    val metronome: MetronomeState? = null,
 ) {
     val targetHr: Int? get() = meta.targetHr
 }
@@ -79,6 +91,10 @@ class RunController private constructor(private val app: Application) {
         var recovery: RecoveryTracker? = null,
         /** Recent raw HR readings for the display smoothing (a few seconds). */
         val hrRecent: ArrayDeque<HrPoint> = ArrayDeque(),
+        /** Recent step times (epoch ms), last LIVE_LOOKBACK_S only: in-memory display state, lost with the process. */
+        val recentSteps: ArrayList<Long> = ArrayList(),
+        /** The main ghost's profile (cadence list for the metronome, section pace for the race panel); null without ghost. */
+        val ghostProfile: GhostProfile? = null,
     )
 
     private val platform = MobilePlatform.get(app)
@@ -86,6 +102,7 @@ class RunController private constructor(private val app: Application) {
     val tokens: TokenStore by lazy { TokenStore.create(app) }
     private val ghostCache = GhostCache(java.io.File(app.noBackupFilesDir, "ghost"))
     private val settings = RunSettings.create(app)
+    private val metronome = MetronomeController(platform.click, platform.quickAction, settings)
 
     private val lock = Any()
     private var active: Active? = null
@@ -115,6 +132,7 @@ class RunController private constructor(private val app: Application) {
         val meta = RunMeta(id, state, prepared?.shortId, prepared?.title, now, null, emptyList(), null, 0, null, false, routeId, prepared?.ghostRunId ?: raceGhostId,
             targetHr, HrTarget.category(targetHr, routeLengthM))
         store.putRunMeta(id, meta.toJson())
+        platform.steps.start() // result ignored: no permission / no sensor never blocks a run (S1)
         attach(meta, RunMetricsAccumulator(now), SystemClock.elapsedRealtime(), ghostFor(meta))
         platform.ensureForegroundService(app)
         id
@@ -146,12 +164,27 @@ class RunController private constructor(private val app: Application) {
                 }
             }
         }
+        // Steps: the collector only appends to a short in-memory list (lock held for the append only; REL1). Not in RECOVERY.
+        val stepsJob = if (recovery != null) null else platform.scope.launch(Dispatchers.Default) {
+            platform.steps.samples.collect { step ->
+                synchronized(lock) {
+                    active?.recentSteps?.let { list ->
+                        list.add(step.timestampMillis)
+                        val cutoff = step.timestampMillis - (CadenceConfig.LIVE_LOOKBACK_S * 1000).toLong()
+                        while (list.isNotEmpty() && list.first() < cutoff) list.removeAt(0)
+                    }
+                }
+            }
+        }
         val jobs = listOfNotNull(
             locationJob,
+            stepsJob,
             platform.scope.launch { platform.heartRate.samples.collect { onHeartRate(it) } },
             platform.scope.launch { while (isActive) { publish(); delay(1000) } },
         )
-        active = Active(meta, acc, monoStartMs, jobs, ghost, locationJob = locationJob, recovery = recovery)
+        val ghostProfile = if (ghost != null) meta.ghostRunId?.let(ghostCache::profile) else null
+        active = Active(meta, acc, monoStartMs, jobs, ghost, locationJob = locationJob, recovery = recovery, ghostProfile = ghostProfile)
+        if (recovery == null) metronome.begin(ghost != null, ghostProfile?.cadenceByProgress)
         publish()
     }
 
@@ -172,13 +205,22 @@ class RunController private constructor(private val app: Application) {
                 val metrics = it.acc.snapshot(now)
                 val ghost = it.ghost?.snapshot(now)
                 val hrDisplay = HrSmoothing.valueAt(it.hrRecent.toList(), settings.hrSmoothing(), now, centered = false)
-                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost, hrDisplay) // no history while paused
+                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost, hrDisplay, it.ghostProfile) // no history while paused
+                val running = it.meta.state == RunState.RECORDING || it.meta.state == RunState.PAUSED
+                // Display only (CAD1 over the last 30 s of steps); never persisted or uploaded, not used for the metronome target.
+                val cadence = if (running) CadenceEstimator.at(it.recentSteps.toList(), pauseRanges(it.meta.pauses), now)?.spm else null
+                val ghostProgress = ghost?.takeIf { g -> g.status == GhostStatus.ON_COURSE }?.progressM
+                val metro = if (running) metronome.tick(ghostProgress, it.meta.state == RunState.PAUSED, now) else null
                 LiveRunState(it.meta, metrics, platform.location.state.value.name, platform.heartRate.state.value.name, ghost, it.history.snapshot(),
-                    it.recovery?.snapshot(now), hrDisplay)
+                    it.recovery?.snapshot(now), hrDisplay, cadence, metro)
             }
         }
         _live.value = live
     }
+
+    /** Pauses as inclusive ms ranges [start, end) for CadenceEstimator; an open pause runs to the end of time. */
+    private fun pauseRanges(pauses: List<PauseRecord>): List<LongRange> =
+        pauses.map { p -> p.startedAtMillis until (p.endedAtMillis ?: Long.MAX_VALUE) }
 
     /** Seconds since run start: monotonic when this process started the run, wall clock after a recovery. */
     private fun offsetS(a: Active, nowMillis: Long): Double =
@@ -192,6 +234,7 @@ class RunController private constructor(private val app: Application) {
             val a = active ?: return
             val state = RunLifecycle.next(a.meta.state, RunEvent.PAUSE) ?: return
             val now = System.currentTimeMillis()
+            platform.steps.stop() // paused time records no steps (S1)
             a.acc.pause(now)
             a.meta = a.meta.copy(state = state, pauses = a.meta.pauses + PauseRecord(now, null, offsetS(a, now), null))
             store.putRunMeta(a.meta.captureId, a.meta.toJson())
@@ -204,12 +247,27 @@ class RunController private constructor(private val app: Application) {
             val a = active ?: return
             val state = RunLifecycle.next(a.meta.state, RunEvent.RESUME) ?: return
             val now = System.currentTimeMillis()
+            platform.steps.start()
             a.acc.resume(now)
             a.meta = a.meta.copy(state = state, pauses = closeOpenPause(a.meta.pauses, now, offsetS(a, now)))
             store.putRunMeta(a.meta.captureId, a.meta.toJson())
         }
         publish()
     }
+
+    // ── Metronome (flow step 23): chip taps, notification action (same cycleMode) and settings ───────────
+
+    /** One-tap mode cycle for the chip. */
+    fun cycleMetronome() { metronome.cycleMode(); publish() }
+
+    /** Explicit mode, e.g. "Use manual cadence" from the no-ghost-cadence notice. */
+    fun selectMetronomeMode(mode: MetronomeMode) { metronome.setMode(mode); publish() }
+
+    /** Manual fixed cadence (persisted, clamped). */
+    fun setManualCadence(spm: Int) { metronome.setManualSpm(spm); publish() }
+
+    /** Click volume 0..1 (persisted). */
+    fun setClickVolume(volume: Float) { metronome.setVolume(volume); publish() }
 
     private fun closeOpenPause(pauses: List<PauseRecord>, nowMillis: Long, offsetS: Double): List<PauseRecord> =
         pauses.map { if (it.endedAtMillis == null) it.copy(endedAtMillis = nowMillis, endedElapsedS = offsetS) else it }
@@ -234,7 +292,8 @@ class RunController private constructor(private val app: Application) {
                 val now = System.currentTimeMillis()
                 val pauses = closeOpenPause(a.meta.pauses, now, offsetS(a, now))
                 val elapsed = offsetS(a, now)
-                platform.stopAll() // recorder.stop() marks the capture finished; GPS and HR are released
+                metronome.stop() // O4: never during or after the end of the run
+                platform.stopAll() // recorder.stop() marks the capture finished; GPS, HR and steps are released
                 active = null
                 val (locations, heartRates) = loadSamples(a.meta.captureId)
                 val summary = runningSummary(a, locations, heartRates, pauses, now, elapsed)
@@ -286,6 +345,8 @@ class RunController private constructor(private val app: Application) {
                 a.locationJob?.cancel() // GPS collector and ghost feed stop; HR collector and publisher stay
                 val elapsed = if (a.monoStartMs != null) (monoNow - a.monoStartMs) / 1000.0 else (t0 - a.meta.startedAtMillis) / 1000.0
                 val pauses = closeOpenPause(a.meta.pauses, t0, elapsed)
+                platform.steps.stop() // the running phase is over: no steps in recovery (S1)
+                metronome.stop()      // O4: the click stops at Finish Run, not during recovery
                 platform.location.stop() // not stopAll: recorder, HR and the foreground service continue
                 val (allLocations, allHeartRates) = loadSamples(a.meta.captureId)
                 val locations = allLocations.filter { it.timestampMillis <= t0 }
@@ -349,10 +410,7 @@ class RunController private constructor(private val app: Application) {
         while (true) {
             val batch = store.fetch(captureId, cursor, 1000)
             if (batch.isEmpty()) break
-            for (s in batch) {
-                if (s.stream == Stream.LOCATION) SampleDecoder.location(s.json)?.let(locations::add)
-                else SampleDecoder.heartRate(s.json)?.let(heartRates::add)
-            }
+            decodeSamples(batch, locations, heartRates)
             cursor = batch.last().sequence
         }
         return locations to heartRates
@@ -426,6 +484,7 @@ class RunController private constructor(private val app: Application) {
             val a = active
             if (a != null && a.meta.captureId == runId) {
                 a.jobs.forEach { it.cancel() }
+                metronome.stop()
                 platform.stopAll()
                 active = null
             }
@@ -569,5 +628,16 @@ class RunController private constructor(private val app: Application) {
             instance ?: synchronized(this) {
                 instance ?: RunController(context.applicationContext as Application).also { instance = it }
             }
+    }
+}
+
+/** Splits stored samples by stream; steps are never decoded as location or heart rate. */
+internal fun decodeSamples(batch: List<CaptureSample>, locations: MutableList<RawLocation>, heartRates: MutableList<RawHeartRate>) {
+    for (s in batch) {
+        when (s.stream) {
+            Stream.LOCATION -> SampleDecoder.location(s.json)?.let(locations::add)
+            Stream.HEART_RATE -> SampleDecoder.heartRate(s.json)?.let(heartRates::add)
+            Stream.STEP -> Unit
+        }
     }
 }

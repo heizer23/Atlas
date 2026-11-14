@@ -1,6 +1,6 @@
 package net.linspad.atlasphone.mobile.permissions
 
-enum class Capability { LOCATION, BLUETOOTH }
+enum class Capability { LOCATION, BLUETOOTH, ACTIVITY_RECOGNITION }
 
 /**
  * GRANTED       - usable.
@@ -15,12 +15,15 @@ object PermissionLogic {
     const val COARSE_LOCATION = "android.permission.ACCESS_COARSE_LOCATION"
     const val BLUETOOTH_SCAN = "android.permission.BLUETOOTH_SCAN"
     const val BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"
+    const val ACTIVITY_RECOGNITION = "android.permission.ACTIVITY_RECOGNITION"
 
     /** Permissions that must be granted for [capability] on the given Android SDK level. */
     fun required(capability: Capability, sdk: Int): List<String> = when (capability) {
         Capability.LOCATION -> listOf(FINE_LOCATION)
         // Android 12+: dedicated Bluetooth permissions. Before: BLE scanning needs location.
         Capability.BLUETOOTH -> if (sdk >= 31) listOf(BLUETOOTH_SCAN, BLUETOOTH_CONNECT) else listOf(FINE_LOCATION)
+        // Runtime permission since Android 10; before that steps need none (empty list counts as granted, no prompt).
+        Capability.ACTIVITY_RECOGNITION -> if (sdk >= 29) listOf(ACTIVITY_RECOGNITION) else emptyList()
     }
 
     /** Permissions to put into the system dialog (location also asks for coarse, as Android 12+ requires). */

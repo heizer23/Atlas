@@ -1,0 +1,621 @@
+{
+  "sprint_note": "Delta-only scaffolding (Sprint01/02 convention): lists only files created or changed by Sprint03 (step stream, CAD1 cadence, ghost cadence by progress, metronome, race-screen delta, web cadence); everything not listed is unchanged. Constants and signatures are declared once here.",
+  "component_name": "runningtracker",
+  "target_root": "03_Application/RunningTracker",
+  "cross_layer_note": "Backend and web live under 03_Application/RunningTracker. Native files live under 01_System/AtlasPhone (package net.linspad.atlasphone). Domain-free device capabilities (step sensor, click audio, one notification quick action) are added to the Mobile Platform (package mobile.*, like location/heart rate); all cadence/metronome/race meaning lives in package running.*. Paths in files[] are always written out in full; PH = 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone. change=new files do not exist yet, change=changed files exist.",
+  "directories": [
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/steps",
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/audio",
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/cadence",
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metronome"
+  ],
+  "constants_note": "Constant sets below are the single declaration. Python names live in backend/config.py; Kotlin CadenceConfig mirrors the CAD_* names/values exactly (parity enforced by tests/fixtures/cadence_golden.json). Phone-only constants are listed in the Kotlin objects.",
+  "files": [
+    {
+      "path": "03_Application/RunningTracker/schema.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Runtime copy of 10_schema.sql (single canonical runtime path, R-CON-BP-07): replaces the run_samples stream constraint by ck_run_samples_stream (+'step'), adds run_metrics.cadence and run_route_progress.cadence_by_progress. Idempotent, additive.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/config.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Single home of server constants. ALGO_VERSION 2 -> 3 (usages: backend/routers/native.py, backend/metrics.py, tests/test_metrics.py:93, tests/test_native_sync.py:225 and :439 assert algo_version == 2 -> 3; tests/test_native_sync.py:433 keeps the legacy fixture at 1 on purpose). New CAD_* constants (CAD1/GB1 in 10_architecture.json).",
+      "public_objects": [
+        {"kind": "constant", "name": "ALGO_VERSION", "pattern": "constant", "methods": [], "value": "3 (CHANGED from 2: complete runs recompute on the next finish replay; no steps => cadence NULL, all other values unchanged)"},
+        {"kind": "constant", "name": "CADENCE_ALGO_VERSION", "pattern": "constant", "methods": [], "value": "1 (stored as run_metrics.cadence.algo)"},
+        {"kind": "constant", "name": "CAD_MIN_SPM", "pattern": "constant", "methods": [], "value": "100.0 (plausible running cadence lower bound; interval upper bound = 60/CAD_MIN_SPM)"},
+        {"kind": "constant", "name": "CAD_MAX_SPM", "pattern": "constant", "methods": [], "value": "230.0 (interval lower bound = 60/CAD_MAX_SPM)"},
+        {"kind": "constant", "name": "CAD_WINDOW_N", "pattern": "constant", "methods": [], "value": "8"},
+        {"kind": "constant", "name": "CAD_MIN_INTERVALS", "pattern": "constant", "methods": [], "value": "4"},
+        {"kind": "constant", "name": "CAD_NORMAL_TOL", "pattern": "constant", "methods": [], "value": "0.25"},
+        {"kind": "constant", "name": "CAD_MISSED_TOL", "pattern": "constant", "methods": [], "value": "0.15"},
+        {"kind": "constant", "name": "CAD_GAP_FACTOR", "pattern": "constant", "methods": [], "value": "2.5"},
+        {"kind": "constant", "name": "CAD_GAP_S", "pattern": "constant", "methods": [], "value": "2.0"},
+        {"kind": "constant", "name": "CAD_REANCHOR_IRREGULAR", "pattern": "constant", "methods": [], "value": "6"},
+        {"kind": "constant", "name": "CAD_SERIES_STEP_S", "pattern": "constant", "methods": [], "value": "5.0 (equals SERIES_BUCKET_S: same x axis as the pace/HR series)"},
+        {"kind": "constant", "name": "CAD_PROFILE_MIN_CONF", "pattern": "constant", "methods": [], "value": "0.3"},
+        {"kind": "constant", "name": "CAD_PROFILE_MAX_AGE_S", "pattern": "constant", "methods": [], "value": "5.0"},
+        {"kind": "constant", "name": "CAD_PROGRESS_BUCKET_M", "pattern": "constant", "methods": [], "value": "20.0"}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/cadence.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Pure implementation of CAD1 (10_architecture.json invariants). No database, no clock; inputs are plain datetimes so metrics.py/ghost.py can import it without cycles. Server result is authoritative; Kotlin CadenceEstimator mirrors it.",
+      "public_objects": [
+        {"kind": "function", "name": "cadence_series", "pattern": "service", "methods": [{"name": "cadence_series", "visibility": "public", "args": ["step_ts: list[datetime]", "pauses: list[tuple[datetime, datetime]]", "start: datetime", "end: datetime"], "returns": "list[tuple[float, float, float]]", "purpose": "CAD1: causal replay of the steps (sorted, de-duplicated, outside pauses, start <= ts <= end) evaluated at start + k*CAD_SERIES_STEP_S <= end; returns (t_s_since_start, spm rounded 0.1, conf rounded 0.01) for non-null points only (gaps absent)."}]},
+        {"kind": "function", "name": "compute_cadence", "pattern": "service", "methods": [{"name": "compute_cadence", "visibility": "public", "args": ["step_ts: list[datetime]", "pauses: list[tuple[datetime, datetime]]", "started_at: datetime", "end: Optional[datetime]"], "returns": "Optional[dict]", "purpose": "Applies the running-phase filter (CAD1 step 1) and returns {avg_spm, series:[{t,spm,conf}], algo} or None (-> SQL NULL) when no step lies in the running phase; end None = last kept step."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/metrics.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "A1 + RS2 + recovery (unchanged) plus cadence. Usages of changed symbols found by grep: compute_metrics (metrics.recompute_and_store, tests/test_metrics.py:23,110,112, tests/test_native_sync.py:431), recompute_and_store (routers/native.py:215,250; fit_import.py:135; tests/test_metrics.py:83,87; tests/test_web_api.py:218), MetricsResult (metrics.py only). recompute_and_store currently routes every non-location row to heart_rates and MUST become a three-way split by stream (otherwise step rows pollute heart rate).",
+      "public_objects": [
+        {"kind": "class", "name": "MetricsResult", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["server_distance_m: float", "avg_hr: Optional[float]", "max_hr: Optional[int]", "splits: list[dict]", "pace_series: list[list[float]]", "hr_series: list[list[float]]", "recovery: Optional[dict] = None", "cadence: Optional[dict] = None"], "returns": "MetricsResult", "purpose": "CHANGED: adds cadence (None when the running phase has no step samples)."}]},
+        {"kind": "function", "name": "compute_metrics", "pattern": "service", "methods": [{"name": "compute_metrics", "visibility": "public", "args": ["locations: list[SampleRow]", "heart_rates: list[SampleRow]", "pauses: list[PauseRow]", "started_at: datetime", "run_finished_at: Optional[datetime] = None", "finished_at: Optional[datetime] = None", "steps: Optional[list[SampleRow]] = None"], "returns": "MetricsResult", "purpose": "CHANGED: steps appended last (existing positional callers stay valid). cadence = cadence.compute_cadence(step timestamps, pauses, started_at, end = run_finished_at or finished_at); steps None/empty -> cadence None. Everything else exactly as ALGO_VERSION 2."}]},
+        {"kind": "function", "name": "recompute_and_store", "pattern": "repository", "methods": [{"name": "recompute_and_store", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "None", "purpose": "CHANGED: splits rows into location / heart_rate / step lists, passes steps, upserts run_metrics.cadence (Json(obj) for an object, plain None for SQL NULL; never Json(None))."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/models.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Wire records. StreamCounts gains step; SampleIn.stream accepts 'step'. Extra keys stay forbidden (deploy order C1).",
+      "public_objects": [
+        {"kind": "class", "name": "StreamCounts", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["location: int = 0", "heart_rate: int = 0", "step: int = 0"], "returns": "StreamCounts", "purpose": "CHANGED: step added (used by expected_counts, verified_counts, high_seq). An old phone body without step means step 0."}]},
+        {"kind": "class", "name": "SampleIn", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["stream: Literal['location','heart_rate','step']", "seq: int", "payload: dict"], "returns": "SampleIn", "purpose": "CHANGED: Literal gains 'step'; payload.timestamp validation unchanged."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/verification.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "V1 over three streams. Usages found by grep: _stored (counts/highs dict literals), verify_run (the for-stream tuple) - both enumerate ('location','heart_rate') and must enumerate ('location','heart_rate','step'); read_cursors/compute_gaps/contiguous_prefix are stream-agnostic (union of seqs) and unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/ghost.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Adds the ghost cadence-by-progress derivation (GB1). Usages of build_progress found by grep: backend/progress_store.py:34, tests/test_ghost.py (lines 56-226, all positional with 5 args; the new parameter has a default).",
+      "public_objects": [
+        {"kind": "class", "name": "ProgressResult", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["profile", "end_progress_m: float", "coverage: float", "matched: int", "off_course: int", "qualified: bool", "reason: Optional[str]", "cadence_by_progress: Optional[list[list[float]]] = None"], "returns": "ProgressResult", "purpose": "CHANGED: cadence_by_progress field appended (dataclass default None)."}]},
+        {"kind": "function", "name": "build_progress", "pattern": "service", "methods": [{"name": "build_progress", "visibility": "public", "args": ["geometry", "fixes", "heart_rates", "pauses", "started_at: datetime", "cadence: Optional[list[tuple[datetime, float]]] = None"], "returns": "ProgressResult", "purpose": "CHANGED: cadence = (ts, spm) series points of the run (already filtered by CAD_PROFILE_MIN_CONF); result.cadence_by_progress per GB1, computed from the profile BEFORE trim_idle_start (bucket key is progress, which trimming does not change). None/empty -> None."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/progress_store.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "recompute_progress additionally reads run_metrics.cadence (written by recompute_and_store before it in the finish path), converts series points to (started_at + t, spm) keeping conf >= CAD_PROFILE_MIN_CONF, passes them to build_progress and upserts run_route_progress.cadence_by_progress (plain None for SQL NULL). Callers found by grep: routers/native.py:253, routers/runs.py:160 (route link), routers/routes.py:141 - all unchanged because the signature is unchanged.",
+      "public_objects": [
+        {"kind": "function", "name": "recompute_progress", "pattern": "repository", "methods": [{"name": "recompute_progress", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "None", "purpose": "CHANGED behavior only (cadence_by_progress), signature unchanged."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/native.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "put_samples/finish need no code change beyond models.py/verification.py (stream is stored as given; expected_counts.step flows through verify_run). native_get_ghost_profile selects run_route_progress.cadence_by_progress and returns it as additional key cadence_by_progress (null when SQL NULL). ALGO_VERSION usage at :14/:214 unchanged.",
+      "public_objects": [
+        {"kind": "function", "name": "native_get_ghost_profile", "pattern": "router", "methods": [{"name": "native_get_ghost_profile", "visibility": "public", "args": ["run_id: str", "device: DeviceContext"], "returns": "dict", "purpose": "CHANGED: response gains cadence_by_progress (see surface GET /native/runs/{id}/ghost-profile)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/runs.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "RUN_SELECT adds (m.cadence->>'avg_spm')::double precision as avg_cadence_spm; series Literal gains 'cadence' (column map cadence -> run_metrics.cadence, points = [[p['t'], p['spm']] for p in cadence.series]; SQL NULL or empty -> empty Dataset).",
+      "public_objects": [
+        {"kind": "function", "name": "get_series", "pattern": "router", "methods": [{"name": "get_series", "visibility": "public", "args": ["run_id: str", "metric: Literal['pace','heart_rate','recovery_hr','cadence']"], "returns": "JSONResponse", "purpose": "CHANGED: metric cadence."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/datasets.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "RUN_SCHEMA gains column avg_cadence_spm (number, 'Avg cadence (spm)'); run_row adds r.get('avg_cadence_spm'); series_dataset label map gains cadence -> 'Cadence'. Signatures unchanged. RunRow additive field declared once in 10_architecture.json exposed_surfaces (GET /runs).",
+      "public_objects": [
+        {"kind": "function", "name": "series_dataset", "pattern": "mapper", "methods": [{"name": "series_dataset", "visibility": "public", "args": ["metric: str", "points: list[list[float]]"], "returns": "Dataset", "purpose": "CHANGED label mapping only."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures/cadence_golden.json",
+      "change": "new",
+      "stub_kind": "json",
+      "role": "Shared oracle for CAD1, read by pytest (backend/cadence.py) AND Kotlin CadenceEstimatorTest (path relative to 01_System/AtlasPhone, as metrics_golden.json). Each case: step offsets in ms relative to the run start, pause intervals, evaluation grid, expected series [t, spm, conf] or absent t values. Tolerances: spm 0.1, conf 0.02. Hand-checked cases: steady 170 spm, single missed step (cadence unchanged, confidence lower), two consecutive missed steps (not corrected, becomes irregular), stop > 2 s then restart (gap + warm-up null), running into walking (no doubling, reanchor after 6 irregular), irregular stumbling, sparse (< 4 intervals), steps across a pause (no interval across the pause), steps after run end excluded, duplicate timestamps, no steps.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Extend (do not remove rows): complete run fix-run-cadence (step rows interleaved with location/heart_rate, run_metrics.cadence object, qualified run_route_progress with cadence_by_progress), complete run fix-run-cadence-empty (step rows exist but none usable -> cadence object with empty series, avg_spm null), uploading run fix-run-cadence-upload (step rows incl. steps after run_finished_at and inside a pause, finish not yet called). Legacy fix-run-complete keeps algo_version 1, no step rows, cadence NULL.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_cadence.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Pure CAD1 scenarios from cadence_golden.json plus the GB1 derivation (build_progress cadence_by_progress buckets, pause handling, no cadence -> None).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_metrics.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Line 93 asserts algo_version == 3; add cadence scenarios (running-phase clipping, steps in pauses ignored, NULL without steps, step rows never counted as heart rate).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_native_sync.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Lines 225 and 439 assert algo_version == 3. Every assertion on the exact high_seq / verified_counts dict now also contains \"step\": 0 (found by grep: lines 112, 191, 195, 219, 354, 416; count_mismatch entries unaffected). Add step ingest, V1 step counts, expected_counts.step mismatch, old-body compatibility, finish computing cadence.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_web_api.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Add avg_cadence_spm in RunRow, series metric cadence (rows, empty, 404, 422 for unknown metric).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_ghost.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Add ghost-profile endpoint scenarios for cadence_by_progress present / null (usages at lines 162-175 stay valid).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/HistoryPage.tsx",
+      "change": "changed",
+      "stub_kind": "react_component",
+      "role": "Only the exported RunRow interface gains `avg_cadence_spm: number | null` (type-only; the list view does not render it).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/RunDetailPage.tsx",
+      "change": "changed",
+      "stub_kind": "react_component",
+      "role": "Adds one request (/series?metric=cadence) to the existing Promise.all (an ApiError shows the existing ErrorCard), an 'Avg cadence' stat in the summary block (fmt: whole spm, DASH when null) and a Cadence card after the HR chart: LineChart of the cadence Dataset (x t_label, y value, avg) or 'No cadence recorded.' when the Dataset is empty. No other card changes. Uses existing running.css classes only.",
+      "public_objects": [
+        {"kind": "function", "name": "RunDetailPage", "pattern": "view", "methods": [{"name": "RunDetailPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "CHANGED: cadence stat and card."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/ui/running_web.spec.ts",
+      "change": "changed",
+      "stub_kind": "playwright_spec",
+      "role": "Add the [UI] scenarios of 10_test_spec.md for the cadence stat/card with stubbed API responses (existing pattern; the stub for the new series request must be added to every existing run-detail test so they keep passing).",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/model/Samples.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Adds the step sample. Stream.STEP wire name 'step.sample' is the payload `type`; the HTTP stream name is 'step' (see AtlasClient). Usages of Stream found by grep: CaptureStore.append (counter choice), CaptureRecorder, AtlasClient.putSamples, RunController.loadSamples, tests - all listed in their own entries.",
+      "public_objects": [
+        {"kind": "class", "name": "Stream", "pattern": "enum", "methods": [], "values": "LOCATION(\"location.sample\"), HEART_RATE(\"heartRate.sample\"), STEP(\"step.sample\") (NEW); NEW property apiName: String = \"location\" | \"heart_rate\" | \"step\" (the HTTP stream name; replaces the if/else in AtlasClient.putSamples)"},
+        {"kind": "class", "name": "RawStep", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["timestampMillis: Long", "elapsedRealtimeNanos: Long?"], "returns": "RawStep", "purpose": "NEW: one detected step. timestampMillis = SENSOR EVENT time converted to UTC epoch ms (now - (elapsedRealtimeNanos_now - event.timestamp)/1e6), so hardware-batched delivery does not shift it; elapsedRealtimeNanos = the sensor event's own monotonic stamp."}]},
+        {"kind": "constant", "name": "SampleJson", "pattern": "mapper", "methods": [{"name": "step", "visibility": "public", "args": ["raw: RawStep", "captureId: String?", "sequence: Long?"], "returns": "JSONObject", "purpose": "NEW: payload {type 'step.sample', captureId, sequence, timestamp (ISO UTC ms), elapsedRealtimeNanos|null}."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/steps/StepDetector.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Mobile Platform capability (no domain logic, like LocationTracker/HeartRateMonitor): Android TYPE_STEP_DETECTOR listener exposed as a Flow<RawStep>. Sensor callbacks only emit to a buffered flow (D7: never block, never touch the store). Registered with maxReportLatencyUs = STEP_MAX_REPORT_LATENCY_MS (batching allowed; timestamps are event time); stop() calls SensorManager.flush before unregister so pending batched events are delivered, then unregisters. Needs ACTIVITY_RECOGNITION on API >= 29; no permission / no sensor -> start() returns false and state says why; never throws, never blocks a run.",
+      "public_objects": [
+        {"kind": "class", "name": "StepDetector", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["context: Context", "permissions: PermissionManager", "log: (String) -> Unit"], "returns": "StepDetector", "purpose": "Wires SensorManager lazily (no sensor access at construction)."},
+          {"name": "samples", "visibility": "public", "args": [], "returns": "Flow<RawStep>", "purpose": "Hot flow of steps while started (extraBufferCapacity so a slow collector never blocks the sensor thread)."},
+          {"name": "state", "visibility": "public", "args": [], "returns": "StateFlow<StepDetector.State>", "purpose": "STOPPED | LISTENING | NO_SENSOR | NO_PERMISSION."},
+          {"name": "start", "visibility": "public", "args": [], "returns": "Boolean", "purpose": "Register the listener; false (state NO_SENSOR / NO_PERMISSION) when impossible. Idempotent while LISTENING."},
+          {"name": "stop", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Flush, unregister; state STOPPED. Idempotent."},
+          {"name": "toRaw", "visibility": "public", "args": ["eventNanos: Long", "nowMillis: Long", "nowElapsedNanos: Long"], "returns": "RawStep", "purpose": "Pure event-time conversion (companion/top-level, JVM-testable)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/audio/BeatScheduler.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure, Android-free, sample-accurate beat generator used by the click audio thread. Fractional accumulation: the interval to the next beat is computed when the previous beat is emitted from the CURRENT target (frames = sampleRate*60/spm, fractional remainder carried), never from timers. Target 0 = silence (no beat, accumulator reset so the first beat after silence starts immediately).",
+      "public_objects": [
+        {"kind": "constant", "name": "ClickConfig", "pattern": "constant", "methods": [], "value": "object: SAMPLE_RATE_HZ=44100, CLICK_MS=12, CLICK_FREQ_HZ=1800, CLICK_PEAK=0.5 (fraction of full scale at volume 1.0), BUFFER_MS=20, DEFAULT_VOLUME=0.2 (0..1, MetronomeConfig default)"},
+        {"kind": "class", "name": "BeatScheduler", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["sampleRateHz: Int", "click: ShortArray"], "returns": "BeatScheduler", "purpose": "click = the pre-rendered click (see renderClick)."},
+          {"name": "fill", "visibility": "public", "args": ["out: ShortArray", "frames: Int", "targetSpm: Double"], "returns": "Int", "purpose": "Writes `frames` PCM16 mono samples (click overlaid where a beat starts, silence elsewhere) and returns the number of beats that STARTED inside this buffer. Deterministic: N frames at S spm yield floor-consistent beat positions with error < 1 frame cumulative."},
+          {"name": "renderClick", "visibility": "public", "args": ["sampleRateHz: Int", "clickMs: Int", "freqHz: Double", "peak: Double"], "returns": "ShortArray", "purpose": "Companion: short sine burst with exponential decay (no DC step, no click-pop)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/audio/ClickEngine.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Mobile Platform capability (domain-free): a quiet click track on its own audio thread. Streaming AudioTrack (MODE_STREAM, PCM16 mono, AudioAttributes USAGE_MEDIA + CONTENT_TYPE_SONIFICATION), blocking write loop fed by BeatScheduler; the target spm and volume are AtomicLong/volatile values read by the thread, so UI/publish stalls cannot change click timing (D7). NO audio-focus request (mixes with music/podcasts, O2). Never touches location/HR/capture.",
+      "public_objects": [
+        {"kind": "class", "name": "ClickEngine", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["log: (String) -> Unit"], "returns": "ClickEngine", "purpose": "No audio resources at construction."},
+          {"name": "state", "visibility": "public", "args": [], "returns": "StateFlow<ClickEngine.State>", "purpose": "STOPPED | RUNNING | ERROR (track could not be created/written)."},
+          {"name": "start", "visibility": "public", "args": ["volume: Float"], "returns": "Boolean", "purpose": "Create the track and the thread (Process.THREAD_PRIORITY_URGENT_AUDIO); starts silent (target null). Idempotent."},
+          {"name": "setTargetSpm", "visibility": "public", "args": ["spm: Double?"], "returns": "Unit", "purpose": "Atomic hand-off; null = silence. Callable from any thread, never blocks."},
+          {"name": "setVolume", "visibility": "public", "args": ["volume: Float"], "returns": "Unit", "purpose": "0..1 gain applied through AudioTrack.setVolume."},
+          {"name": "stop", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Stop the thread, release the track. Idempotent."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/service/QuickAction.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Domain-free hook so the foreground notification can carry ONE app-supplied action (O5) without RecordingService knowing about running: the owner sets label + handler, the service renders the action and invokes the handler when tapped.",
+      "public_objects": [
+        {"kind": "class", "name": "QuickAction", "pattern": "service", "methods": [
+          {"name": "label", "visibility": "public", "args": [], "returns": "StateFlow<String?>", "purpose": "Current action label; null = no action shown."},
+          {"name": "set", "visibility": "public", "args": ["label: String?", "handler: (() -> Unit)?"], "returns": "Unit", "purpose": "Replace label and handler atomically; (null, null) clears."},
+          {"name": "invoke", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Run the handler if set (called by RecordingService on the notification tap)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/service/RecordingService.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Notification builder adds the QuickAction as a second action next to Stop (PendingIntent to the service with ACTION_QUICK; onStartCommand maps it to platform.quickAction.invoke() and returns START_NOT_STICKY without re-entering foreground logic); the watch() combine adds platform.quickAction.label so the label refreshes. ACTION_STOP additionally relies on MobilePlatform.stopAll() now stopping steps and click. Foreground service types stay location|connectedDevice (no new type; step detector and AudioTrack need none; OQ in 10_architecture.json for device verification).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/capture/CaptureStore.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "SQLite version 2 -> 3: onUpgrade adds `ALTER TABLE captures ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0` (existing captures/samples untouched); onCreate includes the column. append() chooses the counter by stream via a when (location_count / hr_count / step_count) - the existing `if LOCATION else hr_count` would count steps as heart rate. The three SELECT lists (info, list) append step_count AFTER next_seq (index 8) so existing cursor indexes stay valid. Sequence stays one counter shared by all streams. Usages of CaptureInfo found by grep: UploadWorker.kt:72, RecordingService.kt:64, MobileTestActivity.kt:231,248, tests (positional construction none).",
+      "public_objects": [
+        {"kind": "class", "name": "CaptureInfo", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["id: String", "startedAtMillis: Long", "endedAtMillis: Long?", "locationCount: Long", "heartRateCount: Long", "unacked: Long", "dropped: Long", "lastSequence: Long", "stepCount: Long = 0"], "returns": "CaptureInfo", "purpose": "CHANGED: stepCount appended with a default."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/capture/CaptureRecorder.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Constructor gains the steps flow (default emptyFlow() so existing constructions/tests compile); start() launches a third collector on ioDispatcher: record(id, Stream.STEP, it.timestampMillis) { SampleJson.step(it, id, seq) }. Capture continues to run through pauses and recovery; WHAT is emitted is decided by StepDetector start/stop (RunController).",
+      "public_objects": [
+        {"kind": "class", "name": "CaptureRecorder", "pattern": "service", "methods": [{"name": "constructor", "visibility": "public", "args": ["store: CaptureStore", "scope: CoroutineScope", "ioDispatcher: CoroutineDispatcher", "locations: Flow<RawLocation>", "heartRates: Flow<RawHeartRate>", "steps: Flow<RawStep> = emptyFlow()"], "returns": "CaptureRecorder", "purpose": "CHANGED: steps parameter appended."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/permissions/PermissionLogic.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Capability gains ACTIVITY_RECOGNITION. required(): sdk >= 29 -> [android.permission.ACTIVITY_RECOGNITION]; sdk < 29 -> empty list (treated as granted, no prompt). toRequest() = required(). PermissionManager.isGranted/status must treat an empty required list as GRANTED (verify; adjust PermissionManager only if it does not). Existing entries unchanged.",
+      "public_objects": [
+        {"kind": "class", "name": "Capability", "pattern": "enum", "methods": [], "values": "LOCATION, BLUETOOTH, ACTIVITY_RECOGNITION (NEW)"},
+        {"kind": "constant", "name": "PermissionLogic", "pattern": "validator", "methods": [{"name": "required", "visibility": "public", "args": ["capability: Capability", "sdk: Int"], "returns": "List<String>", "purpose": "CHANGED: ACTIVITY_RECOGNITION branch."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/MobilePlatform.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Adds `val steps = StepDetector(app, permissions, ::log)`, `val click = ClickEngine(::log)`, `val quickAction = QuickAction()`; the recorder is constructed with steps.samples; stopAll() additionally calls steps.stop() and click.stop() and quickAction.set(null, null). The `active` flow is NOT extended (steps/click only run inside a recorded run, which keeps recorder.active non-null).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/AndroidManifest.xml",
+      "change": "changed",
+      "stub_kind": "xml",
+      "role": "Adds <uses-permission android:name=\"android.permission.ACTIVITY_RECOGNITION\" /> and <uses-feature android:name=\"android.hardware.sensor.stepdetector\" android:required=\"false\" />. No other manifest change; no new service/receiver; foregroundServiceType unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/cadence/CadenceEstimator.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure Kotlin implementation of CAD1 (mirror of backend/cadence.py; parity via cadence_golden.json). Used by the live display (LiveRunState.cadenceSpm) and by the golden tests. Server stays authoritative for stored values.",
+      "public_objects": [
+        {"kind": "constant", "name": "CadenceConfig", "pattern": "constant", "methods": [], "value": "object: same names/values as the backend CAD_* constants (MIN_SPM=100.0, MAX_SPM=230.0, WINDOW_N=8, MIN_INTERVALS=4, NORMAL_TOL=0.25, MISSED_TOL=0.15, GAP_FACTOR=2.5, GAP_S=2.0, REANCHOR_IRREGULAR=6, SERIES_STEP_S=5.0, PROFILE_MIN_CONF=0.3, PROFILE_MAX_AGE_S=5.0, PROGRESS_BUCKET_M=20.0) plus phone-only LIVE_LOOKBACK_S=30.0, STEP_MAX_REPORT_LATENCY_MS=1000"},
+        {"kind": "class", "name": "CadencePoint", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["tSeconds: Double", "spm: Double", "conf: Double"], "returns": "CadencePoint", "purpose": "One non-null series point (gaps are absent, never zero)."}]},
+        {"kind": "constant", "name": "CadenceEstimator", "pattern": "service", "methods": [
+          {"name": "series", "visibility": "public", "args": ["stepMillis: List<Long>", "pausesMillis: List<LongRange>", "startMillis: Long", "endMillis: Long"], "returns": "List<CadencePoint>", "purpose": "CAD1 series (same grid/rounding as the server)."},
+          {"name": "at", "visibility": "public", "args": ["stepMillis: List<Long>", "pausesMillis: List<LongRange>", "atMillis: Long"], "returns": "CadencePoint?", "purpose": "CAD1 evaluated at one instant from the given (recent) steps; null = gap/warm-up. Live use passes only the last LIVE_LOOKBACK_S seconds of steps (display approximation, documented in 10_architecture.json CAD1)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metronome/MetronomeTarget.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure metronome logic (MET1 in 10_architecture.json): mode enum, mode cycle, target selection, ghost cadence lookup by route position, slew/hold smoothing. No Android, no clock (time passed in).",
+      "public_objects": [
+        {"kind": "class", "name": "MetronomeMode", "pattern": "enum", "methods": [], "values": "OFF, MATCH_GHOST, ATTACK_102, MANUAL (MANUAL is the design's fallback mode, OQ2 in 10_architecture.json); parse(String?) -> OFF when null/unknown"},
+        {"kind": "constant", "name": "MetronomeConfig", "pattern": "constant", "methods": [], "value": "object: SLEW_SPM_PER_S=1.0, HOLD_S=15.0, ATTACK_FACTOR=1.02, MIN_TARGET_SPM=100.0, MAX_TARGET_SPM=230.0, DEFAULT_MANUAL_SPM=170, MANUAL_STEP_SPM=1, DEFAULT_VOLUME=0.2"},
+        {"kind": "class", "name": "TargetSmoother", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": [], "returns": "TargetSmoother", "purpose": "Stateful low-pass for one run; reset on mode change."},
+          {"name": "update", "visibility": "public", "args": ["rawTargetSpm: Double?", "nowMillis: Long"], "returns": "Double?", "purpose": "First raw value is taken as is; afterwards the output moves toward the raw value by at most SLEW_SPM_PER_S * elapsed seconds; raw null holds the last output for HOLD_S, then returns null (silence) until a raw value returns, which restarts from that raw value."},
+          {"name": "reset", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Forget state."}
+        ]},
+        {"kind": "constant", "name": "MetronomeTarget", "pattern": "service", "methods": [
+          {"name": "ghostCadenceAt", "visibility": "public", "args": ["cadenceByProgress: List<Pair<Double, Double>>?", "progressM: Double?"], "returns": "Double?", "purpose": "GB1 lookup: bucket value at the progress (linear interpolation between neighbouring bucket centres, bucket centre = start + PROGRESS_BUCKET_M/2); null when the list is null/empty, progress null, or progress is farther than one bucket outside the covered range. Never derived from speed."},
+          {"name": "rawTarget", "visibility": "public", "args": ["mode: MetronomeMode", "ghostCadenceSpm: Double?", "manualSpm: Int"], "returns": "Double?", "purpose": "OFF -> null; MATCH_GHOST -> ghost; ATTACK_102 -> ghost * ATTACK_FACTOR; MANUAL -> manualSpm; result outside [MIN_TARGET_SPM, MAX_TARGET_SPM] -> null (never clicked)."},
+          {"name": "availableModes", "visibility": "public", "args": ["hasGhost: Boolean"], "returns": "List<MetronomeMode>", "purpose": "OFF, MATCH_GHOST, ATTACK_102, MANUAL when a ghost session exists; OFF, MANUAL otherwise. Cycle order = this list order."},
+          {"name": "next", "visibility": "public", "args": ["current: MetronomeMode", "hasGhost: Boolean"], "returns": "MetronomeMode", "purpose": "One-tap cycle; a current mode that is not available (e.g. restored MATCH_GHOST in a free run) goes to OFF."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metronome/MetronomeController.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Owns the metronome for the active run (running meaning on top of the domain-free ClickEngine/QuickAction). Created and driven by RunController: tick() once per publish (1 Hz) computes the target and hands it to ClickEngine atomically; stop() at Finish Run, legacy finish, discard and stopAll. Persists mode/manual cadence/volume through RunSettings only.",
+      "public_objects": [
+        {"kind": "class", "name": "MetronomeState", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["mode: MetronomeMode", "targetSpm: Double?", "ghostHasCadence: Boolean?", "manualSpm: Int", "volume: Float", "engine: String"], "returns": "MetronomeState", "purpose": "What the chip renders: targetSpm null = silent; ghostHasCadence null = no ghost session, false = 'no cadence recorded for this ghost'; engine = ClickEngine state name."}]},
+        {"kind": "class", "name": "MetronomeController", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["engine: ClickEngine", "quickAction: QuickAction", "settings: RunSettings"], "returns": "MetronomeController", "purpose": "No side effects."},
+          {"name": "begin", "visibility": "public", "args": ["hasGhost: Boolean", "ghostCadenceByProgress: List<Pair<Double, Double>>?"], "returns": "Unit", "purpose": "Run start/recover: restore mode (unavailable -> OFF), start the engine only when mode != OFF, publish the QuickAction label."},
+          {"name": "tick", "visibility": "public", "args": ["ghostProgressM: Double?", "paused: Boolean", "nowMillis: Long"], "returns": "MetronomeState", "purpose": "1 Hz (paused = silence and smoother reset): raw target (MetronomeTarget.rawTarget with ghostCadenceAt) -> TargetSmoother -> engine.setTargetSpm; returns the state for LiveRunState."},
+          {"name": "cycleMode", "visibility": "public", "args": [], "returns": "MetronomeMode", "purpose": "MetronomeTarget.next, persist, reset smoother, start/stop engine, update QuickAction label; used by the chip and by the notification action."},
+          {"name": "setMode", "visibility": "public", "args": ["mode: MetronomeMode"], "returns": "Unit", "purpose": "Explicit selection (e.g. 'use manual cadence' from the no-ghost-cadence notice)."},
+          {"name": "setManualSpm", "visibility": "public", "args": ["spm: Int"], "returns": "Unit", "purpose": "Clamped to [MIN_TARGET_SPM, MAX_TARGET_SPM], persisted."},
+          {"name": "setVolume", "visibility": "public", "args": ["volume: Float"], "returns": "Unit", "purpose": "Clamped 0..1, persisted, forwarded to the engine."},
+          {"name": "stop", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Engine stop, QuickAction cleared, smoother reset. Idempotent. Mode stays persisted."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/settings/RunSettings.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Phone-local settings (SharedPreferences atlas_run_settings, not secret, never uploaded). New keys metronome_mode, manual_cadence_spm, click_volume. Existing hrSmoothing members unchanged.",
+      "public_objects": [
+        {"kind": "class", "name": "RunSettings", "pattern": "repository", "methods": [
+          {"name": "metronomeMode", "visibility": "public", "args": [], "returns": "MetronomeMode", "purpose": "Stored mode; OFF when unset/unknown."},
+          {"name": "setMetronomeMode", "visibility": "public", "args": ["mode: MetronomeMode"], "returns": "Unit", "purpose": "Persist the mode name."},
+          {"name": "manualCadenceSpm", "visibility": "public", "args": [], "returns": "Int", "purpose": "Stored value clamped to the target range; DEFAULT_MANUAL_SPM (170) when unset/unparsable."},
+          {"name": "setManualCadenceSpm", "visibility": "public", "args": ["spm: Int"], "returns": "Unit", "purpose": "Persist (clamped)."},
+          {"name": "clickVolume", "visibility": "public", "args": [], "returns": "Float", "purpose": "Stored 0..1; DEFAULT_VOLUME when unset/unparsable."},
+          {"name": "setClickVolume", "visibility": "public", "args": ["volume: Float"], "returns": "Unit", "purpose": "Persist (clamped)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ghost/GhostModels.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "GhostProfile gains the optional cadence list; toJson writes `cadence_by_progress` (JSON null when absent) so the offline cache keeps it, fromJson tolerates a missing/null key (old cached profiles and old servers). Existing constructions stay valid (trailing default). Usages found by grep: AtlasClient.ghostProfile, GhostCache (toJson/fromJson), GhostEngine (reads points only), tests.",
+      "public_objects": [
+        {"kind": "class", "name": "GhostProfile", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["runId: String", "routeId: String", "geometryVersion: Int", "points: List<GhostPoint>", "algoVersion: Int = 1", "cadenceByProgress: List<Pair<Double, Double>>? = null"], "returns": "GhostProfile", "purpose": "CHANGED: cadenceByProgress = [(bucketStartM, spm)] ascending or null = no cadence recorded for this ghost."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/net/AtlasClient.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "putSamples uses Stream.apiName (no if/else); StreamCountsLocal gains step; finish() puts expected_counts.step ONLY when step > 0 (omit, never 0/null: a phone without steps stays compatible with an old server, C1); the finish parser is unchanged (it ignores verified_counts/high_seq). ghostProfile parsing goes through GhostProfile.fromJson (cadence_by_progress). Usages found by grep: UploadWorker.kt:72, AtlasClientTest, UploadPlannerTest.",
+      "public_objects": [
+        {"kind": "class", "name": "StreamCountsLocal", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["location: Long", "heartRate: Long", "step: Long = 0"], "returns": "StreamCountsLocal", "purpose": "CHANGED: step appended with a default (existing 2-arg constructions in tests compile)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/sync/UploadWorker.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Line 72 builds StreamCountsLocal(info.locationCount, info.heartRateCount, info.stepCount). Nothing else: upload batches are stream-agnostic (sequence cursor), step samples ride the existing PUT /samples path and are purged after verified sync like the others.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metrics/RunMetrics.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Adds the 20 s race pace next to (not replacing) the existing 120 s rolling pace (A1.ROLLING_PACE_WINDOW_S stays; cockpit 'Last 2 min' unchanged). New constants A1.RACE_PACE_WINDOW_S=20.0, RACE_PACE_MIN_S=15.0, RACE_PACE_MIN_M=15.0; RunMetricsAccumulator computes pace over the last 20 s of moving time ending at the newest accepted point (null when dt < MIN_S or dd < MIN_M), parallel to rollingPace(). Usages of LiveMetrics found by grep: RunController, LiveHistory.record, UI screens, tests (constructor has defaults).",
+      "public_objects": [
+        {"kind": "class", "name": "LiveMetrics", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["... existing parameters unchanged ...", "racePaceSPerKm: Double? = null"], "returns": "LiveMetrics", "purpose": "CHANGED: racePaceSPerKm appended with a default = RACE_PACE_WINDOW_S rolling pace."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/live/RaceChart.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure display derivations for the race screen left panel (RC1). Gap and pace are never put on one axis: the gap history is a series of seconds, paces are two numbers.",
+      "public_objects": [
+        {"kind": "constant", "name": "RaceConfig", "pattern": "constant", "methods": [], "value": "object: GAP_HISTORY_S=120.0, GHOST_SECTION_MIN_M=15.0"},
+        {"kind": "constant", "name": "RaceChart", "pattern": "service", "methods": [
+          {"name": "ghostSectionPace", "visibility": "public", "args": ["profile: GhostProfile", "fromProgressM: Double", "toProgressM: Double"], "returns": "Double?", "purpose": "Ghost pace (s/km) over the route section the runner covered in the last RACE_PACE_WINDOW_S: (ghost moving time at toProgress - at fromProgress) / distance * 1000, using the profile's time-at-progress lookup already used by GhostComparison; null when the section is shorter than GHOST_SECTION_MIN_M or the ghost cannot answer for either end (never fabricated)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/live/LiveHistory.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Adds the 1-2 minute gap history and the inputs of the ghost section pace. LiveTrends gains gapSeries (x moving s, y time gap s, negative = ahead, window RaceConfig.GAP_HISTORY_S) and racePaceSPerKm, ghostSectionPaceSPerKm (all defaults; LiveTrends.EMPTY unchanged). LiveHistory keeps a (moving s, progress m) buffer long enough to answer 'my progress RACE_PACE_WINDOW_S ago'; record() gains optional racePace and ghostProfile arguments with defaults. Existing series/GapTrend untouched. Usages of LiveTrends/LiveHistory.record found by grep: RunController.publish, GhostRaceScreen, LiveCockpit, LiveInsightsTest.",
+      "public_objects": [
+        {"kind": "class", "name": "LiveHistory", "pattern": "service", "methods": [{"name": "record", "visibility": "public", "args": ["m: LiveMetrics", "ghost: GhostLive?", "hrDisplay: Double? = m.currentHr?.toDouble()", "ghostProfile: GhostProfile? = null"], "returns": "Unit", "purpose": "CHANGED: ghostProfile (the main ghost's profile) enables ghostSectionPace; null = no ghost section pace."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/session/RunController.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Wires steps, cadence display and metronome (flow steps 18-26 of 10_architecture.json). start(): after recorder.start, platform.steps.start() (result ignored; denied/no sensor never blocks the run) and MetronomeController.begin; attach() adds a steps collector (platform.scope, Default) that only appends to a short in-memory list of recent step times (lock held for the append only); publish() adds cadence (CadenceEstimator.at over the recent list) and MetronomeController.tick to LiveRunState. pause(): steps.stop(); resume(): steps.start(); finishRun()/finish()/discard(): steps.stop() and metronome.stop() (O4: not kept during recovery); recover() into PAUSED: no steps until resume. loadSamples(): replace the `if LOCATION ... else heartRate` by a `when` that IGNORES Stream.STEP (currently a step row would be decoded as heart rate). ghostFor() unchanged; the main ghost profile cadence list comes from ghostCache.profile(ghostId).",
+      "public_objects": [
+        {"kind": "class", "name": "LiveRunState", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["... existing parameters unchanged ...", "cadenceSpm: Double? = null", "metronome: MetronomeState? = null"], "returns": "LiveRunState", "purpose": "CHANGED: cadenceSpm = live user cadence (display only, null = no valid cadence, never 0); metronome = chip state, null when no run is active."}]},
+        {"kind": "class", "name": "RunController", "pattern": "service", "methods": [
+          {"name": "cycleMetronome", "visibility": "public", "args": [], "returns": "Unit", "purpose": "NEW: one-tap mode cycle for the chip (delegates to MetronomeController.cycleMode, then publish())."},
+          {"name": "selectMetronomeMode", "visibility": "public", "args": ["mode: MetronomeMode"], "returns": "Unit", "purpose": "NEW: explicit mode (no-ghost-cadence notice 'use manual cadence')."},
+          {"name": "setManualCadence", "visibility": "public", "args": ["spm: Int"], "returns": "Unit", "purpose": "NEW: manual fixed cadence (persisted, clamped)."},
+          {"name": "setClickVolume", "visibility": "public", "args": ["volume: Float"], "returns": "Unit", "purpose": "NEW: click volume (persisted)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/MetronomeChip.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Compose control (display + input only): one tap cycles the mode (label shows mode, target spm and, when known, 'you N'); when state.ghostHasCadence == false in a ghost mode it shows 'No cadence recorded for this ghost' with a button 'Use manual cadence' (selectMetronomeMode(MANUAL)); MANUAL mode shows -/+ steppers for the manual cadence; a small volume slider. Same dark palette as GhostRaceScreen.",
+      "public_objects": [
+        {"kind": "function", "name": "MetronomeChip", "pattern": "view", "methods": [{"name": "MetronomeChip", "visibility": "public", "args": ["state: MetronomeState?", "cadenceSpm: Double?", "onCycle: () -> Unit", "onUseManual: () -> Unit", "onManualSpm: (Int) -> Unit", "onVolume: (Float) -> Unit"], "returns": "Unit (@Composable)", "purpose": "Renders flow step 23; state null renders nothing."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RaceGapPanel.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Left half of the lower race area (RC1): current gap (reuses GapLine/gapText), trend arrow (existing GapTrend), 1-2 min gap history line chart (LiveTrends.gapSeries; zero line = level, above = ahead, colours GainGreen/LossRed as in GhostRaceScreen), then two figures 'you 20 s' and 'ghost' pace in min/km as text (no shared axis with the gap).",
+      "public_objects": [
+        {"kind": "function", "name": "RaceGapPanel", "pattern": "view", "methods": [{"name": "RaceGapPanel", "visibility": "public", "args": ["gapS: Double?", "trends: LiveTrends", "racePaceSPerKm: Double?", "modifier: Modifier"], "returns": "Unit (@Composable)", "purpose": "Display only; every unknown value renders as the existing DASH."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/GhostRaceScreen.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "The existing row with the 158 dp HrDistanceChart (currently preceded by Spacer(weight 1f), lines ~98-101) becomes [RaceGapPanel (weight 1f) | HrDistanceChart (158 dp)]; BottomStats keeps pace/distance/time but its GapLine moves into RaceGapPanel only if the audit shows duplication (implementer decides, must not show the gap twice); MetronomeChip placed in the top/status area. HR side unchanged (5 s smoothing default, ghost HR by route position already implemented: audit only, see RC1).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/LiveCockpit.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Free-run cockpit hosts MetronomeChip (modes OFF/MANUAL only because there is no ghost session).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RunningScreen.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Start paths (startFree / startPrepared / startRace buttons, lines ~223-244 and RaceCard callback) first run the existing LOCATION permission step, then an OPTIONAL ACTIVITY_RECOGNITION request on first use only (run starts whatever the answer); a DENIED/BLOCKED status shows the one-line note 'Cadence is not recorded (activity permission denied)' on the home panel, no re-prompt without an explicit tap. Home panel also gets the default click volume and manual cadence settings (RunSettings).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/Sprint01_MobilePlatform/MobilePlatform_API.md",
+      "change": "changed",
+      "stub_kind": "markdown",
+      "role": "Document platform.steps (StepDetector, permission, event-time semantics), platform.click (ClickEngine, no audio focus), platform.quickAction, Stream.STEP / apiName, CaptureStore v3 / step_count, ACTIVITY_RECOGNITION. Status tags [tested: JVM] / [built] / [unverified]; sensor, audio and screen-off behavior stay [unverified] until a real run.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md",
+      "change": "changed",
+      "stub_kind": "markdown",
+      "role": "Document step stream in the upload (expected_counts.step omitted when 0, deploy-order note C1), CAD1 in short (pointer to 10_architecture.json), ghost cadence_by_progress, metronome modes/chip/notification action/settings keys, race-screen delta, new permission flow.",
+      "public_objects": [],
+      "private_objects": []
+    },
+
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/CadenceEstimatorTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "CAD1 vs tests/fixtures/cadence_golden.json (all cases), plus `at` determinism and gap behavior.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/MetronomeTargetTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "ghostCadenceAt interpolation/edges, rawTarget per mode (attack = 1.02x, out-of-range -> null, no ghost cadence -> null, never from speed), TargetSmoother slew/hold/restart, availableModes/next, MetronomeController.tick with a fake engine (target handed over atomically, stop clears, mode persisted via RunSettings fake store).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/BeatSchedulerTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "Sample-accuracy: beat count and positions over long renders at several spm (no drift), target change affects only the next interval, 0 target silence then immediate first beat, independence from buffer size (renders with 441 vs 4410 frame buffers are identical), click is quiet (peak <= CLICK_PEAK).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/StepCaptureTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "StepDetector.toRaw event-time conversion (batched events keep their time), SampleJson.step payload, Stream.apiName mapping, CaptureStore v3: upgrade from v2 keeps captures/samples, step counter increments only step_count, sequence shared across streams, CaptureInfo.stepCount (extends the CaptureStoreV2Test approach), PermissionLogic.required for ACTIVITY_RECOGNITION on sdk 28 / 29 / 34.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RaceChartTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "ghostSectionPace (normal, too short, ghost cannot answer), LiveHistory gapSeries window and ordering, 20 s race pace (LiveMetrics.racePaceSPerKm) null rules; asserts the 120 s rolling pace is unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/AtlasClientTest.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_test",
+      "role": "putSamples maps STEP to 'step'; finish body contains expected_counts.step only when > 0; GhostProfile with and without cadence_by_progress decodes/round-trips.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/RunMetaCompatTest.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_test",
+      "role": "Add RunSettings defaults/clamping for metronome_mode, manual_cadence_spm, click_volume.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

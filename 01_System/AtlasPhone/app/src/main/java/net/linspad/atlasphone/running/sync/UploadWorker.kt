@@ -69,7 +69,7 @@ class UploadEngine(private val store: CaptureStore, private val client: AtlasCli
                     }
                 }
                 UploadAction.Finish -> {
-                    val counts = StreamCountsLocal(info.locationCount, info.heartRateCount)
+                    val counts = StreamCountsLocal(info.locationCount, info.heartRateCount, info.stepCount)
                     when (val r = client.finish(runId, meta, counts, localLast, info.dropped)) {
                         is AtlasResult.Success -> {
                             action = UploadPlanner.afterFinish(r.value, localLast, round)

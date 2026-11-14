@@ -53,6 +53,23 @@ class RunMetaCompatTest {
         override fun putString(key: String, value: String) { map[key] = value }
     }
 
+    @Test fun metronomeSettingsDefaultsGarbageAndClamping() {
+        val store = MapStore(); val s = RunSettings(store)
+        assertEquals(net.linspad.atlasphone.running.metronome.MetronomeMode.OFF, s.metronomeMode())
+        assertEquals(170, s.manualCadenceSpm())
+        assertEquals(net.linspad.atlasphone.mobile.audio.ClickConfig.DEFAULT_VOLUME, s.clickVolume(), 0f)
+        store.map[RunSettings.KEY_METRONOME_MODE] = "bogus"; store.map[RunSettings.KEY_MANUAL_CADENCE] = "abc"; store.map[RunSettings.KEY_CLICK_VOLUME] = "NaN?"
+        assertEquals(net.linspad.atlasphone.running.metronome.MetronomeMode.OFF, s.metronomeMode())
+        assertEquals(170, s.manualCadenceSpm()); assertEquals(net.linspad.atlasphone.mobile.audio.ClickConfig.DEFAULT_VOLUME, s.clickVolume(), 0f)
+        s.setManualCadenceSpm(500); assertEquals(230, s.manualCadenceSpm())
+        s.setManualCadenceSpm(10); assertEquals(100, s.manualCadenceSpm())
+        store.map[RunSettings.KEY_CLICK_VOLUME] = "7.5"; assertEquals(1f, s.clickVolume(), 0f)
+        s.setClickVolume(-2f); assertEquals(0f, s.clickVolume(), 0f)
+        s.setMetronomeMode(net.linspad.atlasphone.running.metronome.MetronomeMode.ATTACK_102)
+        assertEquals(net.linspad.atlasphone.running.metronome.MetronomeMode.ATTACK_102, RunSettings(store).metronomeMode())
+        assertEquals(HrSmoothingMode.ROLLING_5S, s.hrSmoothing())      // unaffected
+    }
+
     @Test fun smoothingSettingDefaultsToFiveSecondsWhenUnsetOrUnknown() {
         val store = MapStore()
         val settings = RunSettings(store)

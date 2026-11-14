@@ -6,8 +6,8 @@ Canonical product definition for the four Ghost Runner sprints. Each roadmap spr
 
 | Roadmap sprint | Atlas sprint folder | Status |
 |---|---|---|
-| 1 Run Completion, Recovery & Analytics | `Sprint02_RunFinishAndRecovery` | draft written |
-| 2 Live Racing, Cadence & Audio Pacing | — | defined only |
+| 1 Run Completion, Recovery & Analytics | `Sprint02_RunFinishAndRecovery` | TESTS_PASSING (device checks pending) |
+| 2 Live Racing, Cadence & Audio Pacing | `Sprint03_CadenceAndLiveRacing` | draft written |
 | 3 Ghost Identity, History & League | — | defined only |
 | 4 First-Run Experience & Standalone Release | — | defined only |
 

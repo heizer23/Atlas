@@ -37,6 +37,9 @@ RUN_REVOKED_COMPLETE = "c1000000-0000-0000-0000-000000000004"
 RUN_RECOVERY = "c1000000-0000-0000-0000-000000000005"          # complete, run_finished_at set, recovery stored
 RUN_RECOVERY_NOHR = "c1000000-0000-0000-0000-000000000006"     # complete, run_finished_at set, no heart rate
 RUN_RECOVERY_UPLOAD = "c1000000-0000-0000-0000-000000000007"   # uploading, recovery-phase HR already stored
+RUN_CADENCE = "c1000000-0000-0000-0000-000000000008"           # complete, steps + stored cadence object
+RUN_CADENCE_EMPTY = "c1000000-0000-0000-0000-000000000009"     # complete, 3 unusable steps, empty cadence series
+RUN_CADENCE_UPLOAD = "c1000000-0000-0000-0000-00000000000a"    # uploading, steps incl. after run end / inside a pause
 NEW_RUN = "a1000000-0000-0000-0000-000000000001"
 
 

@@ -46,10 +46,13 @@ data class GhostProfile(
     val points: List<GhostPoint>,
     /** Server derivation version of the profile (2 = idle start trimmed); a cached profile of another version is re-downloaded. */
     val algoVersion: Int = 1,
+    /** [(bucketStartM, spm)] ascending, 20 m buckets; null = no cadence recorded for this ghost (never derived from speed). */
+    val cadenceByProgress: List<Pair<Double, Double>>? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("run_id", runId).put("route_id", routeId).put("geometry_version", geometryVersion).put("algo_version", algoVersion)
         .put("points", JSONArray(points.map { JSONArray(listOf(it.t, it.s, it.hr ?: JSONObject.NULL)) }))
+        .put("cadence_by_progress", cadenceByProgress?.let { c -> JSONArray(c.map { JSONArray(listOf(it.first, it.second)) }) } ?: JSONObject.NULL)
         .toString()
 
     companion object {
@@ -59,7 +62,11 @@ data class GhostProfile(
                 a.getJSONArray(i).let { GhostPoint(it.getDouble(0), it.getDouble(1), if (it.isNull(2)) null else it.getDouble(2)) }
             }
             require(pts.size >= 2) { "ghost profile needs at least two points" }
-            return GhostProfile(o.getString("run_id"), o.getString("route_id"), o.getInt("geometry_version"), pts, o.optInt("algo_version", 1))
+            // Missing key (old cache / old server) and JSON null both mean "no cadence recorded".
+            val cad = o.optJSONArray("cadence_by_progress")?.let { c ->
+                (0 until c.length()).map { i -> c.getJSONArray(i).let { it.getDouble(0) to it.getDouble(1) } }
+            }?.takeIf { it.isNotEmpty() }
+            return GhostProfile(o.getString("run_id"), o.getString("route_id"), o.getInt("geometry_version"), pts, o.optInt("algo_version", 1), cad)
         }
         fun fromJson(json: String) = fromJson(JSONObject(json))
     }

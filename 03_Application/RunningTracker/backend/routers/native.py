@@ -281,7 +281,7 @@ def native_get_ghost_profile(run_id: str, device: DeviceContext = Depends(requir
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select route_id, geometry_version, algo_version, end_progress_m, profile "
+                "select route_id, geometry_version, algo_version, end_progress_m, profile, cadence_by_progress "
                 "from runningtracker.run_route_progress where run_id = %s and qualified", (rid,))
             row = cur.fetchone()
     if row is None:
@@ -289,7 +289,8 @@ def native_get_ghost_profile(run_id: str, device: DeviceContext = Depends(requir
     points = row["profile"]
     return {"run_id": rid, "route_id": str(row["route_id"]), "geometry_version": row["geometry_version"],
             "algo_version": row["algo_version"], "time_basis": "moving_seconds",
-            "end_progress_m": row["end_progress_m"], "duration_s": points[-1][0], "points": points}
+            "end_progress_m": row["end_progress_m"], "duration_s": points[-1][0], "points": points,
+            "cadence_by_progress": row["cadence_by_progress"]}
 
 
 @router.get("/library")

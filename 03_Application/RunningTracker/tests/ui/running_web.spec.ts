@@ -23,7 +23,7 @@ const col = (key: string, type = 'number') => ({ key, label: key, type });
 const run = (over: Record<string, unknown>) => ({
   id: RUN_SYNCED, run_type: 'continuous', status: 'complete', sync_state: 'synced',
   started_at: '2030-01-07T08:00:00Z', finished_at: '2030-01-07T08:30:00Z', elapsed_s: 1800, moving_s: 1750,
-  distance_m: 5000, avg_pace_s_per_km: 350, avg_hr: 151.4, max_hr: 172, comment: 'tempo', device_name: 'Pixel',
+  distance_m: 5000, avg_pace_s_per_km: 350, avg_hr: 151.4, max_hr: 172, avg_cadence_spm: null, comment: 'tempo', device_name: 'Pixel',
   location_count: 1800, hr_count: 1790, ...over,
 });
 
@@ -267,4 +267,44 @@ test('run detail hides the Recovery card without recovery and shows null values 
   await expect(page.getByTestId('hrr60')).toHaveText('–');
   await expect(page.getByTestId('hrr120')).toHaveText('–');
   await expect(page.getByTestId('recovery-card')).toContainText('170 bpm');
+});
+
+
+test('run detail shows cadence stat and card', async ({ page }) => {
+  await page.route('**/api/runningtracker/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/runningtracker', '');
+    const metric = url.searchParams.get('metric');
+    if (path === `/runs/${RUN_SYNCED}`) return json(route, dataset('run', [run({ avg_cadence_spm: 170.6 })]));
+    if (path === `/runs/${RUN_SYNCED}/splits`) return json(route, dataset('run_split', [
+      { id: '1', km: 1, distance_m: 1000, duration_s: 340, pace_s_per_km: 340, avg_hr: 150, partial: false }]));
+    if (path === `/runs/${RUN_SYNCED}/series` && metric === 'cadence') return json(route, series(8));
+    if (path === `/runs/${RUN_SYNCED}/series`) return json(route, series(8));
+    return json(route, dataset('x', []));
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  await expect(page.getByTestId('avg-cadence')).toHaveText('171 spm');
+  await expect(page.getByTestId('cadence-chart').locator('svg').first()).toBeVisible();
+  await expect(page.getByTestId('pace-chart').locator('svg').first()).toBeVisible();
+  await expect(page.getByTestId('hr-chart').locator('svg').first()).toBeVisible();
+  await expect(page.getByTestId('splits').locator('tbody tr')).toHaveCount(1);
+  await expect(page.getByLabel('Comment')).toHaveValue('tempo');
+});
+
+test('run detail without cadence shows a dash and the neutral note', async ({ page }) => {
+  await page.route('**/api/runningtracker/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/runningtracker', '');
+    const metric = url.searchParams.get('metric');
+    if (path === `/runs/${RUN_SYNCED}`) return json(route, dataset('run', [run({ avg_cadence_spm: null })]));
+    if (path === `/runs/${RUN_SYNCED}/splits`) return json(route, dataset('run_split', []));
+    if (path === `/runs/${RUN_SYNCED}/series` && metric === 'cadence') return json(route, dataset('run_series', [], [col('t_s'), col('t_label', 'string'), col('value')]));
+    if (path === `/runs/${RUN_SYNCED}/series`) return json(route, series(8));
+    return json(route, dataset('x', []));
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  await expect(page.getByTestId('avg-cadence')).toHaveText('–');
+  await expect(page.getByTestId('cadence-chart')).toContainText('No cadence recorded.');
+  await expect(page.getByTestId('pace-chart').locator('svg').first()).toBeVisible();
+  await expect(page.getByLabel('Comment')).toHaveValue('tempo');
 });

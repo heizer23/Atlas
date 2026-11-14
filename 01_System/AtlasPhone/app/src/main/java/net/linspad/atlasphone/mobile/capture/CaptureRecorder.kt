@@ -5,11 +5,13 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import net.linspad.atlasphone.mobile.model.RawHeartRate
 import net.linspad.atlasphone.mobile.model.RawLocation
+import net.linspad.atlasphone.mobile.model.RawStep
 import net.linspad.atlasphone.mobile.model.SampleJson
 import net.linspad.atlasphone.mobile.model.Stream
 
@@ -25,6 +27,7 @@ class CaptureRecorder(
     private val ioDispatcher: CoroutineDispatcher,
     private val locations: Flow<RawLocation>,
     private val heartRates: Flow<RawHeartRate>,
+    private val steps: Flow<RawStep> = emptyFlow(),
 ) {
     private val _active = MutableStateFlow<CaptureInfo?>(null)
     /** The capture being recorded (counts refreshed after every stored sample), or null. */
@@ -42,6 +45,7 @@ class CaptureRecorder(
         jobs = listOf(
             scope.launch(ioDispatcher) { locations.collect { record(id, Stream.LOCATION, it.timestampMillis) { seq -> SampleJson.location(it, id, seq).toString() } } },
             scope.launch(ioDispatcher) { heartRates.collect { record(id, Stream.HEART_RATE, it.timestampMillis) { seq -> SampleJson.heartRate(it, id, seq).toString() } } },
+            scope.launch(ioDispatcher) { steps.collect { record(id, Stream.STEP, it.timestampMillis) { seq -> SampleJson.step(it, id, seq).toString() } } },
         )
         id
     }

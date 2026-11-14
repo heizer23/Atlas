@@ -1,7 +1,9 @@
 """Web list/detail/splits/series/PATCH/DELETE/prepared/devices/pairing-code scenarios (Dataset | ApiError)."""
 
+import pytest
+
 from tests.conftest import (
-    PREPARED_EXPIRED, PREPARED_FRESH, RUN_COMPLETE, RUN_GAP, RUN_RECOVERY, RUN_RECOVERY_NOHR, RUN_RECOVERY_UPLOAD,
+    PREPARED_EXPIRED, PREPARED_FRESH, RUN_CADENCE, RUN_CADENCE_EMPTY, RUN_CADENCE_UPLOAD, RUN_COMPLETE, RUN_GAP, RUN_RECOVERY, RUN_RECOVERY_NOHR, RUN_RECOVERY_UPLOAD,
     RUN_REVOKED_COMPLETE, RUN_REVOKED_UPLOADING,
 )
 
@@ -21,8 +23,8 @@ def test_history_list_is_a_dataset_with_defined_ordering_and_defaults(client):
     assert body["meta"]["object_type"] == "run" and body["meta"]["row_actions"] == ["delete"]
     ids = [row["id"] for row in body["rows"]]
     # default: uploading + complete, newest started_at first, prepared excluded
-    assert ids == [RUN_RECOVERY_UPLOAD, RUN_RECOVERY_NOHR, RUN_RECOVERY, RUN_GAP, RUN_COMPLETE, RUN_REVOKED_UPLOADING, RUN_REVOKED_COMPLETE]
-    assert body["meta"]["total"] == 7
+    assert ids == [RUN_CADENCE_EMPTY, RUN_CADENCE_UPLOAD, RUN_CADENCE, RUN_RECOVERY_UPLOAD, RUN_RECOVERY_NOHR, RUN_RECOVERY, RUN_GAP, RUN_COMPLETE, RUN_REVOKED_UPLOADING, RUN_REVOKED_COMPLETE]
+    assert body["meta"]["total"] == 10
     by_id = {row["id"]: row for row in body["rows"]}
     assert by_id[RUN_GAP]["sync_state"] == "pending" and by_id[RUN_COMPLETE]["sync_state"] == "synced"
     complete = by_id[RUN_COMPLETE]
@@ -35,8 +37,8 @@ def test_history_list_is_a_dataset_with_defined_ordering_and_defaults(client):
     assert all(row["sync_state"] == "prepared" for row in prepared)
 
     page2 = client.get(f"{W}/runs", params={"page_size": 1, "page": 2}).json()
-    assert [row["id"] for row in page2["rows"]] == [RUN_RECOVERY_NOHR]
-    assert page2["meta"]["total"] == 7 and page2["meta"]["page"] == 2 and page2["meta"]["page_size"] == 1
+    assert [row["id"] for row in page2["rows"]] == [RUN_CADENCE_UPLOAD]
+    assert page2["meta"]["total"] == 10 and page2["meta"]["page"] == 2 and page2["meta"]["page_size"] == 1
 
     for bad in ({"page_size": 101}, {"status": "bogus"}, {"page": 0}):
         e = client.get(f"{W}/runs", params=bad)
@@ -67,7 +69,7 @@ def test_run_detail_splits_and_series(client):
         assert all(isinstance(p["t_s"], (int, float)) and isinstance(p["value"], (int, float)) for p in series)
         assert series == sorted(series, key=lambda p: p["t_label"])  # label sorts like time (LineChart sorts x as text)
     assert client.get(f"{W}/runs/{RUN_COMPLETE}/series").status_code == 422
-    assert client.get(f"{W}/runs/{RUN_COMPLETE}/series", params={"metric": "cadence"}).status_code == 422
+    assert client.get(f"{W}/runs/{RUN_COMPLETE}/series", params={"metric": "speed"}).status_code == 422
 
     # a run that is still uploading has no metrics yet: empty datasets, not errors
     assert _rows(client.get(f"{W}/runs/{RUN_GAP}/splits")) == []
@@ -193,7 +195,7 @@ def test_recovery_series_covers_the_recovery_phase_without_zero_filling(client):
 def test_series_metric_validation(client):
     for metric in ("recovery_hr", "heart_rate", "pace"):
         assert client.get(f"{W}/runs/{RUN_RECOVERY}/series", params={"metric": metric}).status_code == 200
-    for params in ({"metric": "cadence"}, {}):
+    for params in ({"metric": "speed"}, {}):
         r = client.get(f"{W}/runs/{RUN_RECOVERY}/series", params=params)
         assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_ERROR"
 
@@ -236,3 +238,57 @@ def test_deleting_a_recovery_run_removes_its_recovery_data(client, db_conn):
             cur.execute(f"select count(*) as n from runningtracker.{table} where run_id = %s", (RUN_RECOVERY,))
             assert cur.fetchone()["n"] == 0, table
     assert client.get(f"{W}/runs/{RUN_RECOVERY}/recovery").status_code == 404
+
+
+# ---- Sprint03 cadence ----
+
+def test_average_cadence_in_run_row(client):
+    rows = {r["id"]: r for r in _rows(client.get(f"{W}/runs"))}
+    assert rows[RUN_CADENCE]["avg_cadence_spm"] == 170.0
+    assert rows[RUN_CADENCE_EMPTY]["avg_cadence_spm"] is None and rows[RUN_COMPLETE]["avg_cadence_spm"] is None
+    assert _rows(client.get(f"{W}/runs/{RUN_CADENCE}"))[0]["avg_cadence_spm"] == 170.0
+    assert rows[RUN_COMPLETE]["avg_hr"] == 160 and rows[RUN_COMPLETE]["distance_m"] == 2000   # no other column changed
+
+
+def test_cadence_series_dataset(client):
+    r = client.get(f"{W}/runs/{RUN_CADENCE}/series", params={"metric": "cadence"})
+    body = r.json()
+    assert r.status_code == 200 and body["meta"]["object_type"] == "run_series" and body["meta"]["label"] == "Cadence"
+    assert body["meta"]["total"] == 59 and [row["t_s"] for row in body["rows"]] == [5.0 * k for k in range(1, 60)]
+    assert all(row["value"] == 170.0 for row in body["rows"]) and "conf" not in body["rows"][0]
+
+
+def test_cadence_series_empty_and_error_cases(client):
+    for rid in (RUN_CADENCE_EMPTY, RUN_COMPLETE, RUN_CADENCE_UPLOAD):
+        r = client.get(f"{W}/runs/{rid}/series", params={"metric": "cadence"})
+        assert r.status_code == 200 and r.json()["meta"]["total"] == 0 and r.json()["rows"] == []
+    r = client.get(f"{W}/runs/00000000-0000-0000-0000-00000000dead/series", params={"metric": "cadence"})
+    assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
+    assert client.get(f"{W}/runs/{RUN_CADENCE}/series", params={"metric": "speed"}).status_code == 422
+    for metric in ("pace", "heart_rate", "recovery_hr"):
+        assert client.get(f"{W}/runs/{RUN_RECOVERY}/series", params={"metric": metric}).status_code == 200
+
+
+def test_deleting_a_cadence_run_removes_its_cadence_data(client, db_conn):
+    assert client.delete(f"{W}/runs/{RUN_CADENCE}").status_code == 200
+    with db_conn.cursor() as cur:
+        for table in ("run_samples", "run_metrics", "run_route_progress"):
+            cur.execute(f"select count(*) as n from runningtracker.{table} where run_id = %s", (RUN_CADENCE,))
+            assert cur.fetchone()["n"] == 0, table
+    assert client.get(f"{W}/runs/{RUN_CADENCE}/series", params={"metric": "cadence"}).status_code == 404
+
+
+def test_schema_with_step_stream_is_idempotent_and_still_rejects_unknown_streams(db_conn):
+    import os
+    ddl = open(os.path.join(os.path.dirname(__file__), "../schema.sql")).read()
+    with db_conn.cursor() as cur:
+        cur.execute(ddl)
+        cur.execute(ddl)
+        cur.execute("select conname from pg_constraint where conname in ('ck_run_samples_stream', 'run_samples_stream_check')")
+        assert [r["conname"] for r in cur.fetchall()] == ["ck_run_samples_stream"]
+        cur.execute("select count(*) as n from runningtracker.run_samples where run_id = %s", (RUN_CADENCE,))
+        assert cur.fetchone()["n"] == 1450
+        import psycopg2
+        with pytest.raises(psycopg2.errors.CheckViolation):
+            cur.execute("insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload) "
+                        "values (%s, 'gyro', 99999, now(), '{}')", (RUN_CADENCE,))

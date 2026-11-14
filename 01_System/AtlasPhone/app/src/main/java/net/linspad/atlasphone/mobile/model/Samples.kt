@@ -28,9 +28,18 @@ data class RawHeartRate(
     val elapsedRealtimeNanos: Long? = null,
 )
 
-enum class Stream(val wireName: String) {
-    LOCATION("location.sample"),
-    HEART_RATE("heartRate.sample"),
+/** One detected step. [timestampMillis] is the sensor EVENT time as UTC epoch ms (see StepDetector.toRaw). */
+data class RawStep(
+    val timestampMillis: Long,
+    /** The sensor event's own monotonic stamp (SystemClock.elapsedRealtimeNanos domain); null when unavailable. */
+    val elapsedRealtimeNanos: Long? = null,
+)
+
+/** [wireName] is the payload `type`; [apiName] is the stream name on the RunningTracker HTTP API. */
+enum class Stream(val wireName: String, val apiName: String) {
+    LOCATION("location.sample", "location"),
+    HEART_RATE("heartRate.sample", "heart_rate"),
+    STEP("step.sample", "step"),
 }
 
 /**
@@ -72,5 +81,12 @@ object SampleJson {
         .put("bpm", raw.bpm)
         .put("rrIntervalsMs", raw.rrIntervalsMs?.let { JSONArray(it) } ?: JSONObject.NULL)
         .put("source", "bluetooth")
+        .put("elapsedRealtimeNanos", raw.elapsedRealtimeNanos ?: JSONObject.NULL)
+
+    fun step(raw: RawStep, captureId: String?, sequence: Long?): JSONObject = JSONObject()
+        .put("type", Stream.STEP.wireName)
+        .put("captureId", captureId ?: JSONObject.NULL)
+        .put("sequence", sequence ?: JSONObject.NULL)
+        .put("timestamp", iso(raw.timestampMillis))
         .put("elapsedRealtimeNanos", raw.elapsedRealtimeNanos ?: JSONObject.NULL)
 }

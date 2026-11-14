@@ -38,13 +38,16 @@ class RunningActivity : ComponentActivity() {
     private lateinit var platform: MobilePlatform
     private lateinit var controller: RunController
     private var pendingAfterGrant: (() -> Unit)? = null
+    /** True for the optional activity-recognition prompt: the run starts whatever the answer. */
+    private var runAfterAnyAnswer = false
     private val permissionTick = mutableStateOf(0)
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         platform.log("Permission result: " + result.entries.joinToString { "${it.key.substringAfterLast('.')}=${it.value}" })
         val action = pendingAfterGrant
         pendingAfterGrant = null
-        if (result.values.all { it }) action?.invoke() // a denial is never re-prompted automatically
+        if (result.values.all { it } || runAfterAnyAnswer) action?.invoke() // a denial is never re-prompted automatically
+        runAfterAnyAnswer = false
         permissionTick.value = permissionTick.value + 1
     }
 
@@ -79,6 +82,14 @@ class RunningActivity : ComponentActivity() {
         }
     }
 
+    /** Asks for activity recognition only when it was never asked; [action] (the run start) runs after any answer. */
+    private fun askActivityOnce(action: () -> Unit) {
+        if (platform.permissions.status(Capability.ACTIVITY_RECOGNITION, this) == PermissionStatus.NOT_REQUESTED) {
+            runAfterAnyAnswer = true
+            request(Capability.ACTIVITY_RECOGNITION, action)
+        } else action()
+    }
+
     private fun request(capability: Capability, action: () -> Unit) {
         pendingAfterGrant = action
         platform.permissions.markRequested(capability)
@@ -95,7 +106,11 @@ class RunningActivity : ComponentActivity() {
             Page.SUMMARY -> summary?.let { RecapScreen(it, RunSettings.create(this@RunningActivity).hrSmoothing(), onDone = { page = Page.HOME }) } ?: run { page = Page.HOME }
             Page.HOME -> RunningScreen(
                 controller = controller,
-                ensurePermission = { capability, action -> withPermission(capability, explicitRetry = true, action = action) },
+                ensurePermission = { capability, action ->
+                    // Starting a run: LOCATION first (required), then ACTIVITY_RECOGNITION once at first use (optional, result ignored).
+                    if (capability == Capability.LOCATION) withPermission(capability, explicitRetry = true) { askActivityOnce(action) }
+                    else withPermission(capability, explicitRetry = true, action = action)
+                },
                 onFinished = { summary = it; page = Page.SUMMARY },
                 onPair = { page = Page.PAIRING },
             )

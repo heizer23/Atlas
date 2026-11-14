@@ -11,6 +11,7 @@ from typing import Optional
 
 from psycopg2.extras import Json
 
+from backend.cadence import compute_cadence
 from backend.recovery import compute_recovery
 from backend.config import (
     ACCURACY_MAX_M, ALGO_VERSION, MAX_SPEED_MPS, MIN_STEP_M, PARTIAL_SPLIT_MIN_M,
@@ -42,6 +43,7 @@ class MetricsResult:
     pace_series: list[list[float]] = field(default_factory=list)
     hr_series: list[list[float]] = field(default_factory=list)
     recovery: Optional[dict] = None  # None when run_finished_at is None (no recovery phase)
+    cadence: Optional[dict] = None   # None when the running phase has no step samples (CAD2)
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -67,6 +69,7 @@ def compute_metrics(
     started_at: datetime,
     run_finished_at: Optional[datetime] = None,
     finished_at: Optional[datetime] = None,
+    steps: Optional[list[SampleRow]] = None,
 ) -> MetricsResult:
     # RS2: with a run end, only samples at or before it count for running statistics; recovery sees all HR.
     all_heart_rates = heart_rates
@@ -177,6 +180,12 @@ def compute_metrics(
         raw_hr = [(ts, float(b)) for ts, b in raw_hr if isinstance(b, (int, float)) and not isinstance(b, bool)]
         recovery = compute_recovery(raw_hr, run_finished_at, finished_at)
 
+    # CAD1/CAD2: step rows only feed cadence (never heart rate); the estimator applies the running-phase filter itself.
+    cadence = None
+    if steps:
+        end = run_finished_at or finished_at
+        cadence = compute_cadence([s.ts for s in steps], [(p.started_at, p.ended_at) for p in pauses], started_at, end)
+
     return MetricsResult(
         server_distance_m=distance,
         avg_hr=avg_hr,
@@ -185,6 +194,7 @@ def compute_metrics(
         pace_series=[[b * SERIES_BUCKET_S, v] for b, v in sorted(pace_buckets.items())],
         hr_series=[[b * SERIES_BUCKET_S, sum(v) / len(v)] for b, v in sorted(hr_buckets.items())],
         recovery=recovery,
+        cadence=cadence,
     )
 
 
@@ -198,26 +208,27 @@ def recompute_and_store(conn, run_id: str) -> None:
             "select stream, seq, sample_ts, payload from runningtracker.run_samples where run_id = %s order by seq",
             (run_id,),
         )
-        locations, heart_rates = [], []
+        by_stream: dict[str, list[SampleRow]] = {"location": [], "heart_rate": [], "step": []}
         for r in cur.fetchall():
-            row = SampleRow(r["seq"], r["sample_ts"], r["payload"])
-            (locations if r["stream"] == "location" else heart_rates).append(row)
+            by_stream[r["stream"]].append(SampleRow(r["seq"], r["sample_ts"], r["payload"]))
+        locations, heart_rates, steps = by_stream["location"], by_stream["heart_rate"], by_stream["step"]
         cur.execute("select started_at, ended_at from runningtracker.run_pauses where run_id = %s", (run_id,))
         pauses = [PauseRow(r["started_at"], r["ended_at"]) for r in cur.fetchall()]
 
-        m = compute_metrics(locations, heart_rates, pauses, started_at, run["run_finished_at"], run["finished_at"])
+        m = compute_metrics(locations, heart_rates, pauses, started_at, run["run_finished_at"], run["finished_at"], steps)
         cur.execute(
             """
             insert into runningtracker.run_metrics
-                (run_id, algo_version, computed_at, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery)
-            values (%s, %s, now(), %s, %s, %s, %s, %s, %s, %s)
+                (run_id, algo_version, computed_at, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery, cadence)
+            values (%s, %s, now(), %s, %s, %s, %s, %s, %s, %s, %s)
             on conflict (run_id) do update set
                 algo_version = excluded.algo_version, computed_at = excluded.computed_at,
                 server_distance_m = excluded.server_distance_m, avg_hr = excluded.avg_hr, max_hr = excluded.max_hr,
                 splits = excluded.splits, pace_series = excluded.pace_series, hr_series = excluded.hr_series,
-                recovery = excluded.recovery
+                recovery = excluded.recovery, cadence = excluded.cadence
             """,
             (run_id, ALGO_VERSION, m.server_distance_m, m.avg_hr, m.max_hr,
              Json(m.splits), Json(m.pace_series), Json(m.hr_series),
-             Json(m.recovery) if m.recovery is not None else None),
+             Json(m.recovery) if m.recovery is not None else None,
+             Json(m.cadence) if m.cadence is not None else None),
         )

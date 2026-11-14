@@ -28,8 +28,8 @@ def contiguous_prefix(present_seqs: list[int]) -> int:
 
 def _stored(conn, run_id: str) -> tuple[StreamCounts, StreamCounts, list[int]]:
     """(stored counts, high seq) per stream and the sorted union of stored seqs."""
-    counts = {"location": 0, "heart_rate": 0}
-    highs = {"location": 0, "heart_rate": 0}
+    counts = {"location": 0, "heart_rate": 0, "step": 0}
+    highs = {"location": 0, "heart_rate": 0, "step": 0}
     with conn.cursor() as cur:
         cur.execute(
             "select stream, count(*) as n, max(seq) as hi from runningtracker.run_samples where run_id = %s group by stream",
@@ -55,7 +55,7 @@ def verify_run(conn, run_id: str, expected_counts: StreamCounts, last_seq: int) 
     gaps = compute_gaps(seqs, last_seq)
     mismatch = [
         CountMismatch(stream=stream, expected=getattr(expected_counts, stream), stored=getattr(stored, stream))
-        for stream in ("location", "heart_rate")
+        for stream in ("location", "heart_rate", "step")
         if getattr(expected_counts, stream) != getattr(stored, stream)
     ]
     beyond = bool(seqs) and seqs[-1] > last_seq

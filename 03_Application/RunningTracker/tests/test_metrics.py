@@ -90,7 +90,7 @@ def test_metrics_recompute_is_stable(db_conn):
     assert first_metrics == second_metrics
     assert first_samples == second_samples  # raw samples are never touched
     assert len(first_samples) == 40
-    assert first_metrics["algo_version"] == 2 and first_metrics["server_distance_m"] > 0
+    assert first_metrics["algo_version"] == 3 and first_metrics["server_distance_m"] > 0
 
 
 def test_run_end_clips_locations_and_heart_rate_but_not_recovery_input():
@@ -123,3 +123,55 @@ def test_without_run_end_nothing_is_clipped_and_recovery_is_none():
     case = next(c for c in GOLDEN["cases"] if c["name"] == "route_with_pause")
     m = _run(case)
     assert m.recovery is None
+
+
+# ---- Sprint03: cadence in compute_metrics / recompute_and_store ----
+
+def _recompute(run_id):
+    from backend.database import get_db, init_pool
+    import backend.database as db_module
+    if db_module._pool is None:
+        init_pool()
+    with get_db() as conn:
+        recompute_and_store(conn, run_id)
+        conn.commit()
+
+
+def _metrics(db_conn, run_id):
+    with db_conn.cursor() as cur:
+        cur.execute("select * from runningtracker.run_metrics where run_id = %s", (run_id,))
+        return cur.fetchone()
+
+
+def test_step_rows_never_count_as_heart_rate_and_cadence_is_deterministic(db_conn):
+    from tests.conftest import RUN_CADENCE
+    _recompute(RUN_CADENCE)
+    first = _metrics(db_conn, RUN_CADENCE)
+    assert first["avg_hr"] == 150 and first["max_hr"] == 150
+    assert first["cadence"]["algo"] == 1 and abs(first["cadence"]["avg_spm"] - 170) <= 0.1
+    _recompute(RUN_CADENCE)
+    second = _metrics(db_conn, RUN_CADENCE)
+    assert second["cadence"] == first["cadence"] and second["hr_series"] == first["hr_series"]
+    with db_conn.cursor() as cur:
+        cur.execute("select count(*) as n from runningtracker.run_samples where run_id = %s and stream = 'step'", (RUN_CADENCE,))
+        assert cur.fetchone()["n"] == 850
+
+
+def test_run_without_steps_has_null_cadence_and_unchanged_values(db_conn):
+    before = _metrics(db_conn, RUN_COMPLETE)
+    _recompute(RUN_COMPLETE)
+    after = _metrics(db_conn, RUN_COMPLETE)
+    assert after["algo_version"] == 3 and after["cadence"] is None
+    assert after["avg_hr"] == pytest.approx(after["avg_hr"]) and after["server_distance_m"] > 0
+    assert before["cadence"] is None
+
+
+def test_compute_metrics_clips_steps_to_running_phase_and_pauses():
+    start = _ts("2026-01-16T08:00:00+00:00")
+    steps = [SampleRow(i, start + timedelta(milliseconds=353 * i), {}) for i in range(1, 425)]
+    pauses = [PauseRow(start + timedelta(seconds=60), start + timedelta(seconds=70))]
+    m = compute_metrics([], [], pauses, start, start + timedelta(seconds=120), start + timedelta(seconds=130), steps)
+    ts = [p["t"] for p in m.cadence["series"]]
+    assert ts and max(ts) <= 120 and not any(60 <= t < 70 for t in ts)
+    assert m.avg_hr is None and m.max_hr is None and m.hr_series == []
+    assert compute_metrics([], [], [], start, None, None, None).cadence is None

@@ -109,7 +109,7 @@ def test_begin_is_idempotent_and_returns_cursors(client, db_conn):
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "uploading" and body["run_id"] == NEW_RUN
-        assert body["high_seq"] == {"location": 0, "heart_rate": 0} and body["contiguous_seq"] == 0
+        assert body["high_seq"] == {"location": 0, "heart_rate": 0, "step": 0} and body["contiguous_seq"] == 0
     assert len(_row(db_conn, "select 1 from runningtracker.runs where id = %s", NEW_RUN)) == 1
 
     # a run owned by another non-revoked device answers 404
@@ -188,11 +188,11 @@ def test_resume_cursors_reflect_stored_data(client):
     r = begin(client, run_id=RUN_GAP)
     body = r.json()
     assert body["contiguous_seq"] == 4
-    assert body["high_seq"] == {"location": 19, "heart_rate": 20}
+    assert body["high_seq"] == {"location": 19, "heart_rate": 20, "step": 0}
     sent = put(client, RUN_GAP, [loc(21, 21), hr(22, 22)])
     assert sent.status_code == 200
     assert sent.json()["contiguous_seq"] == 4
-    assert sent.json()["high_seq"] == {"location": 21, "heart_rate": 22}
+    assert sent.json()["high_seq"] == {"location": 21, "heart_rate": 22, "step": 0}
     filled = put(client, RUN_GAP, [loc(5, 5), hr(6, 6), loc(7, 7), hr(8, 8)])
     assert filled.json()["contiguous_seq"] == 22
 
@@ -216,13 +216,13 @@ def test_finish_verifies_and_completes(client, db_conn):
     r = finish(client, NEW_RUN, body)
     assert r.status_code == 200
     out = r.json()
-    assert out["result"] == "complete" and out["verified_counts"] == {"location": 100, "heart_rate": 30}
+    assert out["result"] == "complete" and out["verified_counts"] == {"location": 100, "heart_rate": 30, "step": 0}
     assert out["missing_seq_ranges"] == [] and out["count_mismatch"] == []
     run = _row(db_conn, "select status, distance_m, elapsed_s from runningtracker.runs where id = %s", NEW_RUN)[0]
     assert run["status"] == "complete" and run["distance_m"] == 520.0
     assert _row(db_conn, "select count(*) as n from runningtracker.run_pauses where run_id = %s", NEW_RUN)[0]["n"] == 2
     metrics = _row(db_conn, "select algo_version, server_distance_m from runningtracker.run_metrics where run_id = %s", NEW_RUN)
-    assert len(metrics) == 1 and metrics[0]["algo_version"] == 2 and metrics[0]["server_distance_m"] > 0
+    assert len(metrics) == 1 and metrics[0]["algo_version"] == 3 and metrics[0]["server_distance_m"] > 0
 
     again = finish(client, NEW_RUN, body)
     assert again.status_code == 200 and again.json()["result"] == "complete"
@@ -351,7 +351,7 @@ def test_finish_with_run_end_stores_it_and_clips_running_statistics(client, db_c
     assert r.status_code == 200
     out = r.json()
     assert out["result"] == "complete"
-    assert out["verified_counts"] == {"location": 300, "heart_rate": 450}  # recovery-phase HR is stored and verified
+    assert out["verified_counts"] == {"location": 300, "heart_rate": 450, "step": 0}  # recovery-phase HR is stored and verified
     run = _row(db_conn, "select run_finished_at, status from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]
     assert run["status"] == "complete" and run["run_finished_at"] == UP_T0 + timedelta(seconds=300)
     m = _row(db_conn, "select avg_hr, max_hr, hr_series, splits, server_distance_m, pace_series, recovery "
@@ -413,7 +413,7 @@ def test_repeated_finish_of_a_complete_run_keeps_the_stored_run_end(client, db_c
     other = finish(client, RUN_RECOVERY, {**body, "run_finished_at": iso(start + timedelta(seconds=720))})
     for r in (first, other):
         assert r.status_code == 200 and r.json()["result"] == "complete"
-        assert r.json()["verified_counts"] == {"location": 600, "heart_rate": 880}
+        assert r.json()["verified_counts"] == {"location": 600, "heart_rate": 880, "step": 0}
     assert _row(db_conn, q_run, RUN_RECOVERY)[0] == run_before
     assert _row(db_conn, q_metrics, RUN_RECOVERY)[0] == metrics_before  # algo_version current: no recompute
 
@@ -436,7 +436,7 @@ def test_replay_recomputes_a_legacy_run_without_inventing_recovery(client, db_co
     r = finish(client, RUN_COMPLETE, body)
     assert r.status_code == 200 and r.json()["result"] == "complete"
     m = _row(db_conn, "select * from runningtracker.run_metrics where run_id = %s", RUN_COMPLETE)[0]
-    assert m["algo_version"] == 2 and m["recovery"] is None
+    assert m["algo_version"] == 3 and m["recovery"] is None
     assert abs(m["server_distance_m"] - legacy.server_distance_m) < 1e-6
     assert m["avg_hr"] == legacy.avg_hr and m["max_hr"] == legacy.max_hr
     assert m["splits"] == legacy.splits and m["pace_series"] == legacy.pace_series and m["hr_series"] == legacy.hr_series
@@ -450,3 +450,75 @@ def test_old_phone_body_is_accepted_and_unknown_keys_are_not(client, db_conn):
     assert _row(db_conn, "select status from runningtracker.runs where id = %s", RUN_RECOVERY_UPLOAD)[0]["status"] == "uploading"
     ok = finish(client, RUN_RECOVERY_UPLOAD, up_body())
     assert ok.status_code == 200 and ok.json()["result"] == "complete"
+
+
+# ---- Sprint03: step stream ----
+
+from tests.conftest import RUN_CADENCE_UPLOAD  # noqa: E402
+
+UP_START = datetime(2026, 1, 16, 8, 0, 0, tzinfo=timezone.utc)
+
+
+def step(seq, ms_after_start, start=UP_START):
+    return {"stream": "step", "seq": seq, "payload": {
+        "type": "step.sample", "captureId": RUN_CADENCE_UPLOAD, "sequence": seq,
+        "timestamp": iso(start + timedelta(milliseconds=ms_after_start)), "elapsedRealtimeNanos": None}}
+
+
+def cad_finish_body(step_n=424, pauses=True):
+    body = {"finished_at": iso(UP_START + timedelta(seconds=130)), "run_finished_at": iso(UP_START + timedelta(seconds=120)),
+            "elapsed_s": 130.0, "moving_s": 110.0, "distance_m": 480.0, "last_seq": 574,
+            "expected_counts": {"location": 150, "heart_rate": 0, "step": step_n},
+            "pauses": [{"started_at": iso(UP_START + timedelta(seconds=60)), "ended_at": iso(UP_START + timedelta(seconds=70)),
+                        "started_elapsed_s": 60.0, "ended_elapsed_s": 70.0}] if pauses else []}
+    return body
+
+
+def test_step_samples_are_accepted_and_counted_idempotently(client, db_conn):
+    samples = [step(1000 + i, 500 * i) for i in range(1, 4)]
+    first = put(client, RUN_CADENCE_UPLOAD, samples)
+    assert first.status_code == 200 and first.json()["stored"] == 3 and first.json()["high_seq"]["step"] == 1003
+    again = put(client, RUN_CADENCE_UPLOAD, samples)
+    assert again.json()["stored"] == 0 and again.json()["duplicates"] == 3
+    assert _row(db_conn, "select count(*) as n from runningtracker.run_samples where run_id = %s and stream = 'step'",
+                RUN_CADENCE_UPLOAD)[0]["n"] == 427
+
+
+def test_step_sample_without_valid_timestamp_is_rejected(client, db_conn):
+    bad = step(1000, 0)
+    del bad["payload"]["timestamp"]
+    r = put(client, RUN_CADENCE_UPLOAD, [bad])
+    assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert _row(db_conn, "select count(*) as n from runningtracker.run_samples where run_id = %s and stream = 'step'",
+                RUN_CADENCE_UPLOAD)[0]["n"] == 424
+
+
+def test_finish_verifies_the_step_stream(client, db_conn):
+    wrong = finish(client, RUN_CADENCE_UPLOAD, cad_finish_body(step_n=423))
+    out = wrong.json()
+    assert wrong.status_code == 200 and out["result"] == "incomplete"
+    assert out["count_mismatch"] == [{"stream": "step", "expected": 423, "stored": 424}]
+    assert _row(db_conn, "select status from runningtracker.runs where id = %s", RUN_CADENCE_UPLOAD)[0]["status"] == "uploading"
+    ok = finish(client, RUN_CADENCE_UPLOAD, cad_finish_body())
+    assert ok.json()["result"] == "complete" and ok.json()["verified_counts"] == {"location": 150, "heart_rate": 0, "step": 424}
+
+
+def test_finish_stores_cadence_of_the_running_phase_only(client, db_conn):
+    assert finish(client, RUN_CADENCE_UPLOAD, cad_finish_body()).json()["result"] == "complete"
+    m = _row(db_conn, "select cadence, avg_hr from runningtracker.run_metrics where run_id = %s", RUN_CADENCE_UPLOAD)[0]
+    ts = [p["t"] for p in m["cadence"]["series"]]
+    assert ts and max(ts) <= 120 and not any(60 <= t < 70 for t in ts) and m["avg_hr"] is None
+    assert _row(db_conn, "select count(*) as n from runningtracker.run_samples where run_id = %s and stream = 'step'",
+                RUN_CADENCE_UPLOAD)[0]["n"] == 424
+
+
+def test_old_finish_body_without_step_count_still_works(client):
+    body = finish_body(last_seq=4, loc_n=0, hr_n=0)
+    begin(client)
+    assert put(client, NEW_RUN, [loc(1, 1), loc(2, 2), hr(3, 3), hr(4, 4)]).status_code == 200
+    body = finish_body(4, 2, 2)
+    assert "step" not in body["expected_counts"]
+    r = finish(client, NEW_RUN, body)
+    assert r.json()["result"] == "complete" and r.json()["verified_counts"]["step"] == 0
+    body["bogus"] = 1
+    assert finish(client, NEW_RUN, body).status_code == 422

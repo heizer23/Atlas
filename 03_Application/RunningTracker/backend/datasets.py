@@ -20,6 +20,7 @@ RUN_SCHEMA = [
     _col("avg_pace_s_per_km", "Avg pace (s/km)", "number"),
     _col("avg_hr", "Avg HR", "number"),
     _col("max_hr", "Max HR", "number"),
+    _col("avg_cadence_spm", "Avg cadence (spm)", "number"),
     _col("sync_state", "Sync", "enum"),
     _col("status", "Status", "enum"),
     _col("run_type", "Type", "enum"),
@@ -101,7 +102,7 @@ def run_row(r: dict) -> dict:
         "started_at": r["started_at"], "finished_at": r["finished_at"],
         "elapsed_s": r["elapsed_s"], "moving_s": moving, "distance_m": distance,
         "avg_pace_s_per_km": pace,
-        "avg_hr": r.get("avg_hr"), "max_hr": r.get("max_hr"),
+        "avg_hr": r.get("avg_hr"), "max_hr": r.get("max_hr"), "avg_cadence_spm": r.get("avg_cadence_spm"),
         "category": r.get("category"), "route_id": str(r["route_id"]) if r.get("route_id") else None,
         "route_name": r.get("route_name"), "comment": r["comment"], "device_name": r.get("device_name"),
         "location_count": r.get("location_count") or 0, "hr_count": r.get("hr_count") or 0,
@@ -125,7 +126,7 @@ def _label(t_s: float) -> str:
 def series_dataset(metric: str, points: list[list[float]]) -> Dataset:
     rows = [{"id": str(i), "t_s": p[0], "t_label": _label(p[0]), "value": p[1]}
             for i, p in enumerate(sorted(points, key=lambda p: p[0]))]
-    label = {"pace": "Pace", "heart_rate": "Heart rate", "recovery_hr": "Recovery heart rate"}[metric]
+    label = {"pace": "Pace", "heart_rate": "Heart rate", "recovery_hr": "Recovery heart rate", "cadence": "Cadence"}[metric]
     return _dataset("run_series", label, SERIES_SCHEMA, rows)
 
 

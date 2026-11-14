@@ -23,6 +23,7 @@ export default function RunDetailPage() {
   const [hr, setHr] = useState<Dataset | null>(null);
   const [recovery, setRecovery] = useState<RecoveryRow | null>(null);
   const [recoveryHr, setRecoveryHr] = useState<Dataset | null>(null);
+  const [cadence, setCadence] = useState<Dataset | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [comment, setComment] = useState('');
   const [category, setCategory] = useState('');
@@ -31,15 +32,16 @@ export default function RunDetailPage() {
   const [newRoute, setNewRoute] = useState('');
 
   const load = useCallback(async () => {
-    const [r, s, p, h, rc, rh] = await Promise.all([
+    const [r, s, p, h, rc, rh, cd] = await Promise.all([
       apiFetch<Dataset>(`/runningtracker/runs/${id}`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/splits`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=pace`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=heart_rate`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/recovery`),
       apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=recovery_hr`),
+      apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=cadence`),
     ]);
-    for (const res of [r, s, p, h, rc, rh]) if (isApiError(res)) { setError(res); return; }
+    for (const res of [r, s, p, h, rc, rh, cd]) if (isApiError(res)) { setError(res); return; }
     const rt = await apiFetch<Dataset>('/runningtracker/routes');
     if (!isApiError(rt)) setRoutes(rt.rows as unknown as RouteRow[]);
     const row = (r as Dataset).rows[0] as unknown as RunRow;
@@ -51,6 +53,7 @@ export default function RunDetailPage() {
     setHr(h as Dataset);
     setRecovery(((rc as Dataset).rows[0] as unknown as RecoveryRow | undefined) ?? null);  // no row = no recovery phase
     setRecoveryHr(rh as Dataset);
+    setCadence(cd as Dataset);
   }, [id]);
   useEffect(() => { load(); }, [load]);
 
@@ -97,6 +100,7 @@ export default function RunDetailPage() {
 
   const hasPace = (pace?.rows.length ?? 0) > 0;
   const hasHr = (hr?.rows.length ?? 0) > 0;
+  const hasCadence = (cadence?.rows.length ?? 0) > 0;
 
   return (
     <div className="running-page">
@@ -114,6 +118,7 @@ export default function RunDetailPage() {
           <span><span className="running-muted">Avg pace</span><div className="running-stat-value">{fmtPace(run.avg_pace_s_per_km)}</div></span>
           <span><span className="running-muted">Avg HR</span><div className="running-stat-value">{fmtHr(run.avg_hr)}</div></span>
           <span><span className="running-muted">Max HR</span><div className="running-stat-value">{fmtHr(run.max_hr)}</div></span>
+          <span><span className="running-muted">Avg cadence</span><div className="running-stat-value" data-testid="avg-cadence">{run.avg_cadence_spm == null ? DASH : `${Math.round(run.avg_cadence_spm)} spm`}</div></span>
         </div>
         <span className="running-muted">Device {run.device_name ?? DASH} · {run.location_count} GPS and {run.hr_count} HR samples</span>
       </div>
@@ -131,6 +136,12 @@ export default function RunDetailPage() {
         {hasHr
           ? <LineChart dataset={hr} mapping={{ x: 't_label', y: 'value', aggregation: 'avg' }} options={{ title: 'Heart rate over time (bpm)' }} />
           : <span className="running-muted">No heart-rate data.</span>}
+      </div>
+
+      <div className="running-card" data-testid="cadence-chart">
+        {hasCadence
+          ? <LineChart dataset={cadence} mapping={{ x: 't_label', y: 'value', aggregation: 'avg' }} options={{ title: 'Cadence over time (steps/min)' }} />
+          : <span className="running-muted">No cadence recorded.</span>}
       </div>
 
       {recovery && (

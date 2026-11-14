@@ -32,6 +32,7 @@ import net.linspad.atlasphone.mobile.permissions.Capability
 class RecordingService : Service() {
     companion object {
         const val ACTION_STOP = "net.linspad.atlasphone.mobile.STOP"
+        const val ACTION_QUICK = "net.linspad.atlasphone.mobile.QUICK"
         private const val CHANNEL_ID = "mobile_recording"
         private const val NOTIFICATION_ID = 4711
         private const val WAKE_LOCK_MAX_MS = 4 * 60 * 60 * 1000L
@@ -50,6 +51,10 @@ class RecordingService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_QUICK) {
+            platform.quickAction.invoke()   // the owner's handler (e.g. metronome mode cycle); no foreground re-entry
+            return START_NOT_STICKY
+        }
         createChannel()
         if (!enterForeground()) { stopSelf(); return START_NOT_STICKY }
         acquireWakeLock()
@@ -59,11 +64,12 @@ class RecordingService : Service() {
 
     private suspend fun watch() {
         var idleSince: Long? = null
-        combine(platform.location.state, platform.heartRate.state, platform.heartRate.latest, platform.recorder.active, platform.active) { loc, hr, last, cap, active ->
-            Status(active, "GPS ${loc.name.lowercase()} · HR ${last?.bpm?.let { "$it bpm" } ?: hr.name.lowercase()}" +
-                (cap?.let { " · capture ${it.locationCount + it.heartRateCount} samples" } ?: ""))
-        }.collect { status ->
-            notify(status.text)
+        val base = combine(platform.location.state, platform.heartRate.state, platform.heartRate.latest, platform.recorder.active, platform.active) { loc, hr, last, cap, active ->
+            Status(active, null, "GPS ${loc.name.lowercase()} · HR ${last?.bpm?.let { "$it bpm" } ?: hr.name.lowercase()}" +
+                (cap?.let { " · capture ${it.locationCount + it.heartRateCount + it.stepCount} samples" } ?: ""))
+        }
+        combine(base, platform.quickAction.label) { st, quick -> st.copy(quickLabel = quick) }.collect { status ->
+            notify(status.text, status.quickLabel)
             if (status.active) idleSince = null
             else {
                 val since = idleSince ?: System.currentTimeMillis().also { idleSince = it }
@@ -73,7 +79,7 @@ class RecordingService : Service() {
         }
     }
 
-    private data class Status(val active: Boolean, val text: String)
+    private data class Status(val active: Boolean, val quickLabel: String?, val text: String)
 
     private fun isActive(): Boolean {
         val loc = platform.location.isTracking()
@@ -89,7 +95,7 @@ class RecordingService : Service() {
             if (types == 0) { platform.log("Foreground service not started: no location/Bluetooth permission"); return false }
         }
         return try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification("starting…"), types)
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification("starting…", platform.quickAction.label.value), types)
             true
         } catch (e: Exception) {
             platform.log("Foreground service refused: ${e.message}")
@@ -97,10 +103,13 @@ class RecordingService : Service() {
         }
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(text: String, quickLabel: String?): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MobileTestActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(
             this, 1, Intent(this, RecordingService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
+        )
+        val quick = PendingIntent.getService(
+            this, 2, Intent(this, RecordingService::class.java).setAction(ACTION_QUICK), PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -110,11 +119,12 @@ class RecordingService : Service() {
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
             .addAction(0, "Stop", stop)
+            .apply { if (quickLabel != null) addAction(0, quickLabel, quick) }
             .build()
     }
 
-    private fun notify(text: String) {
-        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, buildNotification(text))
+    private fun notify(text: String, quickLabel: String?) {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, buildNotification(text, quickLabel))
     }
 
     private fun createChannel() {

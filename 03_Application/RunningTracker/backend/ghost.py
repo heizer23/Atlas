@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Optional
 
 from backend.config import (
-    ACCURACY_MAX_M, IDLE_START_MIN_S, IDLE_START_MOVE_M, IDLE_START_SEARCH_S, MAX_SPEED_MPS, PROFILE_HR_MAX_AGE_S, PROFILE_MIN_SPACING_S, PROGRESS_BACK_TOLERANCE_M,
+    ACCURACY_MAX_M, IDLE_START_MIN_S, IDLE_START_MOVE_M, IDLE_START_SEARCH_S, MAX_SPEED_MPS, CAD_PROFILE_MAX_AGE_S, CAD_PROGRESS_BUCKET_M, PROFILE_HR_MAX_AGE_S, PROFILE_MIN_SPACING_S, PROGRESS_BACK_TOLERANCE_M,
     PROGRESS_FORWARD_SLACK_M, PROGRESS_MIN_COVERAGE, PROGRESS_OFF_COURSE_M, PROGRESS_START_WINDOW_M,
 )
 
@@ -72,6 +72,7 @@ class ProgressResult:
     off_course: int
     qualified: bool
     reason: Optional[str]
+    cadence_by_progress: Optional[list[list[float]]] = None   # [[bucket_start_m, spm], ...] (GB1), None = no cadence
 
 
 def trim_idle_start(profile: list[list[Optional[float]]]) -> list[list[Optional[float]]]:
@@ -97,6 +98,7 @@ def build_progress(
     heart_rates: list[tuple[datetime, float]],                           # (ts, bpm)
     pauses: list[tuple[datetime, datetime]],
     started_at: datetime,
+    cadence: Optional[list[tuple[datetime, float]]] = None,   # (ts, spm) series points, already filtered by confidence
 ) -> ProgressResult:
     """Match a run onto the route with movement continuity and emit the progress-vs-moving-time profile."""
     proj = RouteProjector(geometry)
@@ -144,6 +146,23 @@ def build_progress(
             continue
         profile.append([round(t, 2), round(s, 2), hr_near(t)])
 
+    # GB1: cadence along the route from the PRE-trim profile (trimming does not change progress).
+    cadence_by_progress = None
+    if cadence:
+        cad = sorted((moving_of(ts), spm) for ts, spm in cadence if not in_pause(ts))
+        cad_t = [t for t, _ in cad]
+        buckets: dict[int, list[float]] = {}
+        for t, s, _ in profile:
+            if not cad:
+                break
+            i = bisect_left(cad_t, t)
+            cands = [cad[j] for j in (i - 1, i) if 0 <= j < len(cad)]
+            t_c, spm = min(cands, key=lambda c: abs(c[0] - t))
+            if abs(t_c - t) <= CAD_PROFILE_MAX_AGE_S:
+                buckets.setdefault(int(s // CAD_PROGRESS_BUCKET_M), []).append(spm)
+        if buckets:
+            cadence_by_progress = [[b * CAD_PROGRESS_BUCKET_M, round(sum(v) / len(v), 1)] for b, v in sorted(buckets.items())]
+
     profile = trim_idle_start(profile)
     end = profile[-1][1] if profile else 0.0
     coverage = end / proj.length if proj.length else 0.0
@@ -152,7 +171,7 @@ def build_progress(
         reason = "too_few_matched_fixes"
     elif coverage < PROGRESS_MIN_COVERAGE:
         reason = "route_not_completed"
-    return ProgressResult(profile, end, coverage, matched, off, reason is None, reason)
+    return ProgressResult(profile, end, coverage, matched, off, reason is None, reason, cadence_by_progress)
 
 
 # ---- live comparison (reference implementation of what the phone computes) ----

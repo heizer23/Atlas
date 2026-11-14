@@ -147,3 +147,15 @@ Checklist is the acceptance list in `00_draft.md`.
 - `CaptureStore` is database version 2 and adds `putRunMeta/getRunMeta/listRunMeta/deleteRunMeta` (table `run_meta`);
   `deleteCapture` also removes the run's metadata. Version-1 databases upgrade in place. **[tested: JVM]**
 - The 20-minute locked-screen hardware capture required by the RunningTracker sprint is still open; record it here when done.
+
+## Sprint03 additions (cadence, click, quick action)
+
+Status tags: `[tested: JVM]` pure logic and storage, `[built]` compiles, `[unverified]` needs a real run.
+
+- `platform.steps: StepDetector` - `samples: Flow<RawStep>`, `state` (STOPPED / LISTENING / NO_SENSOR / NO_PERMISSION), `start(): Boolean`, `stop()` (flush, then unregister). Android `TYPE_STEP_DETECTOR`, batching allowed (`STEP_MAX_REPORT_LATENCY_MS`); `RawStep.timestampMillis` is the sensor EVENT time converted to UTC (`StepDetector.toRaw`) `[tested: JVM]`. Sensor callbacks only `tryEmit` into a buffered flow (oldest dropped when full). Sensor, batching and screen-off delivery `[unverified]`.
+- `platform.click: ClickEngine` (implements `ClickOutput`) - streaming `AudioTrack` on its own thread, `BeatScheduler` for sample-accurate beats `[tested: JVM]`, `setTargetSpm` / `setVolume` are atomics, no audio focus is requested (mixes with other audio). Audio output, mixing, route changes `[unverified]`.
+- `platform.quickAction: QuickAction` - one app-supplied notification action (`set(label, handler)`); `RecordingService` renders it as a second action (`ACTION_QUICK`) `[built]`.
+- `Stream.STEP` (payload `step.sample`, HTTP stream name `step`, `Stream.apiName`); `SampleJson.step` `[tested: JVM]`.
+- `CaptureStore` SQLite version 3: `captures.step_count`; the sequence stays one counter shared by all streams `[tested: JVM]`. `CaptureInfo.stepCount`.
+- Permission `ACTIVITY_RECOGNITION` (`Capability.ACTIVITY_RECOGNITION`): required from Android 10, none before (counts as granted) `[tested: JVM]`.
+- `stopAll()` also stops steps and click and clears the quick action.

@@ -15,6 +15,7 @@ class _Strict(BaseModel):
 class StreamCounts(_Strict):
     location: int = Field(0, ge=0)
     heart_rate: int = Field(0, ge=0)
+    step: int = Field(0, ge=0)
 
 
 DeviceName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
@@ -67,7 +68,7 @@ class BeginResponse(BaseModel):
 
 
 class SampleIn(_Strict):
-    stream: Literal["location", "heart_rate"]
+    stream: Literal["location", "heart_rate", "step"]
     seq: int = Field(ge=1)
     payload: dict
 

@@ -1,6 +1,6 @@
--- RunningTracker Sprint02_RunFinishAndRecovery -- private application schema.
--- sprint_note: seeded from the runtime schema.sql (03_Application/RunningTracker/schema.sql, the clean snapshot; Sprint01's
--- 10_schema.sql is stale) and extended additively. Everything marked [NEW] is this sprint's change; the rest is unchanged.
+-- RunningTracker Sprint03_CadenceAndLiveRacing -- private application schema.
+-- sprint_note: seeded from the runtime schema.sql (03_Application/RunningTracker/schema.sql, the clean snapshot after Sprint02) and extended
+-- ADDITIVELY. Everything marked [NEW] / [CHANGED] is this sprint's change; the rest is unchanged and must stay byte-for-byte equal in the runtime copy.
 -- Runtime canonical path: 03_Application/RunningTracker/schema.sql (copy of this file; executed idempotently at startup).
 -- Private tables: not a cross-application contract. Other components must never query schema `runningtracker`.
 -- Time columns: run times (started_at, finished_at, run_finished_at, pause stamps, sample_ts) are phone-reported UTC (persisted domain time);
@@ -34,7 +34,7 @@ create table if not exists runningtracker.pairing_codes (
 create index if not exists ix_pairing_codes_expires_at
     on runningtracker.pairing_codes(expires_at);
 
--- Failed pair attempts (global, single-user system). Drives the lockout rule (see 10_architecture.json invariants).
+-- Failed pair attempts (global, single-user system). Drives the lockout rule (see Sprint01_RecordAndSync/10_architecture.json invariants).
 create table if not exists runningtracker.pairing_failures (
     id        bigserial   primary key,
     failed_at timestamptz not null default now()
@@ -80,6 +80,9 @@ create index if not exists ix_runs_started_at on runningtracker.runs(started_at 
 create index if not exists ix_runs_status     on runningtracker.runs(status);
 
 -- Raw samples exactly as recorded on the phone (nullable fields stay null). Never updated; duplicates are ignored.
+-- [CHANGED] Sprint03: the stream set grows by 'step' (see ck_run_samples_stream below). This inline constraint is the
+-- original Sprint01 one and is replaced idempotently further down; it is left unchanged here so that a fresh database and an
+-- existing database converge on the same final constraint.
 create table if not exists runningtracker.run_samples (
     run_id    uuid        not null references runningtracker.runs(id) on delete cascade,
     stream    text        not null check (stream in ('location', 'heart_rate')),
@@ -167,12 +170,12 @@ create index if not exists ix_run_route_progress_route on runningtracker.run_rou
 alter table runningtracker.runs add column if not exists ghost_run_id uuid
     references runningtracker.runs(id) on delete set null;
 
--- [NEW] Sprint02: end of the RUNNING phase (phone-reported UTC, persisted domain time). Everything between run_finished_at and
+-- Sprint02: end of the RUNNING phase (phone-reported UTC, persisted domain time). Everything between run_finished_at and
 -- finished_at is the recovery phase (HR only). NULL = legacy run or a run without recovery phase: the whole run is running.
 -- elapsed_s / moving_s / distance_m above keep their meaning and now describe the running phase only.
 alter table runningtracker.runs add column if not exists run_finished_at timestamptz;
 
--- [NEW] Sprint02: ordering rule started_at <= run_finished_at <= finished_at (finished_at may still be null on a row that never finished).
+-- Sprint02: ordering rule started_at <= run_finished_at <= finished_at (finished_at may still be null on a row that never finished).
 do $$
 begin
     if not exists (select 1 from pg_constraint where conname = 'ck_runs_run_finished_at') then
@@ -184,7 +187,32 @@ begin
     end if;
 end $$;
 
--- [NEW] Sprint02: derived recovery metrics, recomputable from run_samples + runs.run_finished_at + runs.finished_at.
--- SQL NULL (not JSON null) = no recovery phase. Object shape (declared once in 10_architecture.json exposed_surfaces, RecoveryRow/series):
+-- Sprint02: derived recovery metrics, recomputable from run_samples + runs.run_finished_at + runs.finished_at.
+-- SQL NULL (not JSON null) = no recovery phase. Object shape (declared once in Sprint02_RunFinishAndRecovery/10_architecture.json exposed_surfaces, RecoveryRow/series):
 -- {"hr_end": n|null, "hr_60": n|null, "hr_120": n|null, "hrr60": n|null, "hrr120": n|null, "curve": [[t_s_since_run_finished_at, bpm], ...]}
 alter table runningtracker.run_metrics add column if not exists recovery jsonb;
+
+-- [NEW] Sprint03: the raw step stream. One sample per detected step (payload.timestamp = sensor event time, phone UTC); raw rows are never
+-- modified. The previous inline constraint (run_samples_stream_check, 2 streams) is dropped and replaced by the named 3-stream one.
+-- Idempotent: the drop is a no-op once the inline constraint is gone, the add is guarded by pg_constraint. Adding the constraint scans
+-- run_samples once (existing rows are all location/heart_rate, so it always validates).
+do $$
+begin
+    alter table runningtracker.run_samples drop constraint if exists run_samples_stream_check;
+    if not exists (select 1 from pg_constraint where conname = 'ck_run_samples_stream') then
+        alter table runningtracker.run_samples
+            add constraint ck_run_samples_stream check (stream in ('location', 'heart_rate', 'step'));
+    end if;
+end $$;
+
+-- [NEW] Sprint03: derived cadence of the RUNNING phase, recomputable from the 'step' rows + run_pauses + runs.started_at/run_finished_at/finished_at
+-- (algorithm CAD1, versioned by cadence.algo and by run_metrics.algo_version). SQL NULL (not JSON null) = no step samples in the running
+-- phase (legacy run, permission denied, no sensor). Object shape (declared once in 10_architecture.json invariant CAD2):
+-- {"avg_spm": n|null, "series": [{"t": seconds_since_started_at, "spm": n, "conf": 0..1}, ...], "algo": integer}
+-- Gaps are absent points, never zero.
+alter table runningtracker.run_metrics add column if not exists cadence jsonb;
+
+-- [NEW] Sprint03: the ghost's cadence along the route, derived next to the profile when the run is matched onto its route.
+-- [[progress_m_bucket_start, spm], ...] ascending, 20 m buckets, empty buckets absent. SQL NULL = the run has no usable cadence
+-- (never derived from speed). Served as `cadence_by_progress` by GET /native/runs/{id}/ghost-profile. Declared once in 10_architecture.json invariant GB1.
+alter table runningtracker.run_route_progress add column if not exists cadence_by_progress jsonb;

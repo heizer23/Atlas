@@ -19,6 +19,8 @@ data class CaptureInfo(
     /** Samples refused because the unacknowledged limit was reached (data is never deleted to make room). */
     val dropped: Long,
     val lastSequence: Long,
+    /** Step samples (Sprint03); appended with a default so existing constructions stay valid. */
+    val stepCount: Long = 0,
 ) {
     val isOpen: Boolean get() = endedAtMillis == null
 }
@@ -45,7 +47,7 @@ class CaptureStore(
     context: Context,
     name: String? = "mobile_captures.db",
     private val maxUnackedPerCapture: Long = 100_000,
-) : SQLiteOpenHelper(context, name, null, 2) {
+) : SQLiteOpenHelper(context, name, null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -53,6 +55,7 @@ class CaptureStore(
                 id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, ended_at INTEGER,
                 next_seq INTEGER NOT NULL DEFAULT 1,
                 location_count INTEGER NOT NULL DEFAULT 0, hr_count INTEGER NOT NULL DEFAULT 0,
+                step_count INTEGER NOT NULL DEFAULT 0,
                 unacked INTEGER NOT NULL DEFAULT 0, dropped INTEGER NOT NULL DEFAULT 0)""",
         )
         db.execSQL(
@@ -64,9 +67,10 @@ class CaptureStore(
         createRunMeta(db)
     }
 
-    /** v1 -> v2 adds run_meta only; captures and samples are untouched (existing captures stay valid). */
+    /** v1 -> v2 adds run_meta; v2 -> v3 adds captures.step_count. Captures and samples are untouched (existing captures stay valid). */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createRunMeta(db)
+        if (oldVersion < 3) db.execSQL("ALTER TABLE captures ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0")
     }
 
     private fun createRunMeta(db: SQLiteDatabase) {
@@ -94,12 +98,12 @@ class CaptureStore(
     }
 
     fun info(id: String): CaptureInfo? = readableDatabase.rawQuery(
-        "SELECT id, started_at, ended_at, location_count, hr_count, unacked, dropped, next_seq FROM captures WHERE id = ?",
+        "SELECT id, started_at, ended_at, location_count, hr_count, unacked, dropped, next_seq, step_count FROM captures WHERE id = ?",
         arrayOf(id),
     ).use { if (it.moveToFirst()) it.toInfo() else null }
 
     fun list(): List<CaptureInfo> = readableDatabase.rawQuery(
-        "SELECT id, started_at, ended_at, location_count, hr_count, unacked, dropped, next_seq FROM captures ORDER BY started_at DESC",
+        "SELECT id, started_at, ended_at, location_count, hr_count, unacked, dropped, next_seq, step_count FROM captures ORDER BY started_at DESC",
         null,
     ).use { c -> buildList { while (c.moveToNext()) add(c.toInfo()) } }
 
@@ -125,7 +129,11 @@ class CaptureStore(
                 put("ts", timestampMillis); put("payload", payload(seq))
             }
             db.insertOrThrow("samples", null, cv)
-            val counter = if (stream == Stream.LOCATION) "location_count" else "hr_count"
+            val counter = when (stream) {
+                Stream.LOCATION -> "location_count"
+                Stream.HEART_RATE -> "hr_count"
+                Stream.STEP -> "step_count"
+            }
             db.execSQL(
                 "UPDATE captures SET next_seq = next_seq + 1, unacked = unacked + 1, $counter = $counter + 1 WHERE id = ?",
                 arrayOf(captureId),
@@ -232,6 +240,6 @@ class CaptureStore(
     private fun android.database.Cursor.toInfo() = CaptureInfo(
         id = getString(0), startedAtMillis = getLong(1), endedAtMillis = if (isNull(2)) null else getLong(2),
         locationCount = getLong(3), heartRateCount = getLong(4), unacked = getLong(5), dropped = getLong(6),
-        lastSequence = getLong(7) - 1,
+        lastSequence = getLong(7) - 1, stepCount = getLong(8),
     )
 }
