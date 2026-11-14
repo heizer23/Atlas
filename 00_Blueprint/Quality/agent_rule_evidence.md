@@ -1190,3 +1190,37 @@ severity: minor
 recurrence_hint: "First observed."
 linked_immediate_artifact: 03_Application/RunningTracker/backend/routers/native.py
 ---
+
+---
+entry_id: EVD-2026-11-11-001
+date: 2026-11-11
+source_agent: sprint_implement
+run_type: implementer_note
+component: Speech
+sprint: Sprint01_SpeechMVP
+pattern_name: small_deviations_from_scaffold_and_test_spec
+short_description: Minor deviations from 10_scaffolding.json / 10_test_spec.md made to satisfy approved review notes or because the written spec was not literally realizable.
+evidence: "(1) 10_test_spec 'transcribed file equals original sample' is not realizable because assemble() remuxes with ffmpeg (design step 6); tests assert a valid webm of the expected duration instead. (2) Review note 3 resolved client-side: useRecorder auto-stops 3 s before max_duration_s; server check stays strict. (3) Review note 6: expected_chunks > max_chunks returns CHUNK_INDEX_INVALID (400); MISSING_CHUNKS lists at most 20 indices. (4) Review note 5: Transcriber.__init__ gained an optional transport argument (httpx.MockTransport seam). (5) useRecorder also returns canRetry (additive) for the Retry button. (6) nginx proxy_read_timeout set to 200s (> 120+60), review note 8. (7) Added tests for CHUNK_INDEX_INVALID, RECORDING_BUSY, SPEECH_NOT_CONFIGURED (unset key). (8) Multipart encoding verified live: repeated fields work, JSON-array string rejected. (9) Speech added to Makefile up/down lists and atlas-net connect list. (10) SPEECH_API_TOKEN not yet in secrets.env (human action); atlas-speech runs fail-closed until added."
+likely_root_cause: none
+candidate_response: none
+severity: minor
+recurrence_hint: "First observed."
+linked_immediate_artifact: 02_Platform/Speech/app/routers/speech.py
+---
+
+---
+entry_id: EVD-2026-11-13-001
+date: 2026-11-13
+source_agent: sprint_implement
+run_type: implementer_note
+component: RunningTracker
+sprint: Sprint02_RunFinishAndRecovery
+pattern_name: small_scaffold_deviations_for_testability_and_fixtures
+short_description: Minor deviations from 10_scaffolding.json / 10_test_spec.md made so the specified scenarios were realizable.
+evidence: "(1) fix-run-recovery heart-rate seq is contiguous (601..1480) so the repeated-finish scenario can verify V1; the 20 s HR gap is a time gap, not a seq gap. (2) Existing test_web_api history-list assertions (ids, total 4 -> 7, page 2) updated because the new fixture runs are part of the default history. (3) Smoothed series (HrSmoothing.series) gives a gap for an invalid sample in every mode, as the test spec requires, in addition to 'null where the window has no valid sample' (valueAt). (4) RecoveryTracker.addHeartRate ignores out-of-order/duplicate timestamps so a reading present in both the capture seed and the live collector is not counted twice. (5) RunMeta.recovery is null when no HR was recorded in the recovery phase (instead of an all-null summary). (6) Shell frontend deployed with vite build + docker cp (as the Stop hook does), not a full image rebuild: no shell wiring file (nginx.conf, Dockerfile, main.tsx, vite.config.ts) is part of this sprint and nginx.conf already carries unrelated uncommitted edits. (7) RecoveryGolden test helper lives in RecoveryMetricsTest.kt and is shared by HrSmoothingTest."
+likely_root_cause: none
+candidate_response: none
+severity: minor
+recurrence_hint: "Also seen in EVD (RunningTracker Sprint01 small_scaffold_deviations_for_testability_and_review_notes)."
+linked_immediate_artifact: 03_Application/RunningTracker/Sprint02_RunFinishAndRecovery/10_test_spec.md
+---

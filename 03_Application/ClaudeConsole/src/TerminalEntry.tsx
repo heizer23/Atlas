@@ -148,7 +148,37 @@ function TerminalView({ session, onExit }: { session: string; onExit: () => void
     ro.observe(hostRef.current!);
     ws.addEventListener('open', pushSize);
 
-    return () => { ro.disconnect(); dataSub.dispose(); ws.close(); term.dispose(); };
+    // Touch drag -> mouse-wheel events for tmux (xterm.js has no touch scrolling; the page would scroll instead).
+    // Finger down = scroll back (wheel up, button 64); finger up = wheel down (65). tmux enters copy-mode or forwards to the app.
+    const host = hostRef.current!;
+    let lastY: number | null = null;
+    let acc = 0;
+    const LINE_PX = 16;
+    const onTouchStart = (e: TouchEvent) => { lastY = e.touches.length === 1 ? e.touches[0].clientY : null; acc = 0; };
+    const onTouchMove = (e: TouchEvent) => {
+      if (lastY === null || e.touches.length !== 1) return;
+      e.preventDefault();
+      const y = e.touches[0].clientY;
+      acc += y - lastY;
+      lastY = y;
+      const steps = Math.trunc(Math.abs(acc) / LINE_PX);
+      if (steps) {
+        const btn = acc > 0 ? 64 : 65;
+        send(`\x1b[<${btn};1;1M`.repeat(steps));
+        acc -= Math.sign(acc) * steps * LINE_PX;
+      }
+    };
+    const onTouchEnd = () => { lastY = null; };
+    host.addEventListener('touchstart', onTouchStart, { passive: true });
+    host.addEventListener('touchmove', onTouchMove, { passive: false });
+    host.addEventListener('touchend', onTouchEnd);
+
+    return () => {
+      host.removeEventListener('touchstart', onTouchStart);
+      host.removeEventListener('touchmove', onTouchMove);
+      host.removeEventListener('touchend', onTouchEnd);
+      ro.disconnect(); dataSub.dispose(); ws.close(); term.dispose();
+    };
   }, [session, attempt, send]);
 
   // Keep the key-bar taps from stealing focus (and hiding the soft keyboard).
@@ -163,8 +193,9 @@ function TerminalView({ session, onExit }: { session: string; onExit: () => void
         <span style={{ fontSize: 12 }}>{status}</span>
         {status === 'closed' && <button onClick={() => { setStatus('connecting'); setAttempt(a => a + 1); }} style={keyBtn()}>Reconnect</button>}
       </div>
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#111', padding: 4 }} />
-      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: 6, background: '#1a1a1a' }}>
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, background: '#111', padding: 4, touchAction: 'none', overscrollBehavior: 'contain' }} />
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 6, background: '#1a1a1a' }}>
+       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', flex: 1, minWidth: 0 }}>
         <button
           style={keyBtn(ctrl)} onPointerDown={keep} onMouseDown={keep}
           onClick={() => { setCtrlState(!ctrlRef.current); termRef.current?.focus(); }}
@@ -175,6 +206,7 @@ function TerminalView({ session, onExit }: { session: string; onExit: () => void
             onClick={() => { send(k.seq); termRef.current?.focus(); }}
           >{k.label}</button>
         ))}
+       </div>
         <RecorderButton onTranscript={t => send(t)} vocabulary={SPEECH_VOCABULARY} />
       </div>
     </div>
