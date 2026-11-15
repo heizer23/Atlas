@@ -172,6 +172,17 @@ def test_recovery_dataset_is_empty_for_legacy_and_uploading_runs_and_404_for_unk
     assert client.get(f"{W}/runs/not-a-uuid/recovery").status_code == 404
 
 
+def test_recovery_trend_lists_only_runs_with_recovery(client):
+    r = client.get(f"{W}/runs/recovery-trend")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["meta"]["object_type"] == "run_recovery_trend"
+    assert [row["id"] for row in body["rows"]] == [RUN_RECOVERY]
+    row = body["rows"][0]
+    assert (row["hr_end"], row["hrr60"], row["hrr120"]) == (150, 12, 24)
+    assert len(row["when"]) == 16 and row["when"].startswith("2026-01-12")
+
+
 def test_run_without_heart_rate_has_a_null_recovery_row_and_an_empty_series(client):
     row = _rows(client.get(f"{W}/runs/{RUN_RECOVERY_NOHR}/recovery"))[0]
     assert row["recovery_s"] == 180

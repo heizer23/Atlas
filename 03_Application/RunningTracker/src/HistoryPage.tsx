@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import Skeleton from '@platform-ui/components/Skeleton';
+import LineChart from '@platform-ui/components/LineChart';
 import type { ApiError, Dataset } from '@platform-ui/api/types';
 import { fmtDateTime, fmtDistance, fmtDuration, fmtHr, fmtPace, syncLabel } from './format';
 
@@ -20,6 +21,11 @@ export default function HistoryPage() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Dataset | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  const [trend, setTrend] = useState<Dataset | null>(null);
+
+  useEffect(() => {
+    apiFetch<Dataset>('/runningtracker/runs/recovery-trend').then((res) => { if (!isApiError(res)) setTrend(res); });
+  }, []);
 
   useEffect(() => {
     setData(null);
@@ -41,6 +47,14 @@ export default function HistoryPage() {
         <div className="running-card" data-testid="empty-history">
           <strong>No runs yet</strong>
           <span className="running-muted">Record a run with AtlasPhone; it appears here once it has synced.</span>
+        </div>
+      )}
+      {trend && trend.rows.length > 0 && (
+        <div className="running-card" data-testid="recovery-trend">
+          <strong>Heart-rate recovery over time</strong>
+          <span className="running-muted">Beats dropped 60 s / 120 s after the run ends; higher = faster recovery. Compare runs with the same cool-down posture and similar effort.</span>
+          <LineChart dataset={trend} mapping={{ x: 'when', y: 'hrr60', aggregation: 'avg' }} options={{ title: 'HRR60 (bpm)' }} />
+          <LineChart dataset={trend} mapping={{ x: 'when', y: 'hrr120', aggregation: 'avg' }} options={{ title: 'HRR120 (bpm)' }} />
         </div>
       )}
       {rows.map((r) => (

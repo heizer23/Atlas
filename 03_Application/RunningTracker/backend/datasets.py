@@ -154,6 +154,23 @@ def recovery_dataset(run_id: str, run_finished_at: Optional[datetime], finished_
     return _dataset("run_recovery", "Recovery", RECOVERY_SCHEMA, [row])
 
 
+RECOVERY_TREND_SCHEMA = [
+    _col("when", "Run", "string"),
+    _col("hr_end", "HR end", "number"),
+    _col("hrr60", "HRR60", "number"),
+    _col("hrr120", "HRR120", "number"),
+]
+
+
+def recovery_trend_dataset(rows: list[dict]) -> Dataset:
+    """One row per run that has recovery metrics, oldest first (input order); `when` is the unique, sortable x label."""
+    out = [{
+        "id": str(r["id"]), "when": r["started_at"].strftime("%Y-%m-%d %H:%M"),
+        **{k: (r["recovery"] or {}).get(k) for k in ("hr_end", "hrr60", "hrr120")},
+    } for r in rows]
+    return _dataset("run_recovery_trend", "Recovery trend", RECOVERY_TREND_SCHEMA, out)
+
+
 def _ghost_label(r: dict) -> Optional[str]:
     if not r.get("ghost_run_id"):
         return None

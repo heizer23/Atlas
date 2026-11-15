@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from backend.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from backend.database import get_db
 from backend.datasets import (
-    ds_response, empty_dataset, recovery_dataset, runs_dataset, series_dataset, splits_dataset,
+    ds_response, empty_dataset, recovery_dataset, recovery_trend_dataset, runs_dataset, series_dataset, splits_dataset,
 )
 from backend.models import RunPatch
 from backend.progress_store import recompute_progress
@@ -71,6 +71,20 @@ def list_runs(
                         params + [page_size, (page - 1) * page_size])
             rows = cur.fetchall()
     return ds_response(runs_dataset(rows, total, page, page_size))
+
+
+@router.get("/recovery-trend", response_model=None)
+def get_recovery_trend(limit: int = Query(60, ge=1, le=200)) -> JSONResponse:
+    """HRR60/HRR120 per run over time (latest `limit` runs with a recovery phase, oldest first)."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select * from (select r.id, r.started_at, m.recovery from runningtracker.runs r "
+                "join runningtracker.run_metrics m on m.run_id = r.id "
+                "where r.status = 'complete' and r.started_at is not null and m.recovery->>'hrr60' is not null "
+                "order by r.started_at desc limit %s) t order by started_at asc", (limit,))
+            rows = cur.fetchall()
+    return ds_response(recovery_trend_dataset(rows))
 
 
 @router.get("/{run_id}", response_model=None)
