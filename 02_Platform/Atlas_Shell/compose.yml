@@ -19,7 +19,7 @@ services:
       - /home/linse/Prod/Atlas:/repo:ro
     working_dir: /repo
     environment:
-      - BASE_URL=http://atlas-shell
+      - BASE_URL=http://atlas-shell-test  # test stack only: its backends are the -test twins
     networks:
       - atlas-net
 

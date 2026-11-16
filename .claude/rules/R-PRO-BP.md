@@ -342,7 +342,7 @@ Written by the implementer for `[UI]` scenarios. Not a sprint artifact (lives in
 
 - Lives at `<component_root>/tests/ui/`
 - Each file covers one or more `[UI]` scenarios from `10_test_spec.md`
-- Tests run against `http://atlas-shell` via the shared `atlas-playwright` container
+- Tests run against `http://atlas-shell-test` (never the production shell) via the shared `atlas-playwright` container
 - Playwright config: `02_Platform/Atlas_Shell/playwright.config.ts`
 - `[UI — manual]` scenarios have no `.spec.ts` file — absence is expected and not treated as `MISSING`
 

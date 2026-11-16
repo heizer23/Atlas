@@ -1,6 +1,11 @@
 import { defineConfig } from '@playwright/test';
 
-const BASE_URL = process.env.BASE_URL ?? 'http://atlas-shell';
+const BASE_URL = process.env.BASE_URL ?? 'http://atlas-shell-test';
+
+// UI tests mutate data. The ordinary shell proxies to production backends, so refuse it.
+if (/^https?:\/\/atlas-shell(:\d+)?\/?$/.test(BASE_URL)) {
+  throw new Error(`Refusing BASE_URL=${BASE_URL}: that is the production shell. Use atlas-shell-test.`);
+}
 
 export default defineConfig({
   // Scan from repo root so explicit test paths in other layers are found.

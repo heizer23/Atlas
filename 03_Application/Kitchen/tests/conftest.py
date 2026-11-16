@@ -31,6 +31,15 @@ os.environ.setdefault("ATLAS_SERVICE_TOKEN", "test-token")   # must match the St
 
 
 def _build_url() -> str:
+    """Refuse any destination other than atlas_test: fixtures TRUNCATE tables."""
+    url = _build_url_unchecked()
+    db = url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    if db != "atlas_test":
+        raise RuntimeError(f"SAFETY ABORT: test database is '{db}', not 'atlas_test'.")
+    return url
+
+
+def _build_url_unchecked() -> str:
     return "postgresql://{user}:{password}@{host}:{port}/{db}".format(
         user=os.environ.get("ATLAS_PG_USER", "atlas"), password=os.environ.get("ATLAS_PG_PASSWORD", ""),
         host=os.environ.get("ATLAS_PG_HOST", "127.0.0.1"), port=os.environ.get("ATLAS_PG_PORT", "5432"),

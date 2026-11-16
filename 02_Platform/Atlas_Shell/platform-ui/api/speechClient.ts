@@ -50,7 +50,7 @@ export function stopRecording(recordingId: string, payload: StopPayload, signal?
   });
 }
 
-// Best effort: the backend answers 204 (empty body), which apiFetch reports as an error; ignored on purpose.
+// Best effort: the backend answers 204 (empty body); the result is ignored on purpose.
 export async function cancelRecording(recordingId: string): Promise<void> {
   try {
     await apiFetch(`/speech/recordings/${recordingId}`, { method: "DELETE" });

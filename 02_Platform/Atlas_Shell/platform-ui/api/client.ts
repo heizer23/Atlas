@@ -33,7 +33,14 @@ export async function apiFetch<T>(
       headers: { "Content-Type": "application/json", ...options?.headers },
     });
     const text = await res.text();
-    if (!text) throw new Error(`HTTP ${res.status} — empty response (is the backend running?)`);
+    if (!text) {
+      // A successful empty body (204, bodyless 200) is a valid mutation response (R-CON-BP-04).
+      if (res.ok) {
+        pushLog({ request_id, url, method, status: res.status, duration: Date.now() - start, response: null });
+        return undefined as T;
+      }
+      throw new Error(`HTTP ${res.status} — empty response (is the backend running?)`);
+    }
     const data = JSON.parse(text);
     pushLog({ request_id, url, method, status: res.status, duration: Date.now() - start, response: data });
     return data as T | ApiError;

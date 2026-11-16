@@ -7,7 +7,7 @@ services:
       dockerfile: 02_Platform/Notifications/Dockerfile
     restart: unless-stopped
     ports:
-      - "0.0.0.0:8020:8000"  # Accessible on network for Android device via Tailscale
+      - "127.0.0.1:8020:8000"  # Loopback only. The phone registers via the shell (workout.linspad.net -> /api/devices); host callers use localhost
     environment:
       # Postgres — required. Either set DATABASE_URL or the individual ATLAS_PG_* vars.
       ATLAS_PG_DB:       ${ATLAS_PG_DB}

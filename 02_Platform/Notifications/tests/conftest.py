@@ -24,6 +24,15 @@ import pytest
 
 
 def _build_url() -> str:
+    """Refuse any destination other than atlas_test: fixtures TRUNCATE tables."""
+    url = _build_url_unchecked()
+    db = url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    if db != "atlas_test":
+        raise RuntimeError(f"SAFETY ABORT: test database is '{db}', not 'atlas_test'.")
+    return url
+
+
+def _build_url_unchecked() -> str:
     if url := os.environ.get("DATABASE_URL"):
         return url
     return (
