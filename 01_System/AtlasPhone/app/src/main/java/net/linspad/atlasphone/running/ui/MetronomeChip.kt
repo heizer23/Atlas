@@ -40,7 +40,7 @@ internal fun MetronomeChip(
     val ghostMode = state.mode == MetronomeMode.MATCH_GHOST || state.mode == MetronomeMode.ATTACK_102
     Column(Modifier.fillMaxWidth().background(ChipBg, RoundedCornerShape(10.dp)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onCycle, modifier = Modifier.height(36.dp)) { Text("Click: ${state.mode.label}", fontSize = 14.sp) }
+            OutlinedButton(onClick = onCycle, modifier = Modifier.height(36.dp)) { Text(if (state.mode == MetronomeMode.COACH) "Click: Coach" else "Click: ${state.mode.label}", fontSize = 14.sp) }
             Text(state.targetSpm?.let { "%.0f spm".format(it) } ?: DASH, color = Color.White, fontSize = 18.sp)
             Text("you " + (cadenceSpm?.let { "%.0f".format(it) } ?: DASH), color = Soft, fontSize = 14.sp)
         }

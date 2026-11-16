@@ -128,6 +128,8 @@ class FinishRequest(_Strict):
     # Route and ghost the phone raced against (chosen on the phone, no prepared run); unknown ids are ignored.
     route_id: Optional[str] = None
     ghost_run_id: Optional[str] = None
+    # Coach plan executed by this run (Sprint04); omitted by the phone when none; unknown/unusable ids are ignored.
+    coach_plan_id: Optional[str] = None
     # End of the running phase (phone UTC). Omitted/None = no recovery phase (legacy behaviour).
     run_finished_at: Optional[datetime] = None
 

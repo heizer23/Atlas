@@ -1,0 +1,1238 @@
+{
+ "_note": "Shared oracle for PLAN1: read by pytest (validate_plan/apply_overrides) and Kotlin CoachPlanTest. expect = reason code or ok (server); phone = ok|unsupported|invalid (Kotlin parseCoachPlan).",
+ "cases": [
+  {
+   "name": "valid_easy_continuous",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "expect": "ok",
+   "phone": "ok"
+  },
+  {
+   "name": "valid_hr_controlled",
+   "plan": {
+    "schema_version": 1,
+    "type": "hr_controlled",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 2400,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "ok",
+   "phone": "ok"
+  },
+  {
+   "name": "valid_interval_6x",
+   "plan": {
+    "schema_version": 1,
+    "type": "interval",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 240,
+       "slow_s_per_km": 270
+      },
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 90,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 240,
+       "slow_s_per_km": 270
+      },
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 90,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 240,
+       "slow_s_per_km": 270
+      },
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 90,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 240,
+       "slow_s_per_km": 270
+      },
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 90,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 240,
+       "slow_s_per_km": 270
+      },
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 90,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 240,
+       "slow_s_per_km": 270
+      },
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 90,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "ok",
+   "phone": "ok"
+  },
+  {
+   "name": "valid_recovery",
+   "plan": {
+    "schema_version": 1,
+    "type": "recovery",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 1200,
+      "hr": {
+       "min": 110,
+       "max": 130
+      },
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "ok",
+   "phone": "ok"
+  },
+  {
+   "name": "unknown_type",
+   "plan": {
+    "schema_version": 1,
+    "type": "tempo",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "expect": "plan_schema",
+   "phone": "ok"
+  },
+  {
+   "name": "hr_range_too_narrow",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 134
+      },
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_bounds",
+   "phone": "ok"
+  },
+  {
+   "name": "hr_outside_bounds",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 150,
+       "max": 210
+      },
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_bounds",
+   "phone": "ok"
+  },
+  {
+   "name": "pace_fast_not_below_slow",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": null,
+      "pace": {
+       "fast_s_per_km": 390,
+       "slow_s_per_km": 330
+      },
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_bounds",
+   "phone": "invalid"
+  },
+  {
+   "name": "extra_key",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ],
+    "surprise": 1
+   },
+   "expect": "plan_schema",
+   "phone": "ok"
+  },
+  {
+   "name": "schema_version_2",
+   "plan": {
+    "schema_version": 2,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "expect": "plan_schema",
+   "phone": "unsupported"
+  },
+  {
+   "name": "interval_without_recovery",
+   "plan": {
+    "schema_version": 1,
+    "type": "interval",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 120,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_type_segments",
+   "phone": "ok"
+  },
+  {
+   "name": "non_interval_with_work_segment",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 1500,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_type_segments",
+   "phone": "ok"
+  },
+  {
+   "name": "hr_controlled_without_hr",
+   "plan": {
+    "schema_version": 1,
+    "type": "hr_controlled",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_type_segments",
+   "phone": "ok"
+  },
+  {
+   "name": "more_than_40_segments",
+   "plan": {
+    "schema_version": 1,
+    "type": "interval",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "recovery",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "work",
+      "duration_s": 30,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_bounds",
+   "phone": "ok"
+  },
+  {
+   "name": "total_longer_than_3_hours",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 10900,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "expect": "plan_bounds",
+   "phone": "ok"
+  },
+  {
+   "name": "unknown_trigger",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "shout"
+    ]
+   },
+   "expect": "plan_schema",
+   "phone": "invalid"
+  },
+  {
+   "name": "duplicate_trigger",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "hr_high"
+    ]
+   },
+   "expect": "plan_schema",
+   "phone": "ok"
+  },
+  {
+   "name": "segments_missing",
+   "plan": {
+    "schema_version": 1,
+    "type": "recovery",
+    "title": "T"
+   },
+   "expect": "plan_schema",
+   "phone": "invalid"
+  },
+  {
+   "name": "not_an_object",
+   "plan": [
+    "x"
+   ],
+   "expect": "plan_schema",
+   "phone": "invalid"
+  }
+ ],
+ "overrides": [
+  {
+   "name": "set_cadence_clear_pace_keep_hr",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "overrides": {
+    "cadence": {
+     "min": 170,
+     "max": 180
+    },
+    "pace": null
+   },
+   "expect": "ok",
+   "steady": {
+    "hr": {
+     "min": 130,
+     "max": 145
+    },
+    "pace": null,
+    "cadence": {
+     "min": 170,
+     "max": 180
+    }
+   }
+  },
+  {
+   "name": "omitted_keeps_everything",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "overrides": {},
+   "expect": "ok",
+   "steady": {
+    "hr": {
+     "min": 130,
+     "max": 145
+    },
+    "pace": {
+     "fast_s_per_km": 330,
+     "slow_s_per_km": 390
+    },
+    "cadence": {
+     "min": 165,
+     "max": 175
+    }
+   }
+  },
+  {
+   "name": "hr_outside_bounds",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "overrides": {
+    "hr": {
+     "min": 150,
+     "max": 210
+    }
+   },
+   "expect": "plan_bounds"
+  },
+  {
+   "name": "clear_hr_on_hr_controlled",
+   "plan": {
+    "schema_version": 1,
+    "type": "hr_controlled",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "steady",
+      "duration_s": 2400,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": []
+   },
+   "overrides": {
+    "hr": null
+   },
+   "expect": "plan_type_segments"
+  },
+  {
+   "name": "unknown_override_key",
+   "plan": {
+    "schema_version": 1,
+    "type": "easy_continuous",
+    "title": "T",
+    "rationale": null,
+    "target_distance_m": null,
+    "segments": [
+     {
+      "kind": "warmup",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     },
+     {
+      "kind": "steady",
+      "duration_s": 1800,
+      "hr": {
+       "min": 130,
+       "max": 145
+      },
+      "pace": {
+       "fast_s_per_km": 330,
+       "slow_s_per_km": 390
+      },
+      "cadence": {
+       "min": 165,
+       "max": 175
+      }
+     },
+     {
+      "kind": "cooldown",
+      "duration_s": 300,
+      "hr": null,
+      "pace": null,
+      "cadence": null
+     }
+    ],
+    "triggers": [
+     "hr_high",
+     "segment_change"
+    ]
+   },
+   "overrides": {
+    "speed": 1
+   },
+   "expect": "plan_schema"
+  }
+ ]
+}

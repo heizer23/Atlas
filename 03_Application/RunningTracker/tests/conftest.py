@@ -83,7 +83,8 @@ def clean_tables(db_conn):
     with db_conn.cursor() as cur:
         cur.execute(
             "truncate runningtracker.run_route_progress, runningtracker.routes, runningtracker.runs, runningtracker.devices, runningtracker.pairing_codes, "
-            "runningtracker.pairing_failures cascade"
+            "runningtracker.pairing_failures, runningtracker.coach_plans, runningtracker.coach_analyses, "
+            "runningtracker.coach_ai_calls, runningtracker.coach_profile_items, runningtracker.coach_settings cascade"
         )
         with open(os.path.join(os.path.dirname(__file__), "fixtures.sql")) as f:
             cur.execute(f.read())
@@ -104,3 +105,66 @@ def client(app):
     from starlette.testclient import TestClient
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
+
+
+# ── Ghost Coach: fake provider (tests never perform a network call; the test container has no key) ─────────────────
+
+FAKE_KEY = "sk-test-KEY-0123456789"
+RUN_COACH_1 = "c2000000-0000-0000-0000-000000000001"   # newest coach fixture run (route + marker strings)
+RUN_COACH_2 = "c2000000-0000-0000-0000-000000000002"
+RUN_COACH_3 = "c2000000-0000-0000-0000-000000000003"
+RUN_COACH_4 = "c2000000-0000-0000-0000-000000000004"
+PLAN_RECOMMENDED = "c3000000-0000-0000-0000-000000000001"
+PLAN_ACCEPTED = "c3000000-0000-0000-0000-000000000002"
+PLAN_ACCEPTED_LINKED = "c3000000-0000-0000-0000-000000000003"
+PLAN_DISREGARDED = "c3000000-0000-0000-0000-000000000004"
+PLAN_INTERVAL = "c3000000-0000-0000-0000-000000000005"
+
+VALID_PLAN = {
+    "schema_version": 1, "type": "easy_continuous", "title": "Easy 30", "rationale": "Relaxed.", "target_distance_m": None,
+    "segments": [{"kind": "steady", "duration_s": 1800, "hr": {"min": 130, "max": 145}, "pace": None, "cadence": None}],
+    "triggers": [],
+}
+
+
+def ai_answer(**over) -> dict:
+    body = {"assessment": "Solid steady run.", "previous_recommendation_effect": None, "profile_updates": [],
+            "next_session": VALID_PLAN}
+    body.update(over)
+    return body
+
+
+class FakeProvider:
+    """httpx.MockTransport that records every request. `answer` is a dict (sent as the provider's text block),
+    a str (sent verbatim) or a callable(request) -> httpx.Response."""
+
+    def __init__(self):
+        import httpx
+        self.requests: list = []
+        self.answer = ai_answer()
+        self.transport = httpx.MockTransport(self._handle)
+
+    def _handle(self, request):
+        import json
+        import httpx
+        self.requests.append(request)
+        if callable(self.answer):
+            return self.answer(request)
+        text = self.answer if isinstance(self.answer, str) else json.dumps(self.answer)
+        return httpx.Response(200, json={"content": [{"type": "text", "text": text}]})
+
+    def user_content(self, i: int = 0) -> str:
+        import json
+        return json.loads(self.requests[i].content)["messages"][0]["content"]
+
+
+@pytest.fixture
+def provider(monkeypatch, client):
+    """Configured fake provider (key + model in the environment, transport seam installed)."""
+    from backend.routers import coach as coach_router
+    fake = FakeProvider()
+    monkeypatch.setenv("RUNNINGTRACKER_COACH_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("RUNNINGTRACKER_COACH_MODEL", "fake-model")
+    monkeypatch.delenv("RUNNINGTRACKER_COACH_API_URL", raising=False)
+    monkeypatch.setattr(coach_router, "_transport", fake.transport)
+    return fake

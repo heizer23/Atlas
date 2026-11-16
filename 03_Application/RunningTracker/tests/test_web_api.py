@@ -3,7 +3,7 @@
 import pytest
 
 from tests.conftest import (
-    PREPARED_EXPIRED, PREPARED_FRESH, RUN_CADENCE, RUN_CADENCE_EMPTY, RUN_CADENCE_UPLOAD, RUN_COMPLETE, RUN_GAP, RUN_RECOVERY, RUN_RECOVERY_NOHR, RUN_RECOVERY_UPLOAD,
+    PREPARED_EXPIRED, PREPARED_FRESH, RUN_CADENCE, RUN_CADENCE_EMPTY, RUN_CADENCE_UPLOAD, RUN_COACH_1, RUN_COACH_2, RUN_COACH_3, RUN_COACH_4, RUN_COMPLETE, RUN_GAP, RUN_RECOVERY, RUN_RECOVERY_NOHR, RUN_RECOVERY_UPLOAD,
     RUN_REVOKED_COMPLETE, RUN_REVOKED_UPLOADING,
 )
 
@@ -23,8 +23,8 @@ def test_history_list_is_a_dataset_with_defined_ordering_and_defaults(client):
     assert body["meta"]["object_type"] == "run" and body["meta"]["row_actions"] == ["delete"]
     ids = [row["id"] for row in body["rows"]]
     # default: uploading + complete, newest started_at first, prepared excluded
-    assert ids == [RUN_CADENCE_EMPTY, RUN_CADENCE_UPLOAD, RUN_CADENCE, RUN_RECOVERY_UPLOAD, RUN_RECOVERY_NOHR, RUN_RECOVERY, RUN_GAP, RUN_COMPLETE, RUN_REVOKED_UPLOADING, RUN_REVOKED_COMPLETE]
-    assert body["meta"]["total"] == 10
+    assert ids == [RUN_COACH_1, RUN_COACH_2, RUN_COACH_3, RUN_COACH_4, RUN_CADENCE_EMPTY, RUN_CADENCE_UPLOAD, RUN_CADENCE, RUN_RECOVERY_UPLOAD, RUN_RECOVERY_NOHR, RUN_RECOVERY, RUN_GAP, RUN_COMPLETE, RUN_REVOKED_UPLOADING, RUN_REVOKED_COMPLETE]
+    assert body["meta"]["total"] == 14
     by_id = {row["id"]: row for row in body["rows"]}
     assert by_id[RUN_GAP]["sync_state"] == "pending" and by_id[RUN_COMPLETE]["sync_state"] == "synced"
     complete = by_id[RUN_COMPLETE]
@@ -37,8 +37,8 @@ def test_history_list_is_a_dataset_with_defined_ordering_and_defaults(client):
     assert all(row["sync_state"] == "prepared" for row in prepared)
 
     page2 = client.get(f"{W}/runs", params={"page_size": 1, "page": 2}).json()
-    assert [row["id"] for row in page2["rows"]] == [RUN_CADENCE_UPLOAD]
-    assert page2["meta"]["total"] == 10 and page2["meta"]["page"] == 2 and page2["meta"]["page_size"] == 1
+    assert [row["id"] for row in page2["rows"]] == [RUN_COACH_2]
+    assert page2["meta"]["total"] == 14 and page2["meta"]["page"] == 2 and page2["meta"]["page_size"] == 1
 
     for bad in ({"page_size": 101}, {"status": "bogus"}, {"page": 0}):
         e = client.get(f"{W}/runs", params=bad)

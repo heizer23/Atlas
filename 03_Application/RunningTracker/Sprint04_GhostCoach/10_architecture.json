@@ -1,0 +1,452 @@
+{
+  "sprint_note": "Adds Ghost Coach V1: opt-in server-side post-run AI analysis (payload allow-list, validated output, no key on the phone), a measured/inferred athlete profile, versioned structured training plans with accept/modify/disregard and stored outcomes, and a deterministic offline coaching engine on the phone that speaks through the existing audio path and drives the metronome; delta-only artifact (Sprint01-03 convention, see open_questions CF5).",
+  "component_name": "runningtracker",
+  "layer": "03_Application",
+  "source_definition": "00_draft.md (section 0a 'V1 scope' is authoritative over section 1; section 0 conflicts are surfaced in open_questions CF1-CF4)",
+  "summary": "Turns completed runs into a personal coaching loop: the server analyses a run with an external AI only after explicit opt-in, keeps a measured/inferred athlete profile and a validated next-session plan the user accepts, and the phone coaches that session fully offline with a deterministic engine.",
+  "classification": {
+    "why_application": "Running-domain meaning only: what a sustainable next session is, which profile values are measured versus inferred, how a plan is validated and judged afterwards, and when to say 'reduce your pace'. Cross-layer exactly as Sprint01-03: server logic, schema and web live in 03_Application/RunningTracker; the live engine lives in 01_System/AtlasPhone package running.coach (domain meaning stays in running.*). Only one domain-free device capability is added to the Mobile Platform (SpeechOutput, text-to-speech).",
+    "non_goals": [
+      "Route intelligence and terrain-anticipating instructions (draft section 6)",
+      "Running economy experiments and the personal-record-attempt plan type (section 7)",
+      "Personalized challenges (section 9)",
+      "Athlete development overview screen, per-gradient profile, step-length targets in plans (section 0a deferred list)",
+      "Any AI call from the phone, any real-time AI inference, any AI call without a user click",
+      "Automatic plan acceptance, automatic scheduling or calendar/notification integration of plans",
+      "Changes to the race UI, ghost identity/league (roadmap Sprint 3) or standalone packaging (roadmap Sprint 4)",
+      "Medical claims, readiness scores, or physiological predictions"
+    ],
+    "not_platform": "Payload shaping, response validation, plan semantics, outcome judgement and coaching rules are meaningful only to running. The provider adapter is deliberately app-local and single-provider (one request shape, host allow-list); it is not a reusable AI gateway and must not be promoted to 02_Platform until a second consumer exists (deferred_decisions). SpeechOutput contains no running meaning (speak a string through the system TTS) and sits in the Mobile Platform next to ClickEngine. No change to 02_Platform, the Dataset contract, nginx or Blueprint."
+  },
+  "contracts": {
+    "consumes": [
+      "Everything declared by Sprint01_RecordAndSync, Sprint02_RunFinishAndRecovery and Sprint03_CadenceAndLiveRacing 10_architecture.json (Dataset/ApiError, device-token native auth, V1, A1 metrics, HR1/HRR1, CAD1/CAD2, ghost profile, Mobile Platform, MetronomeController); unchanged unless named below",
+      "02_Platform/packages/platform_contracts/contracts.py (Dataset, DatasetMeta, ColumnSchema) and platform_errorhandling (api_error envelope)",
+      "Existing server read models: runs, run_metrics (splits, pace_series, hr_series, recovery, cadence), run_pauses, runs.started_at/moving_s/distance_m",
+      "Existing phone live values: LiveMetrics (20 s race pace, active time), HR2 smoothed display heart rate, LiveRunState.cadenceSpm (CAD1 live), MetronomeController, RunSettings, RunMeta, GhostCache-style local caching",
+      "An external AI provider over HTTPS (Anthropic Messages-style request/response) reached only from the atlas-runningtracker container; API key from the compose environment (secrets.env)",
+      "Android TextToSpeech and AudioManager (no permission)"
+    ],
+    "provides": [
+      "No data leaves the system unless the user has enabled AI (default off), the consent on record is the current CONSENT version, and the user clicked 'Analyse run'; the exact document that would be sent can always be inspected first (analysis-preview) and the exact document that was sent is stored (EGR1, CO1, AUD1).",
+      "Every analysis yields a concise stored assessment; the athlete profile distinguishes measured (deterministic) from inferred (AI, with confidence); a recommended next session is a validated, versioned, machine-readable plan that never becomes active without the user's accept (PLAN1).",
+      "Accepted plans and their outcomes are stored and recalculable; the previous recommendation and its outcome feed the next analysis (OUT1).",
+      "The phone coaches an accepted plan entirely offline from a locally cached copy; coaching never needs the server, the AI or connectivity during a run (COACH1, COACH3).",
+      "Everything works without AI: profile (measured values), plans cannot be generated but any accepted plan still coaches, history and outcomes are still recorded; AI failure never affects recording or upload (G1).",
+      "Live coaching never delays or blocks GPS/HR/step recording or the metronome timing (REL2)."
+    ],
+    "invariants": [
+      "CO1 (consent / opt-in, draft section 11 and conflict CF3): the single opt-in is runningtracker.coach_settings.ai_enabled, default false. PATCH /coach/settings may set ai_enabled true only when the request also carries consent_version equal to the current COACH_CONSENT_VERSION (the web UI sends it only after showing the destination, the data categories of EGR1 and a button that opens the analysis-preview); then consent_version and consented_at (server clock, audit only) are stored. Setting ai_enabled false clears both consent columns. A consent version lower than the current COACH_CONSENT_VERSION (bumped whenever PAYLOAD_VERSION, destination host list or EGR1 categories change) counts as no consent (analysis fails CONSENT_REQUIRED, settings show consent_current false). No other code path reads or sets the opt-in; the phone never sends anything to an AI.",
+      "EGR1 (exactly what leaves the system, conflict CF3): the only outbound flow is one HTTPS POST per analysis from the atlas-runningtracker container to COACH_API_URL (host must be in COACH_ALLOWED_HOSTS; redirects are not followed; TLS verification on), triggered only by the user's explicit POST /coach/runs/{id}/analysis. Request content: (a) authentication header carrying the API key (to the provider only); (b) model name and max_tokens; (c) the system prompt = the text of the prompt file for the configured prompt version (static, contains no user data); (d) ONE user message = the JSON document PayloadV1 (field list declared once in 10_scaffolding.json backend/coach_payload.py PAYLOAD_V1_KEYS; the document is identical to the preview and to coach_analyses.sent_payload). PayloadV1 carries only: summary of the analysed run (relative time and weekday, run kind, distance, moving time, pace, HR average/maximum, cadence average, average step length, HRR60/HRR120, per-kilometre splits, first-half versus second-half pace and HR, and pace/HR/cadence series averaged to 60 s buckets), up to COACH_HISTORY_RUNS summaries of earlier runs (same fields without series, relative days before the analysed run), the current athlete profile items, the previous recommendation with its outcome, the user's own goal_text, and the payload/prompt/plan-schema versions. NEVER sent: GPS coordinates, tracks, route geometry or route names; absolute dates, clock times or timestamps; run, device, plan or analysis ids; run titles, comments or categories; raw samples; device names, tokens, pairing data; any Atlas credential other than the single coach API key; any identity of the user. Implicit metadata the provider necessarily sees: the server's public IP address and TLS/HTTP metadata. Retention and training use on the provider side are outside Atlas control (open_questions CF3a).",
+      "KEY1 (key handling, conflict CF3): the API key exists only in the container environment RUNNINGTRACKER_COACH_API_KEY (compose passes it from 01_System/secrets.env; the model and URL come from non-secret config.env). It is never stored in Postgres, never returned by any endpoint (settings expose key_configured: boolean only), never logged, never sent to the phone or the browser, and not passed to the runningtracker-test container (tests use a fake provider). Missing key, missing model, non-https URL or a URL host outside COACH_ALLOWED_HOSTS = key_configured false and analysis fails AI_NOT_CONFIGURED (503) without any network call or coach_ai_calls row. No inbound port, nginx rule or firewall change is introduced; the loopback-only 127.0.0.1:8029 publication is unchanged (R-OPS-BP-02).",
+      "PAY1 (payload construction): PayloadV1 is built by an allow-list builder from explicit RunFacts fields only (never by serialising database rows); numbers are rounded (distance to 10 m, pace to 1 s/km, HR to 1 bpm, cadence to 0.1); absent values are null (never zero); history is the latest COACH_HISTORY_RUNS complete runs that started before the analysed run, ordered by started_at DESC; if the serialised document exceeds COACH_MAX_PAYLOAD_BYTES the oldest history runs are dropped until it fits (the analysed run is never dropped). The same builder serves analysis-preview and analysis, so preview and sent document cannot differ.",
+      "VAL1 (AI output validation, draft section 11): the provider text must be a single JSON object parsed into CoachAiResponse (scaffolding backend/coach_ai.py); anything else (non-JSON, extra top-level keys, missing assessment) = analysis fails AI_INVALID_RESPONSE and nothing but a coach_ai_calls row is stored. assessment (1..1500 chars) and previous_recommendation_effect (<= 600 chars or null) are stored as plain text and rendered as text only. profile_updates are filtered by PROF1. next_session is validated independently by PLAN1: an invalid plan does NOT discard the assessment; the analysis is stored with plan_rejected_reason (a short code, never AI text) and no plan row. Nothing the AI returns is executed or becomes active without the user's accept.",
+      "PLAN1 (training plan, draft sections 5 and 11): schema CoachPlanV1 with schema_version 1 (declared once in 10_scaffolding.json backend/coach_plan.py; Kotlin CoachPlan mirrors it; parity by tests/fixtures/coach_plan_golden.json). Types: easy_continuous, hr_controlled, recovery, endurance, interval. A plan is an ordered list of time-based segments (warmup, steady, work, recovery, cooldown) with optional targets per segment (HR range, pace range, cadence range) and a plan-level trigger list. Validation bounds are constants in config.py (COACH_* plan bounds); a plan violating any bound, a non-interval type containing work/recovery segments, an interval type without at least two work segments and one recovery segment, hr_controlled without an HR range on every steady segment, or an interval plan when one of the previous COACH_INTERVAL_LOOKBACK_PLANS plans (by created_at DESC, status not in disregarded/superseded) was also interval (high intensity stays occasional) is rejected with a reason code. Lifecycle (coach_plans.status): recommended -> accepted | disregarded | superseded; accepted -> disregarded | superseded | completed. Accepting a plan makes every other accepted plan without a linked run 'superseded' (at most one active plan). Accept with overrides stores active_plan = plan with the overrides applied (applied to every steady and work segment, then re-validated by the same bounds); plan itself is never edited. A forced re-analysis supersedes the still-recommended plan of that analysis. Phone and server execute the plan clock as ACTIVE TIME = elapsed time minus completed pauses.",
+      "PROF1 (athlete profile, draft section 3 reduced): rows of coach_profile_items. Measured rows (confidence NULL) are computed deterministically by compute_measured_profile from the latest COACH_MEASURED_WINDOW_RUNS complete runs: natural_cadence_spm (median of run avg cadence over runs that have one), avg_step_length_m (mean of avg speed m/s x 60 / avg cadence spm over those runs), hr_at_median_pace_bpm (mean avg HR of the window runs whose average pace is within COACH_PACE_MATCH_TOL of the window's median pace; null/absent below COACH_HR_PACE_MIN_RUNS qualifying runs), runs_per_week and km_per_week (over the 28 days ending at the latest run's started_at, domain time), pr_fastest_1k_s (best full 1 km split) and pr_longest_run_m. A measured row with no basis is absent, never 0. Inferred rows come only from validated AI profile_updates: key in COACH_INFERRED_KEYS (aerobic_endurance, fatigue_drift, development_trend), value text <= 200 chars, confidence in [0,1] reduced to the cap min(0.9, 0.2 + 0.1 x n_runs) where n_runs = the value returned by coach_store.count_window_runs (pre-step of step 29, read before validation: min(COACH_MEASURED_WINDOW_RUNS, number of complete runs with metrics), counted over the latest runs overall including runs newer than the analysed one, so a re-analysis of an older run uses the same n_runs as the profile window) and that same value is persisted unchanged; updates are ignored entirely when n_runs < COACH_MIN_RUNS_INFERRED (no strong conclusions from individual runs). Keys outside the two sets are dropped. Measured rows are refreshed at every finished run and every analysis; inferred rows are replaced (upsert) only by an analysis.",
+      "OUT1 (outcome, draft sections 11-12 step 7): when a run finishes with FinishRequest.coach_plan_id naming a plan whose status is accepted and whose run_id is null, the plan is linked (run_id set; unknown/other-state ids are ignored, never an error) and, after metrics are stored, outcome = {planned_s, done_s, completed (done_s >= 0.9 x planned_s), in_range: {hr, pace, cadence} (fraction of series points inside the target range of the active-time segment at that point, null when no point has a target), avg_hr, avg_pace_s_per_km, avg_cadence_spm} is computed by compute_outcome from run_metrics series and run_pauses, status becomes completed. Recomputed on every finish replay. Failures in this hook and in the measured-profile refresh are logged and swallowed: they never change the finish response (G1).",
+      "COACH1 (live coaching engine, draft section 8, authoritative definition; pure Kotlin CoachEngine, no clock, no Android, no I/O; evaluated once per second by the 1 Hz publish). Inputs: CoachPlan, immutable CoachState, CoachInput{activeS, paused, hrBpm (HR2-smoothed display value) | null, hrAgeS | null, paceSPerKm (20 s race pace) | null, cadenceSpm (CAD1 live) | null}, CoachSettings{enabled, muted, frequency LOW|NORMAL|HIGH}. Output: new CoachState and at most ONE CoachInstruction per tick. Rules in order: (0) paused, muted, disabled, or plan finished -> no instruction and all out-of-range timers cleared; at activeS >= plan total PLAN_DONE is emitted once (if not muted) then the engine stays silent. (1) Current segment = the segment containing activeS ([start, end)). (2) Boundary events, not gated by the frequency gap: SEGMENT_START on the first tick of a segment (not for a segment already started when the engine was created by recovery), SEGMENT_SOON once when remaining time <= SEGMENT_WARN_S and the segment lasts at least 2 x SEGMENT_WARN_S; SEGMENT_START wins a tie; only when 'segment_change' is in the plan triggers. (3) Corrective instructions are suppressed while segment elapsed time < SETTLE_S. (4) Per dimension with a target in the current segment and a valid reading, deviation = distance beyond the range edge: HR valid iff hrBpm != null and hrAgeS <= HR_STALE_S; pace and cadence valid iff non-null; tolerance HR_TOL_BPM, PACE_TOL_S, CAD_TOL_SPM (a reading inside range +/- tolerance is in range). A condition (HR_HIGH, HR_LOW, PACE_TOO_FAST, PACE_TOO_SLOW, CADENCE_LOW, CADENCE_HIGH) is SUSTAINED when the same-direction deviation has been continuous for >= SUSTAIN_S (a direction flip or return to range restarts the timer; missing data clears it). (5) Candidate order (priority): HR_HIGH, PACE_TOO_FAST, HR_LOW, PACE_TOO_SLOW, CADENCE_LOW, CADENCE_HIGH, restricted to kinds enabled in the plan triggers. Conflict rule: 'push' kinds (HR_LOW, PACE_TOO_SLOW, CADENCE_LOW) are not candidates while any 'ease' kind (HR_HIGH, PACE_TOO_FAST) is sustained, and PACE_TOO_SLOW is also not a candidate while HR_HIGH is sustained. (6) Gates: the chosen candidate is spoken only if activeS - lastSpokenS >= GAP(frequency) (LOW/NORMAL/HIGH in CoachConfig) and activeS - lastSpokenS(kind) >= KIND_COOLDOWN_MULT x GAP(frequency); otherwise nothing is said and the condition stays sustained, so it can fire later when the gates open. Speaking a kind resets that dimension's timer (it must re-sustain for SUSTAIN_S before a repeat) and sets lastSpokenS. (7) KEEP_RHYTHM only if no condition is sustained, every evaluated dimension has been in range for >= MAINTAIN_S, >= MAINTAIN_QUIET_S passed since the last instruction of any kind, and 'keep_rhythm' is enabled. (8) Missing sensors: when the current segment has an HR (pace) target and HR (pace) has been invalid for >= SENSOR_LOST_S and activeS >= SENSOR_GRACE_S, SENSOR_LOST_HR (SENSOR_LOST_GPS) is emitted at most once per SENSOR_NOTICE_COOLDOWN_S and no corrective instruction for that dimension is produced; missing cadence is silent. Instruction texts are the fixed table of CoachKind (no AI text is ever spoken); the cadence step in CADENCE_LOW/HIGH text is round(deviation) clamped to [2, 5].",
+      "COACH2 (metronome integration, draft section 8): MetronomeMode gains COACH (not persisted; RunSettings still stores the last non-COACH mode). COACH is offered by MetronomeTarget.availableModes only while a coach session is active and the plan has at least one cadence target; its raw target = midpoint of the current segment's cadence range, none when that segment has no cadence target or the plan is finished (silence, never speed-derived). While a coach session with a cadence target is active the ghost modes MATCH_GHOST and ATTACK_102 are not offered (coaching beats ghost competition for audio); a restored mode that is not available at begin() becomes COACH when available, else OFF (Sprint03 rule otherwise unchanged). The Sprint03 target smoother, slew limit, hold, no-audio-focus rule and REL1 timing guarantees apply unchanged to COACH.",
+      "COACH3 (offline, plan transport and run link, draft sections 2 and 11): the phone GETs /native/coach/next-plan when the user opens the Run home panel and has connectivity, and stores the returned plan JSON and plan id in a local cache (SharedPreferences atlas_coach); plan null from the server clears the cache; offline or on error the cache is used unchanged. A run started with coaching on stores RunMeta.coachPlanId (the cached plan id); upload sends it as FinishRequest.coach_plan_id only when set. During a run nothing is fetched or sent for coaching. An unsupported schema_version is shown as 'Plan needs an app update' and not coached.",
+      "SPEECH1 (audio, draft section 8): instructions are spoken by SpeechOutput (Android TextToSpeech, USAGE_ASSISTANCE_NAVIGATION_GUIDANCE) and requested around each utterance with AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK so music/podcasts duck briefly; this is a deliberate, scoped exception to the Sprint03 'no audio focus' rule, which continues to apply to ClickEngine only. TTS missing, failing or not yet initialised: the instruction is shown on screen only; nothing throws; the run is unaffected. The last instruction text is also shown on the screen for DISPLAY_S seconds (CoachStrip) when the screen is on.",
+      "REL2 (reliability guard, extends Sprint03 REL1): the engine step runs inside the existing 1 Hz publish on pure in-memory inputs; SpeechOutput is asynchronous and never called with a lock held or from a sensor/audio thread; engine, speech and plan-cache failures are caught, logged and disable coaching for the session without touching recording, upload or the metronome engine.",
+      "G1 (graceful without AI): AI disabled, not configured, offline, rate-limited or failing never affects run recording, upload, finish, metrics, ghost, cadence, HRR, history pages, measured profile, plan acceptance of already stored plans, or phone coaching. Failure is reported only to the user who clicked Analyse (ApiError).",
+      "AUD1 (audit and rate guard): every provider attempt writes coach_ai_calls (outcome ok | provider_error | invalid_response, no content); more than COACH_MAX_CALLS_PER_DAY attempts in the last 24 hours (server clock) fails the next analysis RATE_LIMITED before any network call. The provider request and response bodies are never logged (request logging records method, path, status only); error logs carry the exception class and HTTP status only.",
+      "T4 (time authority, R-CON-AL-06): run-derived values (relative days, weekday, 28-day windows, active time, series x) use only persisted phone-UTC run times and pauses; the server clock is used only for consented_at, decided_at, created_at, analysed_at, called_at and the 24-hour cap. The phone engine uses activeS supplied by the controller (no wall clock inside the engine); plan clock = active time on phone and in compute_outcome.",
+      "C3 (compatibility / deploy order): FinishRequest forbids unknown keys, so the server MUST be deployed before a phone build that sends coach_plan_id; the phone omits the key when no plan is linked, so a new phone without a plan works against an old server. An old phone against the new server works unchanged. New server tables and endpoints are additive. Phone builds without coach code simply never call /native/coach/next-plan. Plan schema_version gates future plan fields (deferred features must bump it).",
+      "P4 (durable state, R-CON-BP-03): Postgres (10_schema.sql, runtime copy 03_Application/RunningTracker/schema.sql): coach_settings, coach_analyses, coach_ai_calls, coach_plans, coach_profile_items, all private to RunningTracker. Phone: SharedPreferences atlas_coach (cached plan JSON, plan id; recreatable from the server) and atlas_run_settings keys coach_enabled, coach_frequency; RunMeta.coachPlanId inside the existing run_meta JSON (additive, tolerant decode). CoachState, last instruction and the metronome COACH state are ephemeral. Prompt files under backend/prompts are versioned source files (not state).",
+      "Q4 (query behavior, R-CON-AL-01/-02): see the query field of each exposed surface. All coach reads return Dataset | ApiError with explicit defaults, ordering and empty cases; there is no pagination (single user, bounded sets).",
+      "N5 (no regression): runs, history, routes, devices, ghost, cadence, metronome (Off/Match/Attack/Manual), HR smoothing, recovery, recap and upload behave as before when no plan is active and AI is off; the race UI is unchanged apart from one coach strip that is absent without a coach session; Sprint03 public signatures are only extended with defaulted parameters."
+    ],
+    "failure_modes": [
+      "CONSENT_REQUIRED (403) on analysis: AI disabled, or consent version older than current; consumer (web) shows the settings link.",
+      "AI_NOT_CONFIGURED (503): key or model missing in the container environment, or COACH_API_URL not https or its host not in COACH_ALLOWED_HOSTS (key_configured is false in all these cases); no network call made and no coach_ai_calls row written.",
+      "RATE_LIMITED (429): more than COACH_MAX_CALLS_PER_DAY attempts in 24 hours.",
+      "RUN_NOT_ANALYSABLE (409): run not complete, no metrics yet, or moving time below COACH_MIN_RUN_S.",
+      "NOT_FOUND (404): unknown run or plan id.",
+      "AI_UNAVAILABLE (502): network error, timeout (COACH_HTTP_TIMEOUT_S), TLS error, redirect, or provider HTTP status != 200; nothing stored except a coach_ai_calls row; the user may retry.",
+      "AI_INVALID_RESPONSE (502): provider output is not the required JSON object; nothing stored except a coach_ai_calls row.",
+      "Plan rejected while the assessment is accepted: analysis stored, plan_rejected_reason set (codes: plan_schema, plan_bounds, plan_type_segments, plan_interval_frequency), no plan row; the web shows 'No session recommended' with the reason code.",
+      "INVALID_TRANSITION (409) on PATCH /coach/plans/{id} for a status change the lifecycle forbids; PLAN_INVALID (422) when overrides violate the plan bounds; VALIDATION_ERROR (422) for malformed bodies; CONSENT_VERSION_MISMATCH (422) when enabling AI with a stale or missing consent_version.",
+      "Phone: no cached plan and offline -> no coaching, run unaffected; cached plan of an unsupported schema_version -> not coached with a visible note; TTS unavailable -> text only; HR/GPS lost -> sensor notice then silence for that dimension; cadence missing -> silent.",
+      "Plan linked to a run id that the server does not know/has another state: ignored silently (finish unaffected); the run simply has no outcome.",
+      "Server coach hook error at finish (profile refresh or outcome): logged, swallowed; the next finish replay or analysis recomputes.",
+      "Deploy-order violation: a phone sending coach_plan_id to an old server gets 422 on finish; run stays pending_upload with the existing visible error (C3)."
+    ]
+  },
+  "shared_views": {
+    "consumes": [],
+    "provides": []
+  },
+  "interfaces": {
+    "consumes": [
+      "External AI provider: one HTTPS POST per analysis (EGR1, KEY1); not a Dataset surface",
+      "AtlasPhone MobilePlatform (speech, audio, settings) and running package (RunController, MetronomeController, AtlasClient, RunSettings)",
+      "platform-ui: apiFetch, Dataset types, existing running.css classes (web)"
+    ],
+    "provides": [
+      "HTTP endpoints below (web surfaces under /api/runningtracker/coach, native surface under /api/runningtracker/native/coach)",
+      "Kotlin APIs: MobilePlatform.speech; CoachEngine, CoachPlan parsing, CoachController, CoachPlanStore, RunController coach members (signatures in 10_scaffolding.json)",
+      "Native documentation updates: 01_System/AtlasPhone/Sprint01_MobilePlatform/MobilePlatform_API.md (SpeechOutput) and 01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md (coach session, plan cache, coach_plan_id), status tags [tested: JVM] / [built] / [unverified]"
+    ],
+    "exposed_surfaces": [
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/coach/settings",
+        "change": "new",
+        "purpose": "Opt-in state and everything the consent screen needs.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx (same exposure as the other web endpoints)",
+        "query": "No parameters. Always exactly one row (the settings row exists from schema init). No pagination, time basis server (calls_last_24h).",
+        "row_shape": "SettingsRow: ai_enabled: boolean, consent_current: boolean (ai_enabled and consent_version == current), consent_version_required: number, consented_at: date|null, goal_text: string|null, key_configured: boolean, destination_host: string|null (host of COACH_API_URL), model: string|null, payload_version: number, prompt_version: string, calls_last_24h: number, daily_cap: number. Never contains the key."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/runningtracker/coach/settings",
+        "change": "new",
+        "purpose": "Enable/disable external AI and set the goal text.",
+        "ui_contract": "Dataset | ApiError (mutation returning the updated SettingsRow Dataset, valid per R-CON-BP-04)",
+        "exposure": "public via shell nginx",
+        "query": "Body {ai_enabled?: boolean, consent_version?: number, goal_text?: string|null}. Omitted field = unchanged. ai_enabled true requires consent_version == current else 422 CONSENT_VERSION_MISMATCH; ai_enabled false clears consent (consent_version in the body is ignored). goal_text: explicit null clears; a string is trimmed and an empty/whitespace string is treated as null; > 500 chars = 422. Round trip (R-CON-AL-05): UI empty goal field -> sends goal_text null; backend stores NULL; GET returns null; UI shows the empty field. Toggle: UI sends {ai_enabled: true, consent_version: <consent_version_required from GET>} after the user confirms; backend stores both consent columns."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/coach/analysis-preview",
+        "change": "new",
+        "purpose": "Show exactly what would leave the system for a run, before any consent or click; makes no outbound call.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Required param run_id (uuid). 404 NOT_FOUND for unknown id; 409 RUN_NOT_ANALYSABLE for the same reasons as analysis. Works whether or not AI is enabled/configured. Builds PayloadV1 with the same builder as analysis (PAY1). One row; no pagination.",
+        "row_shape": "PreviewRow: destination_host: string|null, model: string|null, prompt_version: string, payload_version: number, history_runs: number, byte_size: number, payload_json: string (the exact user-message JSON, pretty-printed for display only; the sent bytes are the compact form of the same document)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/coach/runs/{run_id}/analysis",
+        "change": "new",
+        "purpose": "User-triggered post-run analysis: profile update, assessment, next-session recommendation.",
+        "ui_contract": "Dataset | ApiError (mutation returning AnalysisRow Dataset)",
+        "exposure": "public via shell nginx. Security note: this is a user-triggered action that spends an external API quota and sends data out; it is protected by the opt-in, the 24-hour cap and the shell's existing access control, not by new auth (open_questions CF3b).",
+        "query": "Optional param force (boolean, default false). Order of checks: run exists (404) -> run analysable (409) -> consent current (403) -> configured (503) -> if an analysis already exists and force is false: return it unchanged with 200 and NO outbound call -> rate cap (429) -> build payload -> provider call (502 AI_UNAVAILABLE / AI_INVALID_RESPONSE) -> validate (VAL1, PROF1, PLAN1) -> single transaction: upsert analysis, upsert inferred profile rows, refresh measured rows, supersede the still-recommended plan of this analysis (force only), insert the new recommended plan -> return AnalysisRow. No DB connection is held during the provider call. Idempotent for force=false.",
+        "row_shape": "AnalysisRow: run_id: string, assessment: string, previous_effect: string|null, plan_rejected_reason: string|null, plan_id: string|null, prompt_version: string, model: string, analysed_at: date"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/coach/runs/{run_id}/analysis",
+        "change": "new",
+        "purpose": "Stored post-run assessment for the run detail page.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "404 NOT_FOUND for an unknown run; an empty Dataset (total 0) when the run has no analysis. One row otherwise (AnalysisRow, declared on the POST surface). plan_id is the plan row created by this analysis or null.",
+        "row_shape": "AnalysisRow (see POST /coach/runs/{run_id}/analysis)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/coach/profile",
+        "change": "new",
+        "purpose": "Athlete profile, measured values first.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No parameters. Ordered by basis (measured before inferred) then key ASC. Empty Dataset when no run has produced a profile yet. Never zero-fills a missing measured value.",
+        "row_shape": "ProfileRow: key: string, label: string, basis: enum(measured|inferred), value_text: string, value_num: number|null, unit: string|null, confidence: number|null (null for measured), n_runs: number, updated_at: date"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/coach/next-session",
+        "change": "new",
+        "purpose": "The next recommended training session.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "No parameters. Returns the single accepted plan without a linked run (newest decided_at) if one exists, else the newest plan with status recommended (created_at DESC), else an empty Dataset. At most one row. Row is rendered from active_plan for accepted plans and from plan for recommended ones.",
+        "row_shape": "PlanRow: id: string, status: enum(recommended|accepted|disregarded|superseded|completed), plan_type: enum, title: string, summary: string (server-rendered one line), rationale: string|null, total_s: number, target_distance_m: number|null, hr_min: number|null, hr_max: number|null, pace_fast_s_per_km: number|null, pace_slow_s_per_km: number|null, cad_min: number|null, cad_max: number|null (the four targets of the first steady/work segment; null = not coached), segment_count: number, created_at: date, decided_at: date|null, run_id: string|null, outcome_summary: string|null"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/coach/plans",
+        "change": "new",
+        "purpose": "Recommendation and outcome history.",
+        "ui_contract": "Dataset | ApiError",
+        "exposure": "public via shell nginx",
+        "query": "Param limit (integer, default COACH_PLAN_LIST_DEFAULT, max COACH_PLAN_LIST_MAX; out of range = 422). All statuses, ordered by created_at DESC, id ASC. Empty Dataset when none.",
+        "row_shape": "PlanRow (see GET /coach/next-session)"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "PATCH /api/runningtracker/coach/plans/{plan_id}",
+        "change": "new",
+        "purpose": "Accept (optionally modify) or disregard a plan.",
+        "ui_contract": "Dataset | ApiError (mutation returning the updated PlanRow Dataset)",
+        "exposure": "public via shell nginx",
+        "query": "Body {status: 'accepted'|'disregarded', overrides?: PlanOverrides}. Transitions: recommended -> accepted | disregarded; accepted -> accepted (re-modify, only while run_id is null) | disregarded; anything else 409 INVALID_TRANSITION. overrides only with status accepted; PlanOverrides = {hr?: {min, max}|null, pace?: {fast_s_per_km, slow_s_per_km}|null, cadence?: {min, max}|null, target_distance_m?: number|null}. Per key: omitted = unchanged (an unchanged key keeps the value of the current active_plan, or of plan on first accept); explicit null = clear that target (dimension no longer coached; hr_controlled plans reject clearing hr with PLAN_INVALID); object = set both ends. Applied to every steady and work segment, then re-validated (PLAN_INVALID 422 on bound/range violations). Round trip (R-CON-AL-05): UI empty target inputs -> sends null for that key, untouched inputs -> key omitted; backend interpretation as above; persisted state = active_plan; GET next-session shows nulls as '-'. Accepting supersedes other unlinked accepted plans (PLAN1). 404 for unknown id."
+      },
+      {
+        "type": "http_endpoint",
+        "name": "GET /api/runningtracker/native/coach/next-plan",
+        "change": "new",
+        "purpose": "Phone fetches the active plan for offline coaching.",
+        "ui_contract": "none (machine-to-machine, exempt from Dataset; typed record NextPlanResponse | ApiError)",
+        "exposure": "tailnet only; Bearer device token; blocked on the public nginx path by the existing /api/runningtracker/native 404 rule (unchanged)",
+        "query": "No parameters. Returns the accepted plan without a linked run (newest decided_at): {plan_id: string, schema_version: number, plan: CoachPlanV1 (the active_plan)}; when none exists {plan_id: null, schema_version: null, plan: null}. 401 DEVICE_UNAUTHORIZED as for the other native routes.",
+        "row_shape": "NextPlanResponse: plan_id: string|null, schema_version: number|null, plan: CoachPlanV1|null"
+      },
+      {
+        "type": "http_endpoint",
+        "name": "POST /api/runningtracker/native/runs/{id}/finish",
+        "change": "changed",
+        "purpose": "Existing verified finish; additionally links the executed coach plan and runs the coach hook.",
+        "ui_contract": "none (machine-to-machine; typed record FinishResponse | ApiError, unchanged)",
+        "exposure": "tailnet only; Bearer device token (unchanged)",
+        "query": "FinishRequest gains optional coach_plan_id (uuid string; omitted when no plan is linked, C3; unknown, malformed or non-accepted ids are ignored like route_id/ghost_run_id). On result 'complete' after metrics and route progress: link plan (OUT1), compute outcome, refresh measured profile; hook errors are swallowed (G1). FinishResponse and every other finish behavior unchanged."
+      },
+      {
+        "type": "kotlin_api",
+        "name": "MobilePlatform.speech and running.coach APIs",
+        "change": "new",
+        "purpose": "SpeechOutput capability; CoachEngine / CoachPlan / CoachController / CoachPlanStore; RunController coach members; MetronomeMode.COACH. Signatures in 10_scaffolding.json.",
+        "ui_contract": "none (in-process API)"
+      },
+      {
+        "type": "ui_screen",
+        "name": "Web: Coach page (/running/coach) and run detail coach card",
+        "change": "new",
+        "purpose": "CoachPage: AI consent (destination, data categories, payload preview button, enable toggle, goal text), next recommended session with Accept / Modify / Disregard, profile table, plan history. RunDetailPage: coach card with the stored assessment or an 'Analyse run' button (disabled while the request is pending; shows the ApiError message on failure; links to the Coach page when consent is missing).",
+        "ui_contract": "Dataset | ApiError"
+      },
+      {
+        "type": "ui_screen",
+        "name": "Phone: coach plan card, CoachStrip, coach controls (Compose)",
+        "change": "new",
+        "purpose": "Run home panel card (cached plan summary, 'Coach this run' switch, frequency Low/Normal/High, refresh, notes for offline cache / unsupported plan / TTS unavailable); CoachStrip on the race screen and free-run cockpit (last instruction for DISPLAY_S seconds, current segment and remaining time, mute button); no change otherwise to the race UI.",
+        "ui_contract": "none (native)"
+      }
+    ]
+  },
+  "internal_flow": [
+    {
+      "step": 7,
+      "change": "changed",
+      "name": "finish_run (server, delta to Sprint01 step 7 / Sprint03)",
+      "description": "After V1 verification, metrics and route progress succeed with result 'complete': when coach_plan_id is present call coach_store.on_run_finished (step 35); errors are swallowed.",
+      "inputs": ["FinishRequest.coach_plan_id", "run_metrics", "run_pauses"],
+      "outputs": ["FinishResponse (unchanged)", "coach_plans.run_id/status/outcome", "coach_profile_items measured rows"]
+    },
+    {
+      "step": 27,
+      "change": "new",
+      "name": "coach_settings",
+      "description": "GET/PATCH /coach/settings read and update the single settings row per CO1 (consent check, clearing on disable, goal_text null semantics) and report key_configured, destination, calls_last_24h.",
+      "inputs": ["coach_settings", "environment (key/model/url presence)", "coach_ai_calls (24 h count)", "PATCH body"],
+      "outputs": ["SettingsRow Dataset"]
+    },
+    {
+      "step": 28,
+      "change": "new",
+      "name": "build_payload",
+      "description": "Load RunFacts for the analysed run and the latest COACH_HISTORY_RUNS earlier complete runs (run, run_metrics incl. splits/series/cadence/recovery, linked plan outcome), the profile items, goal_text and the previous recommendation; build PayloadV1 through the allow-list builder (PAY1); serve it as analysis-preview or hand it to step 29.",
+      "inputs": ["run id", "runs", "run_metrics", "run_pauses", "coach_plans", "coach_profile_items", "coach_settings.goal_text"],
+      "outputs": ["PayloadV1", "PreviewRow Dataset"]
+    },
+    {
+      "step": 29,
+      "change": "new",
+      "name": "run_analysis",
+      "description": "POST /coach/runs/{id}/analysis: ordered checks (404, 409, 403, 503, existing analysis returned when force is false, 429), build payload (step 28) and read n_runs via count_window_runs (PROF1 pre-step, before validation), record the attempt, call the provider with the prompt of the configured version and the compact payload (EGR1/KEY1), parse CoachAiResponse (VAL1), filter profile updates (PROF1), validate next_session (PLAN1), then persist analysis, inferred profile rows, measured refresh (step 30), plan row in one transaction; return AnalysisRow.",
+      "inputs": ["run id", "force", "settings and consent", "environment key/model/url", "PayloadV1", "provider response"],
+      "outputs": ["coach_analyses row", "coach_plans row (recommended) or plan_rejected_reason", "coach_profile_items", "coach_ai_calls row", "AnalysisRow Dataset | ApiError"]
+    },
+    {
+      "step": 30,
+      "change": "new",
+      "name": "measured_profile_refresh",
+      "description": "compute_measured_profile over the latest COACH_MEASURED_WINDOW_RUNS complete runs (PROF1) and upsert the measured rows; absent values delete the stale measured row. Runs at every finished run (step 35) and inside step 29; needs no AI.",
+      "inputs": ["complete runs with metrics"],
+      "outputs": ["coach_profile_items (measured)"]
+    },
+    {
+      "step": 31,
+      "change": "new",
+      "name": "plan_decision",
+      "description": "PATCH /coach/plans/{id}: transition check, overrides application and re-validation (PLAN1), supersede other unlinked accepted plans, stamp decided_at; GET next-session / plans / profile / runs/{id}/analysis render the stored rows as Datasets.",
+      "inputs": ["plan id", "body {status, overrides?}", "coach_plans"],
+      "outputs": ["PlanRow Dataset | ApiError", "coach_plans.status/active_plan/decided_at"]
+    },
+    {
+      "step": 32,
+      "change": "new",
+      "name": "phone_plan_fetch_and_cache",
+      "description": "On opening the Run home panel (and on the Refresh button) with connectivity: GET /native/coach/next-plan; parse CoachPlan; store JSON and id in CoachPlanStore; null plan clears it; no connectivity or error keeps the cache (COACH3). The home card shows the cached plan summary and notes.",
+      "inputs": ["AtlasClient", "CoachPlanStore cache"],
+      "outputs": ["cached CoachPlan | none", "home card state"]
+    },
+    {
+      "step": 33,
+      "change": "new",
+      "name": "phone_coach_session",
+      "description": "RunController.start/startPrepared/startRace/recover with 'Coach this run' on and a supported cached plan: CoachController.begin(plan, activeS at begin) creates the initial CoachState (segments already passed are marked started), RunMeta.coachPlanId is set and persisted, MetronomeController.begin is told coachCadence availability (COACH2). pause/resume pass paused to the engine; finishRun/finish/discard/stopAll end the session. Mute toggles CoachSettings.muted for the session; coach_enabled and coach_frequency persist in RunSettings.",
+      "inputs": ["cached CoachPlan", "RunSettings", "RunMeta", "run lifecycle events"],
+      "outputs": ["active CoachController", "RunMeta.coachPlanId"]
+    },
+    {
+      "step": 34,
+      "change": "new",
+      "name": "coach_engine_tick",
+      "description": "Inside the existing 1 Hz publish: build CoachInput (activeS, paused, smoothed HR and its age, 20 s race pace, live cadence), call CoachEngine.step (COACH1), store the new CoachState, and for a non-null instruction call SpeechOutput.speak and expose it as CoachUiState.lastInstruction; pass the current segment's cadence midpoint to MetronomeController.tick (COACH2). Any exception disables coaching for the session (REL2).",
+      "inputs": ["LiveMetrics", "HR2 value and age", "LiveRunState.cadenceSpm", "CoachState", "CoachSettings"],
+      "outputs": ["CoachInstruction?", "spoken audio / strip text", "metronome coach target"]
+    },
+    {
+      "step": 35,
+      "change": "new",
+      "name": "finish_link_and_outcome",
+      "description": "coach_store.on_run_finished(conn, run_id, coach_plan_id): if the plan is accepted and unlinked, set run_id; if a plan is linked to this run (also on replay) compute outcome (OUT1) and set status completed; refresh measured profile (step 30). Errors logged and swallowed.",
+      "inputs": ["run id", "coach_plan_id", "run_metrics", "run_pauses", "coach_plans"],
+      "outputs": ["coach_plans.run_id/outcome/status", "measured profile rows"]
+    },
+    {
+      "step": 36,
+      "change": "new",
+      "name": "web_coach_views",
+      "description": "CoachPage loads settings, next-session, plans and profile Datasets; consent flow = show destination and data categories, open the payload preview for a chosen run, then PATCH settings with consent_version; Accept/Modify/Disregard call PATCH plans; RunDetailPage loads GET runs/{id}/analysis and offers POST analysis; any ApiError renders the existing ErrorCard.",
+      "inputs": ["Dataset responses", "user input"],
+      "outputs": ["rendered pages", "settings/plan/analysis mutations"]
+    }
+  ],
+  "dependencies": {
+    "internal_required": [
+      {"component": "01_System/AtlasPhone", "role": "Native host: running.coach package, SpeechOutput in the Mobile Platform, edits to RunController, MetronomeController/MetronomeTarget, RunSettings, AtlasClient, RunModels, RunningScreen and the two race screens (file list in 10_scaffolding.json)"},
+      {"component": "02_Platform/packages/platform_contracts", "role": "Dataset types for all coach read endpoints"},
+      {"component": "02_Platform/packages/platform_errorhandling", "role": "api_error envelope (unchanged)"},
+      {"component": "02_Platform/Atlas_Shell/platform-ui", "role": "apiFetch and existing components for the web pages (consumed only; ShellEntry/shellConfig of RunningTracker add one route and nav entry, no Shell file change, no nginx change)"},
+      {"component": "02_Platform/Postgres (atlas-postgres)", "role": "schema runningtracker, five new private tables"}
+    ],
+    "internal_optional": [],
+    "external_required": [
+      {"name": "httpx", "role": "Provider HTTPS call (already a declared dependency in pyproject.toml; currently unused by backend code)", "reuse_existing": true},
+      {"name": "External AI provider API (Anthropic Messages-style endpoint)", "role": "Post-run analysis; opt-in, server-side only, single allow-listed host; provider/model confirmation is open_questions CF3a", "reuse_existing": false}
+    ],
+    "external_optional": [],
+    "forbidden": [
+      "Any AI/provider call from the phone, from a background job, scheduler or automatically after a run; any call without consent and an explicit click",
+      "The API key in Postgres, logs, responses, the phone, the browser, the test container, the repository or any file other than the operator's secrets.env",
+      "Sending anything outside the EGR1 allow-list (GPS, route data, absolute dates/times, ids, titles, comments, categories, raw samples, device data, identity)",
+      "New inbound ports, nginx changes, publishing the container beyond 127.0.0.1:8029, or exposing /native/coach on the public path",
+      "Following redirects or calling a host outside COACH_ALLOWED_HOSTS",
+      "Executing or persisting as active any AI output that did not pass VAL1/PLAN1 and an explicit user accept; speaking AI-authored text",
+      "Domain logic (plan validation, engine rules, profile semantics) in 02_Platform or in the domain-free SpeechOutput/ClickEngine; promoting the provider adapter to Platform in this sprint",
+      "Audio-focus requests by ClickEngine (Sprint03 rule unchanged; only SpeechOutput may request transient ducking, SPEECH1)",
+      "Pre-building deferred items: route intelligence/terrain instructions, economy experiments, challenges, development overview, per-gradient profile, step-length targets, personal-record plan type, plan fields or tables for them",
+      "Editing GhostRunner_Roadmap.md before the user confirms CF1/CF2; backfilling analyses for old runs automatically"
+    ]
+  },
+  "persistence": {
+    "owns_persistent_state": true,
+    "schema_artifact": "10_schema.sql",
+    "runtime_schema_path": "03_Application/RunningTracker/schema.sql",
+    "persistence_type": "postgres",
+    "ownership": "private_application_state"
+  },
+  "deferrals": {
+    "application_implementer": [
+      "Order (server, each step pytest-testable): (1) copy 10_schema.sql over schema.sql (re-run idempotently on a database that already has the Sprint03 schema and on an empty one); config.py constants (names in 10_scaffolding.json); (2) pure modules backend/coach_plan.py, coach_profile.py, coach_payload.py, coach_ai.py (parse/validate/build only; provider call function takes an injectable transport) with tests/fixtures/coach_plan_golden.json; (3) coach_store.py, coach_datasets.py, routers/coach.py (web router + native router), main.py include, models.FinishRequest.coach_plan_id, native.finish hook (after recompute_progress, inside try/except, only when result is complete); (4) prompts/coach_prompt_v1.md; (5) compose.yml environment additions (below); (6) deploy the server BEFORE any phone build that sends coach_plan_id (C3).",
+      "compose.yml (runningtracker service only): add environment RUNNINGTRACKER_COACH_API_KEY: ${RUNNINGTRACKER_COACH_API_KEY:-}, RUNNINGTRACKER_COACH_MODEL: ${RUNNINGTRACKER_COACH_MODEL:-}, RUNNINGTRACKER_COACH_API_URL: ${RUNNINGTRACKER_COACH_API_URL:-} (empty = config default), RUNNINGTRACKER_COACH_PROMPT_VERSION: ${RUNNINGTRACKER_COACH_PROMPT_VERSION:-} (empty = default; must match ^v[0-9]+$). Do NOT add them to runningtracker-test and do NOT change ports. The operator adds the key to 01_System/secrets.env and the model name to 01_System/config.env by hand; the implementer must never write a key value anywhere. Rebuild with: docker compose --env-file 01_System/secrets.env --env-file 01_System/config.env -f 03_Application/RunningTracker/compose.yml up -d --build runningtracker runningtracker-test (without both env files the DB credentials are empty).",
+      "Provider call: httpx.Client(timeout=COACH_HTTP_TIMEOUT_S, follow_redirects=False), URL host check against COACH_ALLOWED_HOSTS before the call, headers x-api-key and anthropic-version (constant), body {model, max_tokens, system, messages:[{role:'user', content: compact JSON of PayloadV1}]}, take the first text content block as the response text; map httpx errors/non-200 to AI_UNAVAILABLE without logging bodies; tests inject a fake transport (no network in tests; the test container has no key).",
+      "The prompt file must: demand a single JSON object matching CoachAiResponse and nothing else; describe the PayloadV1 fields; require sustainable progression, occasional high intensity, uncertainty and low confidence from few runs, no medical claims; forbid route/terrain advice and experiments (deferred); state the plan schema and bounds. Version = file name; the stored prompt_version comes from the configured version.",
+      "Run-fact assembly: pace/HR/cadence series come from run_metrics (pace_series/hr_series are [t, value] pairs, cadence is the Sprint03 object); average each to COACH_SERIES_STEP_S buckets; first/second half = split of the running phase by moving time; hr_at_median_pace and PR/frequency rules exactly as PROF1; relative days = whole days between started_at values (domain time).",
+      "Phone, JVM-testable in this order: (a) CoachPlan parse/model + CoachConfig + CoachEngine against the engine scenarios; MetronomeTarget COACH additions; (b) RunSettings keys, RunModels.RunMeta.coachPlanId (additive, tolerant decode), AtlasClient.nextCoachPlan and finish body coach_plan_id (omitted when null); (c) CoachPlanStore (cache), CoachController; (d) SpeechOutput + MobilePlatform.speech (wiring and stopAll); (e) RunController wiring (start/startPrepared/startRace/recover begin, pause/resume, finishRun/finish/discard end, publish tick) with all failures caught (REL2); (f) UI per ui_implementer. grep AtlasClient.finish, RunMeta( and MetronomeController.tick usages and update every caller (listed in 10_scaffolding.json).",
+      "Update MobilePlatform_API.md and RunningScreen_API.md in the existing status-tag style; TTS audio, ducking, headphone routing, screen-off coaching and the full lifecycle on a real run stay [unverified] until a real run.",
+      "Docs hygiene without scope creep: do not edit GhostRunner_Roadmap.md; CF1/CF2 are reported to the user at sprint-close."
+    ],
+    "ui_implementer": [
+      "Web CoachPage.tsx (route /running/coach, nav entry 'Coach' in shellConfig.ts): consent section (destination host, the EGR1 data categories and the never-sent list as static text, 'Show what would be sent' for a run picked from the runs list opening the preview payload_json, toggle that PATCHes {ai_enabled, consent_version}; disabled with a note when key_configured is false), goal text field (empty -> null), next session card (summary, targets; Accept; Modify form with hr/pace/cadence/target distance inputs, empty -> null, untouched -> omitted; Disregard), profile table (measured first, confidence shown for inferred), plan history table. Existing running.css classes only; no new visual language.",
+      "Web RunDetailPage.tsx: Coach card (stored assessment and previous_effect text rendered as plain text, plan_rejected_reason note, 'Analyse run' button with pending state and ApiError message, link to the Coach page on 403 CONSENT_REQUIRED); HistoryPage/ShellEntry changes limited to the route.",
+      "Phone CoachPlanCard.kt (home panel), CoachStrip.kt (race screen + cockpit), controls in RunningScreen.kt; touch targets sized for running, same dark palette as GhostRaceScreen, no animation, strip text auto-clears after DISPLAY_S; MetronomeChip shows the COACH mode label."
+    ],
+    "test_writer": [
+      "Implement every scenario of 10_test_spec.md: pytest in atlas-runningtracker-test (fix- prefixed fixtures for runs with metrics/cadence, a plan in each status, a settings row; a fake provider transport; NEVER a real network call), Playwright [UI] with stubbed API, Kotlin JVM tests for [Phone JVM] scenarios (engine scenarios are table-driven over CoachInput sequences), and list [UI — manual] scenarios as untested in the test report.",
+      "Egress tests: assert the built payload's key set equals PAYLOAD_V1_KEYS recursively and that no value anywhere matches latitude/longitude pairs, uuid-shaped strings, ISO timestamps or any title/comment/category/route text present in the fixtures; assert the key never appears in any response body, log record or stored row.",
+      "coach_plan_golden.json is read by both pytest (validate_plan) and Kotlin CoachPlanTest; engine tests are Kotlin-only (the engine exists only on the phone).",
+      "Do not write automated stand-ins that claim to verify TTS audio, ducking, headphone routing, screen-off behavior or the real provider."
+    ],
+    "reviewer": [
+      "Check EGR1 end to end: payload built from the allow-list only, preview == sent document == stored sent_payload, host allow-list and no redirects, no body logging, key never persisted/returned/logged, test container without key, no new port or nginx change, /native/coach not reachable on the public path.",
+      "Check CO1: opt-in default false, no other code path can trigger an outbound call, stale consent version counts as no consent, disable clears consent, PATCH null/omit semantics (R-CON-AL-04/05) for goal_text and PlanOverrides.",
+      "Check VAL1/PLAN1/PROF1: AI output never executed, plan invalid does not drop the assessment, interval frequency rule, bounds, inferred confidence cap and n_runs minimum, measured rows deterministic and never zero-filled.",
+      "Check COACH1 against the invariant (priority order, suppression of push kinds, gates, settle time, sensor handling, one instruction per tick) and that the engine is pure (no clock, no Android); check COACH2/SPEECH1/REL2 (COACH metronome mode, no audio focus in ClickEngine, async speech, failures cannot touch recording).",
+      "Check declare-once: constants only in config.py / CoachConfig (parity names where mirrored), CoachPlanV1 and PayloadV1 key list only in scaffolding, no signature restated outside 10_scaffolding.json, deferred items not pre-built (no schema/stub beyond plan schema_version), CF1-CF4 surfaced and roadmap untouched.",
+      "Check wire compatibility: coach_plan_id omitted when null, deploy order C3, RunMeta decode tolerant, Sprint03 signatures only extended with defaults."
+    ]
+  },
+  "deferred_decisions": [
+    "Route intelligence, terrain-anticipating instructions, running economy experiments, the personal-record plan type, challenges, development overview, per-gradient profile and step-length targets (draft section 0a deferred list); future plan fields require a CoachPlanV1 schema_version bump.",
+    "Whether to extract the provider adapter into a shared AI gateway (02_Platform or an existing 01_System gateway) once a second consumer exists (see CF3c).",
+    "Automatic analysis after upload (would need a second, explicit consent for unattended sending); V1 is click-only.",
+    "Tone/voice choices (voice selection, earcons instead of speech), per-instruction-kind toggles, and phone-side display of the assessment.",
+    "Plan expiry/staleness rules for an accepted plan that is never run (user disregards manually in V1)."
+  ],
+  "risks": [
+    {
+      "risk": "Training data (HR, pace, cadence, weekly volume, goal text) is sent to a third party whose retention and training-use terms Atlas cannot enforce.",
+      "impact": "Privacy exposure beyond the home system; mitigated by opt-in default off, click-only trigger, minimal derived payload without GPS/ids/dates, preview before consent, versioned consent, 24 h cap; residual risk accepted only after the user chooses the provider/plan (CF3a)."
+    },
+    {
+      "risk": "The web analysis endpoint is reachable wherever the shell is reachable and spends external quota.",
+      "impact": "Unwanted calls or cost if the shell exposure is broader than assumed; mitigated by opt-in, daily cap and per-run idempotence; stronger protection would be an Atlas-wide auth decision (CF3b)."
+    },
+    {
+      "risk": "Prompt-injection or hallucination in the AI response (goal_text is user-authored; the response is third-party output).",
+      "impact": "Bad advice in text or an unsuitable plan; mitigated by strict JSON validation, bounded plan schema, interval-frequency rule, text-only rendering, no speaking of AI text, mandatory user accept; physiological suitability is not guaranteed (not safety-critical, user judgement)."
+    },
+    {
+      "risk": "Coaching instructions are spoken while the runner listens to music or when TTS is missing; ducking and routing are unverified on hardware.",
+      "impact": "Missed or annoying instructions; mitigated by text strip, frequency setting, mute, device verification before reliance."
+    },
+    {
+      "risk": "Engine and server disagree about plan time (active time vs. series time) so outcome in-range fractions are approximate.",
+      "impact": "Slightly off outcome percentages; outcomes are advisory input to the next analysis and shown as fractions, not scores."
+    },
+    {
+      "risk": "A linked run that never reaches the server leaves the plan accepted but unusable on the phone cache until refreshed.",
+      "impact": "Plan appears available but the phone copy was already used locally; the user can disregard it in the web UI and request a new analysis."
+    },
+    {
+      "risk": "Adding SpeechOutput's transient ducking focus contradicts the broad reading of the Sprint03 'no audio focus' rule.",
+      "impact": "Reviewer confusion; resolved by SPEECH1 (scoped exception, ClickEngine unchanged)."
+    },
+    {
+      "risk": "Server-side outbound HTTPS from a container that previously had no outbound flow.",
+      "impact": "First egress of RunningTracker; limited by host allow-list, no redirects, key only for the single allow-listed host; no inbound surface added."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "CF1 (roadmap scope conflict) GhostRunner_Roadmap.md lists 'Personalized AI coaching' under 'Explicitly Out of Scope for Now'; this sprint reverses that. The design proceeds on the draft's explicit decision, adds no roadmap edit, and leaves the roadmap contradictory until the user confirms the reversal; on confirmation the entry must move to a new roadmap section (a sprint-close/product task, not an implementer task).",
+      "owner": "product"
+    },
+    {
+      "question": "CF2 (numbering) Roadmap Sprint 4 (First-Run Experience & Standalone Release) is unbuilt and not Sprint04_* in the folder scheme; this work takes folder Sprint04_GhostCoach and the roadmap's former Sprint 4 becomes Sprint05+. Not renumbered here. The standalone goal stays compatible (AI call is server-side and opt-in, runs stay offline) but the Atlas/Tailscale coupling is deepened: the plan cache is fetched over the tailnet and the AI call needs the Atlas server, so a standalone build would have to drop or replace the coach server half. Reconcile the roadmap table when confirming CF1.",
+      "owner": "product"
+    },
+    {
+      "question": "CF3 (external AI exposure and security) First outbound data flow of RunningTracker. Addressed by CO1/EGR1/KEY1/AUD1 and the forbidden list. Needs confirmation: (a) provider and plan: the design defaults to an Anthropic Messages-style endpoint with a single-host allow-list (changing provider means a new adapter and a CONSENT version bump); confirm provider and that its retention/no-training terms are acceptable; model name is operator config, no default; (b) web analysis endpoint exposure rests on the shell's existing access control, no new auth; confirm acceptable; (c) the atlas_dev_ref shows Chronos as an existing 01_System AI gateway not consumed by applications; the design does NOT route through it (no documented caller contract); confirm that a direct app-local adapter is wanted instead.",
+      "owner": "product"
+    },
+    {
+      "question": "CF4 (layer split) The draft puts the live engine, audio and metronome integration in 01_System/AtlasPhone and AI orchestration/profile/plans/outcomes in 03_Application/RunningTracker. Followed. Note the established Sprint01-03 convention that AtlasPhone's running.* package holds running-domain logic (a Manifest purity tension accepted earlier); the new domain-free pieces (SpeechOutput) are in mobile.*, all coaching meaning is in running.coach.*, nothing in 02_Platform.",
+      "owner": "architecture"
+    },
+    {
+      "question": "CF5 Component 03_Application/RunningTracker still has no 00_architecture/ baseline and .claude/supportDocs/atlas_dev_ref.md has no RunningTracker/AtlasPhone entry (carried from Sprint02 OQ3/OQ4, Sprint03 OQ6); artifacts remain delta-only and 10_schema.sql is a full copy of the runtime schema plus the Sprint04 block. No port or name conflict found (grep of 03_Application for coach tables/files: none; host port 8029 loopback unchanged). Snapshot and dev-ref updates are sprint-close tasks.",
+      "owner": "architecture"
+    },
+    {
+      "question": "OQ1 Instruction language and voice: fixed English texts via system TTS default voice. Confirm, or specify German texts (CoachKind text table is one place to change).",
+      "owner": "product"
+    },
+    {
+      "question": "OQ2 The plan clock is active time (elapsed minus pauses), not 'moving' time in the A1 sense (standing still at a traffic light keeps the plan running). Confirm; the implementer must verify which existing LiveMetrics field equals elapsed-minus-pauses and record the choice in agent_rule_evidence.md as an implementer_note.",
+      "owner": "implementer"
+    },
+    {
+      "question": "OQ3 Engine constants (SUSTAIN_S 15, tolerances HR 3 bpm / pace 10 s/km / cadence 3 spm, gaps 90/45/25 s, SETTLE_S 45) are first guesses for talk-free running; expected to be tuned after the first real sessions via CoachConfig only (no schema impact).",
+      "owner": "product"
+    }
+  ]
+}

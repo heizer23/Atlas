@@ -6,6 +6,7 @@
  *   /running/history/:id    -> RunDetailPage (charts, splits, comment; no map)
  *   /running/routes         -> RoutesPage   (route library)
  *   /running/devices        -> DevicesPage  (pair phone, device list)
+ *   /running/coach          -> CoachPage    (AI consent, next session, profile, plan history)
  */
 
 import React from 'react';
@@ -15,6 +16,7 @@ import HistoryPage from './HistoryPage';
 import RunDetailPage from './RunDetailPage';
 import DevicesPage from './DevicesPage';
 import RoutesPage from './RoutesPage';
+import CoachPage from './CoachPage';
 import './running.css';
 
 export default function ShellEntry() {
@@ -25,6 +27,7 @@ export default function ShellEntry() {
       <Route path="/history/:id" element={<RunDetailPage />} />
       <Route path="/routes" element={<RoutesPage />} />
       <Route path="/devices" element={<DevicesPage />} />
+      <Route path="/coach" element={<CoachPage />} />
     </Routes>
   );
 }

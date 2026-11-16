@@ -29,19 +29,27 @@ class MetronomeController(
     private var begun = false
     private var engineOn = false
     private var hasGhost = false
+    private var hasCoach = false
     private var ghostCadence: List<Pair<Double, Double>>? = null
     private var mode = MetronomeMode.OFF
     private var manualSpm = MetronomeConfig.DEFAULT_MANUAL_SPM
     private var volume = MetronomeConfig.DEFAULT_VOLUME
 
     /** Run start / recover: restore the persisted mode (unavailable -> OFF), start the engine only when mode != OFF. */
-    fun begin(hasGhost: Boolean, ghostCadenceByProgress: List<Pair<Double, Double>>?) = synchronized(lock) {
+    fun begin(hasGhost: Boolean, ghostCadenceByProgress: List<Pair<Double, Double>>?, hasCoach: Boolean = false) = synchronized(lock) {
         this.hasGhost = hasGhost
+        this.hasCoach = hasCoach
         ghostCadence = ghostCadenceByProgress
         manualSpm = settings.manualCadenceSpm()
         volume = settings.clickVolume()
         val restored = settings.metronomeMode()
-        mode = if (restored in MetronomeTarget.availableModes(hasGhost)) restored else MetronomeMode.OFF
+        val available = MetronomeTarget.availableModes(hasGhost, hasCoach)
+        // COACH2: the persisted mode is never COACH; a ghost mode that is unavailable while coaching becomes COACH.
+        mode = when {
+            restored in available -> restored
+            hasCoach && restored in listOf(MetronomeMode.MATCH_GHOST, MetronomeMode.ATTACK_102) -> MetronomeMode.COACH
+            else -> MetronomeMode.OFF
+        }
         begun = true
         smoother.reset()
         applyEngine()
@@ -49,13 +57,13 @@ class MetronomeController(
     }
 
     /** 1 Hz. Paused = silence and smoother reset; otherwise raw target -> smoother -> engine. */
-    fun tick(ghostProgressM: Double?, paused: Boolean, nowMillis: Long): MetronomeState = synchronized(lock) {
+    fun tick(ghostProgressM: Double?, paused: Boolean, nowMillis: Long, coachCadenceSpm: Double? = null): MetronomeState = synchronized(lock) {
         var target: Double? = null
         if (begun && mode != MetronomeMode.OFF) {
             if (paused) {
                 smoother.reset()
             } else {
-                val raw = MetronomeTarget.rawTarget(mode, MetronomeTarget.ghostCadenceAt(ghostCadence, ghostProgressM), manualSpm)
+                val raw = MetronomeTarget.rawTarget(mode, MetronomeTarget.ghostCadenceAt(ghostCadence, ghostProgressM), manualSpm, coachCadenceSpm)
                 target = smoother.update(raw, nowMillis)
             }
         }
@@ -64,7 +72,7 @@ class MetronomeController(
     }
 
     fun cycleMode(): MetronomeMode = synchronized(lock) {
-        setModeLocked(MetronomeTarget.next(mode, hasGhost))
+        setModeLocked(MetronomeTarget.next(mode, hasGhost, hasCoach))
         mode
     }
 
@@ -95,7 +103,7 @@ class MetronomeController(
 
     private fun setModeLocked(newMode: MetronomeMode) {
         mode = newMode
-        settings.setMetronomeMode(newMode)
+        if (newMode != MetronomeMode.COACH) settings.setMetronomeMode(newMode)   // COACH is never persisted
         smoother.reset()
         applyEngine()
         publishLabel()

@@ -31,7 +31,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import net.linspad.atlasphone.mobile.MobilePlatform
 import net.linspad.atlasphone.mobile.heartrate.HeartRateMonitor
@@ -125,6 +127,20 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
     var smoothing by remember { mutableStateOf(settings.hrSmoothing()) }
     var manualSpm by remember { mutableIntStateOf(settings.manualCadenceSpm()) }
     var volume by remember { mutableStateOf(settings.clickVolume()) }
+    var coachPlan by remember { mutableStateOf(controller.cachedCoachPlan()) }
+    var coachEnabled by remember { mutableStateOf(controller.coachEnabled()) }
+    var coachFrequency by remember { mutableStateOf(controller.coachFrequency()) }
+    var coachRefreshing by remember { mutableStateOf(false) }
+    // COACH3: fetch the plan when the panel opens and on the button; offline or on error the cached plan stays.
+    fun refreshCoach() {
+        if (coachRefreshing || !controller.tokens.isPaired()) return
+        coachRefreshing = true
+        scope.launch {
+            coachPlan = withContext(Dispatchers.IO) { runCatching { controller.refreshCoachPlan() }.getOrNull() } ?: controller.cachedCoachPlan()
+            coachRefreshing = false
+        }
+    }
+    LaunchedEffect(Unit) { refreshCoach() }
     val gps by platform.location.state.collectAsState()
     val hrState by platform.heartRate.state.collectAsState()
     val hrLatest by platform.heartRate.latest.collectAsState()
@@ -244,6 +260,11 @@ private fun HomePanel(controller: RunController, ensurePermission: (Capability, 
             }
         }
 
+        CoachPlanCard(coachPlan, coachEnabled, coachFrequency, controller.speechAvailable(), coachRefreshing,
+            onEnabled = { coachEnabled = it; controller.setCoachEnabled(it) },
+            onFrequency = { coachFrequency = it; controller.setCoachFrequency(it) },
+            onRefresh = { refreshCoach() })
+
         Button(modifier = Modifier.fillMaxWidth(), onClick = {
             ensurePermission(Capability.LOCATION) { runCatching { controller.startFree(targetHr) }.onFailure { message = it.message } }
         }) { Text("Free Run", fontSize = 22.sp) }
@@ -343,7 +364,8 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
             onReconnectHr = { ensurePermission(Capability.BLUETOOTH) { platform.heartRate.reconnect(); platform.ensureForegroundService(context) } },
             onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmRecovery = recoveryOffered; confirmFinish = true },
             onCycleMetronome = { controller.cycleMetronome() }, onUseManualCadence = { controller.selectMetronomeMode(MetronomeMode.MANUAL) },
-            onManualCadence = { controller.setManualCadence(it) }, onClickVolume = { controller.setClickVolume(it) })
+            onManualCadence = { controller.setManualCadence(it) }, onClickVolume = { controller.setClickVolume(it) },
+            onCoachMute = { controller.setCoachMuted(it) })
     } else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Free run: scrolling cockpit; Pause / Finish stay pinned below it.
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -365,6 +387,7 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
             MetronomeChip(live.metronome, live.cadenceSpm, onCycle = { controller.cycleMetronome() },
                 onUseManual = { controller.selectMetronomeMode(MetronomeMode.MANUAL) },
                 onManualSpm = { controller.setManualCadence(it) }, onVolume = { controller.setClickVolume(it) })
+            CoachStrip(live.coach, { controller.setCoachMuted(it) })   // absent without a coach session
             Text(gpsText)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

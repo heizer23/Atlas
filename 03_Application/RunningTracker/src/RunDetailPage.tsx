@@ -1,7 +1,7 @@
 /** Run detail: summary, pace and heart-rate charts, km splits, comment (U1 round trip). No map. */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { apiFetch, isApiError } from '@platform-ui/api/client';
 import ErrorCard from '@platform-ui/components/ErrorCard';
 import LineChart from '@platform-ui/components/LineChart';
@@ -12,6 +12,7 @@ import type { RunRow } from './HistoryPage';
 import type { RouteRow } from './RoutesPage';
 
 interface RecoveryRow { id: string; run_finished_at: string; recovery_s: number; hr_end: number | null; hr_60: number | null; hr_120: number | null; hrr60: number | null; hrr120: number | null }
+interface AnalysisRow { run_id: string; assessment: string; previous_effect: string | null; plan_rejected_reason: string | null; plan_id: string | null }
 interface SplitRow { id: string; km: number; distance_m: number; duration_s: number; pace_s_per_km: number; avg_hr: number | null; partial: boolean }
 
 export default function RunDetailPage() {
@@ -30,6 +31,9 @@ export default function RunDetailPage() {
   const [saving, setSaving] = useState(false);
   const [routes, setRoutes] = useState<RouteRow[]>([]);
   const [newRoute, setNewRoute] = useState('');
+  const [analysis, setAnalysis] = useState<AnalysisRow | null>(null);
+  const [analysing, setAnalysing] = useState(false);
+  const [coachError, setCoachError] = useState<ApiError | null>(null);
 
   const load = useCallback(async () => {
     const [r, s, p, h, rc, rh, cd] = await Promise.all([
@@ -42,6 +46,10 @@ export default function RunDetailPage() {
       apiFetch<Dataset>(`/runningtracker/runs/${id}/series?metric=cadence`),
     ]);
     for (const res of [r, s, p, h, rc, rh, cd]) if (isApiError(res)) { setError(res); return; }
+    // The coach card never fails the page: a coach error is shown inside the card only.
+    const ca = await apiFetch<Dataset>(`/runningtracker/coach/runs/${id}/analysis`);
+    if (isApiError(ca)) setCoachError(ca);
+    else { setCoachError(null); setAnalysis((ca.rows[0] as unknown as AnalysisRow | undefined) ?? null); }
     const rt = await apiFetch<Dataset>('/runningtracker/routes');
     if (!isApiError(rt)) setRoutes(rt.rows as unknown as RouteRow[]);
     const row = (r as Dataset).rows[0] as unknown as RunRow;
@@ -86,6 +94,15 @@ export default function RunDetailPage() {
     if (isApiError(res)) { setError(res); return; }
     setNewRoute('');
     load();
+  };
+
+  const analyse = async () => {
+    setAnalysing(true);
+    const res = await apiFetch<Dataset>(`/runningtracker/coach/runs/${id}/analysis`, { method: 'POST' });
+    setAnalysing(false);
+    if (isApiError(res)) { setCoachError(res); return; }
+    setCoachError(null);
+    setAnalysis((res.rows[0] as unknown as AnalysisRow | undefined) ?? null);
   };
 
   const remove = async () => {
@@ -179,6 +196,28 @@ export default function RunDetailPage() {
             </tbody>
           </table>
         ) : <span className="running-muted">No splits.</span>}
+      </div>
+
+      <div className="running-card" data-testid="coach-card">
+        <strong>Coach</strong>
+        {analysis && (
+          <>
+            <span data-testid="coach-assessment" style={{ whiteSpace: 'pre-wrap' }}>{analysis.assessment}</span>
+            {analysis.previous_effect && <span className="running-muted" data-testid="coach-previous" style={{ whiteSpace: 'pre-wrap' }}>Previous recommendation: {analysis.previous_effect}</span>}
+            {analysis.plan_id && <span className="running-muted">A next session was recommended. <Link to="/running/coach">Open the Coach page</Link></span>}
+            {!analysis.plan_id && <span className="running-muted" data-testid="coach-no-plan">No session recommended{analysis.plan_rejected_reason ? ` (${analysis.plan_rejected_reason})` : ''}.</span>}
+          </>
+        )}
+        {!analysis && run.status === 'complete' && (
+          <div><button className="running-btn primary" disabled={analysing} onClick={analyse}>{analysing ? 'Analysing...' : 'Analyse run'}</button></div>
+        )}
+        {!analysis && run.status !== 'complete' && <span className="running-muted">Analysis is available once the run has synced.</span>}
+        {coachError && (
+          <span className="running-warn" data-testid="coach-error">
+            {coachError.error.message}
+            {coachError.error.code === 'CONSENT_REQUIRED' && <> <Link to="/running/coach">Go to the Coach page</Link></>}
+          </span>
+        )}
       </div>
 
       <div className="running-card" data-testid="route-card">

@@ -1,0 +1,612 @@
+{
+  "sprint_note": "Delta-only scaffolding (Sprint01-03 convention): lists only files created or changed by Sprint04 Ghost Coach V1 (coach schema/modules/endpoints, finish hook, compose env, web Coach page, phone coach engine/session/speech); everything not listed is unchanged. Constants, plan schema, payload key set and signatures are declared once here.",
+  "component_name": "runningtracker",
+  "target_root": "03_Application/RunningTracker",
+  "cross_layer_note": "Backend, schema and web live under 03_Application/RunningTracker. Native files live under 01_System/AtlasPhone (package net.linspad.atlasphone). The only Mobile Platform addition is the domain-free SpeechOutput (mobile.audio); all coaching meaning lives in package running.coach. Paths in files[] are written out in full; PH = 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone and PT = 01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone (paths below are written in full, PH/PT are only a reading aid). change=new files do not exist yet, change=changed files exist.",
+  "directories": [
+    "[NEW] 03_Application/RunningTracker/backend/prompts",
+    "[NEW] 01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/coach"
+  ],
+  "constants_note": "Python constants live only in backend/config.py (listed in its entry). Kotlin constants live only in CoachConfig / MetronomeConfig; names are not mirrored between the two sides except the plan schema (CoachPlanV1 <-> CoachPlan, parity by tests/fixtures/coach_plan_golden.json) and the trigger/kind vocabulary. Provider call details (header names, request shape) are described once in 10_architecture.json deferrals.application_implementer.",
+  "files": [
+    {
+      "path": "03_Application/RunningTracker/schema.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Runtime copy of 10_schema.sql (single canonical runtime path, R-CON-BP-07): adds coach_settings (seeded row id 1), coach_analyses, coach_ai_calls, coach_plans, coach_profile_items. Idempotent, additive; the Sprint03 part is unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/compose.yml",
+      "change": "changed",
+      "stub_kind": "yaml",
+      "role": "runningtracker service only: four new environment entries RUNNINGTRACKER_COACH_API_KEY, RUNNINGTRACKER_COACH_MODEL, RUNNINGTRACKER_COACH_API_URL, RUNNINGTRACKER_COACH_PROMPT_VERSION, each `${NAME:-}` (empty = unset). The runningtracker-test service, ports (127.0.0.1:8029 only), volumes and networks are NOT changed; no key value is ever written to this file. Rebuild command with both env files is in 10_architecture.json deferrals.application_implementer.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/config.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Single home of server constants; new block 'Ghost Coach' appended (no existing constant changes; ALGO_VERSION stays 3).",
+      "public_objects": [
+        {"kind": "constant", "name": "COACH_CONSENT_VERSION", "pattern": "constant", "methods": [], "value": "1 (bump when PAYLOAD_VERSION, COACH_ALLOWED_HOSTS or the EGR1 data categories change)"},
+        {"kind": "constant", "name": "COACH_PAYLOAD_VERSION", "pattern": "constant", "methods": [], "value": "1"},
+        {"kind": "constant", "name": "COACH_PLAN_SCHEMA_VERSION", "pattern": "constant", "methods": [], "value": "1"},
+        {"kind": "constant", "name": "COACH_PROMPT_VERSION_DEFAULT", "pattern": "constant", "methods": [], "value": "'v1' (file backend/prompts/coach_prompt_<version>.md; an override from the environment must match ^v[0-9]+$)"},
+        {"kind": "constant", "name": "COACH_API_URL_DEFAULT", "pattern": "constant", "methods": [], "value": "'https://api.anthropic.com/v1/messages'"},
+        {"kind": "constant", "name": "COACH_ALLOWED_HOSTS", "pattern": "constant", "methods": [], "value": "('api.anthropic.com',) - changing it is a code change plus a COACH_CONSENT_VERSION bump"},
+        {"kind": "constant", "name": "COACH_MAX_TOKENS", "pattern": "constant", "methods": [], "value": "1500"},
+        {"kind": "constant", "name": "COACH_HTTP_TIMEOUT_S", "pattern": "constant", "methods": [], "value": "60.0"},
+        {"kind": "constant", "name": "COACH_MAX_CALLS_PER_DAY", "pattern": "constant", "methods": [], "value": "10 (attempts in the last 24 h, server clock)"},
+        {"kind": "constant", "name": "COACH_HISTORY_RUNS", "pattern": "constant", "methods": [], "value": "10"},
+        {"kind": "constant", "name": "COACH_MIN_RUN_S", "pattern": "constant", "methods": [], "value": "300.0 (moving time below this is RUN_NOT_ANALYSABLE)"},
+        {"kind": "constant", "name": "COACH_SERIES_STEP_S", "pattern": "constant", "methods": [], "value": "60 (payload series bucket)"},
+        {"kind": "constant", "name": "COACH_MAX_PAYLOAD_BYTES", "pattern": "constant", "methods": [], "value": "60000"},
+        {"kind": "constant", "name": "COACH_MEASURED_WINDOW_RUNS", "pattern": "constant", "methods": [], "value": "10"},
+        {"kind": "constant", "name": "COACH_PACE_MATCH_TOL", "pattern": "constant", "methods": [], "value": "0.10"},
+        {"kind": "constant", "name": "COACH_HR_PACE_MIN_RUNS", "pattern": "constant", "methods": [], "value": "3"},
+        {"kind": "constant", "name": "COACH_MIN_RUNS_INFERRED", "pattern": "constant", "methods": [], "value": "3"},
+        {"kind": "constant", "name": "COACH_MEASURED_KEYS", "pattern": "constant", "methods": [], "value": "('natural_cadence_spm', 'avg_step_length_m', 'hr_at_median_pace_bpm', 'runs_per_week', 'km_per_week', 'pr_fastest_1k_s', 'pr_longest_run_m')"},
+        {"kind": "constant", "name": "COACH_INFERRED_KEYS", "pattern": "constant", "methods": [], "value": "('aerobic_endurance', 'fatigue_drift', 'development_trend')"},
+        {"kind": "constant", "name": "COACH_PLAN_TYPES", "pattern": "constant", "methods": [], "value": "('easy_continuous', 'hr_controlled', 'recovery', 'endurance', 'interval')"},
+        {"kind": "constant", "name": "COACH_SEGMENT_KINDS", "pattern": "constant", "methods": [], "value": "('warmup', 'steady', 'work', 'recovery', 'cooldown')"},
+        {"kind": "constant", "name": "COACH_TRIGGERS", "pattern": "constant", "methods": [], "value": "('hr_high', 'hr_low', 'pace_fast', 'pace_slow', 'cadence_low', 'cadence_high', 'segment_change', 'keep_rhythm', 'sensor_lost')"},
+        {"kind": "constant", "name": "COACH_HR_BOUNDS", "pattern": "constant", "methods": [], "value": "(60, 200) bpm"},
+        {"kind": "constant", "name": "COACH_PACE_BOUNDS_S_PER_KM", "pattern": "constant", "methods": [], "value": "(180, 900)"},
+        {"kind": "constant", "name": "COACH_MIN_RANGE_HR", "pattern": "constant", "methods": [], "value": "6 (bpm); pace 10 s/km as COACH_MIN_RANGE_PACE; cadence 4 spm as COACH_MIN_RANGE_CAD; cadence bounds reuse CAD_MIN_SPM/CAD_MAX_SPM"},
+        {"kind": "constant", "name": "COACH_MIN_RANGE_PACE", "pattern": "constant", "methods": [], "value": "10"},
+        {"kind": "constant", "name": "COACH_MIN_RANGE_CAD", "pattern": "constant", "methods": [], "value": "4"},
+        {"kind": "constant", "name": "COACH_MAX_SEGMENTS", "pattern": "constant", "methods": [], "value": "40"},
+        {"kind": "constant", "name": "COACH_MIN_SEGMENT_S", "pattern": "constant", "methods": [], "value": "20"},
+        {"kind": "constant", "name": "COACH_MIN_PLAN_S", "pattern": "constant", "methods": [], "value": "300"},
+        {"kind": "constant", "name": "COACH_MAX_PLAN_S", "pattern": "constant", "methods": [], "value": "10800"},
+        {"kind": "constant", "name": "COACH_INTERVAL_LOOKBACK_PLANS", "pattern": "constant", "methods": [], "value": "2"},
+        {"kind": "constant", "name": "COACH_OUTCOME_COMPLETED_FRACTION", "pattern": "constant", "methods": [], "value": "0.9"},
+        {"kind": "constant", "name": "COACH_PLAN_LIST_DEFAULT", "pattern": "constant", "methods": [], "value": "20 (COACH_PLAN_LIST_MAX = 50)"},
+        {"kind": "constant", "name": "COACH_PLAN_LIST_MAX", "pattern": "constant", "methods": [], "value": "50"}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/coach_plan.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Pure plan logic (PLAN1, OUT1): schema CoachPlanV1, validation, overrides, rendering, outcome. No database, no clock, no network. CoachPlanV1 (JSON shape, declared once here; Kotlin CoachPlan mirrors it): {schema_version: int (== COACH_PLAN_SCHEMA_VERSION), type: COACH_PLAN_TYPES, title: str 1..80, rationale: str|null <= 400, target_distance_m: number|null > 0, segments: [{kind: COACH_SEGMENT_KINDS, duration_s: int >= COACH_MIN_SEGMENT_S, hr: {min: int, max: int}|null, pace: {fast_s_per_km: int, slow_s_per_km: int}|null, cadence: {min: int, max: int}|null}] (1..COACH_MAX_SEGMENTS items, total duration COACH_MIN_PLAN_S..COACH_MAX_PLAN_S), triggers: [COACH_TRIGGERS] (omitted or empty = all enabled; unknown value = invalid)}. Range rules: lo < hi, hi - lo >= the COACH_MIN_RANGE_* of the dimension, ends within COACH_HR_BOUNDS / COACH_PACE_BOUNDS_S_PER_KM / [CAD_MIN_SPM, CAD_MAX_SPM], fast_s_per_km < slow_s_per_km. Type/segment rules: non-interval types contain only warmup/steady/cooldown with exactly one steady segment; interval contains >= 2 work and >= 1 recovery segment; hr_controlled needs hr on every steady segment. Extra keys are invalid. Reason codes: plan_schema, plan_bounds, plan_type_segments, plan_interval_frequency.",
+      "public_objects": [
+        {"kind": "class", "name": "PlanRejected", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["reason: str"], "returns": "PlanRejected", "purpose": "Exception carrying one of the four reason codes (never AI text)."}]},
+        {"kind": "class", "name": "CoachPlanV1", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["schema_version: int", "type: str", "title: str", "rationale: Optional[str]", "target_distance_m: Optional[float]", "segments: list[dict]", "triggers: list[str] = []"], "returns": "CoachPlanV1", "purpose": "Pydantic model (extra=forbid) for the shape above; to_json() returns the dict stored in coach_plans.plan / active_plan."}]},
+        {"kind": "function", "name": "validate_plan", "pattern": "validator", "methods": [{"name": "validate_plan", "visibility": "public", "args": ["raw: object", "recent_plan_types: list[str]"], "returns": "CoachPlanV1", "purpose": "PLAN1: parse + all bounds/type rules; recent_plan_types = types of the latest COACH_INTERVAL_LOOKBACK_PLANS plans (created_at DESC, statuses other than disregarded/superseded) for the interval-frequency rule; raises PlanRejected."}]},
+        {"kind": "function", "name": "apply_overrides", "pattern": "service", "methods": [{"name": "apply_overrides", "visibility": "public", "args": ["plan: dict", "overrides: dict"], "returns": "CoachPlanV1", "purpose": "PlanOverrides semantics (omitted key unchanged, null clears, object sets; applied to every steady and work segment; target_distance_m at plan level), then validate_plan with recent_plan_types=[] (the frequency rule is not re-applied); raises PlanRejected('plan_bounds' | 'plan_type_segments'); the router maps it to PLAN_INVALID 422."}]},
+        {"kind": "function", "name": "plan_total_s", "pattern": "service", "methods": [{"name": "plan_total_s", "visibility": "public", "args": ["plan: dict"], "returns": "int", "purpose": "Sum of segment durations."}]},
+        {"kind": "function", "name": "plan_summary", "pattern": "mapper", "methods": [{"name": "plan_summary", "visibility": "public", "args": ["plan: dict"], "returns": "str", "purpose": "One-line server-rendered text for PlanRow.summary, e.g. 'Easy continuous - 40 min - HR 130-145 - cadence 165-175'; unknown targets omitted."}]},
+        {"kind": "function", "name": "first_targets", "pattern": "mapper", "methods": [{"name": "first_targets", "visibility": "public", "args": ["plan: dict"], "returns": "dict", "purpose": "hr_min, hr_max, pace_fast_s_per_km, pace_slow_s_per_km, cad_min, cad_max of the first steady/work segment (None = not coached) for PlanRow."}]},
+        {"kind": "function", "name": "compute_outcome", "pattern": "service", "methods": [{"name": "compute_outcome", "visibility": "public", "args": ["plan: dict", "moving_s: float", "pauses: list[tuple[float, float]]", "hr_series: list[list[float]]", "pace_series: list[list[float]]", "cadence_series: list[dict]", "avg_hr: Optional[float]", "avg_pace_s_per_km: Optional[float]", "avg_cadence_spm: Optional[float]"], "returns": "dict", "purpose": "OUT1: pauses are (start_s, end_s) offsets since started_at; active time of a series point t = t - total pause length before t; points beyond plan_total_s or without a segment target are not evaluated; returns {planned_s, done_s, completed, in_range:{hr,pace,cadence}, avg_hr, avg_pace_s_per_km, avg_cadence_spm}; in_range values are fractions rounded to 0.01 or null."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/coach_profile.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Pure profile logic (PROF1). RunFacts is defined in coach_payload.py and imported here (one direction: coach_profile imports coach_payload, never the reverse).",
+      "public_objects": [
+        {"kind": "function", "name": "compute_measured_profile", "pattern": "service", "methods": [{"name": "compute_measured_profile", "visibility": "public", "args": ["window: list[RunFacts]"], "returns": "list[dict]", "purpose": "window = latest COACH_MEASURED_WINDOW_RUNS complete runs, newest first; returns rows {key, value_text, value_num, unit, n_runs} for every COACH_MEASURED_KEYS entry that has a basis (absent otherwise; never 0)."}]},
+        {"kind": "function", "name": "validate_profile_updates", "pattern": "validator", "methods": [{"name": "validate_profile_updates", "visibility": "public", "args": ["updates: list[dict]", "n_runs: int"], "returns": "list[dict]", "purpose": "PROF1: [] when n_runs < COACH_MIN_RUNS_INFERRED; else keeps entries with key in COACH_INFERRED_KEYS, value text 1..200 chars, confidence number in [0,1] capped at min(0.9, 0.2 + 0.1 x n_runs); unknown keys and malformed entries are dropped; at most one entry per key (first wins)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/coach_payload.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Allow-list payload builder (PAY1, EGR1). The ONLY code that shapes what is sent. PAYLOAD_V1_KEYS (declared once here) = {payload_version, plan_schema_version, goal, profile: [{key, basis, value_text, value_num, unit, confidence}], current_run: RUN + {splits: [{km, duration_s, pace_s_per_km, avg_hr}], first_half: {avg_pace_s_per_km, avg_hr}, second_half: {avg_pace_s_per_km, avg_hr}, series: {step_s, pace: [number|null], hr: [number|null], cadence: [number|null]}}, history: [RUN], previous_recommendation: {plan_type, planned_s, status, outcome: {completed, in_range: {hr, pace, cadence}, avg_hr, avg_pace_s_per_km, avg_cadence_spm}}|null}; RUN = {days_before, weekday, run_kind, distance_m, moving_s, avg_pace_s_per_km, avg_hr, max_hr, avg_cadence_spm, avg_step_length_m, hrr60, hrr120, followed_plan: {plan_type, completed, in_range: {hr, pace, cadence}}|null}. No other key may appear at any depth; values are numbers, short strings from fixed vocabularies, nulls, or the user's goal text.",
+      "public_objects": [
+        {"kind": "constant", "name": "PAYLOAD_V1_KEYS", "pattern": "constant", "methods": [], "value": "the key set described in the role field (a nested dict of allowed keys used by the builder and by tests to assert the allow-list)"},
+        {"kind": "class", "name": "RunFacts", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["started_at: datetime", "run_kind: str", "distance_m: float", "moving_s: float", "avg_hr: Optional[float]", "max_hr: Optional[int]", "avg_cadence_spm: Optional[float]", "hrr60: Optional[float]", "hrr120: Optional[float]", "splits: list[dict]", "pace_series: list[list[float]]", "hr_series: list[list[float]]", "cadence_series: list[dict]", "pauses: list[tuple[float, float]]", "plan_type: Optional[str]", "plan_outcome: Optional[dict]"], "returns": "RunFacts", "purpose": "Domain-time facts of one complete run read from runs/run_metrics/run_pauses/coach_plans by coach_store; started_at is used only to derive days_before/weekday/windows and is never emitted."}]},
+        {"kind": "function", "name": "build_payload", "pattern": "mapper", "methods": [{"name": "build_payload", "visibility": "public", "args": ["current: RunFacts", "history: list[RunFacts]", "profile: list[dict]", "goal_text: Optional[str]", "previous_plan: Optional[dict]"], "returns": "dict", "purpose": "PAY1: builds PayloadV1 from explicit fields only (rounding rules, series bucketing to COACH_SERIES_STEP_S, first/second half by active time, history ordered started_at DESC, oldest history dropped until the compact JSON <= COACH_MAX_PAYLOAD_BYTES); never accepts or serialises raw rows."}]},
+        {"kind": "function", "name": "to_wire", "pattern": "mapper", "methods": [{"name": "to_wire", "visibility": "public", "args": ["payload: dict"], "returns": "str", "purpose": "Compact JSON (sort_keys, no spaces) = the exact user-message content, the bytes counted by byte_size and stored in coach_analyses.sent_payload."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/coach_ai.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "App-local provider adapter and AI response parsing (EGR1, KEY1, VAL1). Reads the environment once per call (no module-level secret copy), never logs request/response bodies or the key, never follows redirects, refuses any host outside COACH_ALLOWED_HOSTS before connecting. CoachAiResponse (declared once here): {assessment: str 1..1500, previous_recommendation_effect: str|null <= 600, profile_updates: [{key: str, value: str, confidence: number}] (max 10), next_session: object|null} with extra top-level keys forbidden; next_session is carried as a raw object and validated by coach_plan.validate_plan.",
+      "public_objects": [
+        {"kind": "class", "name": "ProviderConfig", "pattern": "data_model", "methods": [
+          {"name": "__init__", "visibility": "public", "args": ["api_key: Optional[str]", "model: Optional[str]", "url: str", "prompt_version: str"], "returns": "ProviderConfig", "purpose": "From RUNNINGTRACKER_COACH_* environment; empty strings count as unset; url default COACH_API_URL_DEFAULT; prompt_version default COACH_PROMPT_VERSION_DEFAULT, invalid pattern falls back to the default."},
+          {"name": "configured", "visibility": "public", "args": [], "returns": "bool", "purpose": "True iff api_key and model are set and the url host is in COACH_ALLOWED_HOSTS and scheme is https; a host outside the allow-list therefore yields configured() false (AI_NOT_CONFIGURED 503, key_configured false, no call row)."},
+          {"name": "destination_host", "visibility": "public", "args": [], "returns": "Optional[str]", "purpose": "Host part of url for display (never the key)."}
+        ]},
+        {"kind": "function", "name": "provider_config", "pattern": "factory", "methods": [{"name": "provider_config", "visibility": "public", "args": [], "returns": "ProviderConfig", "purpose": "Reads os.environ."}]},
+        {"kind": "function", "name": "load_prompt", "pattern": "repository", "methods": [{"name": "load_prompt", "visibility": "public", "args": ["version: str"], "returns": "str", "purpose": "Reads backend/prompts/coach_prompt_<version>.md; version must match ^v[0-9]+$ (no path building from other input); missing file raises ProviderError('prompt_missing')."}]},
+        {"kind": "class", "name": "ProviderError", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["code: str"], "returns": "ProviderError", "purpose": "Network/TLS/timeout/redirect/non-200/host-not-allowed (defensive only: unreachable from the analysis route because configured() requires an allowed host and returns AI_NOT_CONFIGURED 503 first)/prompt_missing; maps to AI_UNAVAILABLE; carries a short code only."}]},
+        {"kind": "class", "name": "InvalidAiResponse", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["code: str"], "returns": "InvalidAiResponse", "purpose": "Non-JSON, wrong shape, extra keys, bound violations of assessment fields; maps to AI_INVALID_RESPONSE."}]},
+        {"kind": "function", "name": "call_provider", "pattern": "service", "methods": [{"name": "call_provider", "visibility": "public", "args": ["cfg: ProviderConfig", "system: str", "user_json: str", "transport: Optional[httpx.BaseTransport] = None"], "returns": "str", "purpose": "One HTTPS POST (timeout COACH_HTTP_TIMEOUT_S, follow_redirects False); returns the text of the first text content block; transport is the test seam (fake provider); raises ProviderError."}]},
+        {"kind": "class", "name": "CoachAiResponse", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["assessment: str", "previous_recommendation_effect: Optional[str]", "profile_updates: list[dict]", "next_session: Optional[dict]"], "returns": "CoachAiResponse", "purpose": "Pydantic model (extra=forbid) for the shape in the role field."}]},
+        {"kind": "function", "name": "parse_ai_response", "pattern": "validator", "methods": [{"name": "parse_ai_response", "visibility": "public", "args": ["text: str"], "returns": "CoachAiResponse", "purpose": "Strips an optional single markdown code fence, json-parses to one object, validates; raises InvalidAiResponse."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/coach_store.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Repository for the coach tables and the finish hook. All functions take an open psycopg2 connection (callers use get_db()); none of them performs a network call. Transaction boundaries are owned by the router/native.finish caller.",
+      "public_objects": [
+        {"kind": "function", "name": "get_settings", "pattern": "repository", "methods": [{"name": "get_settings", "visibility": "public", "args": ["conn"], "returns": "dict", "purpose": "The single coach_settings row."}]},
+        {"kind": "function", "name": "update_settings", "pattern": "repository", "methods": [{"name": "update_settings", "visibility": "public", "args": ["conn", "fields: dict", "current_consent_version: int"], "returns": "dict", "purpose": "CO1/Q4 PATCH semantics: only keys present in `fields` change (ai_enabled with consent_version check -> AppError CONSENT_VERSION_MISMATCH 422; ai_enabled false clears consent; goal_text None/blank clears, > 500 -> 422)."}]},
+        {"kind": "function", "name": "count_calls_24h", "pattern": "repository", "methods": [{"name": "count_calls_24h", "visibility": "public", "args": ["conn"], "returns": "int", "purpose": "Provider attempts in the last 24 h (server clock)."}]},
+        {"kind": "function", "name": "record_call", "pattern": "repository", "methods": [{"name": "record_call", "visibility": "public", "args": ["conn", "run_id: str", "outcome: str"], "returns": "None", "purpose": "Insert a coach_ai_calls row (outcome ok | provider_error | invalid_response); committed by the caller in its own short transaction."}]},
+        {"kind": "function", "name": "load_run_bundle", "pattern": "repository", "methods": [{"name": "load_run_bundle", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "Optional[tuple[RunFacts, list[RunFacts], list[dict], Optional[str], Optional[dict]]]", "purpose": "(current RunFacts, history RunFacts (latest COACH_HISTORY_RUNS complete runs that started before the current one, newest first), profile rows, goal_text, previous plan dict {plan_type, planned_s, status, outcome} = the newest coach_plans row created before this analysis); None when the run is unknown; raises AppError RUN_NOT_ANALYSABLE 409 when not complete, no metrics or moving_s < COACH_MIN_RUN_S."}]},
+        {"kind": "function", "name": "save_analysis", "pattern": "repository", "methods": [{"name": "save_analysis", "visibility": "public", "args": ["conn", "run_id: str", "response: CoachAiResponse", "profile_updates: list[dict]", "plan: Optional[CoachPlanV1]", "plan_rejected_reason: Optional[str]", "sent_payload: dict", "model: str", "prompt_version: str", "n_runs: int", "force: bool"], "returns": "dict", "purpose": "One transaction: upsert coach_analyses (same id on force), upsert inferred coach_profile_items, refresh measured rows (compute_measured_profile), supersede the still-recommended plan of this analysis when force, insert the new recommended plan; returns the analysis row incl. plan_id."}]},
+        {"kind": "function", "name": "get_analysis", "pattern": "repository", "methods": [{"name": "get_analysis", "visibility": "public", "args": ["conn", "run_id: str"], "returns": "Optional[dict]", "purpose": "Analysis row joined with the plan id created by it, or None."}]},
+        {"kind": "function", "name": "list_profile", "pattern": "repository", "methods": [{"name": "list_profile", "visibility": "public", "args": ["conn"], "returns": "list[dict]", "purpose": "Ordered by basis (measured first) then key ASC."}]},
+        {"kind": "function", "name": "next_session", "pattern": "repository", "methods": [{"name": "next_session", "visibility": "public", "args": ["conn"], "returns": "Optional[dict]", "purpose": "Accepted plan without run (newest decided_at), else newest recommended, else None."}]},
+        {"kind": "function", "name": "list_plans", "pattern": "repository", "methods": [{"name": "list_plans", "visibility": "public", "args": ["conn", "limit: int"], "returns": "list[dict]", "purpose": "created_at DESC, id ASC."}]},
+        {"kind": "function", "name": "decide_plan", "pattern": "repository", "methods": [{"name": "decide_plan", "visibility": "public", "args": ["conn", "plan_id: str", "status: str", "overrides: Optional[dict]", "overrides_present: bool"], "returns": "dict", "purpose": "PLAN1 transitions (404 / INVALID_TRANSITION 409 / PLAN_INVALID 422), apply_overrides, supersede other unlinked accepted plans, stamp decided_at; overrides_present distinguishes {} from absent only for the accepted->accepted re-modify rule."}]},
+        {"kind": "function", "name": "active_plan_for_phone", "pattern": "repository", "methods": [{"name": "active_plan_for_phone", "visibility": "public", "args": ["conn"], "returns": "Optional[dict]", "purpose": "{plan_id, schema_version, plan} of the accepted plan without run (newest decided_at) or None."}]},
+        {"kind": "function", "name": "on_run_finished", "pattern": "repository", "methods": [{"name": "on_run_finished", "visibility": "public", "args": ["conn", "run_id: str", "coach_plan_id: Optional[str]"], "returns": "None", "purpose": "OUT1 + step 30: link plan when accepted and unlinked, compute and store outcome and status completed for the plan linked to this run (replay-safe), refresh measured profile rows. Never raises to the caller (logs and swallows)."}]},
+        {"kind": "function", "name": "refresh_measured_profile", "pattern": "repository", "methods": [{"name": "refresh_measured_profile", "visibility": "public", "args": ["conn"], "returns": "int", "purpose": "Loads the window, calls compute_measured_profile, upserts rows, deletes measured rows that no longer have a basis; returns the window size, which equals count_window_runs at the same moment; save_analysis persists the pre-step n_runs it was given and does not recompute it."}]},
+        {"kind": "function", "name": "count_window_runs", "pattern": "repository", "methods": [{"name": "count_window_runs", "visibility": "public", "args": ["conn"], "returns": "int", "purpose": "PROF1 pre-step, called by run_analysis after load_run_bundle and before validate_profile_updates: min(COACH_MEASURED_WINDOW_RUNS, number of complete runs with metrics), counted over the latest runs overall (including runs newer than the analysed one). Its value is the n_runs passed to validate_profile_updates and save_analysis."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/coach_datasets.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Dataset builders for the row shapes declared in 10_architecture.json exposed_surfaces (SettingsRow, PreviewRow, AnalysisRow, ProfileRow, PlanRow). Uses datasets._col/_dataset/ds_response (import, do not copy). Empty cases return datasets.empty_dataset-style empty Datasets with the same schema.",
+      "public_objects": [
+        {"kind": "function", "name": "settings_dataset", "pattern": "mapper", "methods": [{"name": "settings_dataset", "visibility": "public", "args": ["settings: dict", "cfg: ProviderConfig", "calls_24h: int"], "returns": "Dataset", "purpose": "SettingsRow; key_configured = cfg.configured(); never includes the key."}]},
+        {"kind": "function", "name": "preview_dataset", "pattern": "mapper", "methods": [{"name": "preview_dataset", "visibility": "public", "args": ["payload: dict", "cfg: ProviderConfig"], "returns": "Dataset", "purpose": "PreviewRow; payload_json pretty-printed from the same dict that to_wire() compacts."}]},
+        {"kind": "function", "name": "analysis_dataset", "pattern": "mapper", "methods": [{"name": "analysis_dataset", "visibility": "public", "args": ["row: Optional[dict]"], "returns": "Dataset", "purpose": "AnalysisRow, or an empty Dataset for None."}]},
+        {"kind": "function", "name": "profile_dataset", "pattern": "mapper", "methods": [{"name": "profile_dataset", "visibility": "public", "args": ["rows: list[dict]"], "returns": "Dataset", "purpose": "ProfileRow with a human label per key."}]},
+        {"kind": "function", "name": "plans_dataset", "pattern": "mapper", "methods": [{"name": "plans_dataset", "visibility": "public", "args": ["rows: list[dict]"], "returns": "Dataset", "purpose": "PlanRow list (plan_summary/first_targets from active_plan when present else plan; outcome_summary one line or None)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/coach.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Two routers in one file. `router` (prefix /coach, web, same exposure as runs.py) and `native_router` (prefix /native/coach, dependencies native_guard like routers/native.py; route depends on require_device). Failures use AppError -> platform ApiError envelope; codes listed in 10_architecture.json failure_modes. analysis does NOT hold a DB connection during call_provider (read bundle -> close -> call -> new transaction to save). Flow steps 27-31 of 10_architecture.json.",
+      "public_objects": [
+        {"kind": "class", "name": "SettingsPatch", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["ai_enabled: Optional[bool] = None", "consent_version: Optional[int] = None", "goal_text: Optional[str] = None"], "returns": "SettingsPatch", "purpose": "Strict body; presence is read from model_fields_set so omitted and explicit null differ (R-CON-AL-04)."}]},
+        {"kind": "class", "name": "PlanPatch", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["status: Literal['accepted','disregarded']", "overrides: Optional[dict] = None"], "returns": "PlanPatch", "purpose": "Strict body; overrides allowed only with accepted; key presence inside overrides is preserved (omitted vs null)."}]},
+        {"kind": "function", "name": "get_settings_route", "pattern": "router", "methods": [{"name": "get_settings_route", "visibility": "public", "args": [], "returns": "JSONResponse", "purpose": "GET /coach/settings"}]},
+        {"kind": "function", "name": "patch_settings_route", "pattern": "router", "methods": [{"name": "patch_settings_route", "visibility": "public", "args": ["body: SettingsPatch"], "returns": "JSONResponse", "purpose": "PATCH /coach/settings"}]},
+        {"kind": "function", "name": "get_analysis_preview", "pattern": "router", "methods": [{"name": "get_analysis_preview", "visibility": "public", "args": ["run_id: str"], "returns": "JSONResponse", "purpose": "GET /coach/analysis-preview?run_id= (run_id is a required query param); no outbound call."}]},
+        {"kind": "function", "name": "post_analysis", "pattern": "router", "methods": [{"name": "post_analysis", "visibility": "public", "args": ["run_id: str", "force: bool = False"], "returns": "JSONResponse", "purpose": "POST /coach/runs/{run_id}/analysis with the ordered checks of the surface definition; provider transport comes from a module-level seam `_transport` (None in production, set by tests)."}]},
+        {"kind": "function", "name": "get_run_analysis", "pattern": "router", "methods": [{"name": "get_run_analysis", "visibility": "public", "args": ["run_id: str"], "returns": "JSONResponse", "purpose": "GET /coach/runs/{run_id}/analysis"}]},
+        {"kind": "function", "name": "get_profile", "pattern": "router", "methods": [{"name": "get_profile", "visibility": "public", "args": [], "returns": "JSONResponse", "purpose": "GET /coach/profile"}]},
+        {"kind": "function", "name": "get_next_session", "pattern": "router", "methods": [{"name": "get_next_session", "visibility": "public", "args": [], "returns": "JSONResponse", "purpose": "GET /coach/next-session"}]},
+        {"kind": "function", "name": "get_plans", "pattern": "router", "methods": [{"name": "get_plans", "visibility": "public", "args": ["limit: int = COACH_PLAN_LIST_DEFAULT"], "returns": "JSONResponse", "purpose": "GET /coach/plans (limit outside 1..COACH_PLAN_LIST_MAX = 422)"}]},
+        {"kind": "function", "name": "patch_plan", "pattern": "router", "methods": [{"name": "patch_plan", "visibility": "public", "args": ["plan_id: str", "body: PlanPatch"], "returns": "JSONResponse", "purpose": "PATCH /coach/plans/{plan_id}"}]},
+        {"kind": "function", "name": "native_next_plan", "pattern": "router", "methods": [{"name": "native_next_plan", "visibility": "public", "args": ["device: DeviceContext"], "returns": "dict", "purpose": "GET /native/coach/next-plan -> NextPlanResponse (active_plan_for_phone or all-null record)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/prompts/coach_prompt_v1.md",
+      "change": "new",
+      "stub_kind": "markdown",
+      "role": "Versioned system prompt (static text, contains no user data). Required content is listed in 10_architecture.json deferrals.application_implementer (prompt file bullet). Changing the prompt = new file coach_prompt_v2.md and a new configured version; prompt_version is stored with every analysis.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/main.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Import routers.coach and include `coach.router` and `coach.native_router` under prefix /api/runningtracker (same pattern as the existing four includes). No other change.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/models.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "FinishRequest gains `coach_plan_id: Optional[str] = None` next to route_id/ghost_run_id (same 'unknown ids are ignored' comment). Usages of FinishRequest found by grep: routers/native.py (finish), tests/test_native_sync.py (bodies built as dicts; no change needed). Extra keys stay forbidden (deploy order C3).",
+      "public_objects": [
+        {"kind": "class", "name": "FinishRequest", "pattern": "data_model", "methods": [{"name": "__init__", "visibility": "public", "args": ["... existing fields unchanged ...", "coach_plan_id: Optional[str] = None"], "returns": "FinishRequest", "purpose": "CHANGED: coach_plan_id appended."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/backend/routers/native.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "finish(): after recompute_and_store and recompute_progress succeed with result 'complete' (existing line ~250-253 region), call coach_store.on_run_finished(conn, rid, _opt_uuid(body.coach_plan_id)); on_run_finished swallows its own errors, so the finish transaction/response is unchanged. Imports: backend.coach_store. No other change (usages of native.finish callers: tests/test_native_sync.py).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/conftest.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "clean_tables(): extend the truncate list with the five coach tables (runningtracker.coach_plans, coach_analyses, coach_ai_calls, coach_profile_items, coach_settings) and re-insert the coach_settings seed row (id 1) from fixtures.sql after truncation; add a fixture that installs a fake provider transport into routers.coach._transport and removes it afterwards (tests must never perform a network call).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures.sql",
+      "change": "changed",
+      "stub_kind": "sql",
+      "role": "Extend (do not remove rows): coach_settings row id 1 (ai_enabled false); complete runs fix-run-coach-1..4 with run_metrics (splits, pace/hr series, cadence object, recovery) and distinct started_at days so history/window rules are testable (title/comment/category/route/GPS values deliberately contain recognisable marker strings such as 'SECRET-TITLE' for the egress tests); coach_plans fix-plan-recommended, fix-plan-accepted (active_plan set, no run), fix-plan-accepted-linked (run_id = fix-run-coach-2, outcome null), fix-plan-disregarded, fix-plan-interval (for the frequency rule); coach_profile_items one measured and one inferred row.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/fixtures/coach_plan_golden.json",
+      "change": "new",
+      "stub_kind": "json",
+      "role": "Shared oracle for PLAN1 read by pytest (validate_plan/apply_overrides) AND Kotlin CoachPlanTest (path relative to 01_System/AtlasPhone as the other golden files). Cases: valid easy_continuous, hr_controlled, interval (6 x work/recovery), recovery; invalid: unknown type, hr range too narrow, hr outside bounds, fast >= slow, extra key, schema_version 2 (Kotlin: Unsupported, server: plan_schema), interval without recovery, non-interval with work segment, hr_controlled without hr, > 40 segments, total > 3 h, duplicate/unknown trigger; overrides: set, clear with null, omitted keeps, clear hr on hr_controlled rejected.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_coach_plan.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "coach_plan_golden.json cases, apply_overrides semantics, compute_outcome (pause shift, in-range fractions, null when no targets, completed threshold), plan_summary/first_targets.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_coach_profile.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "compute_measured_profile (values, absent-not-zero, hr_at_median_pace minimum runs, PRs, 28-day window in domain time) and validate_profile_updates (n_runs minimum, confidence cap, unknown keys dropped).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_coach_payload.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Egress allow-list tests: recursive key set equals PAYLOAD_V1_KEYS; none of the fixture marker strings (title/comment/category/route name), uuids, ISO timestamps or lat/lon-like values occur in to_wire(); history order and truncation by COACH_MAX_PAYLOAD_BYTES; rounding; nulls not zeros.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_coach_api.py",
+      "change": "new",
+      "stub_kind": "python_module",
+      "role": "Endpoint scenarios of 10_test_spec.md with the fake provider transport: settings and consent, preview, analysis happy path/idempotence/force/each error code in order, rate cap, plan rejection keeps assessment, profile/next-session/plans reads, plan PATCH transitions and overrides (null vs omit), native next-plan (token required), finish hook (link, outcome, replay, swallowed errors), key never in responses/logs/rows.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/test_native_sync.py",
+      "change": "changed",
+      "stub_kind": "python_module",
+      "role": "Add finish cases with and without coach_plan_id (old body without the key still 200; unknown/malformed id ignored); existing assertions unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/CoachPage.tsx",
+      "change": "new",
+      "stub_kind": "react_component",
+      "role": "Route /running/coach. Sections per flow step 36 and ui_implementer deferral: consent/settings, next recommended session (Accept / Modify / Disregard), profile table, plan history. Reads Datasets via apiFetch (ErrorCard on ApiError), mutations via PATCH with the null/omit payload rules of the surface definitions; no new CSS classes.",
+      "public_objects": [
+        {"kind": "function", "name": "CoachPage", "pattern": "view", "methods": [{"name": "CoachPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "Renders flow step 36."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/RunDetailPage.tsx",
+      "change": "changed",
+      "stub_kind": "react_component",
+      "role": "Adds one request (GET /coach/runs/{id}/analysis; an ApiError shows the existing ErrorCard) and a Coach card after the existing cards: stored assessment/previous_effect as plain text, plan_rejected_reason note, 'Analyse run' button (POST analysis, disabled while pending, ApiError message inline, link to /running/coach on CONSENT_REQUIRED). No other card changes.",
+      "public_objects": [
+        {"kind": "function", "name": "RunDetailPage", "pattern": "view", "methods": [{"name": "RunDetailPage", "visibility": "public", "args": [], "returns": "JSX.Element", "purpose": "CHANGED: coach card."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/ShellEntry.tsx",
+      "change": "changed",
+      "stub_kind": "react_component",
+      "role": "Adds <Route path='/coach' element={<CoachPage />} /> and the header comment line. No other change.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/src/shellConfig.ts",
+      "change": "changed",
+      "stub_kind": "typescript_module",
+      "role": "Adds the nav entry { id: 'running-coach', label: 'Coach', path: '/running/coach', order: 5 } to the shared nav array.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "03_Application/RunningTracker/tests/ui/running_web.spec.ts",
+      "change": "changed",
+      "stub_kind": "playwright_spec",
+      "role": "Add the [UI] scenarios of 10_test_spec.md with stubbed API responses (existing pattern); the stub for GET /coach/runs/{id}/analysis must be added to every existing run-detail test so they keep passing.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/audio/SpeechOutput.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Mobile Platform capability (domain-free): speak a string through Android TextToSpeech (lazy init, USAGE_ASSISTANCE_NAVIGATION_GUIDANCE, AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK requested around each utterance and abandoned when it ends, SPEECH1). Never throws, never blocks the caller (init and speech are asynchronous), never touches location/HR/capture/ClickEngine. ClickEngine keeps its no-focus rule.",
+      "public_objects": [
+        {"kind": "class", "name": "SpeechOutput", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["context: Context", "log: (String) -> Unit"], "returns": "SpeechOutput", "purpose": "No TTS engine is created at construction."},
+          {"name": "state", "visibility": "public", "args": [], "returns": "StateFlow<SpeechOutput.State>", "purpose": "IDLE | READY | UNAVAILABLE (engine init failed or language not supported)."},
+          {"name": "speak", "visibility": "public", "args": ["text: String"], "returns": "Boolean", "purpose": "Queue-flush speak; false when UNAVAILABLE or not yet initialised (caller shows text only)."},
+          {"name": "stop", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Stop speaking, release focus and the engine. Idempotent."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/mobile/MobilePlatform.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Adds `val speech = SpeechOutput(app, ::log)`; stopAll() additionally calls speech.stop(). The `active` flow is not extended. Usages of MobilePlatform members found by grep: RunController, RecordingService, MobileTestActivity (no change needed there).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/coach/CoachPlan.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Phone model and strict parser of CoachPlanV1 (shape declared once in backend/coach_plan.py; this mirrors it, parity by coach_plan_golden.json). The phone does not re-apply the server's bounds except what the engine needs to be safe (non-empty segments, positive durations, lo < hi); schema_version != 1 yields Unsupported.",
+      "public_objects": [
+        {"kind": "class", "name": "SegmentKind", "pattern": "enum", "methods": [], "values": "WARMUP, STEADY, WORK, RECOVERY, COOLDOWN (wire names lower-case)"},
+        {"kind": "class", "name": "CoachTrigger", "pattern": "enum", "methods": [], "values": "HR_HIGH, HR_LOW, PACE_FAST, PACE_SLOW, CADENCE_LOW, CADENCE_HIGH, SEGMENT_CHANGE, KEEP_RHYTHM, SENSOR_LOST (wire names lower-case = COACH_TRIGGERS)"},
+        {"kind": "class", "name": "TargetRange", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["lo: Double", "hi: Double"], "returns": "TargetRange", "purpose": "Inclusive range; for pace lo = fast_s_per_km, hi = slow_s_per_km."}]},
+        {"kind": "class", "name": "CoachSegment", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["kind: SegmentKind", "durationS: Int", "hr: TargetRange?", "pace: TargetRange?", "cadence: TargetRange?"], "returns": "CoachSegment", "purpose": "null target = dimension not coached in this segment."}]},
+        {"kind": "class", "name": "CoachPlan", "pattern": "data_model", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["planId: String", "type: String", "title: String", "targetDistanceM: Double?", "segments: List<CoachSegment>", "triggers: Set<CoachTrigger>"], "returns": "CoachPlan", "purpose": "triggers empty in the wire plan = all triggers."},
+          {"name": "totalS", "visibility": "public", "args": [], "returns": "Int", "purpose": "Sum of segment durations."},
+          {"name": "segmentIndexAt", "visibility": "public", "args": ["activeS: Double"], "returns": "Int?", "purpose": "Index of the segment containing activeS ([start, end)); null at or after totalS."},
+          {"name": "segmentStartS", "visibility": "public", "args": ["index: Int"], "returns": "Int", "purpose": "Cumulative start of a segment."}
+        ]},
+        {"kind": "class", "name": "CoachPlanParse", "pattern": "data_model", "methods": [], "values": "sealed result: Ok(plan: CoachPlan) | Unsupported(schemaVersion: Int) | Invalid(reason: String)"},
+        {"kind": "function", "name": "parseCoachPlan", "pattern": "mapper", "methods": [{"name": "parseCoachPlan", "visibility": "public", "args": ["planId: String", "planJson: String"], "returns": "CoachPlanParse", "purpose": "Parse the `plan` object of NextPlanResponse; never throws."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/coach/CoachEngine.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Pure deterministic COACH1 (definition in 10_architecture.json invariant COACH1). No Android, no clock, no I/O, no randomness; all time comes from CoachInput.activeS. Texts are the fixed table of CoachKind (English, OQ1). Constants (declared once here): SUSTAIN_S=15, SETTLE_S=45, HR_TOL_BPM=3.0, PACE_TOL_S=10.0, CAD_TOL_SPM=3.0, HR_STALE_S=10.0, SEGMENT_WARN_S=30, GAP_LOW_S=90, GAP_NORMAL_S=45, GAP_HIGH_S=25, KIND_COOLDOWN_MULT=3, MAINTAIN_S=180, MAINTAIN_QUIET_S=300, SENSOR_LOST_S=20, SENSOR_GRACE_S=30, SENSOR_NOTICE_COOLDOWN_S=300, CAD_STEP_MIN=2, CAD_STEP_MAX=5, DISPLAY_S=20.",
+      "public_objects": [
+        {"kind": "constant", "name": "CoachConfig", "pattern": "constant", "methods": [], "value": "object with the constants listed in the role field"},
+        {"kind": "class", "name": "CoachFrequency", "pattern": "enum", "methods": [], "values": "LOW, NORMAL, HIGH (default NORMAL; mapped to GAP_*_S)"},
+        {"kind": "class", "name": "CoachKind", "pattern": "enum", "methods": [], "values": "HR_HIGH, HR_LOW, PACE_TOO_FAST, PACE_TOO_SLOW, CADENCE_LOW, CADENCE_HIGH, KEEP_RHYTHM, SEGMENT_START, SEGMENT_SOON, SENSOR_LOST_HR, SENSOR_LOST_GPS, PLAN_DONE; trigger mapping: HR_HIGH->hr_high, HR_LOW->hr_low, PACE_TOO_FAST->pace_fast, PACE_TOO_SLOW->pace_slow, CADENCE_LOW->cadence_low, CADENCE_HIGH->cadence_high, KEEP_RHYTHM->keep_rhythm, SEGMENT_START/SEGMENT_SOON/PLAN_DONE->segment_change, SENSOR_LOST_*->sensor_lost"},
+        {"kind": "class", "name": "CoachInput", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["activeS: Double", "paused: Boolean", "hrBpm: Double?", "hrAgeS: Double?", "paceSPerKm: Double?", "cadenceSpm: Double?"], "returns": "CoachInput", "purpose": "One tick of live data; activeS = elapsed minus completed pauses (OQ2); nulls = no valid reading (never 0)."}]},
+        {"kind": "class", "name": "CoachSettings", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["enabled: Boolean", "muted: Boolean", "frequency: CoachFrequency"], "returns": "CoachSettings", "purpose": "enabled persisted (RunSettings), muted session-only, frequency persisted."}]},
+        {"kind": "class", "name": "CoachInstruction", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["kind: CoachKind", "text: String", "activeS: Double"], "returns": "CoachInstruction", "purpose": "What to say and show."}]},
+        {"kind": "class", "name": "CoachState", "pattern": "data_model", "methods": [
+          {"name": "initial", "visibility": "public", "args": ["plan: CoachPlan", "startActiveS: Double"], "returns": "CoachState", "purpose": "Companion: fresh state; segments that started before startActiveS are marked as started/warned (recovery mid-plan emits no replayed announcements)."}
+        ]},
+        {"kind": "class", "name": "CoachStepResult", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["state: CoachState", "instruction: CoachInstruction?"], "returns": "CoachStepResult", "purpose": "At most one instruction per tick."}]},
+        {"kind": "constant", "name": "CoachEngine", "pattern": "service", "methods": [
+          {"name": "step", "visibility": "public", "args": ["plan: CoachPlan", "state: CoachState", "input: CoachInput", "settings: CoachSettings"], "returns": "CoachStepResult", "purpose": "COACH1 rules 0-8 in the stated order; pure function of its arguments."},
+          {"name": "currentCadenceTarget", "visibility": "public", "args": ["plan: CoachPlan", "activeS: Double"], "returns": "Double?", "purpose": "COACH2: midpoint of the current segment's cadence range; null without target or after the plan."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/coach/CoachPlanStore.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Local cache of the active plan (SharedPreferences atlas_coach: plan_id, plan_json, fetched_at epoch ms for display only). Recreatable from the server (P4); never uploaded.",
+      "public_objects": [
+        {"kind": "class", "name": "CoachPlanStore", "pattern": "repository", "methods": [
+          {"name": "create", "visibility": "public", "args": ["context: Context"], "returns": "CoachPlanStore", "purpose": "Companion factory."},
+          {"name": "load", "visibility": "public", "args": [], "returns": "CoachPlanParse?", "purpose": "Parse of the cached plan; null when nothing cached."},
+          {"name": "save", "visibility": "public", "args": ["planId: String", "planJson: String", "nowMillis: Long"], "returns": "Unit", "purpose": "Replace the cache."},
+          {"name": "clear", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Server said no active plan."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/coach/CoachController.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Owns the coach session of the active run (running meaning on top of SpeechOutput). Created and driven by RunController: begin() at run start/recover, tick() inside the 1 Hz publish, end() at finishRun/finish/discard/stopAll. Catches every exception, disables itself for the session and logs (REL2); never calls AtlasClient (plan fetching is refreshPlan(), called from the Run home panel only).",
+      "public_objects": [
+        {"kind": "class", "name": "CoachUiState", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["planId: String", "planTitle: String", "segmentLabel: String?", "segmentRemainingS: Int?", "lastInstruction: String?", "muted: Boolean", "speechAvailable: Boolean", "cadenceTargetSpm: Double?"], "returns": "CoachUiState", "purpose": "What CoachStrip renders; lastInstruction is cleared DISPLAY_S seconds after it was issued."}]},
+        {"kind": "class", "name": "CoachController", "pattern": "service", "methods": [
+          {"name": "constructor", "visibility": "public", "args": ["speech: SpeechOutput", "planStore: CoachPlanStore", "settings: RunSettings", "log: (String) -> Unit"], "returns": "CoachController", "purpose": "No side effects."},
+          {"name": "sessionPlanId", "visibility": "public", "args": [], "returns": "String?", "purpose": "Plan id of the cached, supported plan when coaching is enabled for the next run (settings.coachEnabled); null otherwise. Used by RunController.start to set RunMeta.coachPlanId."},
+          {"name": "begin", "visibility": "public", "args": ["planId: String", "activeS: Double"], "returns": "Boolean", "purpose": "Load the cached plan by id (must match), build CoachState.initial; false = no coaching (cache missing/unsupported)."},
+          {"name": "tick", "visibility": "public", "args": ["input: CoachInput"], "returns": "CoachUiState?", "purpose": "COACH1 step; speaks a non-null instruction (speech false -> text only); null when no session."},
+          {"name": "cadenceTarget", "visibility": "public", "args": ["activeS: Double"], "returns": "Double?", "purpose": "COACH2 value for MetronomeController.tick (CoachEngine.currentCadenceTarget)."},
+          {"name": "hasCadenceTarget", "visibility": "public", "args": [], "returns": "Boolean", "purpose": "True when a session is active and any plan segment has a cadence target (drives MetronomeTarget.availableModes)."},
+          {"name": "setMuted", "visibility": "public", "args": ["muted: Boolean"], "returns": "Unit", "purpose": "Session mute; muted -> speech.stop()."},
+          {"name": "end", "visibility": "public", "args": [], "returns": "Unit", "purpose": "Stop speech, drop the session. Idempotent."},
+          {"name": "refreshPlan", "visibility": "public", "args": ["client: AtlasClient"], "returns": "CoachPlanParse?", "purpose": "Blocking (call from IO): GET next-plan, save/clear the cache per COACH3, return the parse of the resulting cache; on any error return the unchanged cache. Never called during a run."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/settings/RunSettings.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Two new keys in atlas_run_settings (not secret, never uploaded): coach_enabled (default true), coach_frequency (default NORMAL). Existing members unchanged.",
+      "public_objects": [
+        {"kind": "class", "name": "RunSettings", "pattern": "repository", "methods": [
+          {"name": "coachEnabled", "visibility": "public", "args": [], "returns": "Boolean", "purpose": "Stored value; true when unset."},
+          {"name": "setCoachEnabled", "visibility": "public", "args": ["enabled: Boolean"], "returns": "Unit", "purpose": "Persist."},
+          {"name": "coachFrequency", "visibility": "public", "args": [], "returns": "CoachFrequency", "purpose": "Stored value; NORMAL when unset/unknown."},
+          {"name": "setCoachFrequency", "visibility": "public", "args": ["frequency: CoachFrequency"], "returns": "Unit", "purpose": "Persist."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/RunModels.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "RunMeta gains `coachPlanId: String? = null` appended AFTER recap (all existing positional constructions stay valid; usages found by grep: RunController.kt:132,432,513, RunLifecycleTest, UploadPlannerTest, AtlasClientTest, RunMetaCompatTest, GhostEngineTest). toJson writes coachPlanId (JSON null when absent); fromJson tolerates a missing or null key (old metas).",
+      "public_objects": [
+        {"kind": "class", "name": "RunMeta", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["... existing parameters unchanged ...", "coachPlanId: String? = null"], "returns": "RunMeta", "purpose": "CHANGED: plan executed (or being executed) by this run; sent as FinishRequest.coach_plan_id when non-null."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/net/AtlasClient.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "finish(): `meta.coachPlanId?.let { body.put(\"coach_plan_id\", it) }` (omitted, never null/empty, C3). New nextCoachPlan(). Usages of AtlasClient.finish found by grep: UploadWorker.kt:73, AtlasClientTest (no signature change).",
+      "public_objects": [
+        {"kind": "class", "name": "NextPlan", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["planId: String?", "schemaVersion: Int?", "planJson: String?"], "returns": "NextPlan", "purpose": "Parsed NextPlanResponse; all null = no active plan; planJson is the raw `plan` object as a string for CoachPlanStore/parseCoachPlan."}]},
+        {"kind": "class", "name": "AtlasClient", "pattern": "service", "methods": [{"name": "nextCoachPlan", "visibility": "public", "args": [], "returns": "AtlasResult<NextPlan>", "purpose": "GET /native/coach/next-plan through the existing call() helper (same auth/error mapping as the other native calls)."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metronome/MetronomeTarget.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "COACH2. MetronomeMode gains COACH (parse() of the string 'COACH' from storage maps to OFF because COACH is never persisted). All new parameters have defaults so existing callers/tests compile; usages found by grep: MetronomeController.kt:44,58,67, MetronomeTargetTest (lines 37-46, 73-77), RunController (indirect).",
+      "public_objects": [
+        {"kind": "class", "name": "MetronomeMode", "pattern": "enum", "methods": [], "values": "OFF, MATCH_GHOST, ATTACK_102, MANUAL, COACH (NEW)"},
+        {"kind": "constant", "name": "MetronomeTarget", "pattern": "service", "methods": [
+          {"name": "rawTarget", "visibility": "public", "args": ["mode: MetronomeMode", "ghostCadenceSpm: Double?", "manualSpm: Int", "coachCadenceSpm: Double? = null"], "returns": "Double?", "purpose": "CHANGED: COACH -> coachCadenceSpm (same MIN/MAX range rule)."},
+          {"name": "availableModes", "visibility": "public", "args": ["hasGhost: Boolean", "hasCoach: Boolean = false"], "returns": "List<MetronomeMode>", "purpose": "CHANGED: hasCoach=false keeps the Sprint03 lists exactly; hasCoach=true: ghost modes removed, COACH inserted after OFF (OFF, COACH, MANUAL)."},
+          {"name": "next", "visibility": "public", "args": ["current: MetronomeMode", "hasGhost: Boolean", "hasCoach: Boolean = false"], "returns": "MetronomeMode", "purpose": "CHANGED: cycles availableModes(hasGhost, hasCoach); unavailable current mode -> OFF."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/metronome/MetronomeController.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "begin() gains hasCoach and applies the COACH2 restore rule (persisted ghost mode unavailable while coach cadence target exists -> COACH; otherwise Sprint03 rule); tick() gains coachCadenceSpm; setMode never persists COACH (the persisted value stays the last non-COACH mode). Usages found by grep: RunController.kt:187 (begin), :213 (tick), MetronomeTargetTest (tick/begin with defaults).",
+      "public_objects": [
+        {"kind": "class", "name": "MetronomeController", "pattern": "service", "methods": [
+          {"name": "begin", "visibility": "public", "args": ["hasGhost: Boolean", "ghostCadenceByProgress: List<Pair<Double, Double>>?", "hasCoach: Boolean = false"], "returns": "Unit", "purpose": "CHANGED: hasCoach added."},
+          {"name": "tick", "visibility": "public", "args": ["ghostProgressM: Double?", "paused: Boolean", "nowMillis: Long", "coachCadenceSpm: Double? = null"], "returns": "MetronomeState", "purpose": "CHANGED: coachCadenceSpm added (null = none)."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/session/RunController.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Wires the coach session (flow steps 33-34). `coach = CoachController(platform.speech, CoachPlanStore.create(app), settings, ::log)` next to `metronome`. start(): planId = coach.sessionPlanId(); after recorder/metronome setup call coach.begin(planId, 0.0) and persist meta.copy(coachPlanId = planId) (only when begin returned true); recover() (into PAUSED): begin again from RunMeta.coachPlanId with the current activeS; metronome.begin gets hasCoach = coach.hasCadenceTarget(). publish(): when a coach session exists, build CoachInput (activeS per OQ2, hr value and age from hrRecent/HR2, LiveMetrics.racePaceSPerKm, cadenceSpm) and call coach.tick inside try/catch; pass coach.cadenceTarget(activeS) to metronome.tick. finishRun()/finish()/discard() and stopAll paths call coach.end(). LiveRunState gains `coach: CoachUiState? = null` (default). New members: setCoachMuted, setCoachEnabled, setCoachFrequency, refreshCoachPlan. All coach calls are wrapped so no exception reaches recording (REL2).",
+      "public_objects": [
+        {"kind": "class", "name": "LiveRunState", "pattern": "data_model", "methods": [{"name": "constructor", "visibility": "public", "args": ["... existing parameters unchanged ...", "coach: CoachUiState? = null"], "returns": "LiveRunState", "purpose": "CHANGED: coach strip state, null without a coach session."}]},
+        {"kind": "class", "name": "RunController", "pattern": "service", "methods": [
+          {"name": "setCoachMuted", "visibility": "public", "args": ["muted: Boolean"], "returns": "Unit", "purpose": "NEW: session mute from CoachStrip (then publish())."},
+          {"name": "setCoachEnabled", "visibility": "public", "args": ["enabled: Boolean"], "returns": "Unit", "purpose": "NEW: persisted 'Coach this run' switch (affects the next start)."},
+          {"name": "setCoachFrequency", "visibility": "public", "args": ["frequency: CoachFrequency"], "returns": "Unit", "purpose": "NEW: persisted frequency; applied to the running session immediately."},
+          {"name": "refreshCoachPlan", "visibility": "public", "args": [], "returns": "CoachPlanParse?", "purpose": "NEW: blocking (IO); delegates to CoachController.refreshPlan with the paired AtlasClient; null when not paired/offline and no cache."},
+          {"name": "cachedCoachPlan", "visibility": "public", "args": [], "returns": "CoachPlanParse?", "purpose": "NEW: the cached plan for the home card."}
+        ]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/CoachStrip.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Compose (display + input only): one thin strip - current segment label with remaining time, the last instruction text while non-null, a mute toggle; renders nothing when state is null. Same dark palette as GhostRaceScreen; no animation; unknown values render as the existing dash.",
+      "public_objects": [
+        {"kind": "function", "name": "CoachStrip", "pattern": "view", "methods": [{"name": "CoachStrip", "visibility": "public", "args": ["state: CoachUiState?", "onMute: (Boolean) -> Unit", "modifier: Modifier"], "returns": "Unit (@Composable)", "purpose": "Renders flow step 34."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/CoachPlanCard.kt",
+      "change": "new",
+      "stub_kind": "kotlin_file",
+      "role": "Compose card for the Run home panel: cached plan title/total minutes/targets, 'Coach this run' switch, frequency Low/Normal/High, Refresh button, notes (offline cache used, no plan, 'Plan needs an app update', speech unavailable).",
+      "public_objects": [
+        {"kind": "function", "name": "CoachPlanCard", "pattern": "view", "methods": [{"name": "CoachPlanCard", "visibility": "public", "args": ["plan: CoachPlanParse?", "enabled: Boolean", "frequency: CoachFrequency", "speechAvailable: Boolean", "refreshing: Boolean", "onEnabled: (Boolean) -> Unit", "onFrequency: (CoachFrequency) -> Unit", "onRefresh: () -> Unit"], "returns": "Unit (@Composable)", "purpose": "Renders flow step 32 result."}]}
+      ],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/RunningScreen.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Home panel hosts CoachPlanCard (refresh on first composition when paired, via refreshCoachPlan on an IO dispatcher); RecordingPanel/start paths unchanged otherwise.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/GhostRaceScreen.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Places CoachStrip (one thin row below the existing status/metronome area); race layout, map, gap panel and HR chart unchanged.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/LiveCockpit.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Places CoachStrip for free runs.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/main/java/net/linspad/atlasphone/running/ui/MetronomeChip.kt",
+      "change": "changed",
+      "stub_kind": "kotlin_file",
+      "role": "Mode label for COACH ('Coach <target spm>'); the chip cycles whatever MetronomeTarget.next returns; no other change.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/Sprint01_MobilePlatform/MobilePlatform_API.md",
+      "change": "changed",
+      "stub_kind": "markdown",
+      "role": "Document platform.speech (SpeechOutput, transient ducking exception to the no-focus rule, UNAVAILABLE handling). Status tags [tested: JVM] / [built] / [unverified]; TTS audio/ducking stay [unverified] until a real run.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/Sprint02_RunningScreen/RunningScreen_API.md",
+      "change": "changed",
+      "stub_kind": "markdown",
+      "role": "Document the coach session (plan cache, GET next-plan, coach_plan_id in finish, deploy-order note C3, COACH1 pointer to 10_architecture.json, MetronomeMode.COACH, settings keys, coach strip/card).",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/CoachPlanTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "parseCoachPlan against tests/fixtures/coach_plan_golden.json (valid plans parse, schema_version 2 = Unsupported, malformed = Invalid, empty triggers = all), totalS/segmentIndexAt boundaries, CoachPlanStore round trip with a fake preference store.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/CoachEngineTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "Table-driven CoachEngine.step scenarios over CoachInput sequences (see 10_test_spec.md engine scenarios): sustain, tolerance, settle, priority and conflict suppression, gates and cooldowns per frequency, repeat only after re-sustain, segment start/soon/done, recovery mid-plan without replay, missing HR/GPS/cadence, pause/mute/disabled, determinism (same inputs same outputs), one instruction per tick, currentCadenceTarget.",
+      "public_objects": [],
+      "private_objects": []
+    },
+    {
+      "path": "01_System/AtlasPhone/app/src/test/java/net/linspad/atlasphone/running/CoachSessionTest.kt",
+      "change": "new",
+      "stub_kind": "kotlin_test",
+      "role": "CoachController with a fake SpeechOutput seam and fake plan store: begin/tick/mute/end, speech unavailable -> text only, exception inside the engine disables the session without propagating, refreshPlan keeps the cache on error and clears on null plan; MetronomeTarget COACH additions (availableModes/next/rawTarget, restore rule, COACH never persisted); RunMeta.coachPlanId JSON round trip and old-meta decode; AtlasClient finish body contains coach_plan_id only when set.",
+      "public_objects": [],
+      "private_objects": []
+    }
+  ]
+}

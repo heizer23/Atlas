@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import net.linspad.atlasphone.mobile.audio.ClickEngine
+import net.linspad.atlasphone.mobile.audio.SpeechOutput
 import net.linspad.atlasphone.mobile.capture.CaptureRecorder
 import net.linspad.atlasphone.mobile.capture.CaptureStore
 import net.linspad.atlasphone.mobile.heartrate.HeartRateMonitor
@@ -53,6 +54,7 @@ class MobilePlatform private constructor(app: Application) {
     val store = CaptureStore(app)
     val steps = StepDetector(app, permissions, ::log)
     val click = ClickEngine(::log)
+    val speech = SpeechOutput(app, ::log)
     val quickAction = QuickAction()
     val recorder = CaptureRecorder(store, scope, Dispatchers.IO, location.samples, heartRate.samples, steps.samples)
 
@@ -79,6 +81,7 @@ class MobilePlatform private constructor(app: Application) {
     fun stopAll() {
         steps.stop()
         click.stop()
+        speech.stop()
         quickAction.set(null, null)
         recorder.stop()
         location.stop()

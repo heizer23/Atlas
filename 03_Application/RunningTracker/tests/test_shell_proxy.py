@@ -17,6 +17,13 @@ def test_runs_proxy_returns_json():
     assert "rows" in r.json()
 
 
+def test_coach_proxy_returns_json_and_native_coach_stays_blocked():
+    r = httpx.get(f"{SHELL}/api/runningtracker/coach/settings", timeout=5)
+    assert r.status_code == 200 and "application/json" in r.headers.get("content-type", "")
+    assert r.json()["rows"][0]["ai_enabled"] in (True, False)
+    assert httpx.get(f"{SHELL}/api/runningtracker/native/coach/next-plan", timeout=5).status_code == 404
+
+
 def test_native_routes_are_not_reachable_through_the_public_proxy():
     paths = [
         "/api/runningtracker/native/prepared-runs",

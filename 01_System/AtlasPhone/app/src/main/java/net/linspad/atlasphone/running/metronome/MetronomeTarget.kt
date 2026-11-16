@@ -7,10 +7,12 @@ import kotlin.math.max
 import kotlin.math.min
 
 enum class MetronomeMode(val label: String) {
-    OFF("Off"), MATCH_GHOST("Match ghost"), ATTACK_102("Attack +2%"), MANUAL("Manual");
+    OFF("Off"), MATCH_GHOST("Match ghost"), ATTACK_102("Attack +2%"), MANUAL("Manual"),
+    /** Sprint04: follows the coach plan's cadence target. Never persisted (parse maps the string to OFF). */
+    COACH("Coach");
 
     companion object {
-        fun parse(s: String?): MetronomeMode = entries.firstOrNull { it.name == s } ?: OFF
+        fun parse(s: String?): MetronomeMode = entries.firstOrNull { it.name == s && it != COACH } ?: OFF
     }
 }
 
@@ -82,22 +84,26 @@ object MetronomeTarget {
         return own + (other - own) * ((progressM - centre) / (oc - centre))
     }
 
-    fun rawTarget(mode: MetronomeMode, ghostCadenceSpm: Double?, manualSpm: Int): Double? {
+    fun rawTarget(mode: MetronomeMode, ghostCadenceSpm: Double?, manualSpm: Int, coachCadenceSpm: Double? = null): Double? {
         val raw = when (mode) {
             MetronomeMode.OFF -> null
             MetronomeMode.MATCH_GHOST -> ghostCadenceSpm
             MetronomeMode.ATTACK_102 -> ghostCadenceSpm?.times(MetronomeConfig.ATTACK_FACTOR)
             MetronomeMode.MANUAL -> manualSpm.toDouble()
+            MetronomeMode.COACH -> coachCadenceSpm
         }
         return raw?.takeIf { it >= MetronomeConfig.MIN_TARGET_SPM && it <= MetronomeConfig.MAX_TARGET_SPM }
     }
 
-    fun availableModes(hasGhost: Boolean): List<MetronomeMode> =
-        if (hasGhost) listOf(MetronomeMode.OFF, MetronomeMode.MATCH_GHOST, MetronomeMode.ATTACK_102, MetronomeMode.MANUAL)
-        else listOf(MetronomeMode.OFF, MetronomeMode.MANUAL)
+    /** hasCoach = a coach session with a cadence target is active: COACH is offered, the ghost modes are not (coaching beats the ghost). */
+    fun availableModes(hasGhost: Boolean, hasCoach: Boolean = false): List<MetronomeMode> = when {
+        hasCoach -> listOf(MetronomeMode.OFF, MetronomeMode.COACH, MetronomeMode.MANUAL)
+        hasGhost -> listOf(MetronomeMode.OFF, MetronomeMode.MATCH_GHOST, MetronomeMode.ATTACK_102, MetronomeMode.MANUAL)
+        else -> listOf(MetronomeMode.OFF, MetronomeMode.MANUAL)
+    }
 
-    fun next(current: MetronomeMode, hasGhost: Boolean): MetronomeMode {
-        val modes = availableModes(hasGhost)
+    fun next(current: MetronomeMode, hasGhost: Boolean, hasCoach: Boolean = false): MetronomeMode {
+        val modes = availableModes(hasGhost, hasCoach)
         val i = modes.indexOf(current)
         return if (i < 0) MetronomeMode.OFF else modes[(i + 1) % modes.size]
     }

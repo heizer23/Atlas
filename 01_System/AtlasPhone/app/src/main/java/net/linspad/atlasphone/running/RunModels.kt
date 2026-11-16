@@ -55,6 +55,8 @@ data class RunMeta(
     val recovery: RecoverySummary? = null,
     /** Display copy for the offline recap; the raw record stays in the capture / Postgres. */
     val recap: RecapData? = null,
+    /** Coach plan executed (or being executed) by this run; sent as FinishRequest.coach_plan_id when non-null (Sprint04). */
+    val coachPlanId: String? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("captureId", captureId)
@@ -85,6 +87,7 @@ data class RunMeta(
         .put("runFinishedAtMillis", runFinishedAtMillis ?: JSONObject.NULL)
         .put("recovery", recovery?.toJson() ?: JSONObject.NULL)
         .put("recap", recap?.toJson() ?: JSONObject.NULL)
+        .put("coachPlanId", coachPlanId ?: JSONObject.NULL)
         .toString()
 
     companion object {
@@ -116,6 +119,8 @@ data class RunMeta(
                 runFinishedAtMillis = if (o.has("runFinishedAtMillis")) o.optL("runFinishedAtMillis") else null,
                 recovery = if (o.has("recovery") && !o.isNull("recovery")) RecoverySummary.fromJson(o.getJSONObject("recovery")) else null,
                 recap = if (o.has("recap") && !o.isNull("recap")) RecapData.fromJson(o.getJSONObject("recap")) else null,
+                // Key added in Sprint04: old metas do not have it.
+                coachPlanId = if (o.has("coachPlanId")) o.optStr("coachPlanId") else null,
             )
         }
     }

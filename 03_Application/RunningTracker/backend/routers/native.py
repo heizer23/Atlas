@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from backend import coach_store
 from backend.config import ALGO_VERSION
 from backend.database import get_db
 from backend.metrics import recompute_and_store
@@ -213,6 +214,8 @@ def finish(run_id: str, body: FinishRequest, device: DeviceContext = Depends(req
                 result = verify_run(conn, rid, body.expected_counts, body.last_seq)
                 if result.result == "complete" and (metrics is None or metrics["algo_version"] != ALGO_VERSION):
                     recompute_and_store(conn, rid)
+                if result.result == "complete":
+                    coach_store.on_run_finished(conn, rid, _opt_uuid(body.coach_plan_id))  # replay: recompute, never raises
                 conn.commit()
                 return result
 
@@ -251,6 +254,7 @@ def finish(run_id: str, body: FinishRequest, device: DeviceContext = Depends(req
             with conn.cursor() as cur:
                 cur.execute("update runningtracker.runs set status = 'complete', updated_at = now() where id = %s", (rid,))
             recompute_progress(conn, rid)
+            coach_store.on_run_finished(conn, rid, _opt_uuid(body.coach_plan_id))  # swallows its own errors (G1)
         conn.commit()
     return result
 

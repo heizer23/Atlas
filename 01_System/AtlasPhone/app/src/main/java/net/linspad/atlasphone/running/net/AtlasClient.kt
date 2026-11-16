@@ -61,6 +61,8 @@ data class PreparedRun(
     val id: String, val shortId: String, val title: String?, val plannedForMillis: Long?, val expiresAtMillis: Long,
     val routeId: String? = null, val ghostRunId: String? = null,
 )
+/** GET /native/coach/next-plan: all null = no active plan; planJson is the raw `plan` object for parseCoachPlan. */
+data class NextPlan(val planId: String?, val schemaVersion: Int?, val planJson: String?)
 data class StreamCountsLocal(val location: Long, val heartRate: Long, val step: Long = 0)
 data class BeginResult(val status: String, val contiguousSeq: Long)
 data class SamplesResult(val stored: Int, val duplicates: Int, val contiguousSeq: Long)
@@ -111,6 +113,12 @@ class AtlasClient(
     /** Ghost profile (moving time, progress, heart rate) of a completed run on its route. */
     fun ghostProfile(runId: String): AtlasResult<GhostProfile> = call("GET", "/runs/$runId/ghost-profile", null) { GhostProfile.fromJson(it) }
 
+    /** The accepted coach plan for offline coaching (never called during a run). */
+    fun nextCoachPlan(): AtlasResult<NextPlan> = call("GET", "/coach/next-plan", null) { o ->
+        if (o.isNull("plan_id") || o.isNull("plan")) NextPlan(null, null, null)
+        else NextPlan(o.getString("plan_id"), o.optInt("schema_version"), o.getJSONObject("plan").toString())
+    }
+
     fun begin(runId: String, startedAtMillis: Long): AtlasResult<BeginResult> =
         call("POST", "/runs/$runId/begin", JSONObject().put("run_type", "continuous").put("started_at", SampleJson.iso(startedAtMillis))) {
             BeginResult(it.getString("status"), it.getLong("contiguous_seq"))
@@ -148,6 +156,8 @@ class AtlasClient(
         meta.category?.let { body.put("category", it) }
         meta.routeId?.let { body.put("route_id", it) }
         meta.ghostRunId?.let { body.put("ghost_run_id", it) }
+        // Omitted (never null/empty) without a coach plan: an old server rejects unknown keys, see invariant C3 (deploy the server first).
+        meta.coachPlanId?.let { body.put("coach_plan_id", it) }
         // Omitted (never null) without a recovery phase: an old server rejects unknown keys, see invariant C1 (deploy the server first).
         meta.runFinishedAtMillis?.let { body.put("run_finished_at", SampleJson.iso(it)) }
         return call("POST", "/runs/$runId/finish", body) { o ->

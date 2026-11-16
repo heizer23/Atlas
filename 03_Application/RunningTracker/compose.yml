@@ -17,6 +17,12 @@ services:
       ATLAS_PG_HOST:     atlas-postgres
       # Non-secret: https://<host>.<tailnet>.ts.net:8443 set by the operator (empty = pairing shows the code without QR URL)
       RUNNINGTRACKER_NATIVE_BASE_URL: ${RUNNINGTRACKER_NATIVE_BASE_URL:-}
+      # Ghost Coach (Sprint04): key from 01_System/secrets.env, model from config.env, both set by the operator by hand.
+      # Empty = AI not configured (analysis fails AI_NOT_CONFIGURED). Never add these to runningtracker-test.
+      RUNNINGTRACKER_COACH_API_KEY: ${RUNNINGTRACKER_COACH_API_KEY:-}
+      RUNNINGTRACKER_COACH_MODEL: ${RUNNINGTRACKER_COACH_MODEL:-}
+      RUNNINGTRACKER_COACH_API_URL: ${RUNNINGTRACKER_COACH_API_URL:-}
+      RUNNINGTRACKER_COACH_PROMPT_VERSION: ${RUNNINGTRACKER_COACH_PROMPT_VERSION:-}
     volumes:
       - ${DATA_ROOT}/runningtracker/logs:/app/logs
     networks:

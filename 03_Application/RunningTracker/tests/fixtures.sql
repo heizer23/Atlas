@@ -192,3 +192,95 @@ select 'c1000000-0000-0000-0000-000000000008', 3, 1196, 150, 150, '[]'::jsonb, '
 insert into runningtracker.run_metrics (run_id, algo_version, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery, cadence) values
  ('c1000000-0000-0000-0000-000000000009', 3, 1196, null, null, '[]'::jsonb, '[[10, 250.0]]'::jsonb, '[]'::jsonb, null,
   '{"avg_spm": null, "series": [], "algo": 1}'::jsonb);
+
+-- ---- Sprint04 Ghost Coach fixtures ------------------------------------------------------------------------------
+-- coach_settings  id 1, AI off. (re-seeded here because conftest truncates the table)
+-- runs            fix-run-coach-1 c2..01 2026-03-12 (newest; comment/category markers, one GPS sample, cadence 168; tests add route/recovery themselves)
+--                 fix-run-coach-2 c2..02 2026-03-08 (cadence 170)   fix-run-coach-3 c2..03 2026-03-04 (cadence 172)
+--                 fix-run-coach-4 c2..04 2026-03-01 (no cadence). All complete, device-1, metrics stored. The Sprint01-03 complete
+--                 runs with metrics (all earlier, Jan 2026) belong to the history/window as well.
+-- plans           fix-plan-recommended   c3..01 easy_continuous, recommended, created -1 day (HR/pace/cadence on the steady segment)
+--                 fix-plan-accepted      c3..02 accepted, no run, decided -2 days
+--                 fix-plan-accepted-linked c3..03 accepted, run = fix-run-coach-2, outcome null
+--                 fix-plan-disregarded   c3..04 disregarded
+--                 fix-plan-interval      c3..05 interval, completed (no run), created -12 hours: the newest non-disregarded plan
+-- profile         one measured (natural_cadence_spm) and one inferred (aerobic_endurance) row
+insert into runningtracker.coach_settings (id, goal_text) values (1, 'Run a relaxed half marathon') on conflict (id) do nothing;
+
+insert into runningtracker.runs (id, run_type, status, started_at, finished_at, elapsed_s, moving_s, distance_m, comment, category, route_id, device_id, created_at) values
+ ('c2000000-0000-0000-0000-000000000001', 'continuous', 'complete', '2026-03-12 07:00:00+00', '2026-03-12 07:26:00+00', 1560, 1500, 5000, 'SECRET-COMMENT', 'SECRET-CATEGORY', null, 'd1000000-0000-0000-0000-000000000001', '2026-03-12 07:30:00+00'),
+ ('c2000000-0000-0000-0000-000000000002', 'continuous', 'complete', '2026-03-08 07:00:00+00', '2026-03-08 07:32:00+00', 1920, 1800, 6000, null, null, null, 'd1000000-0000-0000-0000-000000000001', '2026-03-08 07:35:00+00'),
+ ('c2000000-0000-0000-0000-000000000003', 'continuous', 'complete', '2026-03-04 07:00:00+00', '2026-03-04 07:26:00+00', 1560, 1520, 5000, null, null, null, 'd1000000-0000-0000-0000-000000000001', '2026-03-04 07:30:00+00'),
+ ('c2000000-0000-0000-0000-000000000004', 'continuous', 'complete', '2026-03-01 07:00:00+00', '2026-03-01 07:45:00+00', 2700, 2640, 8000, null, null, null, 'd1000000-0000-0000-0000-000000000001', '2026-03-01 07:50:00+00');
+
+insert into runningtracker.run_samples (run_id, stream, seq, sample_ts, payload) values
+ ('c2000000-0000-0000-0000-000000000001', 'location', 1, '2026-03-12 07:00:01+00',
+  '{"type": "location.sample", "timestamp": "2026-03-12T07:00:01.000Z", "latitude": 52.123456, "longitude": 13.654321, "accuracyMeters": 5.0}'::jsonb);
+
+insert into runningtracker.run_pauses (run_id, started_at, ended_at, started_elapsed_s, ended_elapsed_s) values
+ ('c2000000-0000-0000-0000-000000000002', '2026-03-08 07:10:00+00', '2026-03-08 07:12:00+00', 600, 720);
+
+insert into runningtracker.run_metrics (run_id, algo_version, server_distance_m, avg_hr, max_hr, splits, pace_series, hr_series, recovery, cadence) values
+ ('c2000000-0000-0000-0000-000000000001', 3, 4990, 145, 160,
+  '[{"km": 1, "distance_m": 1000, "duration_s": 310, "pace_s_per_km": 310, "avg_hr": 140, "partial": false},
+    {"km": 2, "distance_m": 1000, "duration_s": 300, "pace_s_per_km": 300, "avg_hr": 144, "partial": false},
+    {"km": 3, "distance_m": 1000, "duration_s": 295, "pace_s_per_km": 295, "avg_hr": 146, "partial": false},
+    {"km": 4, "distance_m": 1000, "duration_s": 298, "pace_s_per_km": 298, "avg_hr": 148, "partial": false},
+    {"km": 5, "distance_m": 990, "duration_s": 296, "pace_s_per_km": 299, "avg_hr": 150, "partial": true}]'::jsonb,
+  '[[5, 310.0], [65, 302.0], [125, 298.0], [605, 296.0], [1205, 300.0]]'::jsonb,
+  '[[5, 130.0], [65, 140.0], [125, 144.0], [605, 150.0], [1205, 152.0]]'::jsonb,
+  null,
+  '{"avg_spm": 168.0, "algo": 1, "series": [{"t": 60.0, "spm": 166.0, "conf": 0.9}, {"t": 600.0, "spm": 168.0, "conf": 0.9}]}'::jsonb),
+ ('c2000000-0000-0000-0000-000000000002', 3, 5990, 148, 165, '[]'::jsonb,
+  '[[5, 300.0], [305, 300.0], [905, 300.0]]'::jsonb, '[[5, 140.0], [305, 148.0], [905, 150.0]]'::jsonb, null,
+  '{"avg_spm": 170.0, "algo": 1, "series": [{"t": 305.0, "spm": 170.0, "conf": 0.9}]}'::jsonb),
+ ('c2000000-0000-0000-0000-000000000003', 3, 4990, 150, 170, '[]'::jsonb,
+  '[[5, 304.0]]'::jsonb, '[[5, 150.0]]'::jsonb, null,
+  '{"avg_spm": 172.0, "algo": 1, "series": [{"t": 5.0, "spm": 172.0, "conf": 0.9}]}'::jsonb),
+ ('c2000000-0000-0000-0000-000000000004', 3, 7990, 152, 172,
+  '[{"km": 1, "distance_m": 1000, "duration_s": 290, "pace_s_per_km": 290, "avg_hr": 150, "partial": false}]'::jsonb,
+  '[[5, 330.0]]'::jsonb, '[[5, 152.0]]'::jsonb, null, null);
+
+insert into runningtracker.coach_plans (id, plan_schema_version, plan_type, status, plan, active_plan, run_id, outcome, created_at, decided_at) values
+ ('c3000000-0000-0000-0000-000000000001', 1, 'easy_continuous', 'recommended',
+  '{"schema_version": 1, "type": "easy_continuous", "title": "Easy 40", "rationale": "Keep it relaxed.", "target_distance_m": null,
+    "segments": [{"kind": "warmup", "duration_s": 300, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "steady", "duration_s": 1800, "hr": {"min": 130, "max": 145}, "pace": {"fast_s_per_km": 330, "slow_s_per_km": 390}, "cadence": {"min": 165, "max": 175}},
+                 {"kind": "cooldown", "duration_s": 300, "hr": null, "pace": null, "cadence": null}],
+    "triggers": []}'::jsonb, null, null, null, now() - interval '1 day', null),
+ ('c3000000-0000-0000-0000-000000000002', 1, 'easy_continuous', 'accepted',
+  '{"schema_version": 1, "type": "easy_continuous", "title": "Easy accepted", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "warmup", "duration_s": 300, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "steady", "duration_s": 1800, "hr": {"min": 130, "max": 145}, "pace": null, "cadence": {"min": 165, "max": 175}},
+                 {"kind": "cooldown", "duration_s": 300, "hr": null, "pace": null, "cadence": null}],
+    "triggers": []}'::jsonb,
+  '{"schema_version": 1, "type": "easy_continuous", "title": "Easy accepted", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "warmup", "duration_s": 300, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "steady", "duration_s": 1800, "hr": {"min": 130, "max": 145}, "pace": null, "cadence": {"min": 165, "max": 175}},
+                 {"kind": "cooldown", "duration_s": 300, "hr": null, "pace": null, "cadence": null}],
+    "triggers": []}'::jsonb, null, null, now() - interval '3 days', now() - interval '2 days'),
+ ('c3000000-0000-0000-0000-000000000003', 1, 'recovery', 'accepted',
+  '{"schema_version": 1, "type": "recovery", "title": "Linked", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "steady", "duration_s": 1200, "hr": null, "pace": null, "cadence": null}], "triggers": []}'::jsonb,
+  '{"schema_version": 1, "type": "recovery", "title": "Linked", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "steady", "duration_s": 1200, "hr": null, "pace": null, "cadence": null}], "triggers": []}'::jsonb,
+  'c2000000-0000-0000-0000-000000000002', null, now() - interval '6 days', now() - interval '5 days'),
+ ('c3000000-0000-0000-0000-000000000004', 1, 'recovery', 'disregarded',
+  '{"schema_version": 1, "type": "recovery", "title": "Dropped", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "steady", "duration_s": 1200, "hr": null, "pace": null, "cadence": null}], "triggers": []}'::jsonb,
+  null, null, null, now() - interval '8 days', now() - interval '7 days'),
+ ('c3000000-0000-0000-0000-000000000005', 1, 'interval', 'completed',
+  '{"schema_version": 1, "type": "interval", "title": "Intervals", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "work", "duration_s": 120, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "recovery", "duration_s": 120, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "work", "duration_s": 120, "hr": null, "pace": null, "cadence": null}], "triggers": []}'::jsonb,
+  '{"schema_version": 1, "type": "interval", "title": "Intervals", "rationale": null, "target_distance_m": null,
+    "segments": [{"kind": "work", "duration_s": 120, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "recovery", "duration_s": 120, "hr": null, "pace": null, "cadence": null},
+                 {"kind": "work", "duration_s": 120, "hr": null, "pace": null, "cadence": null}], "triggers": []}'::jsonb,
+  null, '{"planned_s": 360, "done_s": 360, "completed": true, "in_range": {"hr": null, "pace": null, "cadence": null}}'::jsonb,
+  now() - interval '12 hours', now() - interval '11 hours');
+
+insert into runningtracker.coach_profile_items (key, basis, value_text, value_num, unit, confidence, n_runs) values
+ ('natural_cadence_spm', 'measured', '170 spm', 170, 'spm', null, 4),
+ ('aerobic_endurance', 'inferred', 'Steady base, improving slowly', null, null, 0.5, 4);

@@ -1,6 +1,7 @@
 package net.linspad.atlasphone.running.settings
 
 import android.content.Context
+import net.linspad.atlasphone.running.coach.CoachFrequency
 import net.linspad.atlasphone.running.hr.HrSmoothingMode
 import net.linspad.atlasphone.running.metronome.MetronomeConfig
 import net.linspad.atlasphone.running.metronome.MetronomeMode
@@ -35,6 +36,16 @@ class RunSettings(private val store: SettingsStore) {
 
     fun setClickVolume(volume: Float) = store.putString(KEY_CLICK_VOLUME, volume.coerceIn(0f, 1f).toString())
 
+    /** 'Coach this run' switch (Sprint04): true when unset. Affects the next start only. */
+    fun coachEnabled(): Boolean = store.getString(KEY_COACH_ENABLED) != "false"
+
+    fun setCoachEnabled(enabled: Boolean) = store.putString(KEY_COACH_ENABLED, enabled.toString())
+
+    /** Coaching frequency; NORMAL when unset or unknown. */
+    fun coachFrequency(): CoachFrequency = CoachFrequency.parse(store.getString(KEY_COACH_FREQUENCY))
+
+    fun setCoachFrequency(frequency: CoachFrequency) = store.putString(KEY_COACH_FREQUENCY, frequency.name)
+
     private fun clampSpm(spm: Int) = spm.coerceIn(MetronomeConfig.MIN_TARGET_SPM.toInt(), MetronomeConfig.MAX_TARGET_SPM.toInt())
 
     companion object {
@@ -42,6 +53,8 @@ class RunSettings(private val store: SettingsStore) {
         const val KEY_METRONOME_MODE = "metronome_mode"
         const val KEY_MANUAL_CADENCE = "manual_cadence_spm"
         const val KEY_CLICK_VOLUME = "click_volume"
+        const val KEY_COACH_ENABLED = "coach_enabled"
+        const val KEY_COACH_FREQUENCY = "coach_frequency"
 
         fun create(context: Context): RunSettings {
             val prefs = context.applicationContext.getSharedPreferences("atlas_run_settings", Context.MODE_PRIVATE)

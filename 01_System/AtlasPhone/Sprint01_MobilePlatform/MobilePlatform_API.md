@@ -159,3 +159,10 @@ Status tags: `[tested: JVM]` pure logic and storage, `[built]` compiles, `[unver
 - `CaptureStore` SQLite version 3: `captures.step_count`; the sequence stays one counter shared by all streams `[tested: JVM]`. `CaptureInfo.stepCount`.
 - Permission `ACTIVITY_RECOGNITION` (`Capability.ACTIVITY_RECOGNITION`): required from Android 10, none before (counts as granted) `[tested: JVM]`.
 - `stopAll()` also stops steps and click and clears the quick action.
+
+## Sprint04 additions (speech output)
+
+Status tags: `[tested: JVM]` pure logic, `[built]` compiles, `[unverified]` needs a real run.
+
+- `platform.speech: SpeechOutput` (implements `SpeechPort`) - speaks a string through the system `TextToSpeech`. Domain-free: it knows nothing about running. `state`: IDLE / READY / UNAVAILABLE (engine init failed or English not supported). `prepare()` starts the engine in the background (idempotent), `speak(text): Boolean` is queue-flush and returns false when UNAVAILABLE or not yet initialised (the caller shows the text only), `stop()` stops speaking, abandons focus and releases the engine (idempotent; `MobilePlatform.stopAll()` calls it). Nothing throws and nothing blocks the caller. The `SpeechPort` seam is `[tested: JVM]` through the coach session tests; the engine itself is `[built]`.
+- Audio focus (SPEECH1): utterances use `USAGE_ASSISTANCE_NAVIGATION_GUIDANCE` and request `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` around each utterance (abandoned on done/error) so music ducks briefly. This is a scoped exception to the "no audio focus" rule, which continues to apply to `ClickEngine` only. Real TTS audio, ducking, headphone routing and screen-off speech are `[unverified]` until a real run.

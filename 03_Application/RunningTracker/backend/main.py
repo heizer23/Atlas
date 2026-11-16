@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_pool, init_schema
-from backend.routers import native, pairing_web, routes, runs
+from backend.routers import coach, native, pairing_web, routes, runs
 from backend.security import AppError
 from platform_errorhandling import api_error
 from platform_errorhandling.logging import setup_logging
@@ -40,6 +40,8 @@ app.include_router(runs.router, prefix="/api/runningtracker")
 app.include_router(routes.router, prefix="/api/runningtracker")
 app.include_router(pairing_web.router, prefix="/api/runningtracker")
 app.include_router(native.router, prefix="/api/runningtracker")
+app.include_router(coach.router, prefix="/api/runningtracker")
+app.include_router(coach.native_router, prefix="/api/runningtracker")
 
 
 @app.on_event("startup")

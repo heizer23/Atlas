@@ -42,6 +42,12 @@ import net.linspad.atlasphone.running.recap.RecoveryConfig
 import net.linspad.atlasphone.running.recap.RecoveryTracker
 import net.linspad.atlasphone.running.settings.RunSettings
 import net.linspad.atlasphone.running.ghost.LibraryRun
+import net.linspad.atlasphone.running.coach.CoachController
+import net.linspad.atlasphone.running.coach.CoachFrequency
+import net.linspad.atlasphone.running.coach.CoachInput
+import net.linspad.atlasphone.running.coach.CoachPlanParse
+import net.linspad.atlasphone.running.coach.CoachPlanStore
+import net.linspad.atlasphone.running.coach.CoachUiState
 import net.linspad.atlasphone.running.live.HrTarget
 import net.linspad.atlasphone.running.live.LiveHistory
 import net.linspad.atlasphone.running.live.LiveTrends
@@ -69,6 +75,8 @@ class LiveRunState(
     val cadenceSpm: Double? = null,
     /** Metronome chip state; null when no run is active or in RECOVERY. */
     val metronome: MetronomeState? = null,
+    /** Coach strip state (Sprint04); null without a coach session. */
+    val coach: CoachUiState? = null,
 ) {
     val targetHr: Int? get() = meta.targetHr
 }
@@ -103,6 +111,7 @@ class RunController private constructor(private val app: Application) {
     private val ghostCache = GhostCache(java.io.File(app.noBackupFilesDir, "ghost"))
     private val settings = RunSettings.create(app)
     private val metronome = MetronomeController(platform.click, platform.quickAction, settings)
+    private val coach = CoachController(platform.speech, CoachPlanStore.create(app), settings, platform::log)
 
     private val lock = Any()
     private var active: Active? = null
@@ -129,8 +138,10 @@ class RunController private constructor(private val app: Application) {
         val id = platform.recorder.start(prepared?.id)
         val routeId = prepared?.routeId ?: raceRouteId
         val routeLengthM = routeId?.let { ghostCache.route(it)?.referenceDistanceM }
+        // COACH3: the cached plan of 'Coach this run'; any failure only means no coaching (REL2).
+        val coachPlanId = runCatching { coach.sessionPlanId()?.takeIf { coach.begin(it, 0.0) } }.getOrNull()
         val meta = RunMeta(id, state, prepared?.shortId, prepared?.title, now, null, emptyList(), null, 0, null, false, routeId, prepared?.ghostRunId ?: raceGhostId,
-            targetHr, HrTarget.category(targetHr, routeLengthM))
+            targetHr, HrTarget.category(targetHr, routeLengthM), coachPlanId = coachPlanId)
         store.putRunMeta(id, meta.toJson())
         platform.steps.start() // result ignored: no permission / no sensor never blocks a run (S1)
         attach(meta, RunMetricsAccumulator(now), SystemClock.elapsedRealtime(), ghostFor(meta))
@@ -184,7 +195,7 @@ class RunController private constructor(private val app: Application) {
         )
         val ghostProfile = if (ghost != null) meta.ghostRunId?.let(ghostCache::profile) else null
         active = Active(meta, acc, monoStartMs, jobs, ghost, locationJob = locationJob, recovery = recovery, ghostProfile = ghostProfile)
-        if (recovery == null) metronome.begin(ghost != null, ghostProfile?.cadenceByProgress)
+        if (recovery == null) metronome.begin(ghost != null, ghostProfile?.cadenceByProgress, hasCoach = coach.hasCadenceTarget())
         publish()
     }
 
@@ -198,8 +209,14 @@ class RunController private constructor(private val app: Application) {
         }
     }
 
+    /** What publish() reads under the lock; the coach and the metronome run on it outside the lock (REL2: no speech call with a lock held). */
+    private class Snapshot(
+        val a: Active, val metrics: LiveMetrics, val ghost: GhostLive?, val hrDisplay: Double?,
+        val cadence: Double?, val running: Boolean, val paused: Boolean, val ghostProgress: Double?, val now: Long, val coachInput: CoachInput?,
+    )
+
     private fun publish() {
-        val live = synchronized(lock) {
+        val snap = synchronized(lock) {
             active?.let {
                 val now = System.currentTimeMillis()
                 val metrics = it.acc.snapshot(now)
@@ -210,12 +227,23 @@ class RunController private constructor(private val app: Application) {
                 // Display only (CAD1 over the last 30 s of steps); never persisted or uploaded, not used for the metronome target.
                 val cadence = if (running) CadenceEstimator.at(it.recentSteps.toList(), pauseRanges(it.meta.pauses), now)?.spm else null
                 val ghostProgress = ghost?.takeIf { g -> g.status == GhostStatus.ON_COURSE }?.progressM
-                val metro = if (running) metronome.tick(ghostProgress, it.meta.state == RunState.PAUSED, now) else null
-                LiveRunState(it.meta, metrics, platform.location.state.value.name, platform.heartRate.state.value.name, ghost, it.history.snapshot(),
-                    it.recovery?.snapshot(now), hrDisplay, cadence, metro)
+                val paused = it.meta.state == RunState.PAUSED
+                // OQ2: the plan clock is LiveMetrics.movingS (= elapsed minus pauses; the name is A1's, standing still is not excluded).
+                val lastHr = it.hrRecent.lastOrNull()
+                val coachInput = if (running) CoachInput(
+                    metrics.movingS, paused, hrDisplay, lastHr?.let { h -> (now - h.tsMillis) / 1000.0 }, metrics.racePaceSPerKm, cadence,
+                ) else null
+                Snapshot(it, metrics, ghost, hrDisplay, cadence, running, paused, ghostProgress, now, coachInput)
             }
         }
-        _live.value = live
+        if (snap == null) { _live.value = null; return }
+        // Coach (COACH1) and metronome outside the RunController lock; coach failures are contained in CoachController (REL2).
+        val coachUi = snap.coachInput?.let { coach.tick(it) }
+        val coachCadence = snap.coachInput?.let { coach.cadenceTarget(it.activeS) }
+        val metro = if (snap.running) metronome.tick(snap.ghostProgress, snap.paused, snap.now, coachCadence) else null
+        val a = snap.a
+        _live.value = LiveRunState(a.meta, snap.metrics, platform.location.state.value.name, platform.heartRate.state.value.name, snap.ghost,
+            a.history.snapshot(), a.recovery?.snapshot(snap.now), snap.hrDisplay, snap.cadence, metro, coachUi)
     }
 
     /** Pauses as inclusive ms ranges [start, end) for CadenceEstimator; an open pause runs to the end of time. */
@@ -269,6 +297,39 @@ class RunController private constructor(private val app: Application) {
     /** Click volume 0..1 (persisted). */
     fun setClickVolume(volume: Float) { metronome.setVolume(volume); publish() }
 
+    // ── Coach (Sprint04): session switches and the plan cache; everything is contained, nothing reaches recording (REL2) ─────────
+
+    /** Session mute from the coach strip. */
+    fun setCoachMuted(muted: Boolean) { coach.setMuted(muted); publish() }
+
+    /** Persisted 'Coach this run' switch; affects the next start only. */
+    fun setCoachEnabled(enabled: Boolean) { settings.setCoachEnabled(enabled) }
+
+    /** Persisted frequency; applied to a running session at the next tick. */
+    fun setCoachFrequency(frequency: CoachFrequency) { settings.setCoachFrequency(frequency); publish() }
+
+    fun coachEnabled(): Boolean = settings.coachEnabled()
+    fun coachFrequency(): CoachFrequency = settings.coachFrequency()
+
+    /** The cached plan for the home card (no network). */
+    fun cachedCoachPlan(): CoachPlanParse? = coach.cachedPlan()
+
+    /** Whether the system speech engine is usable; false only after it failed to initialise. */
+    fun speechAvailable(): Boolean = platform.speech.isAvailable()
+
+    /** Blocking (call from IO): fetches the active plan and refreshes the cache (COACH3). Null when nothing is cached. */
+    fun refreshCoachPlan(): CoachPlanParse? {
+        val c = client() ?: return coach.cachedPlan()
+        return coach.refreshPlan(c)
+    }
+
+    /** Active seconds at the start of the last open pause (the recovered run is PAUSED there). */
+    private fun activeAtOpenPause(pauses: List<PauseRecord>): Double {
+        val open = pauses.lastOrNull { it.endedAtMillis == null }
+        val closed = pauses.filter { it.endedAtMillis != null }.sumOf { (it.endedElapsedS ?: it.startedElapsedS) - it.startedElapsedS }
+        return ((open?.startedElapsedS ?: 0.0) - closed).coerceAtLeast(0.0)
+    }
+
     private fun closeOpenPause(pauses: List<PauseRecord>, nowMillis: Long, offsetS: Double): List<PauseRecord> =
         pauses.map { if (it.endedAtMillis == null) it.copy(endedAtMillis = nowMillis, endedElapsedS = offsetS) else it }
 
@@ -293,6 +354,7 @@ class RunController private constructor(private val app: Application) {
                 val pauses = closeOpenPause(a.meta.pauses, now, offsetS(a, now))
                 val elapsed = offsetS(a, now)
                 metronome.stop() // O4: never during or after the end of the run
+                coach.end()
                 platform.stopAll() // recorder.stop() marks the capture finished; GPS, HR and steps are released
                 active = null
                 val (locations, heartRates) = loadSamples(a.meta.captureId)
@@ -347,6 +409,7 @@ class RunController private constructor(private val app: Application) {
                 val pauses = closeOpenPause(a.meta.pauses, t0, elapsed)
                 platform.steps.stop() // the running phase is over: no steps in recovery (S1)
                 metronome.stop()      // O4: the click stops at Finish Run, not during recovery
+                coach.end()           // Sprint04: coaching ends with the running phase
                 platform.location.stop() // not stopAll: recorder, HR and the foreground service continue
                 val (allLocations, allHeartRates) = loadSamples(a.meta.captureId)
                 val locations = allLocations.filter { it.timestampMillis <= t0 }
@@ -456,6 +519,8 @@ class RunController private constructor(private val app: Application) {
             // Rebuild the ghost race by replaying the stored fixes through the same engine.
             val ghost = ghostFor(meta)
             locations.forEach { ghost?.addFix(it.timestampMillis, it.latitude, it.longitude, it.accuracyMeters?.toDouble(), pauses) }
+            // Coaching resumes from the cached plan at the active time reached when the capture was interrupted (no replayed announcements).
+            meta.coachPlanId?.let { planId -> runCatching { coach.begin(planId, activeAtOpenPause(pauses)) } }
             attach(meta, acc, null, ghost)
             platform.ensureForegroundService(app)
         }
@@ -485,6 +550,7 @@ class RunController private constructor(private val app: Application) {
             if (a != null && a.meta.captureId == runId) {
                 a.jobs.forEach { it.cancel() }
                 metronome.stop()
+                coach.end()
                 platform.stopAll()
                 active = null
             }

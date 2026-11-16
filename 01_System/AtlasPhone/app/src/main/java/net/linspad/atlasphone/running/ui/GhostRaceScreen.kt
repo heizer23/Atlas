@@ -75,6 +75,7 @@ internal fun GhostRaceScreen(
     live: LiveRunState, ghost: GhostLive, paused: Boolean, finishing: Boolean, gpsText: String, gpsGood: Boolean,
     onReconnectHr: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onFinish: () -> Unit,
     onCycleMetronome: () -> Unit = {}, onUseManualCadence: () -> Unit = {}, onManualCadence: (Int) -> Unit = {}, onClickVolume: (Float) -> Unit = {},
+    onCoachMute: (Boolean) -> Unit = {},
 ) {
     val m = live.metrics
     val trends = live.trends
@@ -98,6 +99,7 @@ internal fun GhostRaceScreen(
             StatusLines(live, ghost, paused, gpsText, gpsGood, onReconnectHr)
             MetronomeChip(live.metronome, live.cadenceSpm, onCycle = onCycleMetronome, onUseManual = onUseManualCadence,
                 onManualSpm = onManualCadence, onVolume = onClickVolume)
+            CoachStrip(live.coach, onCoachMute, Modifier.padding(top = 4.dp))   // absent without a coach session
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 // Left: gap, gaining/losing arrow, gap history and the 20 s pace beside the ghost's; right: heart rate by position.
                 RaceGapPanel(reading?.timeGapS, trends, m.racePaceSPerKm, Modifier.weight(1f).padding(top = 8.dp, end = 8.dp))

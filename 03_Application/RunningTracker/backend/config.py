@@ -86,3 +86,42 @@ IDLE_START_SEARCH_S = 15.0          # the standing-still window must begin withi
 # Web lists
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
+
+# Ghost Coach (Sprint04; invariants CO1, EGR1, KEY1, PAY1, PROF1, PLAN1, OUT1 in Sprint04_GhostCoach/10_architecture.json)
+COACH_CONSENT_VERSION = 1  # bump when COACH_PAYLOAD_VERSION, COACH_ALLOWED_HOSTS or the EGR1 data categories change
+COACH_PAYLOAD_VERSION = 1
+COACH_PLAN_SCHEMA_VERSION = 1
+COACH_PROMPT_VERSION_DEFAULT = "v1"  # file backend/prompts/coach_prompt_<version>.md; env override must match ^v[0-9]+$
+COACH_API_URL_DEFAULT = "https://api.anthropic.com/v1/messages"
+COACH_ALLOWED_HOSTS = ("api.anthropic.com",)  # changing it is a code change plus a COACH_CONSENT_VERSION bump
+COACH_MAX_TOKENS = 1500
+COACH_HTTP_TIMEOUT_S = 60.0
+COACH_MAX_CALLS_PER_DAY = 10  # attempts in the last 24 h (server clock)
+COACH_HISTORY_RUNS = 10
+COACH_MIN_RUN_S = 300.0  # moving time below this is RUN_NOT_ANALYSABLE
+COACH_SERIES_STEP_S = 60  # payload series bucket
+COACH_MAX_PAYLOAD_BYTES = 60000
+COACH_MEASURED_WINDOW_RUNS = 10
+COACH_PACE_MATCH_TOL = 0.10
+COACH_HR_PACE_MIN_RUNS = 3
+COACH_MIN_RUNS_INFERRED = 3
+COACH_MEASURED_KEYS = ("natural_cadence_spm", "avg_step_length_m", "hr_at_median_pace_bpm", "runs_per_week",
+                       "km_per_week", "pr_fastest_1k_s", "pr_longest_run_m")
+COACH_INFERRED_KEYS = ("aerobic_endurance", "fatigue_drift", "development_trend")
+COACH_PLAN_TYPES = ("easy_continuous", "hr_controlled", "recovery", "endurance", "interval")
+COACH_SEGMENT_KINDS = ("warmup", "steady", "work", "recovery", "cooldown")
+COACH_TRIGGERS = ("hr_high", "hr_low", "pace_fast", "pace_slow", "cadence_low", "cadence_high",
+                  "segment_change", "keep_rhythm", "sensor_lost")
+COACH_HR_BOUNDS = (60, 200)  # bpm
+COACH_PACE_BOUNDS_S_PER_KM = (180, 900)
+COACH_MIN_RANGE_HR = 6  # bpm
+COACH_MIN_RANGE_PACE = 10  # s/km
+COACH_MIN_RANGE_CAD = 4  # spm; cadence bounds reuse CAD_MIN_SPM / CAD_MAX_SPM
+COACH_MAX_SEGMENTS = 40
+COACH_MIN_SEGMENT_S = 20
+COACH_MIN_PLAN_S = 300
+COACH_MAX_PLAN_S = 10800
+COACH_INTERVAL_LOOKBACK_PLANS = 2
+COACH_OUTCOME_COMPLETED_FRACTION = 0.9
+COACH_PLAN_LIST_DEFAULT = 20
+COACH_PLAN_LIST_MAX = 50

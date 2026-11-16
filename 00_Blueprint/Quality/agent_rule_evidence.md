@@ -1224,3 +1224,54 @@ severity: minor
 recurrence_hint: "Also seen in EVD (RunningTracker Sprint01 small_scaffold_deviations_for_testability_and_review_notes)."
 linked_immediate_artifact: 03_Application/RunningTracker/Sprint02_RunFinishAndRecovery/10_test_spec.md
 ---
+
+---
+entry_id: EVD-2026-11-15-001
+date: 2026-11-15
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: RunningTracker
+sprint: Sprint04_GhostCoach
+pattern_name: error_outcome_contradicted_across_artifacts
+short_description: The same failure condition (configured host outside the allow-list) maps to AI_NOT_CONFIGURED 503 via configured() in the scaffold but to AI_UNAVAILABLE 502 in failure_modes and the test spec.
+evidence: "10_scaffolding.json coach_ai.py ProviderConfig.configured ('url host is in COACH_ALLOWED_HOSTS') vs 10_test_spec.md 'Host outside the allow-list is refused without a call' (AI_UNAVAILABLE)"
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/RunningTracker/Sprint04_GhostCoach/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-11-15-002
+date: 2026-11-15
+source_agent: sprint_design_reviewer
+run_type: design_review
+component: RunningTracker
+sprint: Sprint04_GhostCoach
+pattern_name: helper_input_produced_after_consumer
+short_description: validate_profile_updates needs n_runs but the only declared producer (refresh_measured_profile) runs later inside the persistence transaction.
+evidence: "10_scaffolding.json coach_profile.validate_profile_updates(updates, n_runs) and coach_store.refresh_measured_profile ('returns the window size (n_runs)'); 10_architecture.json step 29 order"
+likely_root_cause: rule_gap
+candidate_response: none
+severity: major
+recurrence_hint: "First observed"
+linked_immediate_artifact: 03_Application/RunningTracker/Sprint04_GhostCoach/11_design_review.md
+---
+
+---
+entry_id: EVD-2026-11-15-003
+date: 2026-11-15
+source_agent: sprint_implement
+run_type: implementer_note
+component: RunningTracker
+sprint: Sprint04_GhostCoach
+pattern_name: design_choice_resolved_inline
+short_description: Small, unambiguous design gaps resolved inline (no design change): OQ2 plan clock, per-kind cooldown as candidate eligibility, forced re-analysis and the interval rule, segment-change timer reset, previous-plan selection on force, disregard of a linked plan.
+evidence: "OQ2: LiveMetrics.movingS equals elapsed minus completed pauses (wall-clock) and is used as CoachInput.activeS. COACH1 rule 6 read literally starves lower priorities (HR_HIGH sustained again after 15 s but blocked by its 3x-gap cooldown, so pace/cadence never speak); cooldown is therefore part of candidate eligibility (test spec 'one instruction at a time with priority' requires HR, then pace, then cadence). That scenario also lists cadence 'too low' as third, but CADENCE_LOW is a push kind suppressed while HR_HIGH/PACE_TOO_FAST are sustained (COACH1 rule 5): the engine test uses cadence too high for the priority sequence and the conflict test covers CADENCE_LOW. NB2 (13_design_review): on force=true the still-recommended plan of the analysis being replaced is excluded from recent_plan_types. NB3: previous plan = newest plan created before the analysis whose analysis_id differs from this analysis. NB5: explicit ai_enabled:null is a 422 VALIDATION_ERROR. NB7: profile test asserts against count_window_runs. Deviation timers and in-range timers restart on a segment change (new targets). A linked accepted plan cannot be disregarded (INVALID_TRANSITION) because ck coach_plans requires run_id only for accepted/completed. On force, superseded plans get analysis_id null so AnalysisRow.plan_id means the plan of the current analysis. Test fixtures: coach runs added to fixtures.sql changed the expectations of test_web_api history list (14 rows) because that test asserts the whole fixture world; the route/recovery marker fixtures are created inside the egress test instead."
+likely_root_cause: spec_ambiguity
+candidate_response: none
+severity: minor
+recurrence_hint: "COACH1 literal reading vs test-spec intent: first observed"
+linked_immediate_artifact: 03_Application/RunningTracker/Sprint04_GhostCoach/13_design_review.md
+---

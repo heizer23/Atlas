@@ -1,10 +1,12 @@
--- RunningTracker Sprint03_CadenceAndLiveRacing -- private application schema.
--- sprint_note: seeded from the runtime schema.sql (03_Application/RunningTracker/schema.sql, the clean snapshot after Sprint02) and extended
--- ADDITIVELY. Everything marked [NEW] / [CHANGED] is this sprint's change; the rest is unchanged and must stay byte-for-byte equal in the runtime copy.
+-- RunningTracker Sprint04_GhostCoach -- private application schema.
+-- sprint_note: seeded from the runtime schema.sql (03_Application/RunningTracker/schema.sql, the clean snapshot after Sprint03) and extended
+-- ADDITIVELY. Only the block under "Sprint04 [NEW]" at the end is this sprint's change; everything above it is unchanged and must stay
+-- equal to the runtime copy (the Sprint03 '[NEW]' markers of the previous artifact were reduced to plain 'Sprint03:' comments).
 -- Runtime canonical path: 03_Application/RunningTracker/schema.sql (copy of this file; executed idempotently at startup).
 -- Private tables: not a cross-application contract. Other components must never query schema `runningtracker`.
 -- Time columns: run times (started_at, finished_at, run_finished_at, pause stamps, sample_ts) are phone-reported UTC (persisted domain time);
--- created_at / expires_at / last_used_at / used_at / locked_at / failed_at / revoked_at are server time (now()).
+-- created_at / expires_at / last_used_at / used_at / locked_at / failed_at / revoked_at / consented_at / decided_at / called_at /
+-- analysed_at are server time (now()).
 
 begin;
 
@@ -80,7 +82,7 @@ create index if not exists ix_runs_started_at on runningtracker.runs(started_at 
 create index if not exists ix_runs_status     on runningtracker.runs(status);
 
 -- Raw samples exactly as recorded on the phone (nullable fields stay null). Never updated; duplicates are ignored.
--- [CHANGED] Sprint03: the stream set grows by 'step' (see ck_run_samples_stream below). This inline constraint is the
+-- Sprint03: the stream set grows by 'step' (see ck_run_samples_stream below). This inline constraint is the
 -- original Sprint01 one and is replaced idempotently further down; it is left unchanged here so that a fresh database and an
 -- existing database converge on the same final constraint.
 create table if not exists runningtracker.run_samples (
@@ -192,7 +194,7 @@ end $$;
 -- {"hr_end": n|null, "hr_60": n|null, "hr_120": n|null, "hrr60": n|null, "hrr120": n|null, "curve": [[t_s_since_run_finished_at, bpm], ...]}
 alter table runningtracker.run_metrics add column if not exists recovery jsonb;
 
--- [NEW] Sprint03: the raw step stream. One sample per detected step (payload.timestamp = sensor event time, phone UTC); raw rows are never
+-- Sprint03: the raw step stream. One sample per detected step (payload.timestamp = sensor event time, phone UTC); raw rows are never
 -- modified. The previous inline constraint (run_samples_stream_check, 2 streams) is dropped and replaced by the named 3-stream one.
 -- Idempotent: the drop is a no-op once the inline constraint is gone, the add is guarded by pg_constraint. Adding the constraint scans
 -- run_samples once (existing rows are all location/heart_rate, so it always validates).
@@ -205,14 +207,103 @@ begin
     end if;
 end $$;
 
--- [NEW] Sprint03: derived cadence of the RUNNING phase, recomputable from the 'step' rows + run_pauses + runs.started_at/run_finished_at/finished_at
+-- Sprint03: derived cadence of the RUNNING phase, recomputable from the 'step' rows + run_pauses + runs.started_at/run_finished_at/finished_at
 -- (algorithm CAD1, versioned by cadence.algo and by run_metrics.algo_version). SQL NULL (not JSON null) = no step samples in the running
--- phase (legacy run, permission denied, no sensor). Object shape (declared once in 10_architecture.json invariant CAD2):
+-- phase (legacy run, permission denied, no sensor). Object shape (declared once in Sprint03_CadenceAndLiveRacing/10_architecture.json invariant CAD2):
 -- {"avg_spm": n|null, "series": [{"t": seconds_since_started_at, "spm": n, "conf": 0..1}, ...], "algo": integer}
 -- Gaps are absent points, never zero.
 alter table runningtracker.run_metrics add column if not exists cadence jsonb;
 
--- [NEW] Sprint03: the ghost's cadence along the route, derived next to the profile when the run is matched onto its route.
+-- Sprint03: the ghost's cadence along the route, derived next to the profile when the run is matched onto its route.
 -- [[progress_m_bucket_start, spm], ...] ascending, 20 m buckets, empty buckets absent. SQL NULL = the run has no usable cadence
--- (never derived from speed). Served as `cadence_by_progress` by GET /native/runs/{id}/ghost-profile. Declared once in 10_architecture.json invariant GB1.
+-- (never derived from speed). Served as `cadence_by_progress` by GET /native/runs/{id}/ghost-profile.
 alter table runningtracker.run_route_progress add column if not exists cadence_by_progress jsonb;
+
+-- =====================================================================================================================
+-- Sprint04 [NEW] Ghost Coach. All tables below are new, private and additive (create if not exists); nothing above is changed.
+-- Single-user system: no owner column anywhere. Server clock (now()) is used ONLY for the audit/consent/decision columns named in the
+-- header; every run-derived value keeps the phone-UTC domain time of the run it comes from (invariant T4 in 10_architecture.json).
+-- =====================================================================================================================
+
+begin;
+
+-- Exactly one row (id = 1). The external-AI opt-in lives here and nowhere else (invariant CO1). ai_enabled is false until the user
+-- consents; disabling clears the consent columns, so enabled <=> a consent of some version is recorded.
+create table if not exists runningtracker.coach_settings (
+    id              smallint    primary key check (id = 1),
+    ai_enabled      boolean     not null default false,
+    consent_version integer,
+    consented_at    timestamptz,
+    goal_text       text        check (goal_text is null or char_length(goal_text) <= 500),
+    updated_at      timestamptz not null default now(),
+    check ((ai_enabled and consent_version is not null and consented_at is not null)
+           or (not ai_enabled and consent_version is null and consented_at is null))
+);
+insert into runningtracker.coach_settings (id) values (1) on conflict (id) do nothing;
+
+-- One analysis per run (a forced re-analysis updates the same row). sent_payload is the exact JSON document that was sent to the
+-- provider as the user message (audit of what left the system, invariant EGR1); it contains no raw GPS, ids, titles or comments.
+create table if not exists runningtracker.coach_analyses (
+    id                   uuid        primary key default gen_random_uuid(),
+    run_id               uuid        not null unique references runningtracker.runs(id) on delete cascade,
+    assessment           text        not null check (char_length(assessment) between 1 and 1500),
+    previous_effect      text        check (previous_effect is null or char_length(previous_effect) <= 600),
+    profile_updates      jsonb       not null default '[]'::jsonb,
+    plan_rejected_reason text        check (plan_rejected_reason is null or char_length(plan_rejected_reason) <= 200),
+    payload_version      integer     not null,
+    prompt_version       text        not null check (char_length(prompt_version) <= 20),
+    model                text        not null check (char_length(model) between 1 and 80),
+    sent_payload         jsonb       not null,
+    analysed_at          timestamptz not null default now()
+);
+
+-- Every outbound provider attempt (success or failure) for the daily cap and failure audit. No request or response content.
+create table if not exists runningtracker.coach_ai_calls (
+    id        bigserial   primary key,
+    run_id    uuid        references runningtracker.runs(id) on delete set null,
+    called_at timestamptz not null default now(),
+    outcome   text        not null check (outcome in ('ok', 'provider_error', 'invalid_response'))
+);
+create index if not exists ix_coach_ai_calls_called_at on runningtracker.coach_ai_calls(called_at desc);
+
+-- Recommended / accepted training plans and their outcome history (invariants PLAN1, OUT1).
+--   plan        = the validated AI recommendation, never edited.
+--   active_plan = the version the user accepted (plan + user overrides); NULL until accepted. The phone receives active_plan.
+--   run_id      = the run that executed the plan (set at finish from FinishRequest.coach_plan_id); at most one run per plan.
+--   outcome     = derived, recomputable from run_metrics + run_pauses (OUT1); NULL until the linked run is complete.
+-- Shape of plan / active_plan: CoachPlanV1 (declared once in 10_scaffolding.json backend/coach_plan.py).
+create table if not exists runningtracker.coach_plans (
+    id                  uuid        primary key default gen_random_uuid(),
+    analysis_id         uuid        references runningtracker.coach_analyses(id) on delete set null,
+    plan_schema_version integer     not null,
+    plan_type           text        not null
+                                    check (plan_type in ('easy_continuous', 'hr_controlled', 'recovery', 'endurance', 'interval')),
+    status              text        not null
+                                    check (status in ('recommended', 'accepted', 'disregarded', 'superseded', 'completed')),
+    plan                jsonb       not null,
+    active_plan         jsonb,
+    run_id              uuid        unique references runningtracker.runs(id) on delete set null,
+    outcome             jsonb,
+    created_at          timestamptz not null default now(),
+    decided_at          timestamptz,
+    check (status not in ('accepted', 'completed') or active_plan is not null),
+    check (run_id is null or status in ('accepted', 'completed'))
+);
+create index if not exists ix_coach_plans_status_created on runningtracker.coach_plans(status, created_at desc);
+
+-- Athlete profile: one row per key. basis 'measured' = deterministic server computation (confidence NULL); basis 'inferred' = AI statement
+-- that passed validation (confidence required, capped by the number of runs, invariant PROF1). The key sets are declared once in
+-- 10_scaffolding.json (backend/config.py COACH_MEASURED_KEYS / COACH_INFERRED_KEYS) and enforced in code, not here.
+create table if not exists runningtracker.coach_profile_items (
+    key        text             primary key check (char_length(key) between 1 and 40),
+    basis      text             not null check (basis in ('measured', 'inferred')),
+    value_text text             not null check (char_length(value_text) between 1 and 200),
+    value_num  double precision,
+    unit       text             check (unit is null or char_length(unit) <= 12),
+    confidence double precision check (confidence is null or (confidence >= 0 and confidence <= 1)),
+    n_runs     integer          not null check (n_runs >= 0),
+    updated_at timestamptz      not null default now(),
+    check ((basis = 'measured' and confidence is null) or (basis = 'inferred' and confidence is not null))
+);
+
+commit;

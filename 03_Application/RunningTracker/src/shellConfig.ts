@@ -13,6 +13,7 @@ const nav = [
   { id: 'running-history', label: 'History', path: '/running/history',  order: 2 },
   { id: 'running-routes',  label: 'Routes',  path: '/running/routes',   order: 3 },
   { id: 'running-devices', label: 'Devices', path: '/running/devices',  order: 4 },
+  { id: 'running-coach',   label: 'Coach',   path: '/running/coach',    order: 5 },
 ];
 
 AppRegistry.register({

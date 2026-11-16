@@ -308,3 +308,172 @@ test('run detail without cadence shows a dash and the neutral note', async ({ pa
   await expect(page.getByTestId('pace-chart').locator('svg').first()).toBeVisible();
   await expect(page.getByLabel('Comment')).toHaveValue('tempo');
 });
+
+// ---- Sprint04 Ghost Coach ([UI] scenarios; the API is stubbed) ----------------------------------------------------
+
+const analysisRow = (over: Record<string, unknown> = {}) => ({
+  id: RUN_SYNCED, run_id: RUN_SYNCED, assessment: 'Steady run, heart rate drifted up late.', previous_effect: 'You followed the easy plan.',
+  plan_rejected_reason: null, plan_id: 'p1', prompt_version: 'v1', model: 'm', analysed_at: '2030-01-07T09:00:00Z', ...over,
+});
+
+async function stubRunDetail(page: Page, coach: (path: string, method: string, route: Route) => Promise<boolean> | boolean) {
+  await page.route('**/api/runningtracker/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/runningtracker', '');
+    if (await coach(path, route.request().method(), route)) return;
+    if (path === `/runs/${RUN_SYNCED}`) return json(route, dataset('run', [run({})]));
+    if (path === `/runs/${RUN_SYNCED}/splits`) return json(route, dataset('run_split', []));
+    return json(route, dataset('x', []));
+  });
+}
+
+test('[UI] run detail shows the stored assessment as plain text', async ({ page }) => {
+  await stubRunDetail(page, (path, _m, route) => {
+    if (path === `/coach/runs/${RUN_SYNCED}/analysis`) { json(route, dataset('coach_analysis', [analysisRow({ assessment: '<b>bold</b> steady' })])); return true; }
+    return false;
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  await expect(page.getByTestId('coach-assessment')).toHaveText('<b>bold</b> steady');
+  await expect(page.getByTestId('coach-previous')).toContainText('You followed the easy plan.');
+  await expect(page.getByRole('button', { name: 'Analyse run' })).toHaveCount(0);
+});
+
+test('[UI] analyse run with consent missing disables the button while pending and links to the Coach page', async ({ page }) => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await stubRunDetail(page, async (path, method, route) => {
+    if (path === `/coach/runs/${RUN_SYNCED}/analysis` && method === 'POST') {
+      await gate;
+      await json(route, { error: { code: 'CONSENT_REQUIRED', message: 'Enable AI first.', request_id: 'r1' } }, 403);
+      return true;
+    }
+    return false;
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  const button = page.getByRole('button', { name: 'Analyse run' });
+  await button.click();
+  await expect(page.getByRole('button', { name: 'Analysing...' })).toBeDisabled();
+  release();
+  await expect(page.getByTestId('coach-error')).toContainText('Enable AI first.');
+  await expect(page.getByTestId('coach-error').getByRole('link', { name: 'Go to the Coach page' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Analyse run' })).toBeEnabled();
+});
+
+test('[UI] analyse run success shows the assessment and a pointer to the Coach page; a 502 keeps the button usable', async ({ page }) => {
+  let calls = 0;
+  await stubRunDetail(page, (path, method, route) => {
+    if (path === `/coach/runs/${RUN_SYNCED}/analysis` && method === 'POST') {
+      calls += 1;
+      if (calls === 1) json(route, { error: { code: 'AI_UNAVAILABLE', message: 'The AI provider is unavailable.', request_id: 'r2' } }, 502);
+      else json(route, dataset('coach_analysis', [analysisRow()]));
+      return true;
+    }
+    return false;
+  });
+  await page.goto(`/running/history/${RUN_SYNCED}`);
+  await page.getByRole('button', { name: 'Analyse run' }).click();
+  await expect(page.getByTestId('coach-error')).toContainText('The AI provider is unavailable.');
+  await page.getByRole('button', { name: 'Analyse run' }).click();
+  await expect(page.getByTestId('coach-assessment')).toContainText('heart rate drifted');
+  await expect(page.getByTestId('coach-card').getByRole('link', { name: 'Open the Coach page' })).toBeVisible();
+  await expect(page.getByTestId('coach-error')).toHaveCount(0);
+});
+
+const settings = (over: Record<string, unknown> = {}) => dataset('coach_settings', [{
+  id: 'settings', ai_enabled: false, consent_current: false, consent_version_required: 3, consented_at: null, goal_text: null,
+  key_configured: true, destination_host: 'api.anthropic.com', model: 'm', payload_version: 1, prompt_version: 'v1',
+  calls_last_24h: 0, daily_cap: 10, ...over }]);
+const planRow = (over: Record<string, unknown> = {}) => ({
+  id: 'p1', status: 'recommended', plan_type: 'easy_continuous', title: 'Easy 40', summary: 'Easy continuous - 40 min - HR 130-145',
+  rationale: 'Keep it relaxed.', total_s: 2400, target_distance_m: null, hr_min: 130, hr_max: 145, pace_fast_s_per_km: 330,
+  pace_slow_s_per_km: 390, cad_min: 165, cad_max: 175, segment_count: 3, created_at: '2030-01-07T09:00:00Z', decided_at: null,
+  run_id: null, outcome_summary: null, ...over });
+
+interface CoachStub { settings?: unknown; plan?: unknown[]; plans?: unknown[]; profile?: unknown[]; captured: { patch?: any; plan?: any } }
+async function stubCoach(page: Page, s: CoachStub) {
+  await page.route('**/api/runningtracker/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/runningtracker', '');
+    const method = route.request().method();
+    if (path === '/coach/settings' && method === 'GET') return json(route, s.settings ?? settings());
+    if (path === '/coach/settings' && method === 'PATCH') { s.captured.patch = route.request().postDataJSON(); return json(route, settings({ ai_enabled: true, consent_current: true })); }
+    if (path === '/coach/next-session') return json(route, dataset('coach_plan', s.plan ?? []));
+    if (path === '/coach/plans' && method === 'GET') return json(route, dataset('coach_plan', s.plans ?? s.plan ?? []));
+    if (path.startsWith('/coach/plans/') && method === 'PATCH') { s.captured.plan = route.request().postDataJSON(); return json(route, dataset('coach_plan', [planRow({ status: 'accepted' })])); }
+    if (path === '/coach/profile') return json(route, dataset('coach_profile_item', s.profile ?? []));
+    if (path === '/coach/analysis-preview') return json(route, dataset('coach_preview', [{ id: RUN_SYNCED, destination_host: 'api.anthropic.com', model: 'm', prompt_version: 'v1', payload_version: 1, history_runs: 2, byte_size: 1234, payload_json: '{\n  "payload_version": 1\n}' }]));
+    if (path === '/runs') return json(route, dataset('run', [run({})]));
+    return json(route, dataset('x', []));
+  });
+}
+
+test('[UI] consent flow: destination, data categories, preview, enabling sends the current consent version', async ({ page }) => {
+  const s: CoachStub = { captured: {} };
+  await stubCoach(page, s);
+  await page.goto('/running/coach');
+  const card = page.getByTestId('consent-card');
+  await expect(card).toContainText('api.anthropic.com');
+  await expect(page.getByTestId('sent-categories')).toContainText('per-kilometre splits');
+  await expect(page.getByTestId('never-sent')).toContainText('GPS coordinates');
+  await expect(page.getByTestId('ai-state')).toHaveText('AI off');
+  await page.getByRole('button', { name: 'Show what would be sent' }).click();
+  await expect(page.getByTestId('payload-preview')).toContainText('"payload_version": 1');
+  await page.getByRole('button', { name: 'Enable AI analysis' }).click();
+  await expect.poll(() => s.captured.patch).toEqual({ ai_enabled: true, consent_version: 3 });
+});
+
+test('[UI] consent toggle is disabled with an explanation when no key is configured', async ({ page }) => {
+  await stubCoach(page, { captured: {}, settings: settings({ key_configured: false }) });
+  await page.goto('/running/coach');
+  await expect(page.getByRole('button', { name: 'Enable AI analysis' })).toBeDisabled();
+  await expect(page.getByTestId('not-configured')).toBeVisible();
+});
+
+test('[UI] accept sends no overrides; disregard sends the status', async ({ page }) => {
+  const s: CoachStub = { captured: {}, plan: [planRow()] };
+  await stubCoach(page, s);
+  await page.goto('/running/coach');
+  await expect(page.getByTestId('plan-title')).toHaveText('Easy 40');
+  await page.getByRole('button', { name: 'Accept', exact: true }).click();
+  await expect.poll(() => s.captured.plan).toEqual({ status: 'accepted' });
+  await page.getByRole('button', { name: 'Disregard' }).click();
+  await expect.poll(() => s.captured.plan).toEqual({ status: 'disregarded' });
+});
+
+test('[UI] modify sends the cadence object, null for cleared fields and omits untouched fields', async ({ page }) => {
+  const s: CoachStub = { captured: {}, plan: [planRow()] };
+  await stubCoach(page, s);
+  await page.goto('/running/coach');
+  await page.getByRole('button', { name: 'Modify' }).click();
+  await page.getByLabel('Cadence min').fill('170');
+  await page.getByLabel('Cadence max').fill('180');
+  await page.getByLabel('Pace fast (s/km)').fill('');
+  await page.getByLabel('Pace slow (s/km)').fill('');
+  await page.getByRole('button', { name: 'Accept with changes' }).click();
+  await expect.poll(() => s.captured.plan).toEqual({ status: 'accepted', overrides: { cadence: { min: 170, max: 180 }, pace: null } });
+});
+
+test('[UI] no recommended session shows the empty state', async ({ page }) => {
+  await stubCoach(page, { captured: {}, plan: [] });
+  await page.goto('/running/coach');
+  await expect(page.getByTestId('no-session')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0);
+});
+
+test('[UI] profile lists measured before inferred with confidence; plan history shows status and outcome', async ({ page }) => {
+  await stubCoach(page, {
+    captured: {}, plan: [],
+    plans: [planRow({ id: 'p2', status: 'completed', title: 'Done plan', outcome_summary: 'completed, 40/40 min, HR in range 82%' })],
+    profile: [
+      { id: 'natural_cadence_spm', label: 'Natural cadence', basis: 'measured', value_text: '170 spm', confidence: null, n_runs: 4 },
+      { id: 'aerobic_endurance', label: 'Aerobic endurance', basis: 'inferred', value_text: 'Building', confidence: 0.5, n_runs: 4 },
+    ],
+  });
+  await page.goto('/running/coach');
+  const rows = page.getByTestId('profile').locator('tbody tr');
+  await expect(rows.nth(0)).toContainText('measured');
+  await expect(rows.nth(0)).toContainText('–');
+  await expect(rows.nth(1)).toContainText('inferred');
+  await expect(rows.nth(1)).toContainText('50%');
+  await expect(page.getByTestId('plan-history')).toContainText('completed, 40/40 min, HR in range 82%');
+});
