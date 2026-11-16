@@ -2,14 +2,15 @@
 
 Canonical product definition for the four Ghost Runner sprints. Each roadmap sprint is implemented as its own Atlas sprint folder; do not combine sprints.
 
-**Numbering (R-OPS-BP-01):** Roadmap Sprint 1 = `RunningTracker/Sprint02_RunFinishAndRecovery` (RunningTracker Sprint01 already exists: RecordAndSync). Work spans `03_Application/RunningTracker` (backend, schema, web) and `01_System/AtlasPhone` (native runner). Roadmap Sprint 4 (standalone app) will conflict with the current Atlas/Tailscale coupling and must surface that explicitly when it starts.
+**Numbering (R-OPS-BP-01):** Roadmap Sprint 1 = `RunningTracker/Sprint02_RunFinishAndRecovery` (RunningTracker Sprint01 already exists: RecordAndSync). Work spans `03_Application/RunningTracker` (backend, schema, web) and `01_System/AtlasPhone` (native runner). Ghost Coach V1 was inserted as `Sprint04_GhostCoach` (2026-11), so roadmap Sprint 4 will take folder `Sprint05_*` or later. Roadmap Sprint 4 (standalone app) will conflict with the current Atlas/Tailscale coupling and must surface that explicitly when it starts.
 
 | Roadmap sprint | Atlas sprint folder | Status |
 |---|---|---|
 | 1 Run Completion, Recovery & Analytics | `Sprint02_RunFinishAndRecovery` | TESTS_PASSING (device checks pending) |
-| 2 Live Racing, Cadence & Audio Pacing | `Sprint03_CadenceAndLiveRacing` | draft written |
+| 2 Live Racing, Cadence & Audio Pacing | `Sprint03_CadenceAndLiveRacing` | TESTS_PASSING (device checks pending) |
 | 3 Ghost Identity, History & League | — | defined only |
-| 4 First-Run Experience & Standalone Release | — | defined only |
+| 4 First-Run Experience & Standalone Release | — (next free folder: `Sprint05_*`) | defined only |
+| Ghost Coach V1 (added outside the 4-sprint plan) | `Sprint04_GhostCoach` | TESTS_PASSING (device checks pending); see `Sprint04_GhostCoach/00_draft.md` |
 
 ---
 
@@ -431,7 +432,7 @@ Do not combine all four sprints into one development task.
 - Social leaderboards.
 - Cloud synchronization.
 - Subscription systems.
-- Personalized AI coaching.
+- Personalized AI coaching beyond Ghost Coach V1 (V1 is built: `Sprint04_GhostCoach`). Still deferred from V1: route intelligence, running economy experiments, personalized challenges, athlete development overview. Note for Sprint 4: Ghost Coach adds an opt-in, server-side external AI call, which the standalone release must either keep server-side or drop.
 - Complete workout/strength-training integration.
 - Complex animations, character avatars, or fictional ghost personalities.
 
