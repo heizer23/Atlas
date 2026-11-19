@@ -1,7 +1,6 @@
 package net.linspad.atlasphone.running.ghost
 
 import net.linspad.atlasphone.running.PauseRecord
-import net.linspad.atlasphone.running.live.HrByDistance
 import net.linspad.atlasphone.running.recap.FinishStanding
 import net.linspad.atlasphone.running.recap.FinishStandings
 import kotlin.math.PI
@@ -137,32 +136,20 @@ data class GhostReading(
 )
 
 object GhostComparison {
-    private fun bisectLeft(xs: List<Double>, x: Double): Int {
-        var lo = 0; var hi = xs.size
-        while (lo < hi) { val mid = (lo + hi) ushr 1; if (xs[mid] < x) lo = mid + 1 else hi = mid }
-        return lo
+    /** Interpolates y at x over the profile points (x ascending). Null outside the range or next to a missing y. No allocation: runs every second per ghost. */
+    private inline fun interp(pts: List<GhostPoint>, x: Double, xOf: (GhostPoint) -> Double, yOf: (GhostPoint) -> Double?): Double? {
+        if (pts.isEmpty() || x < xOf(pts.first()) || x > xOf(pts.last())) return null
+        var lo = 0; var hi = pts.size
+        while (lo < hi) { val mid = (lo + hi) ushr 1; if (xOf(pts[mid]) < x) lo = mid + 1 else hi = mid }
+        if (xOf(pts[lo]) == x) return yOf(pts[lo]) // flat parts: earliest point
+        val a = pts[lo - 1]; val b = pts[lo]
+        val y0 = yOf(a) ?: return null; val y1 = yOf(b) ?: return null
+        return y0 + (y1 - y0) * (x - xOf(a)) / (xOf(b) - xOf(a))
     }
 
-    private fun interp(xs: List<Double>, ys: List<Double?>, x: Double): Double? {
-        if (xs.isEmpty() || x < xs.first() || x > xs.last()) return null
-        val i = bisectLeft(xs, x)
-        if (xs[i] == x) return ys[i]
-        val y0 = ys[i - 1]; val y1 = ys[i]
-        if (y0 == null || y1 == null) return null
-        return y0 + (y1 - y0) * (x - xs[i - 1]) / (xs[i] - xs[i - 1])
-    }
-
-    fun timeAtProgress(p: GhostProfile, s: Double): Double? {
-        val ss = p.points.map { it.s }
-        if (s < ss.first() || s > ss.last()) return null
-        val i = bisectLeft(ss, s)
-        if (ss[i] == s) return p.points[i].t // flat parts: earliest time
-        val a = p.points[i - 1]; val b = p.points[i]
-        return a.t + (b.t - a.t) * (s - a.s) / (b.s - a.s)
-    }
-
-    fun progressAtTime(p: GhostProfile, t: Double): Double? = interp(p.points.map { it.t }, p.points.map { it.s }, t)
-    fun hrAtTime(p: GhostProfile, t: Double): Double? = interp(p.points.map { it.t }, p.points.map { it.hr }, t)
+    fun timeAtProgress(p: GhostProfile, s: Double): Double? = interp(p.points, s, { it.s }, { it.t })
+    fun progressAtTime(p: GhostProfile, t: Double): Double? = interp(p.points, t, { it.t }, { it.s })
+    fun hrAtTime(p: GhostProfile, t: Double): Double? = interp(p.points, t, { it.t }, { it.hr })
     fun hrAtProgress(p: GhostProfile, s: Double): Double? = timeAtProgress(p, s)?.let { hrAtTime(p, it) }
 
     /** Where a profile's runner is at moving time [t]: before its first point at the start, after its last at the end. */
@@ -199,8 +186,8 @@ object FieldRanking {
             .mapIndexed { i, p -> p.runId to i + 1 }.toMap()
 }
 
-/** One runner of the field on the minimap: [rank] by finishing time, [isMain] = the run being raced. */
-data class FieldMarker(val rank: Int, val progressM: Double, val isMain: Boolean)
+/** One runner of the field on the minimap: [rank] by finishing time, [isMain] = the selected ghost (the one compared against). */
+data class FieldMarker(val rank: Int, val progressM: Double, val isMain: Boolean, val runId: String = "")
 
 enum class GhostStatus {
     /** No fix matched the route start yet: go to the start of the route. */
@@ -222,10 +209,10 @@ data class GhostLive(
     /** Your place among the field right now (1 = ahead of everyone) and the number of field runners; null without a field. */
     val position: Int? = null,
     val fieldSize: Int = 0,
-    /** Rank by finishing time of the main ghost. */
+    /** Rank by finishing time of the selected ghost. */
     val mainRank: Int? = null,
-    /** The main ghost's whole run: heart rate along the route (progress metres, bpm), 20 m buckets. Shared, not copied. */
-    val ghostHrProfile: List<Pair<Double, Double>> = emptyList(),
+    /** Run id of the selected ghost. */
+    val selectedRunId: String? = null,
 )
 
 /**
@@ -241,7 +228,13 @@ class GhostSession(
 ) {
     private val everyone = (listOf(profile) + otherRuns).distinctBy { it.runId }
     private val ranks = FieldRanking.ranks(everyone)
-    private val ghostHrProfile = HrByDistance.bucket(profile.points.mapNotNull { p -> p.hr?.let { p.s to it } })
+    @Volatile private var selected: GhostProfile = profile
+
+    /** The ghost all comparisons run against; starts as the run chosen for the race. Display only: recording is untouched. */
+    fun selectedProfile(): GhostProfile = selected
+
+    /** Switches the compared ghost; unknown ids are ignored. */
+    fun select(runId: String) { everyone.firstOrNull { it.runId == runId }?.let { selected = it } }
     private val tracker = ProgressTracker(RouteProjector(route.points))
     private val clock = MovingClock(startedAtMillis)
     private var lastFixMillis: Long? = null
@@ -265,15 +258,16 @@ class GhostSession(
     fun snapshot(nowMillis: Long): GhostLive {
         val s = tracker.lastProgressM; val t = tracker.lastMovingS
         val len = route.referenceDistanceM
-        if (s == null || t == null) return GhostLive(GhostStatus.WAITING_FOR_START, route.name, null, null, len, route.points, ghostHrProfile = ghostHrProfile)
-        if (tracker.consecutiveOffCourse >= GhostConfig.SUSPEND_AFTER_OFF_COURSE) return GhostLive(GhostStatus.OFF_COURSE, route.name, null, s, len, route.points, ghostHrProfile = ghostHrProfile)
+        if (s == null || t == null) return GhostLive(GhostStatus.WAITING_FOR_START, route.name, null, null, len, route.points)
+        if (tracker.consecutiveOffCourse >= GhostConfig.SUSPEND_AFTER_OFF_COURSE) return GhostLive(GhostStatus.OFF_COURSE, route.name, null, s, len, route.points)
         val seen = lastFixMillis
-        if (seen == null || nowMillis - seen > GhostConfig.GPS_LOST_MS) return GhostLive(GhostStatus.GPS_LOST, route.name, null, s, len, route.points, ghostHrProfile = ghostHrProfile)
+        if (seen == null || nowMillis - seen > GhostConfig.GPS_LOST_MS) return GhostLive(GhostStatus.GPS_LOST, route.name, null, s, len, route.points)
+        val sel = selected
         val field = if (everyone.size < 2) emptyList() else everyone.map {
-            FieldMarker(ranks.getValue(it.runId), GhostComparison.progressNow(it, t), it.runId == profile.runId)
+            FieldMarker(ranks.getValue(it.runId), GhostComparison.progressNow(it, t), it.runId == sel.runId, it.runId)
         }
         val position = if (field.isEmpty()) null else 1 + field.count { it.progressM > s }
-        return GhostLive(GhostStatus.ON_COURSE, route.name, GhostComparison.compare(profile, t, s), s, len, route.points,
-            field, position, field.size, ranks[profile.runId], ghostHrProfile)
+        return GhostLive(GhostStatus.ON_COURSE, route.name, GhostComparison.compare(sel, t, s), s, len, route.points,
+            field, position, field.size, ranks[sel.runId], sel.runId)
     }
 }

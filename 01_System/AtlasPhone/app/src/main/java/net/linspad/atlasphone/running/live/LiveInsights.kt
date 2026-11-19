@@ -171,7 +171,7 @@ class LocalMapView(
 )
 
 /** A field runner on the map: [rank] by finishing time (the screen draws 1-9 as digits, others as dots). */
-class MapMarker(val rank: Int, val at: MapXY, val isMain: Boolean)
+class MapMarker(val rank: Int, val at: MapXY, val isMain: Boolean, val runId: String = "")
 
 object LocalMap {
     const val MIN_RADIUS_M = 120.0
@@ -244,7 +244,7 @@ object LocalMap {
         points.filter { it.cumM > from && it.cumM < to }.forEach { line.add(xy(it, me, headingDeg)) }
         line.add(xy(pointAt(points, to), me, headingDeg))
 
-        val markers = placed.filter { inside(it.second) }.map { MapMarker(it.first.rank, it.second, it.first.isMain) }
+        val markers = placed.filter { inside(it.second) }.map { MapMarker(it.first.rank, it.second, it.first.isMain, it.first.runId) }
         val km = ArrayList<KmMark>()
         var k = Math.ceil(max(from, 1.0) / 1000.0).toInt()
         while (k * 1000.0 <= min(to, points.last().cumM)) {

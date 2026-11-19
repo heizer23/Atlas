@@ -24,14 +24,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -46,9 +48,7 @@ import net.linspad.atlasphone.running.RecoveryGate
 import net.linspad.atlasphone.running.ghost.GhostLive
 import net.linspad.atlasphone.running.ghost.GhostStatus
 import net.linspad.atlasphone.running.session.LiveRunState
-import net.linspad.atlasphone.running.live.GapTrend
 import net.linspad.atlasphone.running.live.HeadingSmoother
-import net.linspad.atlasphone.running.live.HrByDistance
 import net.linspad.atlasphone.running.live.LiveTrends
 import net.linspad.atlasphone.running.live.LocalMap
 import net.linspad.atlasphone.running.metrics.LiveMetrics
@@ -61,8 +61,6 @@ private val GhostBlue = Color(0xFF3B8EFF)
 private val HrRed = Color(0xFFFF4D6D)
 private val Soft = Color(0xFF9AA3B2)
 private val Amber = Color(0xFFFFC107)
-private val GainGreen = Color(0xFF5BE584)
-private val LossRed = Color(0xFFFF6B6B)
 
 private val Big = TextStyle(fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum", color = Color.White)
 
@@ -75,14 +73,14 @@ internal fun GhostRaceScreen(
     live: LiveRunState, ghost: GhostLive, paused: Boolean, finishing: Boolean, gpsText: String, gpsGood: Boolean,
     onReconnectHr: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onFinish: () -> Unit,
     onCycleMetronome: () -> Unit = {}, onUseManualCadence: () -> Unit = {}, onManualCadence: (Int) -> Unit = {}, onClickVolume: (Float) -> Unit = {},
-    onCoachMute: (Boolean) -> Unit = {},
+    onCoachMute: (Boolean) -> Unit = {}, onSelectGhost: (String) -> Unit = {},
 ) {
     val m = live.metrics
     val trends = live.trends
     val reading = ghost.reading
     BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
         if (ghost.progressM != null && ghost.route.size >= 2 && ghost.status != GhostStatus.WAITING_FOR_START) {
-            RaceMap(ghost, aspect = (maxHeight / maxWidth).toDouble())
+            RaceMap(ghost, aspect = (maxHeight / maxWidth).toDouble(), onSelect = onSelectGhost)
         }
         // Soft fades keep the numbers readable over the route.
         Spacer(Modifier.fillMaxWidth().height(170.dp).background(Brush.verticalGradient(listOf(Bg, Color.Transparent))).align(Alignment.TopCenter))
@@ -100,10 +98,10 @@ internal fun GhostRaceScreen(
             MetronomeChip(live.metronome, live.cadenceSpm, onCycle = onCycleMetronome, onUseManual = onUseManualCadence,
                 onManualSpm = onManualCadence, onVolume = onClickVolume)
             CoachStrip(live.coach, onCoachMute, Modifier.padding(top = 4.dp))   // absent without a coach session
-            Row(Modifier.weight(1f).fillMaxWidth()) {
-                // Left: gap, gaining/losing arrow, gap history and the 20 s pace beside the ghost's; right: heart rate by position.
-                RaceGapPanel(reading?.timeGapS, trends, m.racePaceSPerKm, Modifier.weight(1f).padding(top = 8.dp, end = 8.dp))
-                HrDistanceChart(trends, ghost, live.targetHr, reading?.ghostHrAtPosition, live.hrDisplay, Modifier.width(158.dp).fillMaxHeight().padding(top = 8.dp, bottom = 8.dp))
+            Row(Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                // Left: distance gap (equal elapsed time). Right: HR and pace differences (same route position). The map shows between.
+                GapChart(trends.race, Modifier.width(74.dp).fillMaxHeight())
+                DeltaChart(trends.race, Modifier.width(112.dp).fillMaxHeight())
             }
             BottomStats(m, trends)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -183,39 +181,13 @@ private fun BottomStats(m: LiveMetrics, trends: LiveTrends) {
     }
 }
 
-/** "+0:18" = ahead of the ghost, "−0:18" = behind (green / red), with the 20-30 s trend arrow. */
-@Composable
-internal fun GapLine(gapS: Double?, change: Double?) {
-    if (gapS == null) { Text(DASH, color = Soft, fontSize = 18.sp); return }
-    val ahead = gapS < 0
-    val level = Math.abs(gapS) < 1.0
-    val color = if (level) Color.White else if (ahead) GainGreen else LossRed
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val arrow = when {
-            change == null -> null
-            change <= -GapTrend.STEADY_S -> "↗" to GainGreen
-            change >= GapTrend.STEADY_S -> "↘" to LossRed
-            else -> "→" to Soft
-        }
-        arrow?.let { Text(it.first, color = it.second, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-        Text(gapText(gapS), style = Big.copy(color = color), fontSize = 20.sp)
-    }
-}
-
-/** Mockup's "+0:18": a plus means a lead on the ghost, a minus means a deficit. */
-internal fun gapText(timeGapS: Double): String {
-    val abs = Math.abs(timeGapS)
-    if (abs < 1.0) return "0:00"
-    return (if (timeGapS < 0) "+" else "−") + fmtDuration(abs)
-}
-
 /** "7:15" from seconds per km (the unit label is drawn separately). */
 internal fun paceValue(sPerKm: Double?): String = fmtPace(sPerKm).removeSuffix(" /km")
 
 // ── Map ──────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun RaceMap(ghost: GhostLive, aspect: Double) {
+private fun RaceMap(ghost: GhostLive, aspect: Double, onSelect: (String) -> Unit) {
     val progress = ghost.progressM ?: return
     val dur = tween<Float>(1000, easing = LinearEasing)
     // Heading = route direction at my position (steadier than GPS bearing), low-passed and glided: the map turns slowly.
@@ -233,7 +205,22 @@ private fun RaceMap(ghost: GhostLive, aspect: Double) {
     val ring = remember { android.graphics.Paint().apply { isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER; isFakeBoldText = true } }
     val kmPaint = remember { android.graphics.Paint().apply { isAntiAlias = true; textAlign = android.graphics.Paint.Align.RIGHT; color = 0xFFB4BCC9.toInt() } }
 
-    Canvas(Modifier.fillMaxSize()) {
+    // Tap a ghost to race it: nearest marker within a thumb-sized radius. Display only, the run is untouched.
+    val tapView = rememberUpdatedState(view)
+    val tapSelect = rememberUpdatedState(onSelect)
+    Canvas(Modifier.fillMaxSize().pointerInput(Unit) {
+        detectTapGestures { tap ->
+            val v = tapView.value
+            val centre = Offset(size.width / 2f, size.height * 0.68f)
+            val scale = size.width / 2f / v.radiusM.toFloat()
+            val hit = v.markers.filter { it.runId.isNotEmpty() }.minByOrNull { mk ->
+                (Offset(centre.x + mk.at.east.toFloat() * scale, centre.y - mk.at.north.toFloat() * scale) - tap).getDistance()
+            }?.takeIf { mk ->
+                (Offset(centre.x + mk.at.east.toFloat() * scale, centre.y - mk.at.north.toFloat() * scale) - tap).getDistance() <= 32.dp.toPx()
+            }
+            hit?.let { tapSelect.value(it.runId) }
+        }
+    }) {
         val centre = Offset(size.width / 2, size.height * 0.68f)
         val scale = size.width / 2 / view.radiusM.toFloat()
         fun at(east: Double, north: Double) = Offset(centre.x + east.toFloat() * scale, centre.y - north.toFloat() * scale)
@@ -255,7 +242,8 @@ private fun RaceMap(ghost: GhostLive, aspect: Double) {
             val o = at(mk.at.east, mk.at.north)
             when {
                 mk.isMain -> {
-                    drawCircle(GhostBlue.copy(alpha = 0.25f), 32.dp.toPx(), o)
+                    drawCircle(Amber, 31.dp.toPx(), o, style = Stroke(3.dp.toPx()))      // selected: unmistakable ring
+                    drawCircle(GhostBlue.copy(alpha = 0.25f), 30.dp.toPx(), o)
                     drawCircle(GhostBlue, 22.dp.toPx(), o)
                     drawCircle(Color.White, 22.dp.toPx(), o, style = Stroke(2.5f.dp.toPx()))
                     digit(ring, mk.rank, o, Color.White, 20.sp.toPx())
@@ -288,64 +276,4 @@ private fun DrawScope.digit(paint: android.graphics.Paint, rank: Int, at: Offset
     paint.color = color.toArgb()
     paint.textSize = textSizePx
     drawContext.canvas.nativeCanvas.drawText(rank.toString(), at.x, at.y + textSizePx * 0.35f, paint)
-}
-
-// ── Heart-rate comparison by route distance ──────────────────────────────────
-
-/**
- * Slim vertical graph: bpm left to right, route progress top to bottom. Both traces are aligned by distance, not time.
- * Mine covers the part run so far; the ghost's covers its whole run, faded and dashed beyond my position. No frame, legend or title.
- */
-@Composable
-private fun HrDistanceChart(trends: LiveTrends, ghost: GhostLive, targetHr: Int?, ghostNow: Double?, myNow: Double?, modifier: Modifier) {
-    val my = trends.hrByProgress
-    val gh = ghost.ghostHrProfile
-    val len = ghost.routeLengthM
-    val myS = ghost.progressM
-    if (len <= 0 || myS == null || (my.isEmpty() && gh.isEmpty())) return
-    val (lo, hi) = HrByDistance.axis((my + gh).map { it.second }, targetHr?.toDouble())
-    val labelPaint = remember { android.graphics.Paint().apply { isAntiAlias = true; textAlign = android.graphics.Paint.Align.CENTER; color = 0xFF9AA3B2.toInt() } }
-    Canvas(modifier) {
-        val top = 26.dp.toPx()
-        val h = size.height - top
-        fun x(bpm: Double) = ((bpm - lo) / (hi - lo)).toFloat().coerceIn(0f, 1f) * size.width
-        fun y(s: Double) = top + (s / len).toFloat().coerceIn(0f, 1f) * h
-
-        // Axis along the top, every 10 bpm (20 when the range is wide).
-        val step = if (hi - lo > 50) 20 else 10
-        labelPaint.textSize = 11.dp.toPx()
-        var t = lo
-        while (t <= hi) {
-            val tx = x(t.toDouble())
-            drawLine(Soft.copy(alpha = 0.5f), Offset(tx, top - 5.dp.toPx()), Offset(tx, top), 1.dp.toPx())
-            drawContext.canvas.nativeCanvas.drawText(t.toString(), tx.coerceIn(12.dp.toPx(), size.width - 12.dp.toPx()), top - 9.dp.toPx(), labelPaint)
-            t += step
-        }
-        drawLine(Soft.copy(alpha = 0.5f), Offset(0f, top), Offset(size.width, top), 1.dp.toPx())
-
-        targetHr?.let {
-            val tx = x(it.toDouble())
-            drawLine(Color.White.copy(alpha = 0.45f), Offset(tx, top), Offset(tx, size.height), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
-        }
-
-        fun trace(points: List<Pair<Double, Double>>, color: Color, dashed: Boolean) {
-            if (points.size < 2) return
-            val p = Path()
-            points.forEachIndexed { i, (s, bpm) -> if (i == 0) p.moveTo(x(bpm), y(s)) else p.lineTo(x(bpm), y(s)) }
-            drawPath(p, if (dashed) color.copy(alpha = 0.4f) else color, style = Stroke(
-                2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round,
-                pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(7f, 7f)) else null))
-        }
-        // The ghost: solid up to my position, then faded and dashed (the first point past it keeps the line joined).
-        val firstPast = gh.indexOfFirst { it.first > myS }
-        if (firstPast < 0) trace(gh, GhostBlue, false)
-        else {
-            trace(gh.subList(0, firstPast + 1), GhostBlue, false)
-            trace(gh.subList(firstPast, gh.size), GhostBlue, true)
-        }
-        trace(my, HrRed, false)
-
-        myNow?.let { drawCircle(Color.White, 4.5f.dp.toPx(), Offset(x(it), y(myS))); drawCircle(HrRed, 3.dp.toPx(), Offset(x(it), y(myS))) }
-        ghostNow?.let { drawCircle(Color.White, 4.5f.dp.toPx(), Offset(x(it), y(myS))); drawCircle(GhostBlue, 3.dp.toPx(), Offset(x(it), y(myS))) }
-    }
 }

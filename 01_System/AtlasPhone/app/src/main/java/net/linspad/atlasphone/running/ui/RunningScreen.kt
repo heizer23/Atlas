@@ -365,7 +365,7 @@ private fun RecordingPanel(controller: RunController, live: LiveRunState, ensure
             onPause = { controller.pause() }, onResume = { controller.resume() }, onFinish = { confirmRecovery = recoveryOffered; confirmFinish = true },
             onCycleMetronome = { controller.cycleMetronome() }, onUseManualCadence = { controller.selectMetronomeMode(MetronomeMode.MANUAL) },
             onManualCadence = { controller.setManualCadence(it) }, onClickVolume = { controller.setClickVolume(it) },
-            onCoachMute = { controller.setCoachMuted(it) })
+            onCoachMute = { controller.setCoachMuted(it) }, onSelectGhost = { controller.selectGhost(it) })
     } else Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Free run: scrolling cockpit; Pause / Finish stay pinned below it.
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {

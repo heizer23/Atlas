@@ -222,7 +222,7 @@ class RunController private constructor(private val app: Application) {
                 val metrics = it.acc.snapshot(now)
                 val ghost = it.ghost?.snapshot(now)
                 val hrDisplay = HrSmoothing.valueAt(it.hrRecent.toList(), settings.hrSmoothing(), now, centered = false)
-                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost, hrDisplay, it.ghostProfile) // no history while paused
+                if (it.meta.state == RunState.RECORDING) it.history.record(metrics, ghost, hrDisplay, it.ghost?.selectedProfile()) // no history while paused
                 val running = it.meta.state == RunState.RECORDING || it.meta.state == RunState.PAUSED
                 // Display only (CAD1 over the last 30 s of steps); never persisted or uploaded, not used for the metronome target.
                 val cadence = if (running) CadenceEstimator.at(it.recentSteps.toList(), pauseRanges(it.meta.pauses), now)?.spm else null
@@ -287,6 +287,12 @@ class RunController private constructor(private val app: Application) {
 
     /** One-tap mode cycle for the chip. */
     fun cycleMetronome() { metronome.cycleMode(); publish() }
+
+    /** Compare against another run of the field (map tap). Display only: the recorded run, its ghost id and the metronome stay as they were. */
+    fun selectGhost(runId: String) {
+        synchronized(lock) { active?.ghost?.select(runId) }
+        publish()
+    }
 
     /** Explicit mode, e.g. "Use manual cadence" from the no-ghost-cadence notice. */
     fun selectMetronomeMode(mode: MetronomeMode) { metronome.setMode(mode); publish() }
