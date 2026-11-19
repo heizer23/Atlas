@@ -60,14 +60,19 @@ class SchedulerResult(NamedTuple):
 # returns a NEW Card object and never mutates the Card passed in, and the
 # Scheduler instance itself carries no per-call mutable state (only its
 # immutable construction-time config). Unchanged rationale from Sprint10.
-_FSRS_SCHEDULER = fsrs.Scheduler(desired_retention=DESIRED_RETENTION)
+#
+# enable_fuzzing=False: py-fsrs' default random +/- jitter is drawn independently
+# per review_card call, so the grade-preview labels (one call per grade) could
+# show Hard > Good and never matched what the real review then scheduled.
+_FSRS_SCHEDULER = fsrs.Scheduler(desired_retention=DESIRED_RETENTION, enable_fuzzing=False)
 
 # Oral recall (Sprint16_RecallFSRS) uses the same FSRS-6 model and retention but
 # NO intra-day learning/relearning steps: an oral assessment is a heavy,
 # once-in-a-while event, so even a first Good/Again must yield a day-scale due
 # date (min 1 day), never a 10-minute step.
 _RECALL_SCHEDULER = fsrs.Scheduler(
-    desired_retention=DESIRED_RETENTION, learning_steps=(), relearning_steps=()
+    desired_retention=DESIRED_RETENTION, learning_steps=(), relearning_steps=(),
+    enable_fuzzing=False,
 )
 
 # Direct 1:1 name match — no numeric or semantic translation.
