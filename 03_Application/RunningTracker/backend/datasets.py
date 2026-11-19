@@ -171,6 +171,27 @@ def recovery_trend_dataset(rows: list[dict]) -> Dataset:
     return _dataset("run_recovery_trend", "Recovery trend", RECOVERY_TREND_SCHEMA, out)
 
 
+EFFICIENCY_TREND_SCHEMA = [
+    _col("when", "Run", "string"),
+    _col("pace_s_per_km", "Pace (s/km)", "number"),
+    _col("avg_hr", "Avg HR", "number"),
+    _col("efficiency", "Efficiency factor", "number"),
+]
+
+
+def efficiency_trend_dataset(rows: list[dict]) -> Dataset:
+    """One row per run with distance, moving time and avg HR, oldest first. Efficiency factor = speed (m/min) / avg HR; higher = fitter."""
+    out = []
+    for r in rows:
+        speed_m_min = r["distance_m"] / (r["moving_s"] / 60)
+        out.append({
+            "id": str(r["id"]), "when": r["started_at"].strftime("%Y-%m-%d %H:%M"),
+            "pace_s_per_km": round(r["moving_s"] / (r["distance_m"] / 1000), 1),
+            "avg_hr": r["avg_hr"], "efficiency": round(speed_m_min / r["avg_hr"], 3),
+        })
+    return _dataset("run_efficiency_trend", "Efficiency trend", EFFICIENCY_TREND_SCHEMA, out)
+
+
 def _ghost_label(r: dict) -> Optional[str]:
     if not r.get("ghost_run_id"):
         return None

@@ -183,6 +183,15 @@ def test_recovery_trend_lists_only_runs_with_recovery(client):
     assert len(row["when"]) == 16 and row["when"].startswith("2026-01-12")
 
 
+def test_efficiency_trend_is_speed_over_avg_hr_for_runs_with_hr(client):
+    body = client.get(f"{W}/runs/efficiency-trend").json()
+    assert body["meta"]["object_type"] == "run_efficiency_trend"
+    row = next(r for r in body["rows"] if r["id"] == RUN_COMPLETE)
+    assert row["avg_hr"] == 160 and row["pace_s_per_km"] > 0
+    assert abs(row["efficiency"] - (60000 / row["pace_s_per_km"]) / 160) < 1e-2
+    assert RUN_RECOVERY_NOHR not in [r["id"] for r in body["rows"]]
+
+
 def test_run_without_heart_rate_has_a_null_recovery_row_and_an_empty_series(client):
     row = _rows(client.get(f"{W}/runs/{RUN_RECOVERY_NOHR}/recovery"))[0]
     assert row["recovery_s"] == 180

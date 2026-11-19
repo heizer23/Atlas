@@ -56,6 +56,7 @@ sealed interface AtlasResult<out T> {
     data class NetworkError(val message: String) : AtlasResult<Nothing>
 }
 
+data class EfficiencyBaseline(val n: Int, val avg: Double?)
 data class PairResult(val deviceId: String, val deviceToken: String, val deviceName: String)
 data class PreparedRun(
     val id: String, val shortId: String, val title: String?, val plannedForMillis: Long?, val expiresAtMillis: Long,
@@ -112,6 +113,12 @@ class AtlasClient(
 
     /** Ghost profile (moving time, progress, heart rate) of a completed run on its route. */
     fun ghostProfile(runId: String): AtlasResult<GhostProfile> = call("GET", "/runs/$runId/ghost-profile", null) { GhostProfile.fromJson(it) }
+
+    /** Mean efficiency factor of the latest 5 other runs with heart rate; [EfficiencyBaseline.avg] null when there are none. */
+    fun efficiencyBaseline(excludeRunId: String): AtlasResult<EfficiencyBaseline> =
+        call("GET", "/efficiency-baseline?exclude=$excludeRunId", null) {
+            EfficiencyBaseline(it.getInt("n"), if (it.isNull("avg_efficiency")) null else it.getDouble("avg_efficiency"))
+        }
 
     /** The accepted coach plan for offline coaching (never called during a run). */
     fun nextCoachPlan(): AtlasResult<NextPlan> = call("GET", "/coach/next-plan", null) { o ->

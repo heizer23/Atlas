@@ -16,15 +16,30 @@ export interface RunRow {
   location_count: number; hr_count: number;
 }
 
+/** Latest efficiency factor vs the mean of up to 5 runs before it. */
+function EfficiencyHeadline({ rows }: { rows: { efficiency: number }[] }) {
+  const latest = rows[rows.length - 1].efficiency;
+  const prev = rows.slice(-6, -1).map((r) => r.efficiency);
+  const base = prev.reduce((a, b) => a + b, 0) / prev.length;
+  const pct = ((latest - base) / base) * 100;
+  return (
+    <span data-testid="efficiency-headline">
+      <strong>{latest.toFixed(3)}</strong> latest · {pct >= 0 ? '+' : ''}{pct.toFixed(1)}% vs previous {prev.length} run{prev.length === 1 ? '' : 's'}
+    </span>
+  );
+}
+
 export default function HistoryPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Dataset | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [trend, setTrend] = useState<Dataset | null>(null);
+  const [eff, setEff] = useState<Dataset | null>(null);
 
   useEffect(() => {
     apiFetch<Dataset>('/runningtracker/runs/recovery-trend').then((res) => { if (!isApiError(res)) setTrend(res); });
+    apiFetch<Dataset>('/runningtracker/runs/efficiency-trend').then((res) => { if (!isApiError(res)) setEff(res); });
   }, []);
 
   useEffect(() => {
@@ -47,6 +62,14 @@ export default function HistoryPage() {
         <div className="running-card" data-testid="empty-history">
           <strong>No runs yet</strong>
           <span className="running-muted">Record a run with AtlasPhone; it appears here once it has synced.</span>
+        </div>
+      )}
+      {eff && eff.rows.length > 1 && (
+        <div className="running-card" data-testid="efficiency-trend">
+          <strong>Aerobic efficiency over time</strong>
+          <span className="running-muted">Speed (m/min) divided by average heart rate; higher = faster at the same effort. Compare runs of similar type, and judge the trend, not single runs.</span>
+          <EfficiencyHeadline rows={eff.rows as unknown as { efficiency: number }[]} />
+          <LineChart dataset={eff} mapping={{ x: 'when', y: 'efficiency', aggregation: 'avg' }} options={{ title: 'Efficiency factor' }} />
         </div>
       )}
       {trend && trend.rows.length > 0 && (

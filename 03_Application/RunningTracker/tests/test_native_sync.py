@@ -522,3 +522,11 @@ def test_old_finish_body_without_step_count_still_works(client):
     assert r.json()["result"] == "complete" and r.json()["verified_counts"]["step"] == 0
     body["bogus"] = 1
     assert finish(client, NEW_RUN, body).status_code == 422
+
+
+def test_efficiency_baseline_is_mean_of_other_runs_with_hr_and_tolerates_bad_exclude(client):
+    body = client.get(f"{NATIVE}/efficiency-baseline", headers=auth()).json()
+    assert set(body) == {"n", "avg_efficiency"} and body["n"] <= 5
+    assert (body["avg_efficiency"] is None) == (body["n"] == 0)
+    assert client.get(f"{NATIVE}/efficiency-baseline?exclude=not-a-uuid", headers=auth()).status_code == 200
+    assert client.get(f"{NATIVE}/efficiency-baseline").status_code == 401

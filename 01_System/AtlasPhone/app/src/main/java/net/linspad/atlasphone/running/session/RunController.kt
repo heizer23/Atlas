@@ -329,6 +329,12 @@ class RunController private constructor(private val app: Application) {
         return coach.refreshPlan(c)
     }
 
+    /** Blocking (call from IO): baseline for the recap's efficiency comparison. Null when unpaired, offline or no other runs. */
+    fun efficiencyBaseline(excludeRunId: String): Double? {
+        val c = client() ?: return null
+        return (c.efficiencyBaseline(excludeRunId) as? AtlasResult.Success)?.value?.avg
+    }
+
     /** Active seconds at the start of the last open pause (the recovered run is PAUSED there). */
     private fun activeAtOpenPause(pauses: List<PauseRecord>): Double {
         val open = pauses.lastOrNull { it.endedAtMillis == null }

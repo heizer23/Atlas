@@ -278,6 +278,21 @@ def native_get_route(route_id: str, device: DeviceContext = Depends(require_devi
             "reference_distance_m": row["reference_distance_m"], "is_loop": row["is_loop"], "geometry": row["geometry"]}
 
 
+@router.get("/efficiency-baseline")
+def native_get_efficiency_baseline(exclude: Optional[str] = None, device: DeviceContext = Depends(require_device)):
+    """Mean efficiency factor (speed m/min / avg HR) of the latest 5 complete runs with HR, excluding run `exclude` (invalid uuid = ignored).
+    `n` = runs averaged; `avg_efficiency` is null when n = 0. Server-side calculation, same formula as the web trend."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select (r.distance_m / (r.moving_s / 60.0)) / m.avg_hr as ef from runningtracker.runs r "
+                "join runningtracker.run_metrics m on m.run_id = r.id "
+                "where r.status = 'complete' and r.started_at is not null and m.avg_hr > 0 and r.distance_m > 0 and r.moving_s > 0 "
+                "and (%s::uuid is null or r.id <> %s::uuid) order by r.started_at desc limit 5", (_opt_uuid(exclude), _opt_uuid(exclude)))
+            vals = [r["ef"] for r in cur.fetchall()]
+    return {"n": len(vals), "avg_efficiency": (sum(vals) / len(vals)) if vals else None}
+
+
 @router.get("/runs/{run_id}/ghost-profile")
 def native_get_ghost_profile(run_id: str, device: DeviceContext = Depends(require_device)):
     """Ghost profile of a completed run on its route: points [moving_t_s, progress_m, hr_bpm|null]. 404 unless qualified."""

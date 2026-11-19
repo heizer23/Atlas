@@ -23,7 +23,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import net.linspad.atlasphone.running.RunMeta
 import net.linspad.atlasphone.running.RunState
 import net.linspad.atlasphone.running.hr.HrSmoothingMode
@@ -73,6 +75,13 @@ fun RecapScreen(meta: RunMeta, smoothing: HrSmoothingMode, onDone: () -> Unit = 
             Text("Average ${s?.avgHr?.let { "%.0f".format(it) } ?: DASH}   Max ${recap?.maxHr?.toString() ?: DASH}  (running phase)", fontSize = 16.sp)
             if (hrSeries.isNotEmpty()) Sparkline(hrLines(hrSeries, smoothing, hrSeries.first().tsMillis, HrRed), emptyText = "No heart-rate graph")
         }
+        efficiencyFactor(s?.distanceM, s?.movingS, s?.avgHr)?.let { ef ->
+            val baseline by produceState<Double?>(null, meta.captureId) {
+                value = withContext(Dispatchers.IO) { controller.efficiencyBaseline(meta.captureId) }
+            }
+            Text("Aerobic efficiency ${"%.3f".format(ef)}" + (baseline?.let { "   ${efficiencyDelta(ef, it)} vs last 5 runs" } ?: ""), fontSize = 16.sp)
+            Text("Speed (m/min) per heart-rate beat; higher = fitter. Trend over runs: Atlas web, History.", color = Grey, fontSize = 13.sp)
+        }
         current.recovery?.let { r ->
             Text("Recovery", style = MaterialTheme.typography.titleMedium)
             Text("HRR60 ${fmtBpm(r.hrr60)}   HRR120 ${fmtBpm(r.hrr120)}", fontSize = 16.sp)
@@ -102,6 +111,15 @@ fun RecapScreen(meta: RunMeta, smoothing: HrSmoothingMode, onDone: () -> Unit = 
         OutlinedButton(onClick = onDone) { Text("Done") }
     }
 }
+
+/** Efficiency factor = speed (m/min) / average HR, as on Atlas web. Null without distance, moving time or HR. */
+internal fun efficiencyFactor(distanceM: Double?, movingS: Double?, avgHr: Double?): Double? {
+    if (distanceM == null || movingS == null || avgHr == null || distanceM <= 0 || movingS <= 0 || avgHr <= 0) return null
+    return (distanceM / (movingS / 60.0)) / avgHr
+}
+
+/** "+2.1%" / "-0.4%" relative to the baseline. */
+internal fun efficiencyDelta(ef: Double, baseline: Double): String = "%+.1f%%".format((ef - baseline) / baseline * 100)
 
 private fun rivalText(st: FinishStanding): String {
     val margin = st.rivalMarginS?.let { fmtDuration(it) }
