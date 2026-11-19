@@ -1287,19 +1287,21 @@ function TaskDetailEdit({
 function TaskCreatePanel({
   onCancel,
   onCreated,
+  initial,
 }: {
   onCancel:  () => void;
   onCreated: (status: 'open' | 'pending' | 'scheduled') => void;
+  initial?:  { title: string; description: string; labels?: string[] };
 }) {
-  const [title,        setTitle]        = useState('');
-  const [description,  setDescription]  = useState('');
+  const [title,        setTitle]        = useState(initial?.title ?? '');
+  const [description,  setDescription]  = useState(initial?.description ?? '');
   const [createStatus, setCreateStatus] = useState<'open' | 'pending' | 'scheduled'>('open');
   const [priority,     setPriority]     = useState('medium');
   const [dueDate,      setDueDate]      = useState('');
   const [effortHours,  setEffortHours]  = useState('');
   const [scheduledAt,  setScheduledAt]  = useState('');
   const [repeat,       setRepeat]       = useState<RepeatValue>({ freq: '', interval: '1', fromCompletion: false });
-  const [pendingLabels, setPendingLabels] = useState<string[]>([]);
+  const [pendingLabels, setPendingLabels] = useState<string[]>(initial?.labels ?? []);
   const [labelQuery,   setLabelQuery]   = useState('');
   const [labelSugs,    setLabelSugs]    = useState<LabelRecord[]>([]);
   const [saving,       setSaving]       = useState(false);
@@ -1866,6 +1868,9 @@ function TasksPage() {
   const [error,            setError]            = useState<ApiError | null>(null);
   const [selected,         setSelected]         = useState<TaskRow | null>(null);
   const [creating,         setCreating]         = useState(false);
+  const [draft,            setDraft]            = useState<{ title: string; description: string; labels?: string[] } | undefined>(undefined);
+  const [dragging,         setDragging]         = useState(false);
+  const [draftKey,         setDraftKey]         = useState(0);
   const [actionError,      setActionError]      = useState<ApiError | null>(null);
   const [linkingTask,      setLinkingTask]      = useState<TaskRow | null>(null);
   const [availableLabels,  setAvailableLabels]  = useState<TaskLabel[]>([]);
@@ -2008,6 +2013,50 @@ function TasksPage() {
     fetchTasks(view);
   }
 
+  // ── Drop an Outlook .msg anywhere on the page → prefilled create form ───────
+  // Only reacts to file drags; the backend parses the .msg and creates nothing.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
+    let depth = 0;
+    const onEnter = (e: DragEvent) => { if (hasFiles(e)) { depth++; setDragging(true); } };
+    const onLeave = (e: DragEvent) => { if (hasFiles(e) && --depth <= 0) { depth = 0; setDragging(false); } };
+    const onOver  = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };  // required to allow a drop
+    const onDrop  = async (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();  // never let Chrome navigate to the dropped file
+      depth = 0;
+      setDragging(false);
+      const file = Array.from(e.dataTransfer?.files ?? []).find(f => /\.msg$/i.test(f.name));
+      if (!file) {
+        setToast('Drop an Outlook email (.msg) to create a task');
+        return;
+      }
+      const res = await apiFetch<{ title: string; description: string }>('/tasks/from-email', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body:    file,
+      });
+      if (isApiError(res)) {
+        setToast(`Could not read email: ${res.error.message}`);
+        return;
+      }
+      setDraft({ title: res.title, description: res.description, labels: ['Work'] });
+      setDraftKey(k => k + 1);
+      setSelected(null);
+      setCreating(true);
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('dragover',  onOver);
+    window.addEventListener('drop',      onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('dragover',  onOver);
+      window.removeEventListener('drop',      onDrop);
+    };
+  }, []);
+
   function handleCreated(_status: 'open' | 'pending' | 'scheduled') {
     setCreating(false);
     // Re-fetch current view so the new task is visible
@@ -2138,8 +2187,10 @@ function TasksPage() {
   if (creating) {
     return (
       <TaskCreatePanel
-        onCancel={() => setCreating(false)}
-        onCreated={handleCreated}
+        key={draftKey}
+        initial={draft}
+        onCancel={() => { setCreating(false); setDraft(undefined); }}
+        onCreated={(s) => { setDraft(undefined); handleCreated(s); }}
       />
     );
   }
@@ -2166,7 +2217,7 @@ function TasksPage() {
     <div className="page">
       {/* Page header */}
       <div className="page-header">
-        <button className="icon-btn filled" aria-label="New task" onClick={() => setCreating(true)}>
+        <button className="icon-btn filled" aria-label="New task" onClick={() => { setDraft(undefined); setCreating(true); }}>
           <span className="material-symbols-rounded">add</span>
         </button>
       </div>
@@ -2307,6 +2358,20 @@ function TasksPage() {
             </div>
           );
         })()
+      )}
+
+      {dragging && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000, pointerEvents: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'color-mix(in srgb, var(--md-sys-color-primary) 12%, transparent)',
+            border: '3px dashed var(--md-sys-color-primary)',
+            color: 'var(--md-sys-color-primary)', fontWeight: 600, fontSize: '1.1rem',
+          }}
+        >
+          Drop email to create a task
+        </div>
       )}
 
       {toast && <NextToast message={toast} onDone={dismissToast} />}

@@ -19,5 +19,6 @@ COPY 03_Application/PersonalDevelopment/tests/ ./tests/
 COPY 03_Application/TaskTracker/tests/test_scheduled_status.py ./tests/test_scheduled_status.py
 COPY 03_Application/TaskTracker/tests/test_agenda.py ./tests/test_agenda.py
 COPY 03_Application/TaskTracker/tests/test_recurrence.py ./tests/test_recurrence.py
+COPY 03_Application/TaskTracker/tests/test_msg_parse.py ./tests/test_msg_parse.py
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

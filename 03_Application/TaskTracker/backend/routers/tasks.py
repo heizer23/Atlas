@@ -5,11 +5,12 @@ from datetime import date, timedelta
 from typing import Any
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from backend.database import get_db
+from backend.msg_parse import MAX_MSG_BYTES, NotAMsgFile, parse_msg
 from backend.recurrence import (
     VALID_RECURRENCE_FREQ,
     VALID_RECURRENCE_MODE,
@@ -714,6 +715,47 @@ def _copy_labels_best_effort(source_id: str, successor_id: str) -> None:
                     log.warning("Label copy: attach returned %s task_id=%s", r.status_code, successor_id)
     except Exception as exc:
         log.warning("Label copy failed (best-effort): source=%s successor=%s error=%s", source_id, successor_id, exc)
+
+
+@router.post("/from-email", response_model=None)
+async def parse_email_drop(request: Request) -> JSONResponse:
+    """Parse a dropped Outlook .msg (raw request body) into a task draft.
+
+    Creates nothing: the UI opens the create form prefilled so the user confirms.
+    Mutation-free, Dataset-exempt (R-CON-BP-04). The file is never stored.
+      200: { title, description }
+      413 PAYLOAD_TOO_LARGE: body over MAX_MSG_BYTES (rejected while reading)
+      400 VALIDATION_ERROR: not a readable .msg
+    """
+    too_large = api_error("PAYLOAD_TOO_LARGE", "Email file is too large", status=413)
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_MSG_BYTES:
+                return too_large
+        except ValueError:
+            pass
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf.extend(chunk)
+        if len(buf) > MAX_MSG_BYTES:
+            return too_large
+    try:
+        msg = parse_msg(bytes(buf))
+    except NotAMsgFile as exc:
+        return api_error("VALIDATION_ERROR", str(exc))
+
+    header = []
+    if msg["sender"]:
+        header.append(f"From: {msg['sender']}")
+    if msg["sent_at"]:
+        header.append(f"Sent: {msg['sent_at'][:16].replace('T', ' ')} UTC")
+    parts = ["\n".join(header), msg["body"] or ""]
+    description = "\n\n".join(p for p in parts if p)
+    return JSONResponse(content={
+        "title": msg["subject"] or "(no subject)",
+        "description": description,
+    })
 
 
 @router.post("", response_model=None)
